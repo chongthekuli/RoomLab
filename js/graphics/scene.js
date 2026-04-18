@@ -262,9 +262,25 @@ function rebuildRoom(isFirst) {
         roomGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xa0a8b4 })));
       }
     } else {
-      // Polygon walls: N plane segments around the ring
+      // Polygon walls: N plane segments around the ring.
+      // If stadiumStructure.vomitories is defined, skip wall segments whose midpoints
+      // fall inside any vomitory's angular range — creating physical openings.
       const n = room.polygon_sides ?? 6;
       const verts = roomPlanVertices(room);
+      const vomAnglesRad = (room.stadiumStructure?.vomitories?.centerAnglesDeg || [])
+        .map(a => a * Math.PI / 180);
+      const vomHalfWidth = ((room.stadiumStructure?.vomitories?.widthDeg || 0) / 2) * Math.PI / 180;
+      const segmentInVomitory = (midX, midZ) => {
+        if (vomAnglesRad.length === 0 || vomHalfWidth <= 0) return false;
+        const angle = Math.atan2(midZ - cz, midX - cx);
+        for (const vc of vomAnglesRad) {
+          let diff = angle - vc;
+          while (diff >  Math.PI) diff -= 2 * Math.PI;
+          while (diff < -Math.PI) diff += 2 * Math.PI;
+          if (Math.abs(diff) < vomHalfWidth) return true;
+        }
+        return false;
+      };
       for (let i = 0; i < n; i++) {
         const v1 = verts[i];
         const v2 = verts[(i + 1) % n];
@@ -272,10 +288,12 @@ function rebuildRoom(isFirst) {
         const edgeLen = Math.sqrt(ex * ex + ey * ey);
         const midX = (v1.x + v2.x) / 2;
         const midZ = (v1.y + v2.y) / 2;
+        if (segmentInVomitory(midX, midZ)) continue; // Vomitory opening: skip this wall segment.
         const geo = new THREE.PlaneGeometry(edgeLen, h);
         const m = new THREE.Mesh(geo, wallsMat);
         m.position.set(midX, h/2, midZ);
         m.lookAt(cx, h/2, cz);
+        m.userData.acoustic_material = wallsMatId;
         roomGroup.add(m);
       }
 
@@ -536,36 +554,61 @@ function rebuildZones() {
   rebuildStadiumFurniture();
 }
 
-// Builds solid stadium bowl structures (concrete) as LatheGeometry meshes from
-// room.stadiumStructure. Replaces the old per-tier cylinder risers with a single
-// watertight mesh per bowl. Each mesh is tagged userData.acoustic_material='concrete'
-// so a future ray tracer can assign absorption coefficients by surface.
+// Builds solid stadium bowl structures (concrete) from room.stadiumStructure.
 //
-// Profile (in Vector2 of (radius, height)) wraps clockwise around the bowl cross-section:
-//   inner-bottom → up inner wall → stepped top (tread + riser for each tier) → outer wall
-//   down to floor → across bottom → back to inner-bottom. LatheGeometry revolves this
-//   360° around the Y axis to make a closed annular solid.
+// When vomitories are defined, each bowl is split into N sector lathes (each
+// 360°/N − vomitoryWidth wide), separated by angular gaps where the vomitory
+// entrances cut through. Each sector lathe has TWO end-cap meshes (flat 2D
+// profile polygons transformed into 3D at the sector's start/end angles)
+// so there are no exposed phi-boundary edges — the solid is watertight at
+// every sector's boundary, with the vomitory gap being the only intentional
+// opening in the structure.
+//
+// Without vomitories, each bowl is a single 360° LatheGeometry.
+//
+// All meshes tagged userData.acoustic_material = 'concrete' for ray tracing.
 function rebuildBowlStructure(room) {
   const s = room.stadiumStructure;
   if (!s) return;
   const concreteMat = new THREE.MeshStandardMaterial({
     color: 0x6a5a45, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide,
   });
-  if (s.lowerBowl) roomGroup.add(buildBowlLathe(s.cx, s.cy, s.lowerBowl, concreteMat, 'lower_bowl'));
-  if (s.upperBowl) roomGroup.add(buildBowlLathe(s.cx, s.cy, s.upperBowl, concreteMat, 'upper_bowl'));
+  const buildBowl = (bowl, tagPrefix) => {
+    if (!bowl) return;
+    const vom = s.vomitories;
+    if (!vom || !vom.centerAnglesDeg || vom.centerAnglesDeg.length === 0 || !(vom.widthDeg > 0)) {
+      // No vomitories: single 360° closed lathe.
+      roomGroup.add(buildBowlLatheSector(s.cx, s.cy, bowl, concreteMat, tagPrefix, 0, Math.PI * 2));
+      return;
+    }
+    // With vomitories: N sector lathes + end caps.
+    const halfWidthRad = (vom.widthDeg / 2) * Math.PI / 180;
+    const sorted = [...vom.centerAnglesDeg].sort((a, b) => a - b).map(a => a * Math.PI / 180);
+    for (let i = 0; i < sorted.length; i++) {
+      const curCenter = sorted[i];
+      const nextCenter = sorted[(i + 1) % sorted.length];
+      const sectorStart = curCenter + halfWidthRad;
+      let sectorEnd = nextCenter - halfWidthRad;
+      if (sectorEnd <= sectorStart) sectorEnd += Math.PI * 2;
+      const sectorLength = sectorEnd - sectorStart;
+      roomGroup.add(buildBowlLatheSector(s.cx, s.cy, bowl, concreteMat, `${tagPrefix}_sec${i}`, sectorStart, sectorLength));
+      roomGroup.add(buildBowlEndCap(s.cx, s.cy, bowl, concreteMat, sectorStart, `${tagPrefix}_cap${i}a`));
+      roomGroup.add(buildBowlEndCap(s.cx, s.cy, bowl, concreteMat, sectorEnd,   `${tagPrefix}_cap${i}b`));
+    }
+  };
+  buildBowl(s.lowerBowl, 'lower_bowl');
+  buildBowl(s.upperBowl, 'upper_bowl');
 }
 
-function buildBowlLathe(cx, cy, bowl, mat, tag) {
+// Closed 2D profile for a bowl cross-section (radius × height), traced inner-up,
+// stepped top, outer-down, bottom-across, back to start. Revolved by LatheGeometry.
+function buildBowlProfile(bowl) {
   const { r_in, r_out, floor_z, tier_heights_m } = bowl;
   const tierCount = tier_heights_m.length;
   const tierTread = (r_out - r_in) / tierCount;
-
   const profile = [];
-  // Bottom inner corner
   profile.push(new THREE.Vector2(r_in, floor_z));
-  // Up to first tread
   profile.push(new THREE.Vector2(r_in, tier_heights_m[0]));
-  // For each tier: across tread, then up riser (except last tier has no riser)
   for (let t = 0; t < tierCount; t++) {
     const trEnd = r_in + (t + 1) * tierTread;
     profile.push(new THREE.Vector2(trEnd, tier_heights_m[t]));
@@ -573,14 +616,44 @@ function buildBowlLathe(cx, cy, bowl, mat, tag) {
       profile.push(new THREE.Vector2(trEnd, tier_heights_m[t + 1]));
     }
   }
-  // Outer wall down to floor
   profile.push(new THREE.Vector2(r_out, floor_z));
-  // Close back to start
   profile.push(new THREE.Vector2(r_in, floor_z));
+  return profile;
+}
 
-  const geo = new THREE.LatheGeometry(profile, 64);
+function buildBowlLatheSector(cx, cy, bowl, mat, tag, phi_start_rad, phi_length_rad) {
+  const profile = buildBowlProfile(bowl);
+  const geo = new THREE.LatheGeometry(profile, 20, phi_start_rad, phi_length_rad);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(cx, 0, cy);
+  mesh.userData.acoustic_material = 'concrete';
+  mesh.userData.tag = tag;
+  return mesh;
+}
+
+// Flat end-cap face at phi for a bowl sector lathe. Uses ShapeGeometry to triangulate
+// the 2D profile polygon, then rewrites vertex positions from local (r, z) to
+// world (cx + r·cos(phi), z, cy + r·sin(phi)). This closes the otherwise-open phi
+// boundary of the sector lathe so ray tracing sees a solid sidewall at the vomitory edge.
+function buildBowlEndCap(cx, cy, bowl, mat, phi_rad, tag) {
+  const profile = buildBowlProfile(bowl);
+  const shape2d = new THREE.Shape();
+  shape2d.moveTo(profile[0].x, profile[0].y);
+  for (let i = 1; i < profile.length; i++) {
+    shape2d.lineTo(profile[i].x, profile[i].y);
+  }
+  const geo = new THREE.ShapeGeometry(shape2d);
+  const cos_phi = Math.cos(phi_rad);
+  const sin_phi = Math.sin(phi_rad);
+  const posAttr = geo.attributes.position;
+  for (let i = 0; i < posAttr.count; i++) {
+    const r = posAttr.getX(i);
+    const z = posAttr.getY(i);
+    posAttr.setXYZ(i, cx + r * cos_phi, z, cy + r * sin_phi);
+  }
+  posAttr.needsUpdate = true;
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.userData.acoustic_material = 'concrete';
   mesh.userData.tag = tag;
   return mesh;

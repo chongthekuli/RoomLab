@@ -110,21 +110,30 @@ function generateBowl({ cx, cy, r_in, r_out, elevation_m, material_id, idPrefix,
 // Tiered bowl: each sector is divided into multiple stepped tiers (rows of seats).
 // Each tier is a thin ring sub-sector at its own elevation, creating a visible
 // staircase profile in 3D when sampled by the per-zone heatmap planes.
+// When `gapDeg` > 0, sectors are placed with angular gaps between them (for vomitory
+// entrances). Center of sector N = startAngleDeg + N × (360/sectorCount).
+// Sector angular width = (360/sectorCount) − gapDeg.
 function generateTieredBowl({
   cx, cy, r_in, r_out, tier_heights_m, sectorCount = 4,
+  gapDeg = 0, sectorLabelsOverride = null,
   material_id, idPrefix, labelPrefix, startAngleDeg,
 }) {
-  const sectorLabels = sectorCount === 4 ? ['E', 'S', 'W', 'N']
-    : sectorCount === 8 ? ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']
-    : null;
-  const sectorStep = 360 / sectorCount;
-  const start = startAngleDeg ?? -sectorStep / 2;
+  const defaultLabels4 = ['E', 'S', 'W', 'N'];
+  const defaultLabels8 = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
+  const sectorLabels = sectorLabelsOverride
+    ?? (sectorCount === 4 ? defaultLabels4
+        : sectorCount === 8 ? defaultLabels8
+        : null);
+  const sectorAngularStep = 360 / sectorCount;
+  const sectorWidth = sectorAngularStep - gapDeg;
+  const centerStart = startAngleDeg ?? (gapDeg > 0 ? 0 : -sectorAngularStep / 2);
   const tierCount = tier_heights_m.length;
   const tierRadialDepth = (r_out - r_in) / tierCount;
   const zones = [];
   for (let s = 0; s < sectorCount; s++) {
-    const ts = start + s * sectorStep;
-    const te = ts + sectorStep;
+    const centerDeg = centerStart + s * sectorAngularStep;
+    const ts = centerDeg - sectorWidth / 2;
+    const te = centerDeg + sectorWidth / 2;
     const sLabel = sectorLabels?.[s] ?? (s + 1);
     for (let t = 0; t < tierCount; t++) {
       const ri = r_in + t * tierRadialDepth;
@@ -223,9 +232,19 @@ export const PRESETS = {
         wall_north: 'gypsum-board', wall_south: 'gypsum-board',
         wall_east: 'gypsum-board', wall_west: 'gypsum-board',
       },
-      // stadiumStructure is read by scene.js to build solid LatheGeometry bowl meshes,
-      // tagged with userData.acoustic_material = 'concrete' for future ray tracing.
-      stadiumStructure: { cx, cy, lowerBowl, upperBowl, concourse, catwalkHeight_m: 15, catwalkRadius_m: 10 },
+      // stadiumStructure is read by scene.js to build solid LatheGeometry bowl meshes
+      // (per sector, with end caps) + cut the room wall at vomitory angles.
+      // All structural meshes tagged userData.acoustic_material = 'concrete'.
+      stadiumStructure: {
+        cx, cy, lowerBowl, upperBowl, concourse,
+        catwalkHeight_m: 15, catwalkRadius_m: 10,
+        vomitories: {
+          // 4 vomitories at cardinal angles (0/90/180/270°), each 20° wide.
+          // Leaves 4 bowl sectors at 45/135/225/315° (diagonals), each 70° wide.
+          centerAnglesDeg: [0, 90, 180, 270],
+          widthDeg: 20,
+        },
+      },
       zones: [
         { id: 'Z_court',     label: 'Court',     vertices: rectVerts(15.65, 22.4, 44.35, 37.6), elevation_m: 0,    material_id: 'wood-floor' },
         { id: 'Z_concourse', label: 'Concourse', vertices: ringSectorVerts(cx, cy, 22, 24, 0, 360, 32), elevation_m: 2.55, material_id: 'concrete-painted' },
@@ -234,21 +253,26 @@ export const PRESETS = {
           tier_heights_m: lowerBowl.tier_heights_m,
           sectorCount: 4, material_id: 'carpet-heavy',
           idPrefix: 'Z_lb', labelPrefix: 'Lower',
+          gapDeg: 20, startAngleDeg: 45,
+          sectorLabelsOverride: ['NE', 'SE', 'SW', 'NW'],
         }),
         ...generateTieredBowl({
           cx, cy, r_in: 24, r_out: 29,
           tier_heights_m: upperBowl.tier_heights_m,
           sectorCount: 4, material_id: 'carpet-heavy',
           idPrefix: 'Z_ub', labelPrefix: 'Upper',
+          gapDeg: 20, startAngleDeg: 45,
+          sectorLabelsOverride: ['NE', 'SE', 'SW', 'NW'],
         }),
       ],
       sources: generateCenterCluster({ cx, cy, cz: 15, ring_r: 4, count: 8, modelUrl: SPKLA, power_watts: 500, pitch: -25 }),
       listeners: [
-        { id: 'L1', label: 'Courtside VIP',        position: { x: 17,   y: 30   }, elevation_m: 0,    posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L2', label: 'Lower bowl row 1 S',   position: { x: 30,   y: 45.5 }, elevation_m: 0.3,  posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L3', label: 'Lower bowl row 4 E',   position: { x: 49,   y: 30   }, elevation_m: 1.65, posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L4', label: 'Upper bowl row 3 N',   position: { x: 30,   y: 3.5  }, elevation_m: 6.8,  posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L5', label: 'Concourse walker',     position: { x: 30,   y: 53   }, elevation_m: 2.55, posture: 'standing',      custom_ear_height_m: null },
+        // Positions chosen to land inside NE/SE/SW/NW quadrants (not in vomitory gaps at cardinals).
+        { id: 'L1', label: 'Courtside VIP',         position: { x: 17,   y: 30   }, elevation_m: 0,    posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L2', label: 'Lower bowl row 1 SE',   position: { x: 42,   y: 42   }, elevation_m: 0.3,  posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L3', label: 'Lower bowl row 4 SW',   position: { x: 16,   y: 44   }, elevation_m: 1.65, posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L4', label: 'Upper bowl row 3 NE',   position: { x: 48,   y: 12.5 }, elevation_m: 6.8,  posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L5', label: 'Concourse walker',      position: { x: 30,   y: 53   }, elevation_m: 2.55, posture: 'standing',      custom_ear_height_m: null },
       ],
     };
   })(),
