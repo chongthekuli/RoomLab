@@ -116,6 +116,27 @@ export function isInsideRoom(x, y, room) {
   }
 }
 
+export function maxCeilingHeightAt(x, y, room) {
+  if (room.ceiling_type !== 'dome' || !((room.ceiling_dome_rise_m ?? 0) > 0)) {
+    return room.height_m;
+  }
+  const d = room.ceiling_dome_rise_m;
+  const a = Math.sqrt(baseArea(room) / Math.PI);
+  const R = (a * a + d * d) / (2 * d);
+  const cx = room.width_m / 2, cy = room.depth_m / 2;
+  const horizDistSq = (x - cx) ** 2 + (y - cy) ** 2;
+  if (horizDistSq >= a * a) return room.height_m;
+  const heightAboveWall = Math.sqrt(R * R - horizDistSq) - (R - d);
+  return room.height_m + heightAboveWall;
+}
+
+export function isInsideRoom3D(pos, room) {
+  if (!isInsideRoom(pos.x, pos.y, room)) return false;
+  if (pos.z < 0) return false;
+  if (pos.z > maxCeilingHeightAt(pos.x, pos.y, room)) return false;
+  return true;
+}
+
 export function roomSurfaces(room) {
   const shape = getShape(room);
   const b = baseArea(room);

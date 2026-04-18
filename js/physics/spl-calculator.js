@@ -1,12 +1,12 @@
 import { interpolateAttenuation } from './loudspeaker.js';
-import { isInsideRoom } from './room-shape.js';
+import { isInsideRoom3D } from './room-shape.js';
 
 export const WALL_TRANSMISSION_LOSS_DB = 30;
 
-function pathCrossesWall(speakerState, listenerPos, room) {
+function pathCrossesBoundary(speakerState, listenerPos, room) {
   if (!room) return false;
-  const sIn = isInsideRoom(speakerState.position.x, speakerState.position.y, room);
-  const lIn = isInsideRoom(listenerPos.x, listenerPos.y, room);
+  const sIn = isInsideRoom3D(speakerState.position, room);
+  const lIn = isInsideRoom3D(listenerPos, room);
   return sIn !== lIn;
 }
 
@@ -48,7 +48,7 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
   const sens = speakerDef.acoustic.sensitivity_db_1w_1m;
   const attn = interpolateAttenuation(speakerDef.directivity, azimuth_deg, elevation_deg, freq_hz);
   let spl_db = sens + 10 * Math.log10(speakerState.power_watts) - 20 * Math.log10(clampedR) + attn;
-  const through_wall = pathCrossesWall(speakerState, listenerPos, room);
+  const through_wall = pathCrossesBoundary(speakerState, listenerPos, room);
   if (through_wall) spl_db -= WALL_TRANSMISSION_LOSS_DB;
   return { r, azimuth_deg, elevation_deg, attn_db: attn, spl_db, through_wall };
 }
@@ -69,7 +69,7 @@ export function computeMultiSourceSPL({ sources, getSpeakerDef, listenerPos, fre
 export function computeListenerBreakdown({ sources, getSpeakerDef, listenerPos, freq_hz = 1000, room = null }) {
   const perSpeaker = sources.map((src, i) => {
     const def = getSpeakerDef(src.modelUrl);
-    const outsideRoom = room ? !isInsideRoom(src.position.x, src.position.y, room) : false;
+    const outsideRoom = room ? !isInsideRoom3D(src.position, room) : false;
     if (!def) return { idx: i, spl_db: -Infinity, r: null, azimuth_deg: null, modelUrl: src.modelUrl, outsideRoom, through_wall: false };
     const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room });
     return { idx: i, spl_db: d.spl_db, r: d.r, azimuth_deg: d.azimuth_deg, modelUrl: src.modelUrl, outsideRoom, through_wall: d.through_wall };
@@ -96,11 +96,11 @@ export function computeSPLGrid({
     for (let i = 0; i < cellsX; i++) {
       const x = (i + 0.5) * cellW_m;
       const y = (j + 0.5) * cellD_m;
-      if (!isInsideRoom(x, y, room)) {
+      const listenerPos = { x, y, z: earHeight_m };
+      if (!isInsideRoom3D(listenerPos, room)) {
         row.push(-Infinity);
         continue;
       }
-      const listenerPos = { x, y, z: earHeight_m };
       const totalSPL = computeMultiSourceSPL({ sources, getSpeakerDef, listenerPos, freq_hz, room });
       row.push(totalSPL);
       if (isFinite(totalSPL)) {

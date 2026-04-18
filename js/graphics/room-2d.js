@@ -2,7 +2,7 @@ import { state, earHeightFor, getSelectedListener } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
-import { roomPlanVertices, isInsideRoom } from '../physics/room-shape.js';
+import { roomPlanVertices, isInsideRoom3D } from '../physics/room-shape.js';
 
 let materialsRef;
 
@@ -208,7 +208,7 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room) {
   sources.forEach((src, i) => {
     const sx = x0 + (src.position.x / room.width_m) * pxW;
     const sy = y0 + (src.position.y / room.depth_m) * pxD;
-    const outside = !isInsideRoom(src.position.x, src.position.y, room);
+    const outside = !isInsideRoom3D(src.position, room);
     const fill = outside ? '#ff5a3c' : '#fff';
     const stroke = outside ? '#8a1200' : '#000';
 

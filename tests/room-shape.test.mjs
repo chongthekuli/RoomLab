@@ -1,5 +1,6 @@
 import {
-  baseArea, wallPerimeter, ceilingArea, roomVolume, domeVolume, isInsideRoom,
+  baseArea, wallPerimeter, ceilingArea, roomVolume, domeVolume,
+  isInsideRoom, isInsideRoom3D, maxCeilingHeightAt,
 } from '../js/physics/room-shape.js';
 
 let failed = 0;
@@ -72,6 +73,37 @@ assertEq(isInsideRoom(-1, 2.5, rect), false, 'Point left of rect');
 assertEq(isInsideRoom(3, 3, round), true, 'Center of round');
 assertEq(isInsideRoom(6.5, 3, round), false, 'Outside round (beyond radius)');
 assertEq(isInsideRoom(2, 2, hex), true, 'Near center of hex');
+
+// --- 3D containment: ceiling / floor ---
+const flatRect = {
+  shape: 'rectangular',
+  width_m: 5, height_m: 3, depth_m: 5,
+  ceiling_type: 'flat',
+  surfaces: { floor: 'f', ceiling: 'c', wall_north: 'w', wall_south: 'w', wall_east: 'w', wall_west: 'w' },
+};
+assertEq(isInsideRoom3D({ x: 2.5, y: 2.5, z: 1.5 }, flatRect), true, '3D inside flat rect');
+assertEq(isInsideRoom3D({ x: 2.5, y: 2.5, z: 5.0 }, flatRect), false, 'Above ceiling = outside');
+assertEq(isInsideRoom3D({ x: 2.5, y: 2.5, z: -0.5 }, flatRect), false, 'Below floor = outside');
+assertEq(isInsideRoom3D({ x: 10, y: 2.5, z: 1.5 }, flatRect), false, 'Beyond horizontal = outside');
+assertClose(maxCeilingHeightAt(2.5, 2.5, flatRect), 3, 0.001, 'Flat ceiling height');
+
+const domeRound = {
+  shape: 'round',
+  round_radius_m: 3,
+  width_m: 6, height_m: 2.5, depth_m: 6,
+  ceiling_type: 'dome', ceiling_dome_rise_m: 1,
+  surfaces: { floor: 'f', ceiling: 'c', walls: 'w' },
+};
+// At center: max ceiling = H + rise = 3.5
+assertClose(maxCeilingHeightAt(3, 3, domeRound), 3.5, 0.001, 'Dome apex height = H + rise');
+// At dome base edge (horizDist = a = 3): max ceiling = H
+assertClose(maxCeilingHeightAt(6, 3, domeRound), 2.5, 0.001, 'Dome edge height = wall H');
+// Speaker at center, z just under apex → inside
+assertEq(isInsideRoom3D({ x: 3, y: 3, z: 3.4 }, domeRound), true, 'Under dome apex = inside');
+// Speaker at center, above apex → outside
+assertEq(isInsideRoom3D({ x: 3, y: 3, z: 3.6 }, domeRound), false, 'Above dome apex = outside');
+// Speaker near wall, z above wall but dome is thin here → outside
+assertEq(isInsideRoom3D({ x: 5.9, y: 3, z: 2.7 }, domeRound), false, 'Near wall, above wall height = outside (dome very low there)');
 
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll room-shape tests passed.');

@@ -4,7 +4,7 @@ import { state, earHeightFor, getSelectedListener } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
-import { roomPlanVertices, domeGeometry, isInsideRoom } from '../physics/room-shape.js';
+import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 
 let scene, camera, renderer, controls;
 let roomGroup, sourcesGroup, listenersGroup, heatmapMesh;
@@ -285,7 +285,7 @@ function rebuildSources() {
   }
 
   for (const src of state.sources) {
-    const outside = !isInsideRoom(src.position.x, src.position.y, state.room);
+    const outside = !isInsideRoom3D(src.position, state.room);
     const coneGeo = new THREE.ConeGeometry(0.22, 0.6, 20);
     const coneColor = outside ? 0xff5a3c : 0xffffff;
     const coneMat = new THREE.MeshStandardMaterial({ color: coneColor, emissive: outside ? 0x550000 : 0x333333 });

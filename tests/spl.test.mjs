@@ -160,5 +160,27 @@ const br3_ok = br3.perSpeaker[0].outsideRoom === false && br3.perSpeaker[1].outs
 console.log(`${br3_ok ? 'PASS' : 'FAIL'}  Breakdown outsideRoom flags correct`);
 if (!br3_ok) failed++;
 
+// --- Ceiling/floor containment (fixes P0 gap) ---
+const ceilRoom = {
+  shape: 'rectangular',
+  width_m: 5, height_m: 3, depth_m: 5,
+  ceiling_type: 'flat',
+  surfaces: { floor: 'f', ceiling: 'c', wall_north: 'w', wall_south: 'w', wall_east: 'w', wall_west: 'w' },
+};
+// Speaker above ceiling (z=5 > height 3) but inside horizontal
+const s_above = { position: { x: 2.5, y: 2.5, z: 5 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
+const l_mid  = { x: 2.5, y: 2.5, z: 1.2 };
+const t_above = computeDirectSPL({ speakerDef: speaker, speakerState: s_above, listenerPos: l_mid, room: ceilRoom });
+const t_above_ok = t_above.through_wall === true;
+console.log(`${t_above_ok ? 'PASS' : 'FAIL'}  Speaker above flat ceiling → TL applied (through_wall=true)`);
+if (!t_above_ok) failed++;
+
+// Speaker below floor (z=-1) — also outside
+const s_below = { position: { x: 2.5, y: 2.5, z: -1 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
+const t_below = computeDirectSPL({ speakerDef: speaker, speakerState: s_below, listenerPos: l_mid, room: ceilRoom });
+const t_below_ok = t_below.through_wall === true;
+console.log(`${t_below_ok ? 'PASS' : 'FAIL'}  Speaker below floor → TL applied`);
+if (!t_below_ok) failed++;
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');
