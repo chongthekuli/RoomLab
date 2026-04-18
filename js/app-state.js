@@ -72,6 +72,17 @@ export const ZONE_COLORS = [
 ];
 export function colorForZone(idx) { return ZONE_COLORS[idx % ZONE_COLORS.length]; }
 
+export const SPEAKER_GROUPS = [
+  { id: 'A', label: 'Group A', color: '#ef4444' },
+  { id: 'B', label: 'Group B', color: '#3b82f6' },
+  { id: 'C', label: 'Group C', color: '#10b981' },
+  { id: 'D', label: 'Group D', color: '#f59e0b' },
+  { id: 'E', label: 'Group E', color: '#a855f7' },
+  { id: 'F', label: 'Group F', color: '#ec4899' },
+];
+export function groupById(id) { return SPEAKER_GROUPS.find(g => g.id === id) || null; }
+export function colorForGroup(id) { return groupById(id)?.color ?? '#ffffff'; }
+
 export const DEFAULT_HIFI_SOURCES = [
   { position: { x: 1.0, y: 0.8, z: 1.0 }, aim: { yaw: 10, pitch: 0, roll: 0 }, power_watts: 50 },
   { position: { x: 3.5, y: 0.8, z: 1.0 }, aim: { yaw: -10, pitch: 0, roll: 0 }, power_watts: 50 },

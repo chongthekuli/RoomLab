@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { state, earHeightFor, getSelectedListener, colorForZone } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid } from '../physics/spl-calculator.js';
@@ -326,9 +326,14 @@ function rebuildSources() {
 
   for (const src of state.sources) {
     const outside = !isInsideRoom3D(src.position, state.room);
+    const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
+    const groupInt = groupHex ? parseInt(groupHex.slice(1), 16) : null;
     const coneGeo = new THREE.ConeGeometry(0.22, 0.6, 20);
-    const coneColor = outside ? 0xff5a3c : 0xffffff;
-    const coneMat = new THREE.MeshStandardMaterial({ color: coneColor, emissive: outside ? 0x550000 : 0x333333 });
+    const coneColor = outside ? 0xff5a3c : (groupInt ?? 0xffffff);
+    const coneMat = new THREE.MeshStandardMaterial({
+      color: coneColor,
+      emissive: outside ? 0x550000 : (groupInt ? (groupInt & 0x666666) : 0x333333),
+    });
     const cone = new THREE.Mesh(coneGeo, coneMat);
     cone.position.set(src.position.x, src.position.z, src.position.y);
 
@@ -344,10 +349,21 @@ function rebuildSources() {
 
     const ball = new THREE.Mesh(
       new THREE.SphereGeometry(0.08, 12, 12),
-      new THREE.MeshStandardMaterial({ color: 0x000000 })
+      new THREE.MeshStandardMaterial({ color: groupInt ?? 0x000000 })
     );
     ball.position.copy(cone.position);
     sourcesGroup.add(ball);
+
+    // Group indicator ring below the speaker
+    if (groupInt && !outside) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.35, 0.04, 8, 32),
+        new THREE.MeshBasicMaterial({ color: groupInt })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(src.position.x, 0.02, src.position.y);
+      sourcesGroup.add(ring);
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup } from '../app-state.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
@@ -471,7 +471,8 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room) {
     const sx = x0 + (src.position.x / room.width_m) * pxW;
     const sy = y0 + (src.position.y / room.depth_m) * pxD;
     const outside = !isInsideRoom3D(src.position, room);
-    const fill = outside ? '#ff5a3c' : '#fff';
+    const groupColor = src.groupId ? colorForGroup(src.groupId) : null;
+    const fill = outside ? '#ff5a3c' : (groupColor || '#fff');
     const stroke = outside ? '#8a1200' : '#000';
     const yaw_rad = src.aim.yaw * Math.PI / 180;
     const size = 13;
@@ -480,10 +481,14 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room) {
     const tip = { x: sx + size * aimX, y: sy + size * aimY };
     const bl  = { x: sx - size * 0.5 * aimX - size * 0.6 * rightX, y: sy - size * 0.5 * aimY - size * 0.6 * rightY };
     const br  = { x: sx - size * 0.5 * aimX + size * 0.6 * rightX, y: sy - size * 0.5 * aimY + size * 0.6 * rightY };
+    if (groupColor && !outside) {
+      s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${size + 3}" fill="none" stroke="${groupColor}" stroke-width="2" opacity="0.6"/>`;
+    }
     s += `<polygon points="${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${bl.x.toFixed(1)},${bl.y.toFixed(1)} ${br.x.toFixed(1)},${br.y.toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" />`;
     s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2" fill="${stroke}" />`;
-    const lblFill = outside ? '#ff5a3c' : '#fff';
-    const lblText = outside ? `S${i + 1} ⚠` : `S${i + 1}`;
+    const lblFill = outside ? '#ff5a3c' : (groupColor || '#fff');
+    const grpTag = src.groupId ? ` [${src.groupId}]` : '';
+    const lblText = outside ? `S${i + 1} ⚠` : `S${i + 1}${grpTag}`;
     s += `<text x="${sx.toFixed(1)}" y="${(sy - 18).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-spk" fill="${lblFill}">${lblText}</text>`;
   });
   return s;

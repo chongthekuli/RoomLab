@@ -396,6 +396,23 @@ section h3 {
 #zones-table th { font-weight: 500; color: var(--muted); font-size: 0.74rem; }
 #zones-table .sub { color: var(--muted); font-size: 0.7rem; }
 
+.group-badge {
+  display: inline-block;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 0.2rem;
+  letter-spacing: 0.04em;
+}
+.lr-breakdown .group-row td {
+  background: #f5f6f9;
+  border-top: 2px solid var(--border);
+  font-size: 0.82rem;
+}
+
 .badge-warn {
   display: inline-block;
   background: #ff5a3c;

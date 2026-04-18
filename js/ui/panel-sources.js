@@ -1,4 +1,4 @@
-import { state } from '../app-state.js';
+import { state, SPEAKER_GROUPS, groupById } from '../app-state.js';
 import { emit } from './events.js';
 
 let catalogRef;
@@ -46,16 +46,27 @@ function render() {
     return;
   }
 
-  listRoot.innerHTML = state.sources.map((src, i) => `
-    <div class="source-card" data-source-idx="${i}">
+  listRoot.innerHTML = state.sources.map((src, i) => {
+    const grp = groupById(src.groupId);
+    const groupBadge = grp
+      ? `<span class="group-badge" style="background:${grp.color}">${grp.id}</span>`
+      : '';
+    return `
+    <div class="source-card" data-source-idx="${i}" ${grp ? `style="border-left: 4px solid ${grp.color}"` : ''}>
       <div class="source-header">
-        <span>Speaker ${i + 1}</span>
+        <span>Speaker ${i + 1} ${groupBadge}</span>
         <button class="btn-remove" data-remove-idx="${i}" title="Remove this speaker" aria-label="Remove speaker ${i + 1}">×</button>
       </div>
       <div class="field-group">
         <label>Model
           <select data-f="model">
             ${catalogRef.map(c => `<option value="${c.url}" ${c.url === src.modelUrl ? 'selected' : ''}>${c.label}</option>`).join('')}
+          </select>
+        </label>
+        <label>Group
+          <select data-f="groupId">
+            <option value="">— None —</option>
+            ${SPEAKER_GROUPS.map(g => `<option value="${g.id}" ${g.id === src.groupId ? 'selected' : ''}>${g.label}</option>`).join('')}
           </select>
         </label>
       </div>
@@ -72,7 +83,8 @@ function render() {
         <label>Input power <input type="number" data-f="watts" value="${src.power_watts}" min="0.1" step="10" /><span class="unit">W</span></label>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   listRoot.querySelectorAll('.btn-remove').forEach(btn => {
     btn.addEventListener('click', () => removeSource(parseInt(btn.dataset.removeIdx, 10)));
@@ -102,6 +114,11 @@ function updateSource(idx, field, value) {
     case 'model':
       src.modelUrl = value;
       emit('source:model_changed', { idx, url: value });
+      return;
+    case 'groupId':
+      src.groupId = value || null;
+      render();
+      emit('source:changed');
       return;
   }
   emit('source:changed');

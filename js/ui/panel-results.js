@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, POSTURE_LABELS } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, POSTURE_LABELS, groupById, SPEAKER_GROUPS } from '../app-state.js';
 import { on } from './events.js';
 import { computeAllBands } from '../physics/rt60.js';
 import { computeListenerBreakdown } from '../physics/spl-calculator.js';
@@ -99,15 +99,30 @@ function renderListenerSection() {
   const rows = breakdown.perSpeaker.map(p => {
     const splStr = isFinite(p.spl_db) ? `${p.spl_db.toFixed(1)} dB` : '—';
     const rStr = p.r != null ? `${p.r.toFixed(2)} m` : '—';
+    const src = state.sources[p.idx];
+    const grp = src ? groupById(src.groupId) : null;
+    const grpBadge = grp ? ` <span class="group-badge" style="background:${grp.color}">${grp.id}</span>` : '';
     const badge = p.outsideRoom
       ? ' <span class="badge-warn" title="Speaker is outside the room — SPL reduced by 30 dB for wall transmission loss">outside</span>'
       : (p.through_wall ? ' <span class="badge-warn" title="Path crosses a wall — SPL reduced by 30 dB">through wall</span>' : '');
-    return `<tr><td>Speaker ${p.idx + 1}${badge}</td><td>${splStr}</td><td>${rStr}</td></tr>`;
+    return `<tr><td>Speaker ${p.idx + 1}${grpBadge}${badge}</td><td>${splStr}</td><td>${rStr}</td></tr>`;
   }).join('');
   const anyOutside = breakdown.perSpeaker.some(p => p.outsideRoom);
   const outsideNote = anyOutside
     ? `<div class="lr-note">One or more speakers are outside the room. A 30 dB wall transmission loss is applied to their contribution.</div>`
     : '';
+  // Per-group totals
+  const groupTotals = {};
+  for (const p of breakdown.perSpeaker) {
+    const src = state.sources[p.idx];
+    if (!src?.groupId || !isFinite(p.spl_db)) continue;
+    groupTotals[src.groupId] = (groupTotals[src.groupId] || 0) + Math.pow(10, p.spl_db / 10);
+  }
+  const groupRows = Object.entries(groupTotals).map(([gid, press]) => {
+    const grp = groupById(gid);
+    const spl = 10 * Math.log10(press);
+    return `<tr class="group-row"><td><span class="group-badge" style="background:${grp.color}">${grp.id}</span> ${grp.label}</td><td colspan="2"><strong>${spl.toFixed(1)} dB</strong></td></tr>`;
+  }).join('');
 
   root.innerHTML = `
     <div class="listener-results">
@@ -117,7 +132,7 @@ function renderListenerSection() {
       ${state.sources.length > 0 ? `
         <table class="lr-breakdown">
           <thead><tr><th>Source</th><th>SPL</th><th>Distance</th></tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rows}${groupRows}</tbody>
         </table>
         ${outsideNote}
       ` : ''}
