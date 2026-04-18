@@ -246,8 +246,16 @@ export const PRESETS = {
         },
       },
       zones: [
-        { id: 'Z_court',     label: 'Court',     vertices: rectVerts(15.65, 22.4, 44.35, 37.6), elevation_m: 0,    material_id: 'wood-floor' },
-        { id: 'Z_concourse', label: 'Concourse', vertices: ringSectorVerts(cx, cy, 22, 24, 0, 360, 32), elevation_m: 2.55, material_id: 'concrete-painted' },
+        { id: 'Z_court', label: 'Court', vertices: rectVerts(15.65, 22.4, 44.35, 37.6), elevation_m: 0, material_id: 'wood-floor' },
+        // Concourse split into 4 quadrants aligned with bowl sectors (leaves vomitory gaps clear).
+        ...generateTieredBowl({
+          cx, cy, r_in: 22, r_out: 24,
+          tier_heights_m: [2.55],
+          sectorCount: 4, material_id: 'concrete-painted',
+          idPrefix: 'Z_co', labelPrefix: 'Concourse',
+          gapDeg: 20, startAngleDeg: 45,
+          sectorLabelsOverride: ['NE', 'SE', 'SW', 'NW'],
+        }),
         ...generateTieredBowl({
           cx, cy, r_in: 15, r_out: 22,
           tier_heights_m: lowerBowl.tier_heights_m,
@@ -272,7 +280,7 @@ export const PRESETS = {
         { id: 'L2', label: 'Lower bowl row 1 SE',   position: { x: 42,   y: 42   }, elevation_m: 0.3,  posture: 'sitting_chair', custom_ear_height_m: null },
         { id: 'L3', label: 'Lower bowl row 4 SW',   position: { x: 16,   y: 44   }, elevation_m: 1.65, posture: 'sitting_chair', custom_ear_height_m: null },
         { id: 'L4', label: 'Upper bowl row 3 NE',   position: { x: 48,   y: 12.5 }, elevation_m: 6.8,  posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L5', label: 'Concourse walker',      position: { x: 30,   y: 53   }, elevation_m: 2.55, posture: 'standing',      custom_ear_height_m: null },
+        { id: 'L5', label: 'Concourse walker',      position: { x: 46.3, y: 46.3 }, elevation_m: 2.55, posture: 'standing',      custom_ear_height_m: null },
       ],
     };
   })(),

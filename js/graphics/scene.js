@@ -281,6 +281,10 @@ function rebuildRoom(isFirst) {
         }
         return false;
       };
+      // In vomitory angular range, wall is partial: spans from tunnel ceiling (z=3.5)
+      // to the dome (z=h). Below 3.5m is the tunnel portal. Outside vomitory range,
+      // wall is full height.
+      const TUNNEL_CEILING_Z = 3.5;
       for (let i = 0; i < n; i++) {
         const v1 = verts[i];
         const v2 = verts[(i + 1) % n];
@@ -288,12 +292,18 @@ function rebuildRoom(isFirst) {
         const edgeLen = Math.sqrt(ex * ex + ey * ey);
         const midX = (v1.x + v2.x) / 2;
         const midZ = (v1.y + v2.y) / 2;
-        if (segmentInVomitory(midX, midZ)) continue; // Vomitory opening: skip this wall segment.
-        const geo = new THREE.PlaneGeometry(edgeLen, h);
+        const inVom = segmentInVomitory(midX, midZ);
+        const wallBottom = inVom ? TUNNEL_CEILING_Z : 0;
+        const wallTop = h;
+        const wallH = wallTop - wallBottom;
+        if (wallH <= 0.01) continue;
+        const geo = new THREE.PlaneGeometry(edgeLen, wallH);
         const m = new THREE.Mesh(geo, wallsMat);
-        m.position.set(midX, h/2, midZ);
-        m.lookAt(cx, h/2, cz);
+        const midY = (wallBottom + wallTop) / 2;
+        m.position.set(midX, midY, midZ);
+        m.lookAt(cx, midY, cz);
         m.userData.acoustic_material = wallsMatId;
+        m.userData.tag = inVom ? 'wall_above_tunnel' : 'wall';
         roomGroup.add(m);
       }
 
@@ -521,7 +531,7 @@ function rebuildZones() {
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(cx, zone.elevation_m + 0.01, cz);
+      mesh.position.set(cx, zone.elevation_m + 0.05, cz);
       zonesGroup.add(mesh);
     } else {
       const mat = new THREE.MeshStandardMaterial({
@@ -529,7 +539,7 @@ function rebuildZones() {
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(cx, zone.elevation_m + 0.01, cz);
+      mesh.position.set(cx, zone.elevation_m + 0.05, cz);
       zonesGroup.add(mesh);
     }
 
@@ -554,17 +564,17 @@ function rebuildZones() {
   rebuildStadiumFurniture();
 }
 
-// Builds solid stadium bowl structures (concrete) from room.stadiumStructure.
+// Builds solid stadium structure (concrete) from room.stadiumStructure.
 //
-// When vomitories are defined, each bowl is split into N sector lathes (each
-// 360°/N − vomitoryWidth wide), separated by angular gaps where the vomitory
-// entrances cut through. Each sector lathe has TWO end-cap meshes (flat 2D
-// profile polygons transformed into 3D at the sector's start/end angles)
-// so there are no exposed phi-boundary edges — the solid is watertight at
-// every sector's boundary, with the vomitory gap being the only intentional
-// opening in the structure.
+// Uses ONE unified cross-section profile per quadrant that traces:
+//   inner wall → lower bowl steps → concourse (horizontal) → upper bowl front wall
+//   (vertical rise) → upper bowl steps → back wall (vertical to z=0) →
+//   bottom (horizontal back to start).
 //
-// Without vomitories, each bowl is a single 360° LatheGeometry.
+// Revolved per-sector by LatheGeometry with end caps at both phi boundaries
+// → each of the 4 quadrants becomes a single watertight solid that includes
+// the lower bowl, concourse, upper bowl, and back wall support as one piece.
+// Vomitory gaps between quadrants are enclosed separately with tunnel ceilings.
 //
 // All meshes tagged userData.acoustic_material = 'concrete' for ray tracing.
 function rebuildBowlStructure(room) {
@@ -573,15 +583,14 @@ function rebuildBowlStructure(room) {
   const concreteMat = new THREE.MeshStandardMaterial({
     color: 0x6a5a45, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide,
   });
-  const buildBowl = (bowl, tagPrefix) => {
-    if (!bowl) return;
-    const vom = s.vomitories;
-    if (!vom || !vom.centerAnglesDeg || vom.centerAnglesDeg.length === 0 || !(vom.widthDeg > 0)) {
-      // No vomitories: single 360° closed lathe.
-      roomGroup.add(buildBowlLatheSector(s.cx, s.cy, bowl, concreteMat, tagPrefix, 0, Math.PI * 2));
-      return;
-    }
-    // With vomitories: N sector lathes + end caps.
+  const profile = buildStadiumStructureProfile(s);
+  if (!profile) return;
+
+  const vom = s.vomitories;
+  if (!vom || !vom.centerAnglesDeg || vom.centerAnglesDeg.length === 0 || !(vom.widthDeg > 0)) {
+    // No vomitories: single 360° closed lathe.
+    roomGroup.add(buildProfileLatheSector(s.cx, s.cy, profile, concreteMat, 'stadium', 0, Math.PI * 2));
+  } else {
     const halfWidthRad = (vom.widthDeg / 2) * Math.PI / 180;
     const sorted = [...vom.centerAnglesDeg].sort((a, b) => a - b).map(a => a * Math.PI / 180);
     for (let i = 0; i < sorted.length; i++) {
@@ -591,39 +600,65 @@ function rebuildBowlStructure(room) {
       let sectorEnd = nextCenter - halfWidthRad;
       if (sectorEnd <= sectorStart) sectorEnd += Math.PI * 2;
       const sectorLength = sectorEnd - sectorStart;
-      roomGroup.add(buildBowlLatheSector(s.cx, s.cy, bowl, concreteMat, `${tagPrefix}_sec${i}`, sectorStart, sectorLength));
-      roomGroup.add(buildBowlEndCap(s.cx, s.cy, bowl, concreteMat, sectorStart, `${tagPrefix}_cap${i}a`));
-      roomGroup.add(buildBowlEndCap(s.cx, s.cy, bowl, concreteMat, sectorEnd,   `${tagPrefix}_cap${i}b`));
-    }
-  };
-  buildBowl(s.lowerBowl, 'lower_bowl');
-  buildBowl(s.upperBowl, 'upper_bowl');
-}
-
-// Closed 2D profile for a bowl cross-section (radius × height), traced inner-up,
-// stepped top, outer-down, bottom-across, back to start. Revolved by LatheGeometry.
-function buildBowlProfile(bowl) {
-  const { r_in, r_out, floor_z, tier_heights_m } = bowl;
-  const tierCount = tier_heights_m.length;
-  const tierTread = (r_out - r_in) / tierCount;
-  const profile = [];
-  profile.push(new THREE.Vector2(r_in, floor_z));
-  profile.push(new THREE.Vector2(r_in, tier_heights_m[0]));
-  for (let t = 0; t < tierCount; t++) {
-    const trEnd = r_in + (t + 1) * tierTread;
-    profile.push(new THREE.Vector2(trEnd, tier_heights_m[t]));
-    if (t < tierCount - 1) {
-      profile.push(new THREE.Vector2(trEnd, tier_heights_m[t + 1]));
+      roomGroup.add(buildProfileLatheSector(s.cx, s.cy, profile, concreteMat, `stadium_sec${i}`, sectorStart, sectorLength));
+      roomGroup.add(buildProfileEndCap(s.cx, s.cy, profile, concreteMat, sectorStart, `stadium_cap${i}a`));
+      roomGroup.add(buildProfileEndCap(s.cx, s.cy, profile, concreteMat, sectorEnd,   `stadium_cap${i}b`));
     }
   }
-  profile.push(new THREE.Vector2(r_out, floor_z));
-  profile.push(new THREE.Vector2(r_in, floor_z));
+
+  // Tunnel ceilings enclose each vomitory at ~3.5m — arena is otherwise closed above.
+  buildTunnelCeilings(room, concreteMat);
+}
+
+// Unified closed 2D profile (radius × height) for the whole seating + concourse
+// + back wall structure. The cross-section outline starts at the court edge,
+// ascends through the lower bowl, crosses the concourse flat, rises to the
+// upper bowl front, ascends through the upper bowl, descends vertically via
+// the back wall to the ground, then returns horizontally to the start.
+function buildStadiumStructureProfile(stadium) {
+  const lb = stadium.lowerBowl;
+  const ub = stadium.upperBowl;
+  if (!lb || !ub) return null;
+
+  const profile = [];
+  // Court-edge, floor level
+  profile.push(new THREE.Vector2(lb.r_in, 0));
+  // Up front of lower bowl tier 1
+  profile.push(new THREE.Vector2(lb.r_in, lb.tier_heights_m[0]));
+  // Lower bowl: tread → riser pairs
+  const lbCount = lb.tier_heights_m.length;
+  const lbTread = (lb.r_out - lb.r_in) / lbCount;
+  for (let t = 0; t < lbCount; t++) {
+    const trEnd = lb.r_in + (t + 1) * lbTread;
+    profile.push(new THREE.Vector2(trEnd, lb.tier_heights_m[t]));
+    if (t < lbCount - 1) {
+      profile.push(new THREE.Vector2(trEnd, lb.tier_heights_m[t + 1]));
+    }
+  }
+  // Concourse horizontal: from (lb.r_out, lb_top) to (ub.r_in, lb_top)
+  const concourseZ = lb.tier_heights_m[lbCount - 1];
+  profile.push(new THREE.Vector2(ub.r_in, concourseZ));
+  // Vertical rise: concourse → upper bowl tier 1 front
+  profile.push(new THREE.Vector2(ub.r_in, ub.tier_heights_m[0]));
+  // Upper bowl: tread → riser pairs
+  const ubCount = ub.tier_heights_m.length;
+  const ubTread = (ub.r_out - ub.r_in) / ubCount;
+  for (let t = 0; t < ubCount; t++) {
+    const trEnd = ub.r_in + (t + 1) * ubTread;
+    profile.push(new THREE.Vector2(trEnd, ub.tier_heights_m[t]));
+    if (t < ubCount - 1) {
+      profile.push(new THREE.Vector2(trEnd, ub.tier_heights_m[t + 1]));
+    }
+  }
+  // Back wall: vertical from upper bowl top outer corner straight down to ground
+  profile.push(new THREE.Vector2(ub.r_out, 0));
+  // Bottom horizontal back to start (closes the polygon)
+  profile.push(new THREE.Vector2(lb.r_in, 0));
   return profile;
 }
 
-function buildBowlLatheSector(cx, cy, bowl, mat, tag, phi_start_rad, phi_length_rad) {
-  const profile = buildBowlProfile(bowl);
-  const geo = new THREE.LatheGeometry(profile, 20, phi_start_rad, phi_length_rad);
+function buildProfileLatheSector(cx, cy, profile, mat, tag, phi_start_rad, phi_length_rad) {
+  const geo = new THREE.LatheGeometry(profile, 24, phi_start_rad, phi_length_rad);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(cx, 0, cy);
   mesh.userData.acoustic_material = 'concrete';
@@ -631,12 +666,10 @@ function buildBowlLatheSector(cx, cy, bowl, mat, tag, phi_start_rad, phi_length_
   return mesh;
 }
 
-// Flat end-cap face at phi for a bowl sector lathe. Uses ShapeGeometry to triangulate
-// the 2D profile polygon, then rewrites vertex positions from local (r, z) to
-// world (cx + r·cos(phi), z, cy + r·sin(phi)). This closes the otherwise-open phi
-// boundary of the sector lathe so ray tracing sees a solid sidewall at the vomitory edge.
-function buildBowlEndCap(cx, cy, bowl, mat, phi_rad, tag) {
-  const profile = buildBowlProfile(bowl);
+// Flat end-cap face at phi for a sector lathe. Triangulates the 2D profile
+// polygon via ShapeGeometry, then rewrites vertex positions from local (r, z)
+// to world (cx + r·cos(phi), z, cy + r·sin(phi)). Closes the phi boundary.
+function buildProfileEndCap(cx, cy, profile, mat, phi_rad, tag) {
   const shape2d = new THREE.Shape();
   shape2d.moveTo(profile[0].x, profile[0].y);
   for (let i = 1; i < profile.length; i++) {
@@ -657,6 +690,50 @@ function buildBowlEndCap(cx, cy, bowl, mat, phi_rad, tag) {
   mesh.userData.acoustic_material = 'concrete';
   mesh.userData.tag = tag;
   return mesh;
+}
+
+// Flat annular-sector ceiling above each vomitory at z=tunnelCeilingZ.
+// Encloses the tunnel from above so the arena is closed everywhere except
+// at ground level through the vomitory portals.
+function buildTunnelCeilings(room, mat) {
+  const s = room.stadiumStructure;
+  const vom = s?.vomitories;
+  if (!vom || !vom.widthDeg || !vom.centerAnglesDeg?.length) return;
+  const tunnelZ = 3.5;
+  const r_inner = s.lowerBowl?.r_in ?? 15;
+  const r_outer = room.polygon_radius_m ?? 30;
+  const halfWidthRad = (vom.widthDeg / 2) * Math.PI / 180;
+  const arcSteps = 6;
+
+  for (const centerDeg of vom.centerAnglesDeg) {
+    const centerRad = centerDeg * Math.PI / 180;
+    const ts = centerRad - halfWidthRad;
+    const te = centerRad + halfWidthRad;
+
+    // Build ring-sector shape in local coords (centered at origin).
+    // Shape y is negated to match the rotation convention used elsewhere.
+    const shape = new THREE.Shape();
+    const outerPts = [];
+    for (let i = 0; i <= arcSteps; i++) {
+      const t = ts + (te - ts) * (i / arcSteps);
+      outerPts.push({ x: r_outer * Math.cos(t), y: -r_outer * Math.sin(t) });
+    }
+    shape.moveTo(outerPts[0].x, outerPts[0].y);
+    for (let i = 1; i < outerPts.length; i++) shape.lineTo(outerPts[i].x, outerPts[i].y);
+    for (let i = arcSteps; i >= 0; i--) {
+      const t = ts + (te - ts) * (i / arcSteps);
+      shape.lineTo(r_inner * Math.cos(t), -r_inner * Math.sin(t));
+    }
+    shape.closePath();
+
+    const geo = new THREE.ShapeGeometry(shape);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(s.cx, tunnelZ, s.cy);
+    mesh.userData.acoustic_material = 'concrete';
+    mesh.userData.tag = `tunnel_ceiling_${centerDeg}`;
+    roomGroup.add(mesh);
+  }
 }
 
 // Overhead catwalk torus (rigging truss). Visual + acoustic reference.
