@@ -56,7 +56,22 @@ function initScene() {
   renderer.setSize(w, h);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.innerHTML = '';
+  container.style.position = 'relative';
   container.appendChild(renderer.domElement);
+
+  // SPL legend overlay (HTML over the WebGL canvas, right side, vertical).
+  // Gradient is fixed to the palette used by splColorRGB (60–110 dB range);
+  // the displayed min/max labels update dynamically from the current zone grids.
+  const legend = document.createElement('div');
+  legend.className = 'spl-legend-3d hidden';
+  legend.id = 'spl-legend-3d';
+  legend.innerHTML = `
+    <div class="legend-title">SPL</div>
+    <div class="legend-max">— dB</div>
+    <div class="legend-bar"></div>
+    <div class="legend-min">— dB</div>
+  `;
+  container.appendChild(legend);
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -566,6 +581,7 @@ function rebuildZones() {
   }
 
   rebuildStadiumFurniture();
+  updateSPLLegend();
 }
 
 // Builds solid stadium structure (concrete) from room.stadiumStructure.
@@ -862,6 +878,34 @@ function rebuildHeatmap() {
   heatmapMesh.rotation.x = -Math.PI / 2;
   heatmapMesh.position.set(w/2, ear, d/2);
   scene.add(heatmapMesh);
+  updateSPLLegend();
+}
+
+// Updates the vertical SPL legend overlay on the 3D viewport.
+// Prefers per-zone grid min/max; falls back to the room-level splGrid;
+// hides the legend entirely when there is no SPL data to show.
+function updateSPLLegend() {
+  const legend = document.getElementById('spl-legend-3d');
+  if (!legend) return;
+  const grids = state.results?.zoneGrids;
+  const rg = state.results?.splGrid;
+  let minVal = Infinity, maxVal = -Infinity;
+  if (grids && grids.length > 0) {
+    for (const g of grids) {
+      if (isFinite(g.minSPL_db) && g.minSPL_db < minVal) minVal = g.minSPL_db;
+      if (isFinite(g.maxSPL_db) && g.maxSPL_db > maxVal) maxVal = g.maxSPL_db;
+    }
+  } else if (rg && isFinite(rg.minSPL_db) && isFinite(rg.maxSPL_db) && rg.sourceCount > 0) {
+    minVal = rg.minSPL_db;
+    maxVal = rg.maxSPL_db;
+  }
+  if (!isFinite(minVal) || !isFinite(maxVal)) {
+    legend.classList.add('hidden');
+    return;
+  }
+  legend.classList.remove('hidden');
+  legend.querySelector('.legend-max').textContent = maxVal.toFixed(0) + ' dB';
+  legend.querySelector('.legend-min').textContent = minVal.toFixed(0) + ' dB';
 }
 
 function splColorRGB(spl_db) {
