@@ -28,6 +28,14 @@ export async function mount3DViewport({ materials }) {
   on('source:model_changed', () => { rebuildSources(); rebuildZones(); rebuildHeatmap(); });
   on('listener:changed', () => { rebuildListeners(); rebuildHeatmap(); });
   on('listener:selected', () => { rebuildListeners(); rebuildHeatmap(); });
+  // Preset swap replaces the entire scene; rebuild everything.
+  on('scene:reset', () => {
+    rebuildRoom(false);
+    rebuildSources();
+    rebuildListeners();
+    rebuildZones();
+    rebuildHeatmap();
+  });
 
   window.addEventListener('resize', onResize);
   document.addEventListener('viewport:tab-changed', e => {

@@ -184,6 +184,7 @@ export function mount2DViewport({ materials }) {
   on('source:model_changed', render);
   on('listener:changed', render);
   on('listener:selected', render);
+  on('scene:reset', render);
   window.addEventListener('resize', render);
 }
 

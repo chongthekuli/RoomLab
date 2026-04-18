@@ -301,6 +301,9 @@ function buildMatSelect(dataKey, currentValue) {
 function applyPreset(key) {
   applyPresetToState(key);
   render();
+  // scene:reset tells every panel/viewport that state arrays were replaced wholesale.
+  // room:changed kept for listeners that only care about room geometry.
+  emit('scene:reset');
   emit('room:changed');
 }
 

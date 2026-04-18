@@ -1,5 +1,5 @@
 import { state, SPEAKER_GROUPS, groupById } from '../app-state.js';
-import { emit } from './events.js';
+import { emit, on } from './events.js';
 
 let catalogRef;
 
@@ -13,6 +13,7 @@ export function mountSourcesPanel({ speakerCatalog }) {
   `;
   root.querySelector('#add-source-btn').addEventListener('click', addSource);
   render();
+  on('scene:reset', render);
 }
 
 function addSource() {

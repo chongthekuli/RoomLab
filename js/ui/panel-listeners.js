@@ -1,5 +1,5 @@
 import { state, POSTURE_LABELS, earHeightFor } from '../app-state.js';
-import { emit } from './events.js';
+import { emit, on } from './events.js';
 
 let nextIdNum = 2;
 
@@ -17,6 +17,7 @@ export function mountListenersPanel() {
     .filter(Number.isFinite);
   if (nums.length) nextIdNum = Math.max(...nums) + 1;
   render();
+  on('scene:reset', render);
 }
 
 function addListener() {

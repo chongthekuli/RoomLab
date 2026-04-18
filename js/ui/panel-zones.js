@@ -15,6 +15,7 @@ export function mountZonesPanel({ materials }) {
   root.querySelector('#add-zone-btn').addEventListener('click', () => startDrawZone({}));
   render();
   on('room:changed', render);
+  on('scene:reset', render);
 }
 
 function removeZone(id) {

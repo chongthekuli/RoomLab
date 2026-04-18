@@ -37,6 +37,7 @@ export function mountResultsPanel({ materials }) {
   on('source:model_changed', render);
   on('listener:changed', render);
   on('listener:selected', render);
+  on('scene:reset', render);
 }
 
 function render() {
