@@ -36,7 +36,6 @@ export function getSelectedListener() {
   return state.listeners.find(l => l.id === state.selectedListenerId) || null;
 }
 
-// --- Zone + group color palettes ---
 export const ZONE_COLORS = [
   '#a855f7', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#6366f1',
 ];
@@ -53,7 +52,15 @@ export const SPEAKER_GROUPS = [
 export function groupById(id) { return SPEAKER_GROUPS.find(g => g.id === id) || null; }
 export function colorForGroup(id) { return groupById(id)?.color ?? '#ffffff'; }
 
-// --- Geometry helpers for preset construction ---
+export const SPEAKER_CATALOG = [
+  { url: 'data/loudspeakers/generic-12inch.json',       label: 'Generic 12" 2-way' },
+  { url: 'data/loudspeakers/compact-6inch.json',        label: 'Compact 6" monitor' },
+  { url: 'data/loudspeakers/line-array-element.json',   label: 'Line-array element' },
+];
+const SPK12 = SPEAKER_CATALOG[0].url;
+const SPK6  = SPEAKER_CATALOG[1].url;
+const SPKLA = SPEAKER_CATALOG[2].url;
+
 function hexagonVerts(cx, cy, r) {
   const v = [];
   for (let i = 0; i < 6; i++) {
@@ -66,7 +73,6 @@ function rectVerts(x1, y1, x2, y2) {
   return [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 }];
 }
 
-// --- Default state (boots into auditorium) ---
 export const state = {
   room: {
     shape: 'polygon',
@@ -98,59 +104,41 @@ export const state = {
   results: { rt60: null, splGrid: null, zoneGrids: [] },
 };
 
-// PA: 4 speakers at 4.5 m ringing the stage, each pitched -20°, aimed at its audience block
-export const DEFAULT_AUDITORIUM_SOURCES = [
-  { position: { x: 10, y: 8,  z: 4.5 }, aim: { yaw: 180, pitch: -20, roll: 0 }, power_watts: 200, groupId: 'A' },
-  { position: { x: 10, y: 12, z: 4.5 }, aim: { yaw: 0,   pitch: -20, roll: 0 }, power_watts: 200, groupId: 'A' },
-  { position: { x: 12, y: 10, z: 4.5 }, aim: { yaw: 90,  pitch: -20, roll: 0 }, power_watts: 200, groupId: 'B' },
-  { position: { x: 8,  y: 10, z: 4.5 }, aim: { yaw: -90, pitch: -20, roll: 0 }, power_watts: 200, groupId: 'B' },
-];
+export const DEFAULT_PRESET_KEY = 'auditorium';
 
-// Stage (hex) + four tiered audience blocks at different elevations
-export const DEFAULT_AUDITORIUM_ZONES = [
-  { id: 'Z1', label: 'Stage',           vertices: hexagonVerts(10, 10, 2),        elevation_m: 0.50, material_id: 'wood-floor' },
-  { id: 'Z2', label: 'North audience',  vertices: rectVerts(7,    3.5, 13,  7.5), elevation_m: 0.00, material_id: 'carpet-heavy' },
-  { id: 'Z3', label: 'East audience',   vertices: rectVerts(12.5, 7.5, 16.5, 12.5), elevation_m: 0.25, material_id: 'carpet-heavy' },
-  { id: 'Z4', label: 'South audience',  vertices: rectVerts(7,   12.5, 13,  16.5), elevation_m: 0.50, material_id: 'carpet-heavy' },
-  { id: 'Z5', label: 'West audience',   vertices: rectVerts(3.5,  7.5, 7.5, 12.5), elevation_m: 0.25, material_id: 'carpet-heavy' },
-];
-
-export const DEFAULT_LISTENER = {
-  id: 'L1',
-  label: 'Listener 1',
-  position: { x: 10, y: 5 },
-  posture: 'sitting_chair',
-  custom_ear_height_m: null,
-};
-
-// Kept for backward compatibility if a caller references it
-export const DEFAULT_HIFI_SOURCES = [
-  { position: { x: 1.0, y: 0.8, z: 1.0 }, aim: { yaw: 10, pitch: 0, roll: 0 }, power_watts: 50 },
-  { position: { x: 3.5, y: 0.8, z: 1.0 }, aim: { yaw: -10, pitch: 0, roll: 0 }, power_watts: 50 },
-];
-
-// --- Presets (auditorium first so it's the default reset target) ---
 export const PRESETS = {
   auditorium: {
     label: 'Auditorium (arena)',
-    shape: 'polygon',
-    ceiling_type: 'dome',
-    polygon_sides: 16,
-    polygon_radius_m: 10,
+    shape: 'polygon', ceiling_type: 'dome',
+    polygon_sides: 16, polygon_radius_m: 10,
     width_m: 20, height_m: 7, depth_m: 20,
     ceiling_dome_rise_m: 1.5,
     surfaces: {
-      floor: 'wood-floor', ceiling: 'acoustic-tile',
-      walls: 'gypsum-board',
+      floor: 'wood-floor', ceiling: 'acoustic-tile', walls: 'gypsum-board',
       wall_north: 'gypsum-board', wall_south: 'gypsum-board',
       wall_east: 'gypsum-board', wall_west: 'gypsum-board',
     },
-    zones: DEFAULT_AUDITORIUM_ZONES,
+    zones: [
+      { id: 'Z1', label: 'Stage',          vertices: hexagonVerts(10, 10, 2),          elevation_m: 0.50, material_id: 'wood-floor' },
+      { id: 'Z2', label: 'North audience', vertices: rectVerts(7,   3.5, 13,  7.5),    elevation_m: 0.00, material_id: 'carpet-heavy' },
+      { id: 'Z3', label: 'East audience',  vertices: rectVerts(12.5, 7.5, 16.5, 12.5), elevation_m: 0.25, material_id: 'carpet-heavy' },
+      { id: 'Z4', label: 'South audience', vertices: rectVerts(7,   12.5, 13, 16.5),   elevation_m: 0.50, material_id: 'carpet-heavy' },
+      { id: 'Z5', label: 'West audience',  vertices: rectVerts(3.5,  7.5,  7.5, 12.5), elevation_m: 0.25, material_id: 'carpet-heavy' },
+    ],
+    sources: [
+      { modelUrl: SPK12, position: { x: 10, y: 8,  z: 4.5 }, aim: { yaw: 180, pitch: -20, roll: 0 }, power_watts: 200, groupId: 'A' },
+      { modelUrl: SPK12, position: { x: 10, y: 12, z: 4.5 }, aim: { yaw: 0,   pitch: -20, roll: 0 }, power_watts: 200, groupId: 'A' },
+      { modelUrl: SPK12, position: { x: 12, y: 10, z: 4.5 }, aim: { yaw: 90,  pitch: -20, roll: 0 }, power_watts: 200, groupId: 'B' },
+      { modelUrl: SPK12, position: { x: 8,  y: 10, z: 4.5 }, aim: { yaw: -90, pitch: -20, roll: 0 }, power_watts: 200, groupId: 'B' },
+    ],
+    listeners: [
+      { id: 'L1', label: 'Listener 1', position: { x: 10, y: 5 }, posture: 'sitting_chair', custom_ear_height_m: null },
+    ],
   },
+
   recitalhall: {
     label: 'Recital hall',
-    shape: 'rectangular',
-    ceiling_type: 'dome',
+    shape: 'rectangular', ceiling_type: 'dome',
     width_m: 12, height_m: 5, depth_m: 18,
     ceiling_dome_rise_m: 0.8,
     surfaces: {
@@ -164,7 +152,15 @@ export const PRESETS = {
       { id: 'Z3', label: 'Middle stalls', vertices: rectVerts(2, 9.5, 10, 13),  elevation_m: 0.3, material_id: 'carpet-heavy' },
       { id: 'Z4', label: 'Back stalls',   vertices: rectVerts(2, 13.5, 10, 17), elevation_m: 0.6, material_id: 'carpet-heavy' },
     ],
+    sources: [
+      { modelUrl: SPK12, position: { x: 3.5, y: 3, z: 3.5 }, aim: { yaw:  15, pitch: -12, roll: 0 }, power_watts: 150, groupId: 'A' },
+      { modelUrl: SPK12, position: { x: 8.5, y: 3, z: 3.5 }, aim: { yaw: -15, pitch: -12, roll: 0 }, power_watts: 150, groupId: 'A' },
+    ],
+    listeners: [
+      { id: 'L1', label: 'Listener 1', position: { x: 6, y: 10 }, posture: 'sitting_chair', custom_ear_height_m: null },
+    ],
   },
+
   rotunda: {
     label: 'Rotunda (round + dome)',
     shape: 'round', ceiling_type: 'dome',
@@ -172,24 +168,44 @@ export const PRESETS = {
     width_m: 8, height_m: 3.5, depth_m: 8,
     ceiling_dome_rise_m: 1.5,
     surfaces: {
-      floor: 'wood-floor', ceiling: 'gypsum-board',
-      walls: 'gypsum-board',
+      floor: 'wood-floor', ceiling: 'gypsum-board', walls: 'gypsum-board',
       wall_north: 'gypsum-board', wall_south: 'gypsum-board',
       wall_east: 'gypsum-board', wall_west: 'gypsum-board',
     },
+    zones: [],
+    sources: [
+      { modelUrl: SPK6, position: { x: 4,   y: 1.5, z: 2.5 }, aim: { yaw:   0, pitch: -15, roll: 0 }, power_watts: 80, groupId: 'A' },
+      { modelUrl: SPK6, position: { x: 4,   y: 6.5, z: 2.5 }, aim: { yaw: 180, pitch: -15, roll: 0 }, power_watts: 80, groupId: 'A' },
+      { modelUrl: SPK6, position: { x: 6.5, y: 4,   z: 2.5 }, aim: { yaw:  90, pitch: -15, roll: 0 }, power_watts: 80, groupId: 'B' },
+      { modelUrl: SPK6, position: { x: 1.5, y: 4,   z: 2.5 }, aim: { yaw: -90, pitch: -15, roll: 0 }, power_watts: 80, groupId: 'B' },
+    ],
+    listeners: [
+      { id: 'L1', label: 'Listener 1', position: { x: 4, y: 4 }, posture: 'sitting_chair', custom_ear_height_m: null },
+    ],
   },
+
   octagon: {
     label: 'Octagonal hall',
     shape: 'polygon', ceiling_type: 'flat',
     polygon_sides: 8, polygon_radius_m: 5,
     width_m: 10, height_m: 4, depth_m: 10,
     surfaces: {
-      floor: 'wood-floor', ceiling: 'acoustic-tile',
-      walls: 'gypsum-board',
+      floor: 'wood-floor', ceiling: 'acoustic-tile', walls: 'gypsum-board',
       wall_north: 'gypsum-board', wall_south: 'gypsum-board',
       wall_east: 'gypsum-board', wall_west: 'gypsum-board',
     },
+    zones: [],
+    sources: [
+      { modelUrl: SPK12, position: { x: 5, y: 2, z: 3.2 }, aim: { yaw:   0, pitch: -12, roll: 0 }, power_watts: 120, groupId: 'A' },
+      { modelUrl: SPK12, position: { x: 5, y: 8, z: 3.2 }, aim: { yaw: 180, pitch: -12, roll: 0 }, power_watts: 120, groupId: 'A' },
+      { modelUrl: SPK12, position: { x: 8, y: 5, z: 3.2 }, aim: { yaw:  90, pitch: -12, roll: 0 }, power_watts: 120, groupId: 'B' },
+      { modelUrl: SPK12, position: { x: 2, y: 5, z: 3.2 }, aim: { yaw: -90, pitch: -12, roll: 0 }, power_watts: 120, groupId: 'B' },
+    ],
+    listeners: [
+      { id: 'L1', label: 'Listener 1', position: { x: 5, y: 5 }, posture: 'standing', custom_ear_height_m: null },
+    ],
   },
+
   hifi: {
     label: 'Hi-fi room',
     shape: 'rectangular', ceiling_type: 'flat',
@@ -199,7 +215,16 @@ export const PRESETS = {
       wall_north: 'gypsum-board', wall_south: 'gypsum-board',
       wall_east: 'gypsum-board', wall_west: 'gypsum-board',
     },
+    zones: [],
+    sources: [
+      { modelUrl: SPK12, position: { x: 1.0, y: 0.8, z: 1.0 }, aim: { yaw:  10, pitch: 0, roll: 0 }, power_watts: 50, groupId: 'A' },
+      { modelUrl: SPK12, position: { x: 3.5, y: 0.8, z: 1.0 }, aim: { yaw: -10, pitch: 0, roll: 0 }, power_watts: 50, groupId: 'A' },
+    ],
+    listeners: [
+      { id: 'L1', label: 'Listener 1', position: { x: 2.25, y: 2.8 }, posture: 'sitting_chair', custom_ear_height_m: null },
+    ],
   },
+
   classroom: {
     label: 'Classroom',
     shape: 'rectangular', ceiling_type: 'flat',
@@ -209,7 +234,16 @@ export const PRESETS = {
       wall_north: 'gypsum-board', wall_south: 'gypsum-board',
       wall_east: 'gypsum-board', wall_west: 'gypsum-board',
     },
+    zones: [],
+    sources: [
+      { modelUrl: SPK6, position: { x: 4, y: 1.5, z: 2.5 }, aim: { yaw:   0, pitch: -15, roll: 0 }, power_watts: 60, groupId: 'A' },
+      { modelUrl: SPK6, position: { x: 4, y: 7,   z: 2.5 }, aim: { yaw: 180, pitch: -20, roll: 0 }, power_watts: 60, groupId: 'A' },
+    ],
+    listeners: [
+      { id: 'L1', label: 'Listener 1', position: { x: 4, y: 5 }, posture: 'sitting_chair', custom_ear_height_m: null },
+    ],
   },
+
   livevenue: {
     label: 'Live venue',
     shape: 'rectangular', ceiling_type: 'flat',
@@ -219,7 +253,20 @@ export const PRESETS = {
       wall_north: 'gypsum-board', wall_south: 'gypsum-board',
       wall_east: 'gypsum-board', wall_west: 'gypsum-board',
     },
+    zones: [
+      { id: 'Z1', label: 'Stage',    vertices: rectVerts(5, 0.5, 10, 4),    elevation_m: 1.0, material_id: 'wood-floor' },
+      { id: 'Z2', label: 'Audience', vertices: rectVerts(1, 5,   14, 19),   elevation_m: 0.0, material_id: 'concrete-painted' },
+    ],
+    sources: [
+      { modelUrl: SPKLA, position: { x: 4,   y: 2, z: 5   }, aim: { yaw:  15, pitch: -10, roll: 0 }, power_watts: 500, groupId: 'A' },
+      { modelUrl: SPKLA, position: { x: 11,  y: 2, z: 5   }, aim: { yaw: -15, pitch: -10, roll: 0 }, power_watts: 500, groupId: 'A' },
+      { modelUrl: SPK12, position: { x: 7.5, y: 1, z: 2.5 }, aim: { yaw:   0, pitch:  -5, roll: 0 }, power_watts: 200, groupId: 'B' },
+    ],
+    listeners: [
+      { id: 'L1', label: 'Listener 1', position: { x: 7.5, y: 12 }, posture: 'standing', custom_ear_height_m: null },
+    ],
   },
+
   studio: {
     label: 'Studio (dead)',
     shape: 'rectangular', ceiling_type: 'flat',
@@ -229,5 +276,53 @@ export const PRESETS = {
       wall_north: 'acoustic-tile', wall_south: 'acoustic-tile',
       wall_east: 'acoustic-tile', wall_west: 'acoustic-tile',
     },
+    zones: [],
+    sources: [
+      { modelUrl: SPK6, position: { x: 1.8, y: 1.2, z: 1.2 }, aim: { yaw:  15, pitch: 0, roll: 0 }, power_watts: 40, groupId: 'A' },
+      { modelUrl: SPK6, position: { x: 3.2, y: 1.2, z: 1.2 }, aim: { yaw: -15, pitch: 0, roll: 0 }, power_watts: 40, groupId: 'A' },
+    ],
+    listeners: [
+      { id: 'L1', label: 'Listener 1', position: { x: 2.5, y: 2.5 }, posture: 'sitting_chair', custom_ear_height_m: null },
+    ],
   },
 };
+
+function deepClone(x) { return JSON.parse(JSON.stringify(x)); }
+
+export function applyPresetToState(key) {
+  const p = PRESETS[key];
+  if (!p) return;
+  state.room.shape = p.shape ?? 'rectangular';
+  state.room.ceiling_type = p.ceiling_type ?? 'flat';
+  state.room.width_m = p.width_m;
+  state.room.height_m = p.height_m;
+  state.room.depth_m = p.depth_m;
+  if (p.polygon_sides != null)      state.room.polygon_sides = p.polygon_sides;
+  if (p.polygon_radius_m != null)   state.room.polygon_radius_m = p.polygon_radius_m;
+  if (p.round_radius_m != null)     state.room.round_radius_m = p.round_radius_m;
+  if (p.ceiling_dome_rise_m != null) state.room.ceiling_dome_rise_m = p.ceiling_dome_rise_m;
+  Object.assign(state.room.surfaces, p.surfaces);
+  if (p.shape === 'polygon' || p.shape === 'round') {
+    const r = p.shape === 'polygon' ? state.room.polygon_radius_m : state.room.round_radius_m;
+    state.room.width_m = 2 * r;
+    state.room.depth_m = 2 * r;
+  }
+
+  if (p.zones !== undefined) {
+    state.zones = p.zones.map(deepClone);
+    state.selectedZoneId = state.zones[0]?.id ?? null;
+  }
+  if (p.sources !== undefined) {
+    state.sources = p.sources.map(deepClone);
+  }
+  if (p.listeners !== undefined) {
+    state.listeners = p.listeners.map(deepClone);
+    state.selectedListenerId = state.listeners[0]?.id ?? null;
+  }
+}
+
+// Kept for backward-compatibility references
+export const DEFAULT_AUDITORIUM_SOURCES = PRESETS.auditorium.sources;
+export const DEFAULT_AUDITORIUM_ZONES = PRESETS.auditorium.zones;
+export const DEFAULT_LISTENER = PRESETS.auditorium.listeners[0];
+export const DEFAULT_HIFI_SOURCES = PRESETS.hifi.sources;

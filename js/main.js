@@ -1,4 +1,4 @@
-import { state, DEFAULT_AUDITORIUM_SOURCES, DEFAULT_LISTENER, DEFAULT_AUDITORIUM_ZONES } from './app-state.js';
+import { state, SPEAKER_CATALOG, DEFAULT_PRESET_KEY, applyPresetToState } from './app-state.js';
 import { loadMaterials } from './physics/materials.js';
 import { loadLoudspeaker } from './physics/loudspeaker.js';
 import { mountRoomPanel } from './ui/panel-room.js';
@@ -8,12 +8,6 @@ import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport } from './graphics/scene.js';
-
-const SPEAKER_CATALOG = [
-  { url: 'data/loudspeakers/generic-12inch.json',       label: 'Generic 12" 2-way' },
-  { url: 'data/loudspeakers/compact-6inch.json',        label: 'Compact 6" monitor' },
-  { url: 'data/loudspeakers/line-array-element.json',   label: 'Line-array element' },
-];
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -34,21 +28,9 @@ async function boot() {
   const materials = await loadMaterials();
   await Promise.all(SPEAKER_CATALOG.map(c => loadLoudspeaker(c.url)));
 
-  if (state.sources.length === 0) {
-    const defaultModel = SPEAKER_CATALOG[0].url;
-    for (const s of DEFAULT_AUDITORIUM_SOURCES) {
-      state.sources.push({ modelUrl: defaultModel, ...structuredClone(s) });
-    }
-  }
-  if (state.listeners.length === 0) {
-    state.listeners.push(structuredClone(DEFAULT_LISTENER));
-    state.selectedListenerId = DEFAULT_LISTENER.id;
-  }
-  if (state.zones.length === 0) {
-    for (const z of DEFAULT_AUDITORIUM_ZONES) {
-      state.zones.push(structuredClone(z));
-    }
-    state.selectedZoneId = DEFAULT_AUDITORIUM_ZONES[0].id;
+  // Pristine state → apply default preset
+  if (state.sources.length === 0 && state.listeners.length === 0 && state.zones.length === 0) {
+    applyPresetToState(DEFAULT_PRESET_KEY);
   }
 
   setupTabs();

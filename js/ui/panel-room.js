@@ -1,4 +1,4 @@
-import { state, PRESETS, SHAPE_LABELS, CEILING_LABELS } from '../app-state.js';
+import { state, PRESETS, SHAPE_LABELS, CEILING_LABELS, applyPresetToState } from '../app-state.js';
 import { emit } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
 
@@ -299,23 +299,7 @@ function buildMatSelect(dataKey, currentValue) {
 }
 
 function applyPreset(key) {
-  const p = PRESETS[key];
-  if (!p) return;
-  state.room.shape = p.shape ?? 'rectangular';
-  state.room.ceiling_type = p.ceiling_type ?? 'flat';
-  state.room.width_m = p.width_m;
-  state.room.height_m = p.height_m;
-  state.room.depth_m = p.depth_m;
-  if (p.polygon_sides != null) state.room.polygon_sides = p.polygon_sides;
-  if (p.polygon_radius_m != null) state.room.polygon_radius_m = p.polygon_radius_m;
-  if (p.round_radius_m != null) state.room.round_radius_m = p.round_radius_m;
-  if (p.ceiling_dome_rise_m != null) state.room.ceiling_dome_rise_m = p.ceiling_dome_rise_m;
-  Object.assign(state.room.surfaces, p.surfaces);
-  if (p.zones) {
-    state.zones = p.zones.map(z => JSON.parse(JSON.stringify(z)));
-    state.selectedZoneId = state.zones[0]?.id ?? null;
-  }
-  syncBoundingBoxToShape();
+  applyPresetToState(key);
   render();
   emit('room:changed');
 }
