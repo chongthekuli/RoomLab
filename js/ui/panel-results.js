@@ -15,6 +15,7 @@ export function mountResultsPanel({ materials }) {
       <thead><tr><th>Hz</th><th>Sabine</th><th>Eyring</th></tr></thead>
       <tbody></tbody>
     </table>
+    <div id="spl-section"></div>
     <div class="hint">
       <strong>Target ranges:</strong><br>
       Speech / meetings: 0.4–0.8 s<br>
@@ -28,6 +29,8 @@ export function mountResultsPanel({ materials }) {
   `;
   render();
   on('room:changed', render);
+  on('source:changed', render);
+  on('source:model_changed', render);
 }
 
 function render() {
@@ -49,13 +52,29 @@ function render() {
   tbody.innerHTML = bands.map(b => `
     <tr>
       <td>${b.frequency_hz}</td>
-      <td>${fmt(b.sabine_s)}</td>
-      <td>${fmt(b.eyring_s)}</td>
+      <td>${fmtRT(b.sabine_s)}</td>
+      <td>${fmtRT(b.eyring_s)}</td>
     </tr>
   `).join('');
+
+  const splSection = document.getElementById('spl-section');
+  const splGrid = state.results.splGrid;
+  if (splGrid) {
+    splSection.innerHTML = `
+      <h3>SPL coverage (1 kHz, ear height 1.2 m)</h3>
+      <table id="spl-table">
+        <tr><th>Max</th><td>${splGrid.maxSPL_db.toFixed(1)} dB</td></tr>
+        <tr><th>Average</th><td>${splGrid.avgSPL_db.toFixed(1)} dB</td></tr>
+        <tr><th>Min</th><td>${splGrid.minSPL_db.toFixed(1)} dB</td></tr>
+        <tr><th>Uniformity</th><td>${splGrid.uniformity_db.toFixed(1)} dB range</td></tr>
+      </table>
+    `;
+  } else {
+    splSection.innerHTML = '';
+  }
 }
 
-function fmt(v) {
+function fmtRT(v) {
   if (!isFinite(v)) return '∞';
   if (v === 0) return '0.00 s';
   return v.toFixed(2) + ' s';
