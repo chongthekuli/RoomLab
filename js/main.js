@@ -7,7 +7,7 @@ import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mount2DViewport } from './graphics/room-2d.js';
-import { mount3DViewport } from './graphics/scene.js';
+import { mount3DViewport, toggleHeatmaps } from './graphics/scene.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -22,6 +22,14 @@ function setupTabs() {
       document.dispatchEvent(new CustomEvent('viewport:tab-changed', { detail: { view: target } }));
     });
   });
+
+  const heatBtn = document.getElementById('toggle-heatmaps');
+  if (heatBtn) {
+    heatBtn.addEventListener('click', () => {
+      toggleHeatmaps();
+      heatBtn.classList.toggle('active', state.display.showHeatmaps);
+    });
+  }
 }
 
 async function boot() {

@@ -7,8 +7,18 @@ import { computeSPLGrid, computeZoneSPLGrid } from '../physics/spl-calculator.js
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 
 let scene, camera, renderer, controls;
-let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapMesh;
+let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
 let materialsRef, container;
+
+// Flip all heatmap visibility in one place. Structural geometry (bowls, walls,
+// floor, outlines) stays visible. Kept as a named export so the UI toolbar
+// button and any future API can toggle from outside.
+export function toggleHeatmaps(force) {
+  const next = typeof force === 'boolean' ? force : !state.display.showHeatmaps;
+  state.display.showHeatmaps = next;
+  if (heatmapGroup) heatmapGroup.visible = next;
+  if (heatmapMesh) heatmapMesh.visible = next;
+}
 
 export async function mount3DViewport({ materials }) {
   materialsRef = materials;
@@ -489,8 +499,19 @@ function rebuildZones() {
   } else {
     disposeGroup(zonesGroup);
   }
+  // Heatmap planes live in their own group so the toolbar toggle can flip
+  // visibility without touching the structural outlines/catwalk that stay in zonesGroup.
+  if (!heatmapGroup) {
+    heatmapGroup = new THREE.Group();
+    scene.add(heatmapGroup);
+  } else {
+    disposeGroup(heatmapGroup);
+  }
   state.results.zoneGrids = [];
-  if (!state.zones || state.zones.length === 0) return;
+  if (!state.zones || state.zones.length === 0) {
+    heatmapGroup.visible = state.display.showHeatmaps;
+    return;
+  }
 
   for (let zi = 0; zi < state.zones.length; zi++) {
     const zone = state.zones[zi];
@@ -544,31 +565,34 @@ function rebuildZones() {
       }
       geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 
+      // Heatmap plane floats at the listener layer (ear height) — the sampled
+      // SPL field actually corresponds to splInfo.earZ_m, not the zone floor.
+      // Matches EASE/Odeon convention of a separate visualization plane above
+      // the structural geometry.
       const mat = new THREE.MeshBasicMaterial({
-        map: heatmapTex, transparent: true, opacity: 0.85,
+        map: heatmapTex, transparent: true, opacity: 0.75,
         side: THREE.DoubleSide, depthWrite: false,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(cx, zone.elevation_m + 0.05, cz);
-      zonesGroup.add(mesh);
+      mesh.position.set(cx, splInfo.earZ_m, cz);
+      mesh.userData.zone_id = zone.id;
+      mesh.userData.acoustic_material = zone.material_id ?? null;
+      mesh.userData.tag = 'heatmap_layer';
+      heatmapGroup.add(mesh);
     } else {
+      // No sources / no SPL yet: fall back to a translucent colored patch at
+      // the structural floor so the user can still see zone extents. Lives in
+      // zonesGroup (structural overlay) — not toggled by the heatmap switch.
       const mat = new THREE.MeshStandardMaterial({
         color: colorInt, transparent: true, opacity: 0.4, side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.set(cx, zone.elevation_m + 0.05, cz);
+      mesh.userData.zone_id = zone.id;
+      mesh.userData.acoustic_material = zone.material_id ?? null;
       zonesGroup.add(mesh);
-    }
-
-    // Zone heatmap mesh also gets a material tag for its surface type.
-    // The actual physical surface is the solid bowl (concrete) for bowl zones
-    // or wood for the court. Heatmap is just a visual overlay.
-    const zoneLastMesh = zonesGroup.children[zonesGroup.children.length - 1];
-    if (zoneLastMesh) {
-      zoneLastMesh.userData.zone_id = zone.id;
-      zoneLastMesh.userData.acoustic_material = zone.material_id ?? null;
     }
 
     // Outline edges
@@ -581,6 +605,7 @@ function rebuildZones() {
   }
 
   rebuildStadiumFurniture();
+  heatmapGroup.visible = state.display.showHeatmaps;
   updateSPLLegend();
 }
 
@@ -877,6 +902,7 @@ function rebuildHeatmap() {
   heatmapMesh = new THREE.Mesh(geo, mat);
   heatmapMesh.rotation.x = -Math.PI / 2;
   heatmapMesh.position.set(w/2, ear, d/2);
+  heatmapMesh.visible = state.display.showHeatmaps;
   scene.add(heatmapMesh);
   updateSPLLegend();
 }

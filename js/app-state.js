@@ -200,6 +200,7 @@ export const state = {
   zones: [],
   selectedZoneId: null,
   results: { rt60: null, splGrid: null, zoneGrids: [] },
+  display: { showHeatmaps: true },
 };
 
 export const DEFAULT_PRESET_KEY = 'auditorium';
