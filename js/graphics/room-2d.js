@@ -1,4 +1,4 @@
-import { state } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
@@ -41,6 +41,8 @@ export function mount2DViewport({ materials }) {
   on('room:changed', render);
   on('source:changed', render);
   on('source:model_changed', render);
+  on('listener:changed', render);
+  on('listener:selected', render);
   window.addEventListener('resize', render);
 }
 
@@ -70,13 +72,15 @@ function render() {
   const wE = surfaces.wall_east,  wW = surfaces.wall_west;
   const fl = surfaces.floor,      cl = surfaces.ceiling;
 
+  const ear = earHeightFor(getSelectedListener());
+
   let splResult = null;
   let splSvg = '';
   if (state.sources.length > 0) {
     splResult = computeSPLGrid({
       sources: state.sources,
       getSpeakerDef: url => getCachedLoudspeaker(url),
-      room: state.room, gridSize: 25, freq_hz: 1000,
+      room: state.room, gridSize: 25, freq_hz: 1000, earHeight_m: ear,
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;
@@ -93,9 +97,13 @@ function render() {
     ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, w, d)
     : '';
 
+  const listenerSvg = state.listeners.length > 0
+    ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, w, d)
+    : '';
+
   vp.innerHTML = `
     <div class="viewport-2d">
-      <div class="vp-header">Floor plan — top-down view</div>
+      <div class="vp-header">Floor plan — top-down view (heatmap @ ${ear.toFixed(2)} m ear height)</div>
       <svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">
         <rect x="${x0}" y="${y0}" width="${pxW}" height="${pxD}"
               fill="${colorFor(alphaOf(fl))}" fill-opacity="0.15" rx="2" />
@@ -114,13 +122,14 @@ function render() {
         <text x="${x0 + pxW + 18}" y="${y0 + pxD/2 + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">Right — ${nameOf(wE)}</text>
         <text x="${x0 - 18}" y="${y0 + pxD/2 + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">Left — ${nameOf(wW)}</text>
 
+        ${listenerSvg}
         ${speakerSvg}
 
         <text x="${x0 + pxW/2}" y="${vbH - 20}" text-anchor="middle" class="vp-lbl vp-lbl-dim">${w} m wide · Floor: ${nameOf(fl)} · Ceiling: ${nameOf(cl)}</text>
         <text x="30" y="${y0 + pxD/2}" text-anchor="middle" class="vp-lbl vp-lbl-dim" transform="rotate(-90 30 ${y0 + pxD/2})">${d} m deep</text>
       </svg>
       ${renderLegend(splResult)}
-      <div class="vp-note">${splResult ? `SPL heatmap @ 1 kHz, ear height 1.2 m · triangle = speaker (tip points along aim)` : 'Add a source in the Sources panel to see SPL coverage.'}</div>
+      <div class="vp-note">${splResult ? `SPL heatmap sums all speakers · triangle = speaker (tip = aim) · yellow circle = selected listener` : 'Add a source to see SPL coverage.'}</div>
     </div>
   `;
 }
@@ -160,6 +169,24 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, roomW, roomD) {
     s += `<polygon points="${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${bl.x.toFixed(1)},${bl.y.toFixed(1)} ${br.x.toFixed(1)},${br.y.toFixed(1)}" fill="#fff" stroke="#000" stroke-width="1.5" />`;
     s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2" fill="#000" />`;
     s += `<text x="${sx.toFixed(1)}" y="${(sy - 18).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-spk">S${i + 1}</text>`;
+  });
+  return s;
+}
+
+function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, roomW, roomD) {
+  let s = '';
+  listeners.forEach((lst) => {
+    const sx = x0 + (lst.position.x / roomW) * pxW;
+    const sy = y0 + (lst.position.y / roomD) * pxD;
+    const isSel = lst.id === selectedId;
+    const radius = isSel ? 10 : 7;
+    const fill = isSel ? '#ffd000' : '#4a8ff0';
+    const stroke = isSel ? '#ffffff' : '#13161c';
+    const strokeW = isSel ? 2.5 : 1.5;
+    s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" />`;
+    const lblMatch = String(lst.label).match(/\d+/);
+    const short = lblMatch ? lblMatch[0] : String(lst.label).slice(0, 2);
+    s += `<text x="${sx.toFixed(1)}" y="${(sy + 3).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-listener">${short}</text>`;
   });
   return s;
 }

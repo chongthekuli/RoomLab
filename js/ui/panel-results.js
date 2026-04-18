@@ -1,6 +1,8 @@
-import { state } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, POSTURE_LABELS } from '../app-state.js';
 import { on } from './events.js';
 import { computeAllBands } from '../physics/rt60.js';
+import { computeListenerBreakdown } from '../physics/spl-calculator.js';
+import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 
 let materialsRef;
 
@@ -9,6 +11,7 @@ export function mountResultsPanel({ materials }) {
   const root = document.getElementById('panel-results');
   root.innerHTML = `
     <h2>Results</h2>
+    <div id="listener-section"></div>
     <div id="rt60-summary" class="summary"></div>
     <h3>RT60 per band</h3>
     <table id="rt60-table">
@@ -31,9 +34,61 @@ export function mountResultsPanel({ materials }) {
   on('room:changed', render);
   on('source:changed', render);
   on('source:model_changed', render);
+  on('listener:changed', render);
+  on('listener:selected', render);
 }
 
 function render() {
+  renderListenerSection();
+  renderRT60();
+  renderSPLStats();
+}
+
+function renderListenerSection() {
+  const root = document.getElementById('listener-section');
+  if (!root) return;
+  const lst = getSelectedListener();
+  if (!lst) {
+    root.innerHTML = state.listeners.length === 0
+      ? '<div class="phase-placeholder">Add a listener in the Listeners panel to see per-position SPL.</div>'
+      : '<div class="phase-placeholder">Select a listener to see per-position SPL.</div>';
+    return;
+  }
+
+  const ear = earHeightFor(lst);
+  const pos = { x: lst.position.x, y: lst.position.y, z: ear };
+  const breakdown = computeListenerBreakdown({
+    sources: state.sources,
+    getSpeakerDef: url => getCachedLoudspeaker(url),
+    listenerPos: pos,
+    freq_hz: 1000,
+  });
+
+  const postureLabel = POSTURE_LABELS[lst.posture] ?? lst.posture;
+  const totalStr = isFinite(breakdown.total_spl_db) ? breakdown.total_spl_db.toFixed(1) + ' dB' : '—';
+
+  const rows = breakdown.perSpeaker.map(p => {
+    const splStr = isFinite(p.spl_db) ? `${p.spl_db.toFixed(1)} dB` : '—';
+    const rStr = p.r != null ? `${p.r.toFixed(2)} m` : '—';
+    return `<tr><td>Speaker ${p.idx + 1}</td><td>${splStr}</td><td>${rStr}</td></tr>`;
+  }).join('');
+
+  root.innerHTML = `
+    <div class="listener-results">
+      <div class="lr-title">Selected listener: <strong>${escapeHtml(lst.label)}</strong></div>
+      <div class="lr-sub">${postureLabel} · ear ${ear.toFixed(2)} m · at (${lst.position.x.toFixed(2)}, ${lst.position.y.toFixed(2)})</div>
+      <div class="lr-total"><span class="big-num">${totalStr}</span><span class="sub"> Total SPL @ 1 kHz</span></div>
+      ${state.sources.length > 0 ? `
+        <table class="lr-breakdown">
+          <thead><tr><th>Source</th><th>SPL</th><th>Distance</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderRT60() {
   const bands = computeAllBands({ room: state.room, materials: materialsRef });
   const f500 = bands.find(b => b.frequency_hz === 500);
   const f1k  = bands.find(b => b.frequency_hz === 1000);
@@ -43,25 +98,28 @@ function render() {
 
   document.getElementById('rt60-summary').innerHTML = `
     <div class="big ${rating.klass}">${isFinite(mid) ? mid.toFixed(2) : '∞'}<span class="unit"> s</span></div>
-    <div class="sub">Mid-band average (500 Hz + 1 kHz, Sabine)</div>
+    <div class="sub">Mid-band average RT60 (500 Hz + 1 kHz, Sabine)</div>
     <div class="rating ${rating.klass}">${rating.label}</div>
     <div class="sub meta">Volume ${first.volume_m3.toFixed(1)} m³ · Surface ${first.totalArea_m2.toFixed(1)} m² · Mean α ${first.meanAbsorption.toFixed(2)}</div>
   `;
 
-  const tbody = document.querySelector('#rt60-table tbody');
-  tbody.innerHTML = bands.map(b => `
+  document.querySelector('#rt60-table tbody').innerHTML = bands.map(b => `
     <tr>
       <td>${b.frequency_hz}</td>
       <td>${fmtRT(b.sabine_s)}</td>
       <td>${fmtRT(b.eyring_s)}</td>
     </tr>
   `).join('');
+}
 
-  const splSection = document.getElementById('spl-section');
+function renderSPLStats() {
+  const root = document.getElementById('spl-section');
+  if (!root) return;
   const splGrid = state.results.splGrid;
   if (splGrid) {
-    splSection.innerHTML = `
-      <h3>SPL coverage (1 kHz, ear height 1.2 m)</h3>
+    const ear = splGrid.earHeight_m.toFixed(2);
+    root.innerHTML = `
+      <h3>SPL coverage @ ${ear} m ear height</h3>
       <table id="spl-table">
         <tr><th>Max</th><td>${splGrid.maxSPL_db.toFixed(1)} dB</td></tr>
         <tr><th>Average</th><td>${splGrid.avgSPL_db.toFixed(1)} dB</td></tr>
@@ -70,7 +128,7 @@ function render() {
       </table>
     `;
   } else {
-    splSection.innerHTML = '';
+    root.innerHTML = '';
   }
 }
 
@@ -87,4 +145,8 @@ function ratingFor(t) {
   if (t < 1.6) return { klass: 'ok',   label: 'Balanced — mixed-use' };
   if (t < 2.5) return { klass: 'warn', label: 'Live / reverberant — good for music' };
   return { klass: 'bad', label: 'Excessively reverberant' };
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }

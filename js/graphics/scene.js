@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { state } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
 
 let scene, camera, renderer, controls;
-let roomGroup, sourcesGroup, heatmapMesh;
+let roomGroup, sourcesGroup, listenersGroup, heatmapMesh;
 let materialsRef, container;
 
 export async function mount3DViewport({ materials }) {
@@ -17,12 +17,15 @@ export async function mount3DViewport({ materials }) {
   initScene();
   rebuildRoom(true);
   rebuildSources();
+  rebuildListeners();
   rebuildHeatmap();
   animate();
 
   on('room:changed', () => { rebuildRoom(false); rebuildHeatmap(); });
   on('source:changed', () => { rebuildSources(); rebuildHeatmap(); });
   on('source:model_changed', () => { rebuildSources(); rebuildHeatmap(); });
+  on('listener:changed', () => { rebuildListeners(); rebuildHeatmap(); });
+  on('listener:selected', () => { rebuildListeners(); rebuildHeatmap(); });
 
   window.addEventListener('resize', onResize);
   document.addEventListener('viewport:tab-changed', e => {
@@ -60,7 +63,6 @@ function initScene() {
   grid.position.y = -0.01;
   scene.add(grid);
 
-  // Small world axes near origin for orientation
   const axes = new THREE.AxesHelper(0.5);
   scene.add(axes);
 }
@@ -69,6 +71,7 @@ function disposeGroup(g) {
   if (!g) return;
   while (g.children.length) {
     const c = g.children.pop();
+    if (c.children && c.children.length) disposeGroup(c);
     c.geometry?.dispose();
     if (c.material) {
       if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
@@ -148,8 +151,6 @@ function rebuildSources() {
     const coneGeo = new THREE.ConeGeometry(0.22, 0.6, 20);
     const coneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x333333 });
     const cone = new THREE.Mesh(coneGeo, coneMat);
-
-    // state.position.x=width, .y=depth, .z=height → world (x, z, y)
     cone.position.set(src.position.x, src.position.z, src.position.y);
 
     const yaw = src.aim.yaw * Math.PI / 180;
@@ -171,6 +172,52 @@ function rebuildSources() {
   }
 }
 
+function rebuildListeners() {
+  if (!listenersGroup) {
+    listenersGroup = new THREE.Group();
+    scene.add(listenersGroup);
+  } else {
+    disposeGroup(listenersGroup);
+  }
+
+  for (const lst of state.listeners) {
+    const isSel = lst.id === state.selectedListenerId;
+    const ear = earHeightFor(lst);
+    const bodyColor = isSel ? 0xffd000 : 0x4a8ff0;
+    const headColor = isSel ? 0xffd000 : 0xffc59e;
+
+    let bodyBottom = 0;
+    if (lst.posture === 'sitting_chair') bodyBottom = 0.45;
+
+    const bodyTop = ear - 0.12;
+    const bodyH = Math.max(bodyTop - bodyBottom, 0.1);
+
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.17, 0.17, bodyH, 14),
+      new THREE.MeshStandardMaterial({ color: bodyColor })
+    );
+    body.position.set(lst.position.x, bodyBottom + bodyH / 2, lst.position.y);
+    listenersGroup.add(body);
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 14, 14),
+      new THREE.MeshStandardMaterial({ color: headColor })
+    );
+    head.position.set(lst.position.x, ear, lst.position.y);
+    listenersGroup.add(head);
+
+    // Chair block for sitting_chair
+    if (lst.posture === 'sitting_chair') {
+      const chair = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 0.45, 0.5),
+        new THREE.MeshStandardMaterial({ color: 0x6a6a6a, transparent: true, opacity: 0.7 })
+      );
+      chair.position.set(lst.position.x, 0.225, lst.position.y);
+      listenersGroup.add(chair);
+    }
+  }
+}
+
 function rebuildHeatmap() {
   if (heatmapMesh) {
     scene.remove(heatmapMesh);
@@ -182,10 +229,11 @@ function rebuildHeatmap() {
 
   if (state.sources.length === 0) return;
 
+  const ear = earHeightFor(getSelectedListener());
   const splResult = computeSPLGrid({
     sources: state.sources,
     getSpeakerDef: url => getCachedLoudspeaker(url),
-    room: state.room, gridSize: 40, freq_hz: 1000, earHeight_m: 1.2,
+    room: state.room, gridSize: 40, freq_hz: 1000, earHeight_m: ear,
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
   const { grid, cellsX, cellsY } = splResult;
@@ -220,7 +268,7 @@ function rebuildHeatmap() {
   });
   heatmapMesh = new THREE.Mesh(geo, mat);
   heatmapMesh.rotation.x = -Math.PI / 2;
-  heatmapMesh.position.set(w/2, 1.2, d/2);
+  heatmapMesh.position.set(w/2, ear, d/2);
   scene.add(heatmapMesh);
 }
 

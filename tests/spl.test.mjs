@@ -102,5 +102,30 @@ const t8ok = t8 === -Infinity;
 console.log(`${t8ok ? 'PASS' : 'FAIL'}  Empty sources returns -Infinity  actual=${t8}`);
 if (!t8ok) failed++;
 
+// --- Listener breakdown tests ---
+import { computeListenerBreakdown } from '../js/physics/spl-calculator.js';
+
+// One speaker at origin, one listener 1m on-axis. Breakdown returns 97 dB for speaker 1.
+const br1 = computeListenerBreakdown({
+  sources: [{ modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 }],
+  getSpeakerDef: () => speaker,
+  listenerPos: { x: 0, y: 1, z: 0 },
+});
+assertClose(br1.perSpeaker[0].spl_db, 97, 0.01, 'Breakdown single speaker SPL');
+assertClose(br1.total_spl_db, 97, 0.01, 'Breakdown total with 1 source = single SPL');
+
+// Two co-located speakers → total +3 dB, each contribution 97
+const br2 = computeListenerBreakdown({
+  sources: [
+    { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
+    { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
+  ],
+  getSpeakerDef: () => speaker,
+  listenerPos: { x: 0, y: 1, z: 0 },
+});
+assertClose(br2.perSpeaker[0].spl_db, 97, 0.01, 'Breakdown speaker 1 of 2');
+assertClose(br2.perSpeaker[1].spl_db, 97, 0.01, 'Breakdown speaker 2 of 2');
+assertClose(br2.total_spl_db, 97 + 10 * Math.log10(2), 0.01, 'Breakdown total with 2 co-located = +3 dB');
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');

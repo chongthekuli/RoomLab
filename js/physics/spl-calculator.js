@@ -54,6 +54,19 @@ export function computeMultiSourceSPL({ sources, getSpeakerDef, listenerPos, fre
   return pressureSum > 0 ? 10 * Math.log10(pressureSum) : -Infinity;
 }
 
+export function computeListenerBreakdown({ sources, getSpeakerDef, listenerPos, freq_hz = 1000 }) {
+  const perSpeaker = sources.map((src, i) => {
+    const def = getSpeakerDef(src.modelUrl);
+    if (!def) return { idx: i, spl_db: -Infinity, r: null, azimuth_deg: null, modelUrl: src.modelUrl };
+    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz });
+    return { idx: i, spl_db: d.spl_db, r: d.r, azimuth_deg: d.azimuth_deg, modelUrl: src.modelUrl };
+  });
+  let pressureSum = 0;
+  for (const p of perSpeaker) if (isFinite(p.spl_db)) pressureSum += Math.pow(10, p.spl_db / 10);
+  const total_spl_db = pressureSum > 0 ? 10 * Math.log10(pressureSum) : -Infinity;
+  return { perSpeaker, total_spl_db, freq_hz };
+}
+
 export function computeSPLGrid({
   sources, getSpeakerDef, room,
   earHeight_m = 1.2, gridSize = 25, freq_hz = 1000,

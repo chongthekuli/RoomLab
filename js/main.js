@@ -1,8 +1,9 @@
-import { state } from './app-state.js';
+import { state, DEFAULT_HIFI_SOURCES, DEFAULT_LISTENER } from './app-state.js';
 import { loadMaterials } from './physics/materials.js';
 import { loadLoudspeaker } from './physics/loudspeaker.js';
 import { mountRoomPanel } from './ui/panel-room.js';
 import { mountSourcesPanel } from './ui/panel-sources.js';
+import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport } from './graphics/scene.js';
@@ -33,21 +34,20 @@ async function boot() {
   await Promise.all(SPEAKER_CATALOG.map(c => loadLoudspeaker(c.url)));
 
   if (state.sources.length === 0) {
-    state.sources.push({
-      modelUrl: SPEAKER_CATALOG[0].url,
-      position: {
-        x: state.room.width_m / 2,
-        y: 1.5,
-        z: Math.min(state.room.height_m - 0.3, 2.5),
-      },
-      aim: { yaw: 0, pitch: -15, roll: 0 },
-      power_watts: 100,
-    });
+    const defaultModel = SPEAKER_CATALOG[0].url;
+    for (const s of DEFAULT_HIFI_SOURCES) {
+      state.sources.push({ modelUrl: defaultModel, ...structuredClone(s) });
+    }
+  }
+  if (state.listeners.length === 0) {
+    state.listeners.push(structuredClone(DEFAULT_LISTENER));
+    state.selectedListenerId = DEFAULT_LISTENER.id;
   }
 
   setupTabs();
   mountRoomPanel({ materials });
   mountSourcesPanel({ speakerCatalog: SPEAKER_CATALOG });
+  mountListenersPanel();
   mountResultsPanel({ materials });
   mount2DViewport({ materials });
 
