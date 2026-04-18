@@ -63,6 +63,35 @@ assertClose(a3.azimuth_deg, 0, 0.01, 'Yaw=90° speaker: +X listener = on-axis');
 const a4 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: 30 }, { x: 0, y: 3, z: 3 });
 assertClose(a4.elevation_deg, 15, 0.01, 'Pitch up 30° on a 45° listener → local elev 15°');
 
+// 3D rotation correctness: a listener 90° off-axis should have local elevation 0
+// regardless of pitch, because they lie on the speaker's pitch rotation axis.
+// The previous 2D approximation returned `global_elev − pitch` = 30° here, which
+// was wrong because subtracting pitch from global elevation is only valid when
+// the listener is directly forward. Reference: fix for wide-azimuth directivity lookup.
+const a5 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: -30 }, { x: 1, y: 0, z: 0 });
+assertClose(a5.azimuth_deg, 90, 0.01, '90° off-axis + pitch=-30°: azimuth still 90°');
+assertClose(a5.elevation_deg, 0, 0.01, '90° off-axis + pitch=-30°: local elev 0° (on pitch rotation axis)');
+
+// Diagonal case — listener forward-right, speaker pitched down 45°.
+// Old 2D math: az=45°, el=45° (over-reports).
+// New 3D math: az≈54.7°, el=30° (correct). Formula values below verified on paper.
+const a6 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: -45 }, { x: 1, y: 1, z: 0 });
+const expectedAz = Math.atan2(1, Math.sqrt(0.5)) * 180 / Math.PI; // ≈ 54.74°
+const expectedEl = Math.atan2(Math.sqrt(0.5), Math.sqrt(1 + 0.5)) * 180 / Math.PI; // 30°
+assertClose(a6.azimuth_deg, expectedAz, 0.01, 'Diagonal listener + pitch: azimuth from 3D rotation');
+assertClose(a6.elevation_deg, expectedEl, 0.01, 'Diagonal listener + pitch: elevation from 3D rotation');
+
+// Listener directly overhead: elevation should be +90° regardless of yaw.
+const a7 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 120, pitch: 0 }, { x: 0, y: 0, z: 5 });
+assertClose(a7.elevation_deg, 90, 0.01, 'Listener straight up: elevation = +90°');
+
+// Yaw + pitch combined. Speaker yaw=90° aims +x; pitch=-45° tilts down.
+// Listener 3 m along +X is along the pitched speaker's horizontal-but-tilted axis:
+// local y = r·cos(pitch), local z = r·sin(-pitch) — listener sits 45° above aim.
+const a8 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 90, pitch: -45 }, { x: 3, y: 0, z: 0 });
+assertClose(a8.azimuth_deg, 0, 0.01, 'Yaw=90° aims +x, listener at +x: azimuth = 0');
+assertClose(a8.elevation_deg, 45, 0.01, 'Yaw=90° pitch=-45°, listener at +x: elev = +45°');
+
 // --- Multi-source SPL tests ---
 const coLocated = [
   { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },

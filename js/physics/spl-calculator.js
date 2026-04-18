@@ -10,6 +10,33 @@ function pathCrossesBoundary(speakerState, listenerPos, room) {
   return sIn !== lIn;
 }
 
+// Transform a listener's world position into the speaker's body frame and
+// extract (azimuth, elevation) for directivity lookup.
+//
+// Body frame convention:
+//   +Y = aim direction (forward)
+//   +X = speaker's right
+//   +Z = speaker's up
+//
+// Body-to-world composition (intrinsic rotations applied right-to-left):
+//   R_bw = R_yaw · R_pitch · R_roll
+// where
+//   R_yaw rotates around world Z   (yaw=+90° rotates aim from +Y to +X, i.e. CW viewed from +Z)
+//   R_pitch rotates around body X  (pitch=+90° rotates aim from +Y to +Z, i.e. up)
+//   R_roll rotates around body Y   (roll=+90° rotates body +X toward world -Z)
+//
+// World-to-body applies the inverses in reverse order:
+//   body = R_roll(-roll) · R_pitch(-pitch) · R_yaw(-yaw) · (listener - speaker)
+//
+// Because the original yaw convention is CW (standard math R_z(-yaw)), the
+// "inverse yaw" step is a standard R_z(+yaw) rotation.
+//
+// This proper 3D rotation replaces the earlier 2D approximation that computed
+// azimuth from horizontal projection only and then subtracted pitch from the
+// global elevation. That approximation was correct only when the listener was
+// directly forward (azimuth=0); at wide azimuths it distorted the directivity
+// lookup because it never accounted for the pitch axis rotating around the
+// yawed body-X axis.
 export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   const dx = listenerPos.x - speakerPos.x;
   const dy = listenerPos.y - speakerPos.y;
@@ -19,19 +46,34 @@ export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
 
   const yaw_rad = speakerAimDeg.yaw * Math.PI / 180;
   const pitch_rad = speakerAimDeg.pitch * Math.PI / 180;
+  const roll_rad = (speakerAimDeg.roll || 0) * Math.PI / 180;
 
-  const aimX = Math.sin(yaw_rad);
-  const aimY = Math.cos(yaw_rad);
-  const rightX = Math.cos(yaw_rad);
-  const rightY = -Math.sin(yaw_rad);
+  // Step 1 — inverse yaw (standard R_z(+yaw) applied to world delta).
+  const cy_ = Math.cos(yaw_rad);
+  const sy_ = Math.sin(yaw_rad);
+  const x1 = dx * cy_ - dy * sy_;
+  const y1 = dx * sy_ + dy * cy_;
+  const z1 = dz;
 
-  const dot_aim = dx * aimX + dy * aimY;
-  const dot_right = dx * rightX + dy * rightY;
-  const azimuth_rad = Math.atan2(dot_right, dot_aim);
+  // Step 2 — inverse pitch (standard R_x(-pitch) around the body X axis).
+  const cp = Math.cos(pitch_rad);
+  const sp = Math.sin(pitch_rad);
+  const x2 = x1;
+  const y2 = y1 * cp + z1 * sp;
+  const z2 = -y1 * sp + z1 * cp;
 
-  const horizDist = Math.sqrt(dx * dx + dy * dy);
-  const listenerElev_rad = Math.atan2(dz, horizDist);
-  const elevation_rad = listenerElev_rad - pitch_rad;
+  // Step 3 — inverse roll (standard R_y(-roll) around the body Y axis).
+  const cr = Math.cos(roll_rad);
+  const sr = Math.sin(roll_rad);
+  const lx = cr * x2 - sr * z2;
+  const ly = y2;
+  const lz = sr * x2 + cr * z2;
+
+  // Body frame: aim = +Y. Positive azimuth is toward speaker's right (+X).
+  // Positive elevation is toward speaker's up (+Z).
+  const azimuth_rad = Math.atan2(lx, ly);
+  const horizLocal = Math.sqrt(lx * lx + ly * ly);
+  const elevation_rad = Math.atan2(lz, horizLocal);
 
   return {
     r,
