@@ -428,7 +428,7 @@ function rebuildZones() {
     const colorHex = colorForZone(zi);
     const colorInt = parseInt(colorHex.slice(1), 16);
 
-    // Build zone shape (centered on its own origin for ShapeGeometry, then positioned)
+    // Shape centered at its own centroid
     const cx = zone.vertices.reduce((a, v) => a + v.x, 0) / zone.vertices.length;
     const cz = zone.vertices.reduce((a, v) => a + v.y, 0) / zone.vertices.length;
     const shape = new THREE.Shape();
@@ -438,7 +438,7 @@ function rebuildZones() {
     }
     shape.closePath();
 
-    // SPL heatmap for zone (if sources present)
+    // SPL heatmap (if sources present)
     let heatmapTex = null;
     let splInfo = null;
     if (state.sources.length > 0) {
@@ -453,23 +453,36 @@ function rebuildZones() {
       }
     }
 
-    if (heatmapTex) {
-      // Use a bounding-box plane textured with heatmap, masked to zone shape via alphaTest
+    // Use ShapeGeometry (exactly matches zone polygon) for both heatmap and fallback cases
+    const geo = new THREE.ShapeGeometry(shape);
+
+    if (heatmapTex && splInfo) {
+      // Manually UV-map so the heatmap texture aligns with the zone's bbox in state coords
       const [minX, maxX] = splInfo.boundsX;
       const [minY, maxY] = splInfo.boundsY;
       const w = maxX - minX, d = maxY - minY;
-      const geo = new THREE.PlaneGeometry(w, d);
+      const positions = geo.attributes.position;
+      const uvs = new Float32Array(positions.count * 2);
+      for (let i = 0; i < positions.count; i++) {
+        const lx = positions.getX(i);
+        const ly = positions.getY(i);
+        // Convert shape-local back to state coords
+        const sx = lx + cx;
+        const sy = cz - ly;
+        uvs[i * 2]     = (sx - minX) / w;
+        uvs[i * 2 + 1] = 1 - (sy - minY) / d; // flipY compensation
+      }
+      geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
       const mat = new THREE.MeshBasicMaterial({
         map: heatmapTex, transparent: true, opacity: 0.85,
-        side: THREE.DoubleSide, depthWrite: false, alphaTest: 0.01,
+        side: THREE.DoubleSide, depthWrite: false,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set((minX + maxX) / 2, zone.elevation_m + 0.01, (minY + maxY) / 2);
+      mesh.position.set(cx, zone.elevation_m + 0.01, cz);
       zonesGroup.add(mesh);
     } else {
-      // Flat colored outline plane
-      const geo = new THREE.ShapeGeometry(shape);
       const mat = new THREE.MeshStandardMaterial({
         color: colorInt, transparent: true, opacity: 0.4, side: THREE.DoubleSide,
       });
@@ -525,6 +538,9 @@ function rebuildHeatmap() {
   }
 
   if (state.sources.length === 0) return;
+  // When zones exist, they carry per-elevation heatmaps. Skip the room-level plane
+  // to avoid a giant translucent disc covering the stacked zone visualization.
+  if (state.zones && state.zones.length > 0) return;
 
   const ear = earHeightFor(getSelectedListener());
   const splResult = computeSPLGrid({
