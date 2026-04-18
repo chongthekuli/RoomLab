@@ -42,6 +42,7 @@ function initScene() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.innerHTML = '';
   container.appendChild(renderer.domElement);
 
   controls = new OrbitControls(camera, renderer.domElement);
@@ -180,14 +181,14 @@ function rebuildHeatmap() {
   }
 
   if (state.sources.length === 0) return;
-  const src = state.sources[0];
-  const def = getCachedLoudspeaker(src.modelUrl);
-  if (!def) return;
 
-  const { grid, cellsX, cellsY } = computeSPLGrid({
-    speakerDef: def, speakerState: src,
+  const splResult = computeSPLGrid({
+    sources: state.sources,
+    getSpeakerDef: url => getCachedLoudspeaker(url),
     room: state.room, gridSize: 40, freq_hz: 1000, earHeight_m: 1.2,
   });
+  if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
+  const { grid, cellsX, cellsY } = splResult;
 
   const canvas = document.createElement('canvas');
   canvas.width = cellsX;

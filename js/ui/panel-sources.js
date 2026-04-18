@@ -9,8 +9,32 @@ export function mountSourcesPanel({ speakerCatalog }) {
   root.innerHTML = `
     <h2>Sources</h2>
     <div id="sources-list"></div>
+    <button id="add-source-btn" class="btn-add">+ Add speaker</button>
   `;
+  root.querySelector('#add-source-btn').addEventListener('click', addSource);
   render();
+}
+
+function addSource() {
+  const defaultModel = catalogRef[0].url;
+  state.sources.push({
+    modelUrl: defaultModel,
+    position: {
+      x: state.room.width_m / 2,
+      y: Math.min(1.5 + state.sources.length * 0.8, state.room.depth_m - 0.5),
+      z: Math.min(state.room.height_m - 0.3, 2.5),
+    },
+    aim: { yaw: 0, pitch: -15, roll: 0 },
+    power_watts: 100,
+  });
+  render();
+  emit('source:changed');
+}
+
+function removeSource(idx) {
+  state.sources.splice(idx, 1);
+  render();
+  emit('source:changed');
 }
 
 function render() {
@@ -18,13 +42,16 @@ function render() {
   if (!listRoot) return;
 
   if (state.sources.length === 0) {
-    listRoot.innerHTML = '<div class="phase-placeholder">No loudspeaker added.</div>';
+    listRoot.innerHTML = '<div class="phase-placeholder">No loudspeakers yet — click "+ Add speaker" below.</div>';
     return;
   }
 
   listRoot.innerHTML = state.sources.map((src, i) => `
     <div class="source-card" data-source-idx="${i}">
-      <div class="source-header">Speaker ${i + 1}</div>
+      <div class="source-header">
+        <span>Speaker ${i + 1}</span>
+        <button class="btn-remove" data-remove-idx="${i}" title="Remove this speaker" aria-label="Remove speaker ${i + 1}">×</button>
+      </div>
       <div class="field-group">
         <label>Model
           <select data-f="model">
@@ -46,6 +73,10 @@ function render() {
       </div>
     </div>
   `).join('');
+
+  listRoot.querySelectorAll('.btn-remove').forEach(btn => {
+    btn.addEventListener('click', () => removeSource(parseInt(btn.dataset.removeIdx, 10)));
+  });
 
   listRoot.querySelectorAll('.source-card').forEach(card => {
     const idx = parseInt(card.dataset.sourceIdx, 10);

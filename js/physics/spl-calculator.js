@@ -41,41 +41,54 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
   return { r, azimuth_deg, elevation_deg, attn_db: attn, spl_db };
 }
 
+export function computeMultiSourceSPL({ sources, getSpeakerDef, listenerPos, freq_hz = 1000 }) {
+  let pressureSum = 0;
+  for (const src of sources) {
+    const def = getSpeakerDef(src.modelUrl);
+    if (!def) continue;
+    const { spl_db } = computeDirectSPL({
+      speakerDef: def, speakerState: src, listenerPos, freq_hz,
+    });
+    pressureSum += Math.pow(10, spl_db / 10);
+  }
+  return pressureSum > 0 ? 10 * Math.log10(pressureSum) : -Infinity;
+}
+
 export function computeSPLGrid({
-  speakerDef, speakerState, room,
+  sources, getSpeakerDef, room,
   earHeight_m = 1.2, gridSize = 25, freq_hz = 1000,
 }) {
   const cellsX = gridSize;
   const cellsY = gridSize;
   const cellW_m = room.width_m / cellsX;
   const cellD_m = room.depth_m / cellsY;
-
   const grid = [];
   let minSPL = Infinity, maxSPL = -Infinity, sum = 0, count = 0;
 
   for (let j = 0; j < cellsY; j++) {
     const row = [];
     for (let i = 0; i < cellsX; i++) {
-      const x = (i + 0.5) * cellW_m;
-      const y = (j + 0.5) * cellD_m;
-      const { spl_db } = computeDirectSPL({
-        speakerDef, speakerState,
-        listenerPos: { x, y, z: earHeight_m },
-        freq_hz,
-      });
-      row.push(spl_db);
-      if (spl_db < minSPL) minSPL = spl_db;
-      if (spl_db > maxSPL) maxSPL = spl_db;
-      sum += spl_db;
-      count++;
+      const listenerPos = { x: (i + 0.5) * cellW_m, y: (j + 0.5) * cellD_m, z: earHeight_m };
+      const totalSPL = computeMultiSourceSPL({ sources, getSpeakerDef, listenerPos, freq_hz });
+      row.push(totalSPL);
+      if (isFinite(totalSPL)) {
+        if (totalSPL < minSPL) minSPL = totalSPL;
+        if (totalSPL > maxSPL) maxSPL = totalSPL;
+        sum += totalSPL;
+        count++;
+      }
     }
     grid.push(row);
   }
 
+  const hasResults = count > 0;
   return {
     grid, cellsX, cellsY, cellW_m, cellD_m,
-    minSPL_db: minSPL, maxSPL_db: maxSPL,
-    avgSPL_db: sum / count, uniformity_db: maxSPL - minSPL,
+    minSPL_db: hasResults ? minSPL : 0,
+    maxSPL_db: hasResults ? maxSPL : 0,
+    avgSPL_db: hasResults ? sum / count : 0,
+    uniformity_db: hasResults ? (maxSPL - minSPL) : 0,
     freq_hz, earHeight_m,
+    sourceCount: sources.length,
   };
 }

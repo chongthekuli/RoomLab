@@ -188,6 +188,47 @@ section h3 {
   font-weight: 600;
   margin-bottom: 0.45rem;
   color: var(--fg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.btn-add {
+  display: block;
+  width: 100%;
+  padding: 0.45rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-top: 0.3rem;
+}
+.btn-add:hover { background: #1d5bce; }
+.btn-remove {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  font-family: inherit;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.btn-remove:hover { background: #fbdde2; color: #b10020; border-color: #fbdde2; }
+.viewport-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #99a;
+  font-size: 0.85rem;
 }
 .source-row {
   display: grid;

@@ -73,15 +73,17 @@ function render() {
   let splResult = null;
   let splSvg = '';
   if (state.sources.length > 0) {
-    const src = state.sources[0];
-    const def = getCachedLoudspeaker(src.modelUrl);
-    if (def) {
-      splResult = computeSPLGrid({
-        speakerDef: def, speakerState: src,
-        room: state.room, gridSize: 25, freq_hz: 1000,
-      });
+    splResult = computeSPLGrid({
+      sources: state.sources,
+      getSpeakerDef: url => getCachedLoudspeaker(url),
+      room: state.room, gridSize: 25, freq_hz: 1000,
+    });
+    if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;
       splSvg = renderHeatmapSVG(splResult, x0, y0, pxW, pxD);
+    } else {
+      state.results.splGrid = null;
+      splResult = null;
     }
   } else {
     state.results.splGrid = null;

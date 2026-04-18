@@ -8,7 +8,9 @@ import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport } from './graphics/scene.js';
 
 const SPEAKER_CATALOG = [
-  { url: 'data/loudspeakers/generic-12inch.json', label: 'Generic 12" 2-way' },
+  { url: 'data/loudspeakers/generic-12inch.json',       label: 'Generic 12" 2-way' },
+  { url: 'data/loudspeakers/compact-6inch.json',        label: 'Compact 6" monitor' },
+  { url: 'data/loudspeakers/line-array-element.json',   label: 'Line-array element' },
 ];
 
 function setupTabs() {
@@ -28,7 +30,7 @@ function setupTabs() {
 
 async function boot() {
   const materials = await loadMaterials();
-  await loadLoudspeaker(SPEAKER_CATALOG[0].url);
+  await Promise.all(SPEAKER_CATALOG.map(c => loadLoudspeaker(c.url)));
 
   if (state.sources.length === 0) {
     state.sources.push({
@@ -60,6 +62,6 @@ async function boot() {
 
 boot().catch(err => {
   console.error('RoomLAB boot failed', err);
-  const vp = document.getElementById('view-2d') || document.getElementById('viewport');
+  const vp = document.getElementById('view-2d') || document.getElementById('view-3d');
   if (vp) vp.innerHTML = `<div class="viewport-2d"><div class="vp-header">Startup error: ${err.message}</div></div>`;
 });

@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "id": "compact-6inch-v1",
+  "manufacturer": "RoomLAB Open",
+  "model": "Compact 6\" 2-way monitor",
+  "license": "CC-BY-4.0",
+  "note": "Stub. Wider, more diffuse pattern than 12\" — smaller driver is less beamy at 1 kHz.",
+  "physical": {
+    "weight_kg": 5.5,
+    "dimensions_m": { "w": 0.22, "h": 0.32, "d": 0.25 }
+  },
+  "electrical": {
+    "nominal_impedance_ohm": 8,
+    "max_input_watts": 80,
+    "max_spl_db": 108
+  },
+  "acoustic": {
+    "sensitivity_db_1w_1m": 85.0,
+    "frequency_range_hz": [90, 20000],
+    "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000]
+  },
+  "placement": {
+    "position_m": { "x": 0.0, "y": 2.0, "z": 0.0 },
+    "aim_deg":    { "yaw": 0, "pitch": 0, "roll": 0 }
+  },
+  "directivity": {
+    "angular_resolution_deg": 30,
+    "azimuth_deg":   [-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180],
+    "elevation_deg": [-90, -60, -30, 0, 30, 60, 90],
+    "attenuation_db": {
+      "1000": [
+        [-18, -18, -18, -18, -18, -18, -18, -18, -18, -18, -18, -18, -18],
+        [ -9,  -8,  -6,  -4,  -3,  -2,  -1,  -2,  -3,  -4,  -6,  -8,  -9],
+        [ -7,  -5,  -3,  -2,  -1,   0,   0,   0,  -1,  -2,  -3,  -5,  -7],
+        [ -6,  -4,  -2,  -1,   0,   0,   0,   0,   0,  -1,  -2,  -4,  -6],
+        [ -7,  -5,  -3,  -2,  -1,   0,   0,   0,  -1,  -2,  -3,  -5,  -7],
+        [ -9,  -8,  -6,  -4,  -3,  -2,  -1,  -2,  -3,  -4,  -6,  -8,  -9],
+        [-18, -18, -18, -18, -18, -18, -18, -18, -18, -18, -18, -18, -18]
+      ]
+    }
+  }
+}

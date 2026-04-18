@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RoomLAB</title>
-  <link rel="stylesheet" href="css/main.css?v=5" />
-  <link rel="stylesheet" href="css/theme.css?v=5" />
+  <link rel="stylesheet" href="css/main.css?v=6" />
+  <link rel="stylesheet" href="css/theme.css?v=6" />
   <script type="importmap">
   {
     "imports": {
@@ -23,21 +23,23 @@
       <section id="panel-sources"><h2>Sources</h2></section>
       <section id="panel-library">
         <h2>Library</h2>
-        <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files — coming in Phase 3.</div>
+        <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files — coming later.</div>
       </section>
     </aside>
     <section id="viewport">
       <div class="viewport-tabs">
-        <button class="vp-tab active" data-view="2d">2D Floor plan</button>
-        <button class="vp-tab" data-view="3d">3D View</button>
+        <button class="vp-tab" data-view="2d">2D Floor plan</button>
+        <button class="vp-tab active" data-view="3d">3D View</button>
       </div>
-      <div id="view-2d" class="viewport-view"></div>
-      <div id="view-3d" class="viewport-view" hidden></div>
+      <div id="view-2d" class="viewport-view" hidden></div>
+      <div id="view-3d" class="viewport-view">
+        <div class="viewport-loading">Loading 3D view…</div>
+      </div>
     </section>
     <aside id="panel-right">
       <section id="panel-results"><h2>Results</h2></section>
     </aside>
   </main>
-  <script type="module" src="js/main.js?v=5"></script>
+  <script type="module" src="js/main.js?v=6"></script>
 </body>
 </html>

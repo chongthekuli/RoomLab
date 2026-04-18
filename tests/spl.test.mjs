@@ -67,5 +67,40 @@ assertClose(a3.azimuth_deg, 0, 0.01, 'Yaw=90° speaker: +X listener = on-axis');
 const a4 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: 30 }, { x: 0, y: 3, z: 3 });
 assertClose(a4.elevation_deg, 15, 0.01, 'Pitch up 30° on a 45° listener → local elev 15°');
 
+// --- Multi-source SPL tests ---
+import { computeMultiSourceSPL } from '../js/physics/spl-calculator.js';
+
+// Two co-located 1W speakers, both on-axis to listener at 1m
+// Each contributes 97 dB; pressure sum = 2 × 10^9.7 → total = 97 + 10·log₁₀(2) ≈ 100.01 dB
+const coLocated = [
+  { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
+  { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
+];
+const lookup = () => speaker;
+const t6 = computeMultiSourceSPL({
+  sources: coLocated, getSpeakerDef: lookup,
+  listenerPos: { x: 0, y: 1, z: 0 },
+});
+assertClose(t6, 97 + 10 * Math.log10(2), 0.01, 'Two identical co-located sources = +3 dB');
+
+// Four identical sources → +6 dB
+const four = Array.from({ length: 4 }, () => ({
+  modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1,
+}));
+const t7 = computeMultiSourceSPL({
+  sources: four, getSpeakerDef: lookup,
+  listenerPos: { x: 0, y: 1, z: 0 },
+});
+assertClose(t7, 97 + 10 * Math.log10(4), 0.01, 'Four identical sources = +6 dB');
+
+// Empty source list returns -Infinity
+const t8 = computeMultiSourceSPL({
+  sources: [], getSpeakerDef: lookup,
+  listenerPos: { x: 0, y: 1, z: 0 },
+});
+const t8ok = t8 === -Infinity;
+console.log(`${t8ok ? 'PASS' : 'FAIL'}  Empty sources returns -Infinity  actual=${t8}`);
+if (!t8ok) failed++;
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');
