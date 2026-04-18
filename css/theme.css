@@ -1,0 +1,10 @@
+:root {
+  --bg: #ffffff;
+  --bg-viewport: #0e1116;
+  --fg: #1a1a1a;
+  --muted: #6a6a6a;
+  --border: #e3e3e3;
+  --accent: #2f6feb;
+}
+
+body { background: var(--bg); color: var(--fg); }
