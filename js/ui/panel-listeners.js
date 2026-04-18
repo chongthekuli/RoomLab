@@ -74,9 +74,10 @@ function render() {
         <div class="field-group">
           <label>Label <input type="text" data-f="label" value="${lst.label}" /></label>
         </div>
-        <div class="source-row duo">
+        <div class="source-row triplet">
           <label>X <input type="number" data-f="x" value="${lst.position.x.toFixed(2)}" step="0.1" /><span class="unit">m</span></label>
           <label>Y <input type="number" data-f="y" value="${lst.position.y.toFixed(2)}" step="0.1" /><span class="unit">m</span></label>
+          <label>Elev <input type="number" data-f="elevation_m" value="${(lst.elevation_m ?? 0).toFixed(2)}" step="0.1" /><span class="unit">m</span></label>
         </div>
         <div class="field-group">
           <label>Posture
@@ -130,6 +131,7 @@ function updateListener(id, field, value) {
     case 'label': lst.label = value; break;
     case 'x': lst.position.x = parseFloat(value); break;
     case 'y': lst.position.y = parseFloat(value); break;
+    case 'elevation_m': lst.elevation_m = parseFloat(value) || 0; break;
     case 'posture':
       lst.posture = value;
       if (value === 'custom' && lst.custom_ear_height_m == null) {

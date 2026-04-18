@@ -25,10 +25,11 @@ export const CEILING_LABELS = {
 
 export function earHeightFor(listener) {
   if (!listener) return 1.2;
+  const elev = listener.elevation_m ?? 0;
   if (listener.posture === 'custom' && typeof listener.custom_ear_height_m === 'number') {
     return listener.custom_ear_height_m;
   }
-  return POSTURE_EAR_HEIGHTS_M[listener.posture] ?? 1.2;
+  return elev + (POSTURE_EAR_HEIGHTS_M[listener.posture] ?? 1.2);
 }
 
 export function getSelectedListener() {
@@ -73,6 +74,59 @@ function rectVerts(x1, y1, x2, y2) {
   return [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 }];
 }
 
+function ringSectorVerts(cx, cy, r_in, r_out, theta_start_deg, theta_end_deg, arcSteps = 5) {
+  const verts = [];
+  const ts = theta_start_deg * Math.PI / 180;
+  const te = theta_end_deg * Math.PI / 180;
+  for (let i = 0; i <= arcSteps; i++) {
+    const t = ts + (te - ts) * (i / arcSteps);
+    verts.push({ x: cx + r_out * Math.cos(t), y: cy + r_out * Math.sin(t) });
+  }
+  for (let i = arcSteps; i >= 0; i--) {
+    const t = ts + (te - ts) * (i / arcSteps);
+    verts.push({ x: cx + r_in * Math.cos(t), y: cy + r_in * Math.sin(t) });
+  }
+  return verts;
+}
+
+function generateBowl({ cx, cy, r_in, r_out, elevation_m, material_id, idPrefix, labelPrefix, count = 8, startAngleDeg = -22.5 }) {
+  const labels8 = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
+  const step = 360 / count;
+  const zones = [];
+  for (let i = 0; i < count; i++) {
+    const ts = startAngleDeg + i * step;
+    const te = ts + step;
+    zones.push({
+      id: `${idPrefix}${i + 1}`,
+      label: `${labelPrefix} ${labels8[i] ?? i + 1}`,
+      vertices: ringSectorVerts(cx, cy, r_in, r_out, ts, te, 5),
+      elevation_m,
+      material_id,
+    });
+  }
+  return zones;
+}
+
+function generateCenterCluster({ cx, cy, cz, ring_r, count = 8, modelUrl, power_watts = 500, pitch = -25 }) {
+  const sources = [];
+  const step = 360 / count;
+  for (let i = 0; i < count; i++) {
+    const a_deg = i * step;
+    const a_rad = a_deg * Math.PI / 180;
+    const x = cx + ring_r * Math.cos(a_rad);
+    const y = cy + ring_r * Math.sin(a_rad);
+    const yaw = ((90 - a_deg) % 360 + 360) % 360;
+    const yaw_signed = yaw > 180 ? yaw - 360 : yaw;
+    const groupId = (i % 2 === 0) ? 'A' : 'B';
+    sources.push({
+      modelUrl, position: { x, y, z: cz },
+      aim: { yaw: yaw_signed, pitch, roll: 0 },
+      power_watts, groupId,
+    });
+  }
+  return sources;
+}
+
 export const state = {
   room: {
     shape: 'polygon',
@@ -107,8 +161,39 @@ export const state = {
 export const DEFAULT_PRESET_KEY = 'auditorium';
 
 export const PRESETS = {
-  auditorium: {
-    label: 'Auditorium (arena)',
+  auditorium: (() => {
+    // Sports arena modeled after University of Wyoming Arena-Auditorium (~11,600-seat geodesic dome).
+    // Scaled for simulation: 50m polygon (24 sides approximates dome), 8m walls + 8m dome rise
+    // (16m apex). NCAA basketball court at center (28.7 x 15.2m). Two tier bowl (lower+upper)
+    // wrapping 360 deg as 8 ring sectors each. Center-hung PA cluster of 8 speakers at 12m.
+    const cx = 25, cy = 25;
+    return {
+      label: 'Sports arena (dome)',
+      shape: 'polygon', ceiling_type: 'dome',
+      polygon_sides: 24, polygon_radius_m: 25,
+      width_m: 50, height_m: 8, depth_m: 50,
+      ceiling_dome_rise_m: 8,
+      surfaces: {
+        floor: 'wood-floor', ceiling: 'gypsum-board', walls: 'gypsum-board',
+        wall_north: 'gypsum-board', wall_south: 'gypsum-board',
+        wall_east: 'gypsum-board', wall_west: 'gypsum-board',
+      },
+      zones: [
+        { id: 'Z_court', label: 'Court', vertices: rectVerts(10.65, 17.4, 39.35, 32.6), elevation_m: 0, material_id: 'wood-floor' },
+        ...generateBowl({ cx, cy, r_in: 16, r_out: 22, elevation_m: 2.5, material_id: 'carpet-heavy', idPrefix: 'Z_lb', labelPrefix: 'Lower', count: 8 }),
+        ...generateBowl({ cx, cy, r_in: 22, r_out: 24.5, elevation_m: 7, material_id: 'carpet-heavy', idPrefix: 'Z_ub', labelPrefix: 'Upper', count: 8 }),
+      ],
+      sources: generateCenterCluster({ cx, cy, cz: 12, ring_r: 3, count: 8, modelUrl: SPKLA, power_watts: 500, pitch: -25 }),
+      listeners: [
+        { id: 'L1', label: 'Courtside VIP',    position: { x: 12,  y: 25   }, elevation_m: 0,   posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L2', label: 'Lower bowl south', position: { x: 25,  y: 44   }, elevation_m: 2.5, posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L3', label: 'Upper bowl NW',    position: { x: 8.7, y: 8.7  }, elevation_m: 7,   posture: 'sitting_chair', custom_ear_height_m: null },
+      ],
+    };
+  })(),
+
+  chamber: {
+    label: 'Chamber (small arena)',
     shape: 'polygon', ceiling_type: 'dome',
     polygon_sides: 16, polygon_radius_m: 10,
     width_m: 20, height_m: 7, depth_m: 20,
