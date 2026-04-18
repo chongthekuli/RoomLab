@@ -2,6 +2,7 @@ import { state, earHeightFor, getSelectedListener } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
+import { roomPlanVertices } from '../physics/room-shape.js';
 
 let materialsRef;
 
@@ -46,9 +47,13 @@ export function mount2DViewport({ materials }) {
   window.addEventListener('resize', render);
 }
 
+function roomToSvg(x0, y0, pxW, pxD, room, x, y) {
+  return { sx: x0 + (x / room.width_m) * pxW, sy: y0 + (y / room.depth_m) * pxD };
+}
+
 function render() {
   const vp = document.getElementById('view-2d');
-  const { width_m: w, depth_m: d, height_m: h, surfaces } = state.room;
+  const { width_m: w, depth_m: d, height_m: h, surfaces, shape } = state.room;
 
   if (!(w > 0 && d > 0 && h > 0)) {
     vp.innerHTML = `<div class="viewport-2d"><div class="vp-header">Enter positive room dimensions</div></div>`;
@@ -67,10 +72,6 @@ function render() {
   const pxD = d * scale;
   const x0 = (vbW - pxW) / 2;
   const y0 = (vbH - pxD) / 2;
-
-  const wN = surfaces.wall_north, wS = surfaces.wall_south;
-  const wE = surfaces.wall_east,  wW = surfaces.wall_west;
-  const fl = surfaces.floor,      cl = surfaces.ceiling;
 
   const ear = earHeightFor(getSelectedListener());
 
@@ -93,45 +94,98 @@ function render() {
     state.results.splGrid = null;
   }
 
+  const roomOutline = renderRoomOutline(state.room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces);
+  const clipPathSvg = renderClipPath(state.room, x0, y0, pxW, pxD);
+
   const speakerSvg = state.sources.length > 0
-    ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, w, d)
+    ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, state.room)
     : '';
 
   const listenerSvg = state.listeners.length > 0
-    ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, w, d)
+    ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room)
+    : '';
+
+  const shapeLbl = shape === 'rectangular'
+    ? `${w} m wide · ${d} m deep`
+    : shape === 'polygon'
+      ? `${state.room.polygon_sides}-gon · radius ${state.room.polygon_radius_m} m`
+      : `round · radius ${state.room.round_radius_m} m`;
+  const ceilLbl = state.room.ceiling_type === 'dome'
+    ? ` · domed ceiling (rise ${state.room.ceiling_dome_rise_m} m)`
     : '';
 
   vp.innerHTML = `
     <div class="viewport-2d">
       <div class="vp-header">Floor plan — top-down view (heatmap @ ${ear.toFixed(2)} m ear height)</div>
       <svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">
-        <rect x="${x0}" y="${y0}" width="${pxW}" height="${pxD}"
-              fill="${colorFor(alphaOf(fl))}" fill-opacity="0.15" rx="2" />
-        ${splSvg}
-        <line x1="${x0}" y1="${y0}" x2="${x0 + pxW}" y2="${y0}"
-              stroke="${colorFor(alphaOf(wN))}" stroke-width="8" stroke-linecap="round" />
-        <line x1="${x0}" y1="${y0 + pxD}" x2="${x0 + pxW}" y2="${y0 + pxD}"
-              stroke="${colorFor(alphaOf(wS))}" stroke-width="8" stroke-linecap="round" />
-        <line x1="${x0 + pxW}" y1="${y0}" x2="${x0 + pxW}" y2="${y0 + pxD}"
-              stroke="${colorFor(alphaOf(wE))}" stroke-width="8" stroke-linecap="round" />
-        <line x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + pxD}"
-              stroke="${colorFor(alphaOf(wW))}" stroke-width="8" stroke-linecap="round" />
-
-        <text x="${x0 + pxW/2}" y="${y0 - 22}" text-anchor="middle" class="vp-lbl vp-lbl-wall">Front — ${nameOf(wN)}</text>
-        <text x="${x0 + pxW/2}" y="${y0 + pxD + 34}" text-anchor="middle" class="vp-lbl vp-lbl-wall">Back — ${nameOf(wS)}</text>
-        <text x="${x0 + pxW + 18}" y="${y0 + pxD/2 + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">Right — ${nameOf(wE)}</text>
-        <text x="${x0 - 18}" y="${y0 + pxD/2 + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">Left — ${nameOf(wW)}</text>
-
+        <defs>${clipPathSvg}</defs>
+        ${roomOutline.floorFill}
+        <g clip-path="url(#room-clip)">${splSvg}</g>
+        ${roomOutline.walls}
+        ${roomOutline.labels}
         ${listenerSvg}
         ${speakerSvg}
-
-        <text x="${x0 + pxW/2}" y="${vbH - 20}" text-anchor="middle" class="vp-lbl vp-lbl-dim">${w} m wide · Floor: ${nameOf(fl)} · Ceiling: ${nameOf(cl)}</text>
-        <text x="30" y="${y0 + pxD/2}" text-anchor="middle" class="vp-lbl vp-lbl-dim" transform="rotate(-90 30 ${y0 + pxD/2})">${d} m deep</text>
+        <text x="${x0 + pxW/2}" y="${vbH - 20}" text-anchor="middle" class="vp-lbl vp-lbl-dim">${shapeLbl} · h ${h} m · Floor: ${nameOf(surfaces.floor)} · Ceiling: ${nameOf(surfaces.ceiling)}${ceilLbl}</text>
       </svg>
       ${renderLegend(splResult)}
-      <div class="vp-note">${splResult ? `SPL heatmap sums all speakers · triangle = speaker (tip = aim) · yellow circle = selected listener` : 'Add a source to see SPL coverage.'}</div>
+      <div class="vp-note">${splResult ? `SPL heatmap sums all speakers · white triangles = speakers · yellow circle = selected listener` : 'Add a source to see SPL coverage.'}</div>
     </div>
   `;
+}
+
+function renderClipPath(room, x0, y0, pxW, pxD) {
+  const verts = roomPlanVertices(room);
+  const points = verts.map(v => {
+    const sx = x0 + (v.x / room.width_m) * pxW;
+    const sy = y0 + (v.y / room.depth_m) * pxD;
+    return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+  }).join(' ');
+  return `<clipPath id="room-clip"><polygon points="${points}" /></clipPath>`;
+}
+
+function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
+  const shape = room.shape ?? 'rectangular';
+  const verts = roomPlanVertices(room);
+  const svgPts = verts.map(v => ({
+    sx: x0 + (v.x / room.width_m) * pxW,
+    sy: y0 + (v.y / room.depth_m) * pxD,
+  }));
+
+  if (shape === 'rectangular') {
+    const wN = surfaces.wall_north, wS = surfaces.wall_south;
+    const wE = surfaces.wall_east,  wW = surfaces.wall_west;
+    const floorFill = `<rect x="${x0}" y="${y0}" width="${pxW}" height="${pxD}"
+              fill="${colorFor(alphaOf(surfaces.floor))}" fill-opacity="0.15" rx="2" />`;
+    const walls = `
+      <line x1="${x0}" y1="${y0}" x2="${x0 + pxW}" y2="${y0}"
+            stroke="${colorFor(alphaOf(wN))}" stroke-width="8" stroke-linecap="round" />
+      <line x1="${x0}" y1="${y0 + pxD}" x2="${x0 + pxW}" y2="${y0 + pxD}"
+            stroke="${colorFor(alphaOf(wS))}" stroke-width="8" stroke-linecap="round" />
+      <line x1="${x0 + pxW}" y1="${y0}" x2="${x0 + pxW}" y2="${y0 + pxD}"
+            stroke="${colorFor(alphaOf(wE))}" stroke-width="8" stroke-linecap="round" />
+      <line x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + pxD}"
+            stroke="${colorFor(alphaOf(wW))}" stroke-width="8" stroke-linecap="round" />
+    `;
+    const labels = `
+      <text x="${x0 + pxW/2}" y="${y0 - 22}" text-anchor="middle" class="vp-lbl vp-lbl-wall">Front — ${nameOf(wN)}</text>
+      <text x="${x0 + pxW/2}" y="${y0 + pxD + 34}" text-anchor="middle" class="vp-lbl vp-lbl-wall">Back — ${nameOf(wS)}</text>
+      <text x="${x0 + pxW + 18}" y="${y0 + pxD/2 + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">Right — ${nameOf(wE)}</text>
+      <text x="${x0 - 18}" y="${y0 + pxD/2 + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">Left — ${nameOf(wW)}</text>
+    `;
+    return { floorFill, walls, labels };
+  }
+
+  // Polygon or round: single walls material, single outline
+  const pointsAttr = svgPts.map(p => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' ');
+  const wallsMat = surfaces.walls ?? surfaces.wall_north ?? 'gypsum-board';
+  const floorFill = `<polygon points="${pointsAttr}" fill="${colorFor(alphaOf(surfaces.floor))}" fill-opacity="0.15" />`;
+  const walls = `<polygon points="${pointsAttr}" fill="none" stroke="${colorFor(alphaOf(wallsMat))}" stroke-width="8" stroke-linejoin="round" />`;
+
+  // Single top label
+  const centerX = svgPts.reduce((s, p) => s + p.sx, 0) / svgPts.length;
+  const topY = Math.min(...svgPts.map(p => p.sy));
+  const labels = `<text x="${centerX.toFixed(1)}" y="${(topY - 22).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall">Walls — ${nameOf(wallsMat)}</text>`;
+  return { floorFill, walls, labels };
 }
 
 function renderHeatmapSVG(splResult, x0, y0, pxW, pxD) {
@@ -142,17 +196,18 @@ function renderHeatmapSVG(splResult, x0, y0, pxW, pxD) {
   for (let j = 0; j < cellsY; j++) {
     for (let i = 0; i < cellsX; i++) {
       const spl = grid[j][i];
+      if (!isFinite(spl)) continue;
       s += `<rect x="${(x0 + i * cw).toFixed(2)}" y="${(y0 + j * ch).toFixed(2)}" width="${(cw + 0.5).toFixed(2)}" height="${(ch + 0.5).toFixed(2)}" fill="${splColor(spl)}" fill-opacity="0.55" />`;
     }
   }
   return s;
 }
 
-function renderSpeakersSVG(sources, x0, y0, pxW, pxD, roomW, roomD) {
+function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room) {
   let s = '';
   sources.forEach((src, i) => {
-    const sx = x0 + (src.position.x / roomW) * pxW;
-    const sy = y0 + (src.position.y / roomD) * pxD;
+    const sx = x0 + (src.position.x / room.width_m) * pxW;
+    const sy = y0 + (src.position.y / room.depth_m) * pxD;
     const yaw_rad = src.aim.yaw * Math.PI / 180;
     const size = 13;
     const aimX = Math.sin(yaw_rad);
@@ -173,11 +228,11 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, roomW, roomD) {
   return s;
 }
 
-function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, roomW, roomD) {
+function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room) {
   let s = '';
   listeners.forEach((lst) => {
-    const sx = x0 + (lst.position.x / roomW) * pxW;
-    const sy = y0 + (lst.position.y / roomD) * pxD;
+    const sx = x0 + (lst.position.x / room.width_m) * pxW;
+    const sy = y0 + (lst.position.y / room.depth_m) * pxD;
     const isSel = lst.id === selectedId;
     const radius = isSel ? 10 : 7;
     const fill = isSel ? '#ffd000' : '#4a8ff0';

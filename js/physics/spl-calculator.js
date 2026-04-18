@@ -1,4 +1,5 @@
 import { interpolateAttenuation } from './loudspeaker.js';
+import { isInsideRoom } from './room-shape.js';
 
 export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   const dx = listenerPos.x - speakerPos.x;
@@ -81,7 +82,13 @@ export function computeSPLGrid({
   for (let j = 0; j < cellsY; j++) {
     const row = [];
     for (let i = 0; i < cellsX; i++) {
-      const listenerPos = { x: (i + 0.5) * cellW_m, y: (j + 0.5) * cellD_m, z: earHeight_m };
+      const x = (i + 0.5) * cellW_m;
+      const y = (j + 0.5) * cellD_m;
+      if (!isInsideRoom(x, y, room)) {
+        row.push(-Infinity);
+        continue;
+      }
+      const listenerPos = { x, y, z: earHeight_m };
       const totalSPL = computeMultiSourceSPL({ sources, getSpeakerDef, listenerPos, freq_hz });
       row.push(totalSPL);
       if (isFinite(totalSPL)) {

@@ -4,6 +4,7 @@ import { state, earHeightFor, getSelectedListener } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
+import { roomPlanVertices, domeGeometry, isInsideRoom } from '../physics/room-shape.js';
 
 let scene, camera, renderer, controls;
 let roomGroup, sourcesGroup, listenersGroup, heatmapMesh;
@@ -88,6 +89,19 @@ function colorForAlpha(alpha) {
   return 0x3a9e5a;
 }
 
+function makeFloorCeilingShape(room) {
+  // 2D THREE.Shape in room's (x, y) state coords, centered on origin
+  const verts = roomPlanVertices(room);
+  const cx = room.width_m / 2, cy = room.depth_m / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(verts[0].x - cx, -(verts[0].y - cy));
+  for (let i = 1; i < verts.length; i++) {
+    shape.lineTo(verts[i].x - cx, -(verts[i].y - cy));
+  }
+  shape.closePath();
+  return shape;
+}
+
 function rebuildRoom(isFirst) {
   if (!roomGroup) {
     roomGroup = new THREE.Group();
@@ -96,45 +110,168 @@ function rebuildRoom(isFirst) {
     disposeGroup(roomGroup);
   }
 
-  const { width_m: w, height_m: h, depth_m: d, surfaces } = state.room;
+  const room = state.room;
+  const { width_m: w, height_m: h, depth_m: d, surfaces } = room;
+  const shape = room.shape ?? 'rectangular';
+  const cx = w / 2, cz = d / 2;
+
   const bandIdx = materialsRef.frequency_bands_hz.indexOf(500);
   const useIdx = bandIdx >= 0 ? bandIdx : 2;
   const alphaOf = id => materialsRef.byId[id]?.absorption[useIdx] ?? 0;
+  const wallsMatId = surfaces.walls ?? surfaces.wall_north ?? 'gypsum-board';
 
-  const mkPlane = (width, height, position, rotation, surfId, opacity) => {
-    const geo = new THREE.PlaneGeometry(width, height);
-    const mat = new THREE.MeshStandardMaterial({
-      color: colorForAlpha(alphaOf(surfId)),
-      transparent: true,
-      opacity,
-      side: THREE.DoubleSide,
-    });
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(...position);
-    m.rotation.set(...rotation);
-    roomGroup.add(m);
-  };
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: colorForAlpha(alphaOf(surfaces.floor)),
+    transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+  });
+  const ceilMat = new THREE.MeshStandardMaterial({
+    color: colorForAlpha(alphaOf(surfaces.ceiling)),
+    transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+  });
+  const wallsMat = new THREE.MeshStandardMaterial({
+    color: colorForAlpha(alphaOf(wallsMatId)),
+    transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+  });
 
-  mkPlane(w, d, [w/2, 0.001, d/2], [-Math.PI/2, 0, 0], surfaces.floor, 0.55);
-  mkPlane(w, d, [w/2, h - 0.001, d/2], [Math.PI/2, 0, 0], surfaces.ceiling, 0.22);
-  mkPlane(w, h, [w/2, h/2, 0], [0, Math.PI, 0], surfaces.wall_north, 0.22);
-  mkPlane(w, h, [w/2, h/2, d], [0, 0, 0], surfaces.wall_south, 0.22);
-  mkPlane(d, h, [w, h/2, d/2], [0, -Math.PI/2, 0], surfaces.wall_east, 0.22);
-  mkPlane(d, h, [0, h/2, d/2], [0, Math.PI/2, 0], surfaces.wall_west, 0.22);
+  if (shape === 'rectangular') {
+    // Floor + ceiling as rectangular planes
+    const floorGeo = new THREE.PlaneGeometry(w, d);
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(cx, 0.001, cz);
+    roomGroup.add(floor);
 
-  const box = new THREE.BoxGeometry(w, h, d);
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(box),
-    new THREE.LineBasicMaterial({ color: 0xa0a8b4 })
-  );
-  edges.position.set(w/2, h/2, d/2);
-  roomGroup.add(edges);
-  box.dispose();
+    if (room.ceiling_type !== 'dome') {
+      const ceilGeo = new THREE.PlaneGeometry(w, d);
+      const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+      ceiling.rotation.x = Math.PI / 2;
+      ceiling.position.set(cx, h - 0.001, cz);
+      roomGroup.add(ceiling);
+    }
+
+    // 4 walls (per-material)
+    const wallOpts = [
+      [w, h, [cx, h/2, 0],   [0, Math.PI, 0],    surfaces.wall_north],
+      [w, h, [cx, h/2, d],   [0, 0, 0],          surfaces.wall_south],
+      [d, h, [w,  h/2, cz],  [0, -Math.PI/2, 0], surfaces.wall_east],
+      [d, h, [0,  h/2, cz],  [0, Math.PI/2, 0],  surfaces.wall_west],
+    ];
+    for (const [ww, wh, pos, rot, surfId] of wallOpts) {
+      const geo = new THREE.PlaneGeometry(ww, wh);
+      const mat = new THREE.MeshStandardMaterial({
+        color: colorForAlpha(alphaOf(surfId)),
+        transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+      });
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(...pos);
+      m.rotation.set(...rot);
+      roomGroup.add(m);
+    }
+
+    // Wireframe edges for shoebox
+    const box = new THREE.BoxGeometry(w, h, d);
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(box),
+      new THREE.LineBasicMaterial({ color: 0xa0a8b4 })
+    );
+    edges.position.set(cx, h/2, cz);
+    roomGroup.add(edges);
+    box.dispose();
+  } else {
+    // Polygon or round: use ShapeGeometry for floor/ceiling (plan shape)
+    const planShape = makeFloorCeilingShape(room);
+    const floorGeo = new THREE.ShapeGeometry(planShape);
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(cx, 0.001, cz);
+    roomGroup.add(floor);
+
+    if (room.ceiling_type !== 'dome') {
+      const ceilGeo = new THREE.ShapeGeometry(planShape);
+      const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+      ceiling.rotation.x = Math.PI / 2;
+      ceiling.position.set(cx, h - 0.001, cz);
+      roomGroup.add(ceiling);
+    }
+
+    if (shape === 'round') {
+      // Cylindrical wall, open-ended
+      const r = room.round_radius_m ?? 3;
+      const cylGeo = new THREE.CylinderGeometry(r, r, h, 48, 1, true);
+      const cyl = new THREE.Mesh(cylGeo, wallsMat);
+      cyl.position.set(cx, h/2, cz);
+      roomGroup.add(cyl);
+
+      // Top and bottom ring edges
+      const ringPts = [];
+      for (let i = 0; i <= 64; i++) {
+        const a = i * 2 * Math.PI / 64;
+        ringPts.push(new THREE.Vector3(cx + r * Math.cos(a), 0, cz + r * Math.sin(a)));
+      }
+      const bottomRing = new THREE.BufferGeometry().setFromPoints(ringPts);
+      roomGroup.add(new THREE.Line(bottomRing, new THREE.LineBasicMaterial({ color: 0xa0a8b4 })));
+      const topPts = ringPts.map(p => new THREE.Vector3(p.x, h, p.z));
+      const topRing = new THREE.BufferGeometry().setFromPoints(topPts);
+      roomGroup.add(new THREE.Line(topRing, new THREE.LineBasicMaterial({ color: 0xa0a8b4 })));
+    } else {
+      // Polygon walls: N plane segments around the ring
+      const n = room.polygon_sides ?? 6;
+      const verts = roomPlanVertices(room);
+      for (let i = 0; i < n; i++) {
+        const v1 = verts[i];
+        const v2 = verts[(i + 1) % n];
+        const ex = v2.x - v1.x, ey = v2.y - v1.y;
+        const edgeLen = Math.sqrt(ex * ex + ey * ey);
+        const midX = (v1.x + v2.x) / 2;
+        const midZ = (v1.y + v2.y) / 2;
+        const geo = new THREE.PlaneGeometry(edgeLen, h);
+        const m = new THREE.Mesh(geo, wallsMat);
+        m.position.set(midX, h/2, midZ);
+        m.lookAt(cx, h/2, cz);
+        roomGroup.add(m);
+      }
+
+      // Wireframe edges around polygon
+      const bottom = verts.map(v => new THREE.Vector3(v.x, 0, v.y));
+      bottom.push(bottom[0]);
+      const top = verts.map(v => new THREE.Vector3(v.x, h, v.y));
+      top.push(top[0]);
+      roomGroup.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(bottom),
+        new THREE.LineBasicMaterial({ color: 0xa0a8b4 })
+      ));
+      roomGroup.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(top),
+        new THREE.LineBasicMaterial({ color: 0xa0a8b4 })
+      ));
+      // Vertical edges
+      for (let i = 0; i < n; i++) {
+        const pts = [
+          new THREE.Vector3(verts[i].x, 0, verts[i].y),
+          new THREE.Vector3(verts[i].x, h, verts[i].y),
+        ];
+        roomGroup.add(new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({ color: 0xa0a8b4 })
+        ));
+      }
+    }
+  }
+
+  // Dome cap (any shape)
+  const dome = domeGeometry(room);
+  if (dome) {
+    const { sphereRadius, rise, thetaMax } = dome;
+    const capGeo = new THREE.SphereGeometry(sphereRadius, 48, 24, 0, Math.PI * 2, 0, thetaMax);
+    const cap = new THREE.Mesh(capGeo, ceilMat);
+    cap.position.set(cx, h + rise - sphereRadius, cz);
+    roomGroup.add(cap);
+  }
 
   if (isFirst && controls) {
     const d3 = Math.max(w, h, d);
-    camera.position.set(w / 2 + d3 * 0.9, h + d3 * 0.5, d + d3 * 0.4);
-    controls.target.set(w / 2, h * 0.4, d / 2);
+    camera.position.set(cx + d3 * 0.9, h + d3 * 0.5, d + d3 * 0.4);
+    controls.target.set(cx, h * 0.4, cz);
     controls.update();
   }
 }
@@ -206,7 +343,6 @@ function rebuildListeners() {
     head.position.set(lst.position.x, ear, lst.position.y);
     listenersGroup.add(head);
 
-    // Chair block for sitting_chair
     if (lst.posture === 'sitting_chair') {
       const chair = new THREE.Mesh(
         new THREE.BoxGeometry(0.5, 0.45, 0.5),
@@ -246,8 +382,13 @@ function rebuildHeatmap() {
 
   for (let j = 0; j < cellsY; j++) {
     for (let i = 0; i < cellsX; i++) {
-      const [r, g, b] = splColorRGB(grid[j][i]);
+      const val = grid[j][i];
       const idx = (j * cellsX + i) * 4;
+      if (!isFinite(val)) {
+        img.data[idx + 3] = 0;
+        continue;
+      }
+      const [r, g, b] = splColorRGB(val);
       img.data[idx + 0] = r;
       img.data[idx + 1] = g;
       img.data[idx + 2] = b;
@@ -264,7 +405,7 @@ function rebuildHeatmap() {
   const geo = new THREE.PlaneGeometry(w, d);
   const mat = new THREE.MeshBasicMaterial({
     map: tex, transparent: true, opacity: 0.78,
-    side: THREE.DoubleSide, depthWrite: false,
+    side: THREE.DoubleSide, depthWrite: false, alphaTest: 0.01,
   });
   heatmapMesh = new THREE.Mesh(geo, mat);
   heatmapMesh.rotation.x = -Math.PI / 2;

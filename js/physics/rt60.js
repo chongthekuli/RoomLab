@@ -1,3 +1,5 @@
+import { roomSurfaces, roomVolume } from './room-shape.js';
+
 const SABINE_CONSTANT = 0.161;
 
 export function sabine({ volume_m3, totalAbsorption_sabins }) {
@@ -11,20 +13,8 @@ export function eyring({ volume_m3, totalArea_m2, meanAbsorption }) {
   return SABINE_CONSTANT * volume_m3 / (-totalArea_m2 * Math.log(1 - meanAbsorption));
 }
 
-function shoeboxSurfaces(room) {
-  const { width_m: w, height_m: h, depth_m: d, surfaces } = room;
-  return [
-    { id: 'floor',      area_m2: w * d, materialId: surfaces.floor },
-    { id: 'ceiling',    area_m2: w * d, materialId: surfaces.ceiling },
-    { id: 'wall_north', area_m2: w * h, materialId: surfaces.wall_north },
-    { id: 'wall_south', area_m2: w * h, materialId: surfaces.wall_south },
-    { id: 'wall_east',  area_m2: d * h, materialId: surfaces.wall_east },
-    { id: 'wall_west',  area_m2: d * h, materialId: surfaces.wall_west },
-  ];
-}
-
 export function computeRT60Band({ room, materials, bandIndex }) {
-  const surfaces = shoeboxSurfaces(room);
+  const surfaces = roomSurfaces(room);
   let totalArea_m2 = 0;
   let totalAbsorption_sabins = 0;
   for (const s of surfaces) {
@@ -32,7 +22,7 @@ export function computeRT60Band({ room, materials, bandIndex }) {
     totalArea_m2 += s.area_m2;
     totalAbsorption_sabins += s.area_m2 * alpha;
   }
-  const volume_m3 = room.width_m * room.height_m * room.depth_m;
+  const volume_m3 = roomVolume(room);
   const meanAbsorption = totalArea_m2 > 0 ? totalAbsorption_sabins / totalArea_m2 : 0;
   return {
     volume_m3,

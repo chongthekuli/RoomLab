@@ -243,7 +243,7 @@ section h3 {
   background: #fff9e6;
   box-shadow: 0 0 0 2px #ffd00040;
 }
-.listener-derived { font-size: 0.76rem; color: var(--muted); margin: 0.25rem 0; }
+.listener-derived, .note-small { font-size: 0.76rem; color: var(--muted); margin: 0.25rem 0; }
 .btn-select {
   width: 100%;
   padding: 0.3rem;
