@@ -365,6 +365,36 @@ section h3 {
 .vertex-row input { padding: 0.2rem 0.3rem; border: 1px solid var(--border); border-radius: 3px; font: inherit; min-width: 0; }
 
 .vp-lbl-edge { font-size: 10px; fill: #fff; font-weight: 600; }
+.vp-lbl-zone { font-size: 13px; font-weight: 700; paint-order: stroke; stroke: #13161c; stroke-width: 3px; }
+.vp-lbl-zone-sub { font-size: 10px; font-weight: 500; fill: #cce; paint-order: stroke; stroke: #13161c; stroke-width: 2px; }
+
+.zone-card {
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+.zone-card.selected { background: #f7f0ff; }
+.zone-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; margin-top: 0.4rem; }
+.btn-redraw {
+  padding: 0.3rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.btn-redraw:hover { background: #f0f2f6; color: var(--fg); }
+.derived { color: var(--muted); font-size: 0.76rem; }
+
+#zones-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 0.3rem; }
+#zones-table th, #zones-table td { padding: 0.3rem; border-bottom: 1px solid var(--border); text-align: right; }
+#zones-table th:first-child, #zones-table td:first-child { text-align: left; }
+#zones-table th { font-weight: 500; color: var(--muted); font-size: 0.74rem; }
+#zones-table .sub { color: var(--muted); font-size: 0.7rem; }
 
 .badge-warn {
   display: inline-block;

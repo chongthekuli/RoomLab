@@ -4,6 +4,7 @@ import { loadLoudspeaker } from './physics/loudspeaker.js';
 import { mountRoomPanel } from './ui/panel-room.js';
 import { mountSourcesPanel } from './ui/panel-sources.js';
 import { mountListenersPanel } from './ui/panel-listeners.js';
+import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport } from './graphics/scene.js';
@@ -48,6 +49,7 @@ async function boot() {
   mountRoomPanel({ materials });
   mountSourcesPanel({ speakerCatalog: SPEAKER_CATALOG });
   mountListenersPanel();
+  mountZonesPanel({ materials });
   mountResultsPanel({ materials });
   mount2DViewport({ materials });
 

@@ -80,6 +80,65 @@ export function computeListenerBreakdown({ sources, getSpeakerDef, listenerPos, 
   return { perSpeaker, total_spl_db, freq_hz };
 }
 
+function pointInPoly(x, y, verts) {
+  let inside = false;
+  const n = verts.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    if (((verts[i].y > y) !== (verts[j].y > y)) &&
+        (x < (verts[j].x - verts[i].x) * (y - verts[i].y) / (verts[j].y - verts[i].y) + verts[i].x)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+export function computeZoneSPLGrid({
+  zone, sources, getSpeakerDef, room,
+  gridSize = 22, freq_hz = 1000, earAbove_m = 1.2,
+}) {
+  const verts = zone.vertices || [];
+  if (verts.length < 3) return null;
+  const xs = verts.map(v => v.x), ys = verts.map(v => v.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const cellW = (maxX - minX) / gridSize;
+  const cellH = (maxY - minY) / gridSize;
+  const grid = [];
+  let minSPL = Infinity, maxSPL = -Infinity, sum = 0, count = 0;
+  const earZ = (zone.elevation_m || 0) + earAbove_m;
+  for (let j = 0; j < gridSize; j++) {
+    const row = [];
+    for (let i = 0; i < gridSize; i++) {
+      const x = minX + (i + 0.5) * cellW;
+      const y = minY + (j + 0.5) * cellH;
+      if (!pointInPoly(x, y, verts)) { row.push(-Infinity); continue; }
+      const listenerPos = { x, y, z: earZ };
+      const spl = computeMultiSourceSPL({ sources, getSpeakerDef, listenerPos, freq_hz, room });
+      row.push(spl);
+      if (isFinite(spl)) {
+        if (spl < minSPL) minSPL = spl;
+        if (spl > maxSPL) maxSPL = spl;
+        sum += spl;
+        count++;
+      }
+    }
+    grid.push(row);
+  }
+  const ok = count > 0;
+  return {
+    id: zone.id, label: zone.label,
+    grid, cellsX: gridSize, cellsY: gridSize,
+    boundsX: [minX, maxX], boundsY: [minY, maxY],
+    cellW_m: cellW, cellH_m: cellH,
+    elevation_m: zone.elevation_m || 0,
+    earZ_m: earZ,
+    minSPL_db: ok ? minSPL : 0,
+    maxSPL_db: ok ? maxSPL : 0,
+    avgSPL_db: ok ? sum / count : 0,
+    uniformity_db: ok ? (maxSPL - minSPL) : 0,
+  };
+}
+
 export function computeSPLGrid({
   sources, getSpeakerDef, room,
   earHeight_m = 1.2, gridSize = 25, freq_hz = 1000,

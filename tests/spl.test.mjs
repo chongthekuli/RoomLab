@@ -182,5 +182,32 @@ const t_below_ok = t_below.through_wall === true;
 console.log(`${t_below_ok ? 'PASS' : 'FAIL'}  Speaker below floor → TL applied`);
 if (!t_below_ok) failed++;
 
+// --- Zone SPL grid test ---
+import { computeZoneSPLGrid } from '../js/physics/spl-calculator.js';
+
+// Zone is a 2m square, speaker 1m above center at sensitivity
+const zoneRoom = {
+  shape: 'rectangular',
+  width_m: 10, height_m: 5, depth_m: 10,
+  ceiling_type: 'flat',
+  surfaces: { floor: 'f', ceiling: 'c', wall_north: 'w', wall_south: 'w', wall_east: 'w', wall_west: 'w' },
+};
+const zone = {
+  id: 'Z1', label: 'Test zone',
+  vertices: [{ x: 4, y: 4 }, { x: 6, y: 4 }, { x: 6, y: 6 }, { x: 4, y: 6 }],
+  elevation_m: 0,
+};
+const zSrc = { modelUrl: 'x', position: { x: 5, y: 5, z: 1.2 + 1 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
+// Speaker directly above zone center at 1m above ear. On-axis listener at zone center: r=1, elev=-90.
+// At elev=-90 with speaker aim pitch=0, my mock speaker has -20 attenuation.
+const zg = computeZoneSPLGrid({
+  zone, sources: [zSrc],
+  getSpeakerDef: () => speaker,
+  room: zoneRoom, gridSize: 5,
+});
+const zgok = zg && zg.id === 'Z1' && zg.grid.length === 5 && isFinite(zg.avgSPL_db);
+console.log(`${zgok ? 'PASS' : 'FAIL'}  Zone SPL grid computed (avg=${zg.avgSPL_db.toFixed(1)} dB)`);
+if (!zgok) failed++;
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');

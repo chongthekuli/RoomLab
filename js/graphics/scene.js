@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { state, earHeightFor, getSelectedListener } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
-import { computeSPLGrid } from '../physics/spl-calculator.js';
+import { computeSPLGrid, computeZoneSPLGrid } from '../physics/spl-calculator.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 
 let scene, camera, renderer, controls;
-let roomGroup, sourcesGroup, listenersGroup, heatmapMesh;
+let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapMesh;
 let materialsRef, container;
 
 export async function mount3DViewport({ materials }) {
@@ -19,12 +19,13 @@ export async function mount3DViewport({ materials }) {
   rebuildRoom(true);
   rebuildSources();
   rebuildListeners();
+  rebuildZones();
   rebuildHeatmap();
   animate();
 
-  on('room:changed', () => { rebuildRoom(false); rebuildHeatmap(); });
-  on('source:changed', () => { rebuildSources(); rebuildHeatmap(); });
-  on('source:model_changed', () => { rebuildSources(); rebuildHeatmap(); });
+  on('room:changed', () => { rebuildRoom(false); rebuildZones(); rebuildHeatmap(); });
+  on('source:changed', () => { rebuildSources(); rebuildZones(); rebuildHeatmap(); });
+  on('source:model_changed', () => { rebuildSources(); rebuildZones(); rebuildHeatmap(); });
   on('listener:changed', () => { rebuildListeners(); rebuildHeatmap(); });
   on('listener:selected', () => { rebuildListeners(); rebuildHeatmap(); });
 
@@ -393,6 +394,109 @@ function rebuildListeners() {
       listenersGroup.add(chair);
     }
   }
+}
+
+function rebuildZones() {
+  if (!zonesGroup) {
+    zonesGroup = new THREE.Group();
+    scene.add(zonesGroup);
+  } else {
+    disposeGroup(zonesGroup);
+  }
+  state.results.zoneGrids = [];
+  if (!state.zones || state.zones.length === 0) return;
+
+  for (let zi = 0; zi < state.zones.length; zi++) {
+    const zone = state.zones[zi];
+    if (!zone.vertices || zone.vertices.length < 3) continue;
+    const colorHex = colorForZone(zi);
+    const colorInt = parseInt(colorHex.slice(1), 16);
+
+    // Build zone shape (centered on its own origin for ShapeGeometry, then positioned)
+    const cx = zone.vertices.reduce((a, v) => a + v.x, 0) / zone.vertices.length;
+    const cz = zone.vertices.reduce((a, v) => a + v.y, 0) / zone.vertices.length;
+    const shape = new THREE.Shape();
+    shape.moveTo(zone.vertices[0].x - cx, -(zone.vertices[0].y - cz));
+    for (let i = 1; i < zone.vertices.length; i++) {
+      shape.lineTo(zone.vertices[i].x - cx, -(zone.vertices[i].y - cz));
+    }
+    shape.closePath();
+
+    // SPL heatmap for zone (if sources present)
+    let heatmapTex = null;
+    let splInfo = null;
+    if (state.sources.length > 0) {
+      splInfo = computeZoneSPLGrid({
+        zone, sources: state.sources,
+        getSpeakerDef: url => getCachedLoudspeaker(url),
+        room: state.room, gridSize: 24, freq_hz: 1000, earAbove_m: 1.2,
+      });
+      if (splInfo && isFinite(splInfo.maxSPL_db)) {
+        state.results.zoneGrids.push(splInfo);
+        heatmapTex = zoneHeatmapTexture(splInfo);
+      }
+    }
+
+    if (heatmapTex) {
+      // Use a bounding-box plane textured with heatmap, masked to zone shape via alphaTest
+      const [minX, maxX] = splInfo.boundsX;
+      const [minY, maxY] = splInfo.boundsY;
+      const w = maxX - minX, d = maxY - minY;
+      const geo = new THREE.PlaneGeometry(w, d);
+      const mat = new THREE.MeshBasicMaterial({
+        map: heatmapTex, transparent: true, opacity: 0.85,
+        side: THREE.DoubleSide, depthWrite: false, alphaTest: 0.01,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set((minX + maxX) / 2, zone.elevation_m + 0.01, (minY + maxY) / 2);
+      zonesGroup.add(mesh);
+    } else {
+      // Flat colored outline plane
+      const geo = new THREE.ShapeGeometry(shape);
+      const mat = new THREE.MeshStandardMaterial({
+        color: colorInt, transparent: true, opacity: 0.4, side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(cx, zone.elevation_m + 0.01, cz);
+      zonesGroup.add(mesh);
+    }
+
+    // Outline edges
+    const outline = zone.vertices.map(v => new THREE.Vector3(v.x, zone.elevation_m + 0.02, v.y));
+    outline.push(outline[0]);
+    zonesGroup.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(outline),
+      new THREE.LineBasicMaterial({ color: colorInt, linewidth: 2 })
+    ));
+  }
+}
+
+function zoneHeatmapTexture(splInfo) {
+  const { grid, cellsX, cellsY } = splInfo;
+  const canvas = document.createElement('canvas');
+  canvas.width = cellsX;
+  canvas.height = cellsY;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(cellsX, cellsY);
+  for (let j = 0; j < cellsY; j++) {
+    for (let i = 0; i < cellsX; i++) {
+      const val = grid[j][i];
+      const idx = (j * cellsX + i) * 4;
+      if (!isFinite(val)) { img.data[idx + 3] = 0; continue; }
+      const [r, g, b] = splColorRGB(val);
+      img.data[idx + 0] = r;
+      img.data[idx + 1] = g;
+      img.data[idx + 2] = b;
+      img.data[idx + 3] = 210;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  return tex;
 }
 
 function rebuildHeatmap() {

@@ -62,8 +62,15 @@ export const state = {
   sources: [],
   listeners: [],
   selectedListenerId: null,
-  results: { rt60: null, splGrid: null },
+  zones: [],
+  selectedZoneId: null,
+  results: { rt60: null, splGrid: null, zoneGrids: [] },
 };
+
+export const ZONE_COLORS = [
+  '#a855f7', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#6366f1',
+];
+export function colorForZone(idx) { return ZONE_COLORS[idx % ZONE_COLORS.length]; }
 
 export const DEFAULT_HIFI_SOURCES = [
   { position: { x: 1.0, y: 0.8, z: 1.0 }, aim: { yaw: 10, pitch: 0, roll: 0 }, power_watts: 50 },

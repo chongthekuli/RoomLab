@@ -19,6 +19,7 @@ export function mountResultsPanel({ materials }) {
       <tbody></tbody>
     </table>
     <div id="spl-section"></div>
+    <div id="zones-section"></div>
     <div class="hint">
       <strong>Target ranges:</strong><br>
       Speech / meetings: 0.4–0.8 s<br>
@@ -42,6 +43,33 @@ function render() {
   renderListenerSection();
   renderRT60();
   renderSPLStats();
+  renderZoneStats();
+}
+
+function renderZoneStats() {
+  const root = document.getElementById('zones-section');
+  if (!root) return;
+  const grids = state.results.zoneGrids || [];
+  if (grids.length === 0 || state.sources.length === 0) {
+    root.innerHTML = '';
+    return;
+  }
+  root.innerHTML = `
+    <h3>Audience zone coverage</h3>
+    <table id="zones-table">
+      <thead><tr><th>Zone</th><th>Max</th><th>Avg</th><th>Uniformity</th></tr></thead>
+      <tbody>
+        ${grids.map(g => `
+          <tr>
+            <td><strong>${escapeHtml(g.label)}</strong><br><span class="sub">elev ${g.elevation_m.toFixed(2)} m</span></td>
+            <td>${g.maxSPL_db.toFixed(1)} dB</td>
+            <td>${g.avgSPL_db.toFixed(1)} dB</td>
+            <td>${g.uniformity_db.toFixed(1)} dB</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
 }
 
 function renderListenerSection() {
