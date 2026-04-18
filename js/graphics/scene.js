@@ -313,8 +313,23 @@ function rebuildRoom(isFirst) {
     const capGeo = new THREE.SphereGeometry(sphereRadius, 48, 24, 0, Math.PI * 2, 0, thetaMax);
     const cap = new THREE.Mesh(capGeo, ceilMat);
     cap.position.set(cx, h + rise - sphereRadius, cz);
+    cap.userData.acoustic_material = surfaces.ceiling;
     roomGroup.add(cap);
   }
+
+  // Tag floor + walls with their acoustic material for future ray tracing.
+  // Labels here identify the Three.js object class in the scene graph; the actual
+  // absorption coefficients come from the material id in state.room.surfaces.
+  for (const m of roomGroup.children) {
+    if (!m.userData.acoustic_material) {
+      // Default tag based on position: y≈0 is floor, upper shell is ceiling, else wall.
+      // rebuildRoom only puts floor/ceiling/walls in roomGroup, so this is safe.
+      m.userData.acoustic_material = m.userData.acoustic_material ?? wallsMatId;
+    }
+  }
+
+  // Solid stadium bowl structures (LatheGeometry) if the preset provides stadiumStructure.
+  rebuildBowlStructure(room);
 
   if (isFirst && controls) {
     const d3 = Math.max(w, h, d);
@@ -500,6 +515,15 @@ function rebuildZones() {
       zonesGroup.add(mesh);
     }
 
+    // Zone heatmap mesh also gets a material tag for its surface type.
+    // The actual physical surface is the solid bowl (concrete) for bowl zones
+    // or wood for the court. Heatmap is just a visual overlay.
+    const zoneLastMesh = zonesGroup.children[zonesGroup.children.length - 1];
+    if (zoneLastMesh) {
+      zoneLastMesh.userData.zone_id = zone.id;
+      zoneLastMesh.userData.acoustic_material = zone.material_id ?? null;
+    }
+
     // Outline edges
     const outline = zone.vertices.map(v => new THREE.Vector3(v.x, zone.elevation_m + 0.02, v.y));
     outline.push(outline[0]);
@@ -512,89 +536,86 @@ function rebuildZones() {
   rebuildStadiumFurniture();
 }
 
-// Builds vertical riser walls between consecutive tiers in a bowl sector, plus courtside
-// risers at the front row. Makes the stair profile visible from any viewing angle.
-// Also adds an overhead catwalk torus when the room is large (arena-scale).
-function rebuildStadiumFurniture() {
-  const zoneById = new Map(state.zones.map(z => [z.id, z]));
-  const cx = state.room.width_m / 2;
-  const cy = state.room.depth_m / 2;
-  const arcSteps = 4; // must match what ringSectorVerts used for tier generation (5 points per arc)
-
-  const riserMat = new THREE.MeshStandardMaterial({
-    color: 0x5a4a38, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+// Builds solid stadium bowl structures (concrete) as LatheGeometry meshes from
+// room.stadiumStructure. Replaces the old per-tier cylinder risers with a single
+// watertight mesh per bowl. Each mesh is tagged userData.acoustic_material='concrete'
+// so a future ray tracer can assign absorption coefficients by surface.
+//
+// Profile (in Vector2 of (radius, height)) wraps clockwise around the bowl cross-section:
+//   inner-bottom → up inner wall → stepped top (tread + riser for each tier) → outer wall
+//   down to floor → across bottom → back to inner-bottom. LatheGeometry revolves this
+//   360° around the Y axis to make a closed annular solid.
+function rebuildBowlStructure(room) {
+  const s = room.stadiumStructure;
+  if (!s) return;
+  const concreteMat = new THREE.MeshStandardMaterial({
+    color: 0x6a5a45, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide,
   });
+  if (s.lowerBowl) roomGroup.add(buildBowlLathe(s.cx, s.cy, s.lowerBowl, concreteMat, 'lower_bowl'));
+  if (s.upperBowl) roomGroup.add(buildBowlLathe(s.cx, s.cy, s.upperBowl, concreteMat, 'upper_bowl'));
+}
 
-  for (const zone of state.zones) {
-    const m = zone.id.match(/^(Z_lb|Z_ub)(\d+)_(\d+)$/);
-    if (!m) continue;
-    const [, prefix, sectorId, tierStr] = m;
-    const tierNum = parseInt(tierStr, 10);
-    const nextZone = zoneById.get(`${prefix}${sectorId}_${tierNum + 1}`);
+function buildBowlLathe(cx, cy, bowl, mat, tag) {
+  const { r_in, r_out, floor_z, tier_heights_m } = bowl;
+  const tierCount = tier_heights_m.length;
+  const tierTread = (r_out - r_in) / tierCount;
 
-    // Outer arc of this zone: first 5 vertices (arcSteps+1 points)
-    const vOuter0 = zone.vertices[0];
-    const vOuterEnd = zone.vertices[arcSteps];
-    const r_outer = Math.hypot(vOuter0.x - cx, vOuter0.y - cy);
-    const ts = Math.atan2(vOuter0.y - cy, vOuter0.x - cx);
-    const te = Math.atan2(vOuterEnd.y - cy, vOuterEnd.x - cx);
-    let thetaLen = te - ts;
-    if (thetaLen < -0.01) thetaLen += 2 * Math.PI;
-
-    // Between-tier riser at outer edge going up to next tier's elevation
-    if (nextZone) {
-      const h_bottom = zone.elevation_m;
-      const h_top = nextZone.elevation_m;
-      const h_diff = h_top - h_bottom;
-      if (h_diff > 0.02) {
-        const geo = new THREE.CylinderGeometry(r_outer, r_outer, h_diff, arcSteps * 2, 1, true, ts, thetaLen);
-        const mesh = new THREE.Mesh(geo, riserMat);
-        mesh.position.set(cx, h_bottom + h_diff / 2, cy);
-        zonesGroup.add(mesh);
-      }
-    }
-
-    // Courtside riser for tier 1 of lower bowl: step up from court floor (z=0) to tier 1
-    if (prefix === 'Z_lb' && tierNum === 1 && zone.elevation_m > 0.05) {
-      // Inner arc: vertices arcSteps+1..2*arcSteps+1 (in reverse direction)
-      const vInnerFromEnd = zone.vertices[arcSteps + 1]; // inner at theta_end
-      const vInnerToStart = zone.vertices[2 * arcSteps + 1]; // inner at theta_start
-      const r_inner = Math.hypot(vInnerToStart.x - cx, vInnerToStart.y - cy);
-      const ts_i = Math.atan2(vInnerToStart.y - cy, vInnerToStart.x - cx);
-      const te_i = Math.atan2(vInnerFromEnd.y - cy, vInnerFromEnd.x - cx);
-      let thetaLenI = te_i - ts_i;
-      if (thetaLenI < -0.01) thetaLenI += 2 * Math.PI;
-      const geo = new THREE.CylinderGeometry(r_inner, r_inner, zone.elevation_m, arcSteps * 2, 1, true, ts_i, thetaLenI);
-      const mesh = new THREE.Mesh(geo, riserMat);
-      mesh.position.set(cx, zone.elevation_m / 2, cy);
-      zonesGroup.add(mesh);
+  const profile = [];
+  // Bottom inner corner
+  profile.push(new THREE.Vector2(r_in, floor_z));
+  // Up to first tread
+  profile.push(new THREE.Vector2(r_in, tier_heights_m[0]));
+  // For each tier: across tread, then up riser (except last tier has no riser)
+  for (let t = 0; t < tierCount; t++) {
+    const trEnd = r_in + (t + 1) * tierTread;
+    profile.push(new THREE.Vector2(trEnd, tier_heights_m[t]));
+    if (t < tierCount - 1) {
+      profile.push(new THREE.Vector2(trEnd, tier_heights_m[t + 1]));
     }
   }
+  // Outer wall down to floor
+  profile.push(new THREE.Vector2(r_out, floor_z));
+  // Close back to start
+  profile.push(new THREE.Vector2(r_in, floor_z));
 
-  // Overhead catwalk torus: visual reference to arena rigging trusses. Only for large domed venues.
-  if ((state.room.shape === 'polygon' || state.room.shape === 'round')
-      && state.room.ceiling_type === 'dome'
-      && state.room.height_m >= 10) {
-    const catwalkRadius = Math.min(cx, cy) * 0.35;
-    const catwalkHeight = state.room.height_m + 1;
-    const ctGeo = new THREE.TorusGeometry(catwalkRadius, 0.25, 8, 48);
-    const ctMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.7, roughness: 0.35 });
-    const catwalk = new THREE.Mesh(ctGeo, ctMat);
-    catwalk.rotation.x = Math.PI / 2;
-    catwalk.position.set(cx, catwalkHeight, cy);
-    zonesGroup.add(catwalk);
-    // Cables hanging from dome to truss (4 evenly-spaced thin lines)
-    const cableMat = new THREE.LineBasicMaterial({ color: 0x666666 });
-    for (let i = 0; i < 8; i++) {
-      const ang = (i / 8) * Math.PI * 2;
-      const x1 = cx + catwalkRadius * Math.cos(ang);
-      const z1 = cy + catwalkRadius * Math.sin(ang);
-      const pts = [
-        new THREE.Vector3(x1, catwalkHeight, z1),
-        new THREE.Vector3(x1 * 0.7 + cx * 0.3, catwalkHeight + 3, z1 * 0.7 + cy * 0.3),
-      ];
-      zonesGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), cableMat));
-    }
+  const geo = new THREE.LatheGeometry(profile, 64);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(cx, 0, cy);
+  mesh.userData.acoustic_material = 'concrete';
+  mesh.userData.tag = tag;
+  return mesh;
+}
+
+// Overhead catwalk torus (rigging truss). Visual + acoustic reference.
+// Called after rebuildZones so zone heatmap planes render first.
+function rebuildStadiumFurniture() {
+  const s = state.room.stadiumStructure;
+  if (!s) return;
+  const catwalkHeight = s.catwalkHeight_m ?? (state.room.height_m + 1);
+  const catwalkRadius = s.catwalkRadius_m ?? Math.min(state.room.width_m, state.room.depth_m) * 0.2;
+
+  const ctGeo = new THREE.TorusGeometry(catwalkRadius, 0.3, 10, 64);
+  const ctMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.7, roughness: 0.35 });
+  const catwalk = new THREE.Mesh(ctGeo, ctMat);
+  catwalk.rotation.x = Math.PI / 2;
+  catwalk.position.set(s.cx, catwalkHeight, s.cy);
+  catwalk.userData.acoustic_material = 'steel';
+  catwalk.userData.tag = 'catwalk_truss';
+  zonesGroup.add(catwalk);
+
+  // Cables from dome to truss
+  const cableMat = new THREE.LineBasicMaterial({ color: 0x666666 });
+  for (let i = 0; i < 8; i++) {
+    const ang = (i / 8) * Math.PI * 2;
+    const x1 = s.cx + catwalkRadius * Math.cos(ang);
+    const z1 = s.cy + catwalkRadius * Math.sin(ang);
+    const pts = [
+      new THREE.Vector3(x1, catwalkHeight, z1),
+      new THREE.Vector3(x1 * 0.65 + s.cx * 0.35, catwalkHeight + 4, z1 * 0.65 + s.cy * 0.35),
+    ];
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), cableMat);
+    line.userData.acoustic_material = 'steel';
+    zonesGroup.add(line);
   }
 }
 

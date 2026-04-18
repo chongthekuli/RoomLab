@@ -196,45 +196,59 @@ export const DEFAULT_PRESET_KEY = 'auditorium';
 
 export const PRESETS = {
   auditorium: (() => {
-    // Sports arena modeled after University of Wyoming Arena-Auditorium (~11,600 seats, geodesic dome).
-    // 50 m polygon plan (24 sides approximates the dome). Walls 12 m + 8 m dome rise → 20 m at apex.
-    // NCAA basketball court (28.7 × 15.2 m) at center. Two continuous bowls wrapping 360°, each
-    // divided into 4 quadrants × 4 stepped tiers = 16 stadium rows per bowl (32 tiered zones).
-    // Between lower bowl top (2.8 m) and upper bowl bottom (6 m) is the concourse. Center-hung
-    // PA cluster of 8 line-array elements at 15 m.
-    const cx = 25, cy = 25;
+    // Sports arena modeled after University of Wyoming Arena-Auditorium.
+    // 60 m polygon plan (24 sides approximates the geodesic dome).
+    // Walls 12 m + 10 m dome rise → 22 m at apex.
+    // NCAA basketball court (28.7 × 15.2 m) at center.
+    //
+    // Bowl structure (solid stepped volumes via LatheGeometry — see scene.js/rebuildBowlStructure):
+    //   Lower bowl:  r = 15 → 22 m, tiers at 0.3–2.55 m, tread = 1.17 m, riser = 0.45 m → rake 21°
+    //   Concourse:   flat ring r = 22 → 24 m at z = 2.55 m (walkway behind lower bowl)
+    //   Upper bowl:  r = 24 → 29 m, tiers at 5.8–8.3 m, tread = 0.83 m, riser = 0.5 m → rake 31°
+    //
+    // 1 m "service corridor" (r = 29 → 30) between upper bowl outer edge and room wall.
+    // Center-hung PA cluster: 8 line-array elements on a 4 m ring at 15 m height.
+    const cx = 30, cy = 30;
+    const lowerBowl = { r_in: 15, r_out: 22, floor_z: 0,    tier_heights_m: [0.3,  0.75, 1.2,  1.65, 2.1,  2.55] };
+    const upperBowl = { r_in: 24, r_out: 29, floor_z: 2.55, tier_heights_m: [5.8,  6.3,  6.8,  7.3,  7.8,  8.3] };
+    const concourse = { r_in: 22, r_out: 24, elevation_m: 2.55 };
     return {
       label: 'Sports arena (dome)',
       shape: 'polygon', ceiling_type: 'dome',
-      polygon_sides: 24, polygon_radius_m: 25,
-      width_m: 50, height_m: 12, depth_m: 50,
-      ceiling_dome_rise_m: 8,
+      polygon_sides: 24, polygon_radius_m: 30,
+      width_m: 60, height_m: 12, depth_m: 60,
+      ceiling_dome_rise_m: 10,
       surfaces: {
         floor: 'wood-floor', ceiling: 'gypsum-board', walls: 'gypsum-board',
         wall_north: 'gypsum-board', wall_south: 'gypsum-board',
         wall_east: 'gypsum-board', wall_west: 'gypsum-board',
       },
+      // stadiumStructure is read by scene.js to build solid LatheGeometry bowl meshes,
+      // tagged with userData.acoustic_material = 'concrete' for future ray tracing.
+      stadiumStructure: { cx, cy, lowerBowl, upperBowl, concourse, catwalkHeight_m: 15, catwalkRadius_m: 10 },
       zones: [
-        { id: 'Z_court', label: 'Court', vertices: rectVerts(10.65, 17.4, 39.35, 32.6), elevation_m: 0, material_id: 'wood-floor' },
+        { id: 'Z_court',     label: 'Court',     vertices: rectVerts(15.65, 22.4, 44.35, 37.6), elevation_m: 0,    material_id: 'wood-floor' },
+        { id: 'Z_concourse', label: 'Concourse', vertices: ringSectorVerts(cx, cy, 22, 24, 0, 360, 32), elevation_m: 2.55, material_id: 'concrete-painted' },
         ...generateTieredBowl({
-          cx, cy, r_in: 16, r_out: 22,
-          tier_heights_m: [0.3, 0.75, 1.2, 1.65, 2.1, 2.55],
+          cx, cy, r_in: 15, r_out: 22,
+          tier_heights_m: lowerBowl.tier_heights_m,
           sectorCount: 4, material_id: 'carpet-heavy',
           idPrefix: 'Z_lb', labelPrefix: 'Lower',
         }),
         ...generateTieredBowl({
-          cx, cy, r_in: 22.5, r_out: 24.5,
-          tier_heights_m: [5.8, 6.3, 6.8, 7.3, 7.8, 8.3],
+          cx, cy, r_in: 24, r_out: 29,
+          tier_heights_m: upperBowl.tier_heights_m,
           sectorCount: 4, material_id: 'carpet-heavy',
           idPrefix: 'Z_ub', labelPrefix: 'Upper',
         }),
       ],
-      sources: generateCenterCluster({ cx, cy, cz: 15, ring_r: 3, count: 8, modelUrl: SPKLA, power_watts: 500, pitch: -25 }),
+      sources: generateCenterCluster({ cx, cy, cz: 15, ring_r: 4, count: 8, modelUrl: SPKLA, power_watts: 500, pitch: -25 }),
       listeners: [
-        { id: 'L1', label: 'Courtside VIP',        position: { x: 12,   y: 25   }, elevation_m: 0,    posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L2', label: 'Lower bowl row 1 S',   position: { x: 25,   y: 41.5 }, elevation_m: 0.3,  posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L3', label: 'Lower bowl row 4 E',   position: { x: 45.5, y: 25   }, elevation_m: 1.65, posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L4', label: 'Upper bowl row 3 N',   position: { x: 25,   y: 1.8  }, elevation_m: 6.8,  posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L1', label: 'Courtside VIP',        position: { x: 17,   y: 30   }, elevation_m: 0,    posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L2', label: 'Lower bowl row 1 S',   position: { x: 30,   y: 45.5 }, elevation_m: 0.3,  posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L3', label: 'Lower bowl row 4 E',   position: { x: 49,   y: 30   }, elevation_m: 1.65, posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L4', label: 'Upper bowl row 3 N',   position: { x: 30,   y: 3.5  }, elevation_m: 6.8,  posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L5', label: 'Concourse walker',     position: { x: 30,   y: 53   }, elevation_m: 2.55, posture: 'standing',      custom_ear_height_m: null },
       ],
     };
   })(),
