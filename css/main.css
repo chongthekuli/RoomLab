@@ -12,7 +12,38 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
 
 #panel-left { border-right: 1px solid var(--border); overflow-y: auto; padding: 0.75rem 1rem; }
 #panel-right { border-left: 1px solid var(--border); overflow-y: auto; padding: 0.75rem 1rem; }
-#viewport { position: relative; background: var(--bg-viewport); color: #9aa; overflow: hidden; }
+#viewport {
+  position: relative;
+  background: var(--bg-viewport);
+  color: #9aa;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+.viewport-tabs {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.4rem 0.6rem;
+  background: #13161c;
+  border-bottom: 1px solid #2a2f38;
+}
+.vp-tab {
+  background: transparent;
+  border: 1px solid #2a2f38;
+  color: #89929d;
+  padding: 0.3rem 0.9rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+.vp-tab:hover { color: #fff; border-color: #4a515b; }
+.vp-tab.active { background: #2a2f38; color: #fff; border-color: #3a4048; }
+.viewport-view { position: relative; overflow: hidden; }
+.viewport-view[hidden] { display: none; }
+#view-3d { background: #0e1116; }
+#view-3d canvas { display: block; }
 
 section h2 {
   font-size: 0.72rem;

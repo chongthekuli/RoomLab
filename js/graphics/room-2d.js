@@ -45,7 +45,7 @@ export function mount2DViewport({ materials }) {
 }
 
 function render() {
-  const vp = document.getElementById('viewport');
+  const vp = document.getElementById('view-2d');
   const { width_m: w, depth_m: d, height_m: h, surfaces } = state.room;
 
   if (!(w > 0 && d > 0 && h > 0)) {

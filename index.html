@@ -4,28 +4,40 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RoomLAB</title>
-  <link rel="stylesheet" href="css/main.css?v=4" />
-  <link rel="stylesheet" href="css/theme.css?v=4" />
+  <link rel="stylesheet" href="css/main.css?v=5" />
+  <link rel="stylesheet" href="css/theme.css?v=5" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <header id="app-header"><h1>RoomLAB</h1></header>
   <main id="app-root">
     <aside id="panel-left">
       <section id="panel-room"><h2>Room</h2></section>
-      <section id="panel-sources">
-        <h2>Sources</h2>
-        <div class="phase-placeholder">Loudspeaker placement &amp; aim — coming in Phase 3.</div>
-      </section>
+      <section id="panel-sources"><h2>Sources</h2></section>
       <section id="panel-library">
         <h2>Library</h2>
         <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files — coming in Phase 3.</div>
       </section>
     </aside>
-    <section id="viewport"></section>
+    <section id="viewport">
+      <div class="viewport-tabs">
+        <button class="vp-tab active" data-view="2d">2D Floor plan</button>
+        <button class="vp-tab" data-view="3d">3D View</button>
+      </div>
+      <div id="view-2d" class="viewport-view"></div>
+      <div id="view-3d" class="viewport-view" hidden></div>
+    </section>
     <aside id="panel-right">
       <section id="panel-results"><h2>Results</h2></section>
     </aside>
   </main>
-  <script type="module" src="js/main.js?v=4"></script>
+  <script type="module" src="js/main.js?v=5"></script>
 </body>
 </html>
