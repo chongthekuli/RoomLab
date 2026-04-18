@@ -508,6 +508,94 @@ function rebuildZones() {
       new THREE.LineBasicMaterial({ color: colorInt, linewidth: 2 })
     ));
   }
+
+  rebuildStadiumFurniture();
+}
+
+// Builds vertical riser walls between consecutive tiers in a bowl sector, plus courtside
+// risers at the front row. Makes the stair profile visible from any viewing angle.
+// Also adds an overhead catwalk torus when the room is large (arena-scale).
+function rebuildStadiumFurniture() {
+  const zoneById = new Map(state.zones.map(z => [z.id, z]));
+  const cx = state.room.width_m / 2;
+  const cy = state.room.depth_m / 2;
+  const arcSteps = 4; // must match what ringSectorVerts used for tier generation (5 points per arc)
+
+  const riserMat = new THREE.MeshStandardMaterial({
+    color: 0x5a4a38, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+  });
+
+  for (const zone of state.zones) {
+    const m = zone.id.match(/^(Z_lb|Z_ub)(\d+)_(\d+)$/);
+    if (!m) continue;
+    const [, prefix, sectorId, tierStr] = m;
+    const tierNum = parseInt(tierStr, 10);
+    const nextZone = zoneById.get(`${prefix}${sectorId}_${tierNum + 1}`);
+
+    // Outer arc of this zone: first 5 vertices (arcSteps+1 points)
+    const vOuter0 = zone.vertices[0];
+    const vOuterEnd = zone.vertices[arcSteps];
+    const r_outer = Math.hypot(vOuter0.x - cx, vOuter0.y - cy);
+    const ts = Math.atan2(vOuter0.y - cy, vOuter0.x - cx);
+    const te = Math.atan2(vOuterEnd.y - cy, vOuterEnd.x - cx);
+    let thetaLen = te - ts;
+    if (thetaLen < -0.01) thetaLen += 2 * Math.PI;
+
+    // Between-tier riser at outer edge going up to next tier's elevation
+    if (nextZone) {
+      const h_bottom = zone.elevation_m;
+      const h_top = nextZone.elevation_m;
+      const h_diff = h_top - h_bottom;
+      if (h_diff > 0.02) {
+        const geo = new THREE.CylinderGeometry(r_outer, r_outer, h_diff, arcSteps * 2, 1, true, ts, thetaLen);
+        const mesh = new THREE.Mesh(geo, riserMat);
+        mesh.position.set(cx, h_bottom + h_diff / 2, cy);
+        zonesGroup.add(mesh);
+      }
+    }
+
+    // Courtside riser for tier 1 of lower bowl: step up from court floor (z=0) to tier 1
+    if (prefix === 'Z_lb' && tierNum === 1 && zone.elevation_m > 0.05) {
+      // Inner arc: vertices arcSteps+1..2*arcSteps+1 (in reverse direction)
+      const vInnerFromEnd = zone.vertices[arcSteps + 1]; // inner at theta_end
+      const vInnerToStart = zone.vertices[2 * arcSteps + 1]; // inner at theta_start
+      const r_inner = Math.hypot(vInnerToStart.x - cx, vInnerToStart.y - cy);
+      const ts_i = Math.atan2(vInnerToStart.y - cy, vInnerToStart.x - cx);
+      const te_i = Math.atan2(vInnerFromEnd.y - cy, vInnerFromEnd.x - cx);
+      let thetaLenI = te_i - ts_i;
+      if (thetaLenI < -0.01) thetaLenI += 2 * Math.PI;
+      const geo = new THREE.CylinderGeometry(r_inner, r_inner, zone.elevation_m, arcSteps * 2, 1, true, ts_i, thetaLenI);
+      const mesh = new THREE.Mesh(geo, riserMat);
+      mesh.position.set(cx, zone.elevation_m / 2, cy);
+      zonesGroup.add(mesh);
+    }
+  }
+
+  // Overhead catwalk torus: visual reference to arena rigging trusses. Only for large domed venues.
+  if ((state.room.shape === 'polygon' || state.room.shape === 'round')
+      && state.room.ceiling_type === 'dome'
+      && state.room.height_m >= 10) {
+    const catwalkRadius = Math.min(cx, cy) * 0.35;
+    const catwalkHeight = state.room.height_m + 1;
+    const ctGeo = new THREE.TorusGeometry(catwalkRadius, 0.25, 8, 48);
+    const ctMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.7, roughness: 0.35 });
+    const catwalk = new THREE.Mesh(ctGeo, ctMat);
+    catwalk.rotation.x = Math.PI / 2;
+    catwalk.position.set(cx, catwalkHeight, cy);
+    zonesGroup.add(catwalk);
+    // Cables hanging from dome to truss (4 evenly-spaced thin lines)
+    const cableMat = new THREE.LineBasicMaterial({ color: 0x666666 });
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2;
+      const x1 = cx + catwalkRadius * Math.cos(ang);
+      const z1 = cy + catwalkRadius * Math.sin(ang);
+      const pts = [
+        new THREE.Vector3(x1, catwalkHeight, z1),
+        new THREE.Vector3(x1 * 0.7 + cx * 0.3, catwalkHeight + 3, z1 * 0.7 + cy * 0.3),
+      ];
+      zonesGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), cableMat));
+    }
+  }
 }
 
 function zoneHeatmapTexture(splInfo) {
