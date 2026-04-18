@@ -74,6 +74,40 @@ assertEq(isInsideRoom(3, 3, round), true, 'Center of round');
 assertEq(isInsideRoom(6.5, 3, round), false, 'Outside round (beyond radius)');
 assertEq(isInsideRoom(2, 2, hex), true, 'Near center of hex');
 
+// --- Custom polygon (shoelace area) ---
+const lShape = {
+  shape: 'custom',
+  custom_vertices: [
+    { x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 3 }, { x: 2.5, y: 3 }, { x: 2.5, y: 5 }, { x: 0, y: 5 },
+  ],
+  width_m: 5, depth_m: 5, height_m: 3,
+  ceiling_type: 'flat',
+  surfaces: { floor: 'f', ceiling: 'c', walls: 'w', edges: ['w','w','w','w','w','w'] },
+};
+// L-shape: 5×3 rect + 2.5×2 rect = 15 + 5 = 20 m²
+assertClose(baseArea(lShape), 20, 0.01, 'Custom L-shape area via shoelace = 20 m²');
+// Perimeter: 5 + 3 + 2.5 + 2 + 2.5 + 5 = 20 m
+assertClose(wallPerimeter(lShape), 20, 0.01, 'Custom L-shape perimeter = 20 m');
+assertClose(roomVolume(lShape), 60, 0.01, 'Custom L-shape volume = 60 m³');
+
+// Inside checks for L-shape: (1, 1) inside main rect
+assertEq(isInsideRoom(1, 1, lShape), true, 'Custom (1,1) inside L main part');
+// (4, 4) is inside the "notch" (outside room)
+assertEq(isInsideRoom(4, 4, lShape), false, 'Custom (4,4) in notch is outside');
+// (1, 4) is inside the narrow extension
+assertEq(isInsideRoom(1, 4, lShape), true, 'Custom (1,4) inside L extension');
+
+// Square custom shape
+const square = {
+  shape: 'custom',
+  custom_vertices: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }],
+  width_m: 2, depth_m: 2, height_m: 2,
+  ceiling_type: 'flat',
+  surfaces: { floor: 'f', ceiling: 'c', walls: 'w', edges: ['w','w','w','w'] },
+};
+assertClose(baseArea(square), 4, 0.001, 'Custom square area = 4');
+assertClose(wallPerimeter(square), 8, 0.001, 'Custom square perimeter = 8');
+
 // --- 3D containment: ceiling / floor ---
 const flatRect = {
   shape: 'rectangular',

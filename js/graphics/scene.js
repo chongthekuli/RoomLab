@@ -213,6 +213,45 @@ function rebuildRoom(isFirst) {
       const topPts = ringPts.map(p => new THREE.Vector3(p.x, h, p.z));
       const topRing = new THREE.BufferGeometry().setFromPoints(topPts);
       roomGroup.add(new THREE.Line(topRing, new THREE.LineBasicMaterial({ color: 0xa0a8b4 })));
+    } else if (shape === 'custom') {
+      // Custom polygon: plane per edge, per-edge materials
+      const verts = roomPlanVertices(room);
+      const edges = room.surfaces.edges || [];
+      const bandIdx2 = materialsRef.frequency_bands_hz.indexOf(500);
+      const useIdx2 = bandIdx2 >= 0 ? bandIdx2 : 2;
+      const alphaOf2 = id => materialsRef.byId[id]?.absorption[useIdx2] ?? 0;
+      const n = verts.length;
+      for (let i = 0; i < n; i++) {
+        const v1 = verts[i];
+        const v2 = verts[(i + 1) % n];
+        const ex = v2.x - v1.x, ey = v2.y - v1.y;
+        const edgeLen = Math.sqrt(ex * ex + ey * ey);
+        if (edgeLen < 0.01) continue;
+        const midX = (v1.x + v2.x) / 2;
+        const midZ = (v1.y + v2.y) / 2;
+        const geo = new THREE.PlaneGeometry(edgeLen, h);
+        const edgeMat = new THREE.MeshStandardMaterial({
+          color: colorForAlpha(alphaOf2(edges[i] ?? 'gypsum-board')),
+          transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+        });
+        const m = new THREE.Mesh(geo, edgeMat);
+        m.position.set(midX, h/2, midZ);
+        m.lookAt(cx, h/2, cz);
+        roomGroup.add(m);
+      }
+      const bottom = verts.map(v => new THREE.Vector3(v.x, 0, v.y));
+      bottom.push(bottom[0]);
+      const top = verts.map(v => new THREE.Vector3(v.x, h, v.y));
+      top.push(top[0]);
+      roomGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(bottom), new THREE.LineBasicMaterial({ color: 0xa0a8b4 })));
+      roomGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(top), new THREE.LineBasicMaterial({ color: 0xa0a8b4 })));
+      for (let i = 0; i < n; i++) {
+        const pts = [
+          new THREE.Vector3(verts[i].x, 0, verts[i].y),
+          new THREE.Vector3(verts[i].x, h, verts[i].y),
+        ];
+        roomGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xa0a8b4 })));
+      }
     } else {
       // Polygon walls: N plane segments around the ring
       const n = room.polygon_sides ?? 6;

@@ -13,6 +13,16 @@ export function baseArea(room) {
       const r = room.round_radius_m ?? 3;
       return Math.PI * r * r;
     }
+    case 'custom': {
+      const v = room.custom_vertices || [];
+      if (v.length < 3) return 0;
+      let a = 0;
+      for (let i = 0; i < v.length; i++) {
+        const j = (i + 1) % v.length;
+        a += v[i].x * v[j].y - v[j].x * v[i].y;
+      }
+      return Math.abs(a) / 2;
+    }
     default:
       return room.width_m * room.depth_m;
   }
@@ -28,6 +38,18 @@ export function wallPerimeter(room) {
     case 'round': {
       const r = room.round_radius_m ?? 3;
       return 2 * Math.PI * r;
+    }
+    case 'custom': {
+      const v = room.custom_vertices || [];
+      if (v.length < 2) return 0;
+      let p = 0;
+      for (let i = 0; i < v.length; i++) {
+        const j = (i + 1) % v.length;
+        const dx = v[j].x - v[i].x;
+        const dy = v[j].y - v[i].y;
+        p += Math.sqrt(dx * dx + dy * dy);
+      }
+      return p;
     }
     default:
       return 2 * (room.width_m + room.depth_m);
@@ -83,6 +105,9 @@ export function roomPlanVertices(room) {
       }
       return verts;
     }
+    case 'custom': {
+      return (room.custom_vertices || []).map(v => ({ x: v.x, y: v.y }));
+    }
     default: {
       const w = room.width_m, d = room.depth_m;
       return [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }];
@@ -110,6 +135,7 @@ export function isInsideRoom(x, y, room) {
       return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
     }
     case 'polygon':
+    case 'custom':
       return pointInPolygon(x, y, roomPlanVertices(room));
     default:
       return x >= 0 && x <= room.width_m && y >= 0 && y <= room.depth_m;
@@ -153,6 +179,23 @@ export function roomSurfaces(room) {
       { id: 'wall_east',  area_m2: d * wallH, materialId: s.wall_east },
       { id: 'wall_west',  area_m2: d * wallH, materialId: s.wall_west },
     ];
+  }
+
+  if (shape === 'custom') {
+    const v = room.custom_vertices || [];
+    const edges = room.surfaces.edges || [];
+    const result = [floor, ceiling];
+    for (let i = 0; i < v.length; i++) {
+      const j = (i + 1) % v.length;
+      const dx = v[j].x - v[i].x, dy = v[j].y - v[i].y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      result.push({
+        id: `edge_${i}`,
+        area_m2: len * wallH,
+        materialId: edges[i] ?? room.surfaces.walls ?? 'gypsum-board',
+      });
+    }
+    return result;
   }
 
   const wallsMat = room.surfaces.walls ?? room.surfaces.wall_north ?? 'gypsum-board';

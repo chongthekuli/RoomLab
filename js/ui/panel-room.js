@@ -1,5 +1,6 @@
 import { state, PRESETS, SHAPE_LABELS, CEILING_LABELS } from '../app-state.js';
 import { emit } from './events.js';
+import { startDrawCustomShape } from '../graphics/room-2d.js';
 
 const RECT_SURFACE_LABELS = [
   ['floor',      'Floor'],
@@ -57,6 +58,15 @@ export function mountRoomPanel({ materials }) {
 
   root.querySelector('[data-f="shape"]').addEventListener('change', e => {
     state.room.shape = e.target.value;
+    if (e.target.value === 'custom' && (!state.room.custom_vertices || state.room.custom_vertices.length < 3)) {
+      // Seed with a default L-shape so user sees something before drawing
+      state.room.custom_vertices = [
+        { x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 3 }, { x: 2.5, y: 3 }, { x: 2.5, y: 5 }, { x: 0, y: 5 },
+      ];
+      state.room.width_m = 5;
+      state.room.depth_m = 5;
+      state.room.surfaces.edges = state.room.custom_vertices.map(() => state.room.surfaces.walls || 'gypsum-board');
+    }
     syncBoundingBoxToShape();
     render();
     emit('room:changed');
@@ -119,8 +129,73 @@ function renderShapeParams() {
         <label>Height <input type="number" data-sf="height_m" value="${r.height_m}" min="0.5" step="0.1" /> <span class="unit">m</span></label>
       </div>
     `;
+  } else if (r.shape === 'custom') {
+    const vcount = (r.custom_vertices || []).length;
+    root.innerHTML = `
+      <div class="field-group">
+        <label>Height <input type="number" data-sf="height_m" value="${r.height_m}" min="0.5" step="0.1" /> <span class="unit">m</span></label>
+      </div>
+      <button class="btn-draw" id="btn-draw-custom">${vcount >= 3 ? '✎ Redraw custom shape' : '✎ Draw custom shape'}</button>
+      ${vcount >= 3 ? `<div class="note-small">${vcount} vertices · bbox ${r.width_m.toFixed(1)} × ${r.depth_m.toFixed(1)} m</div>` : '<div class="note-small">Click the button above to draw a polygon by placing vertices.</div>'}
+      <div id="vertex-list"></div>
+    `;
+    root.querySelector('#btn-draw-custom').addEventListener('click', () => startDrawCustomShape());
+    renderVertexList();
   }
   wireShapeInputs();
+}
+
+function renderVertexList() {
+  const root = document.getElementById('vertex-list');
+  if (!root) return;
+  const verts = state.room.custom_vertices || [];
+  if (verts.length === 0) { root.innerHTML = ''; return; }
+  root.innerHTML = `
+    <h4>Vertices</h4>
+    <div class="vertex-list">
+      ${verts.map((v, i) => `
+        <div class="vertex-row">
+          <span class="vertex-idx">${i + 1}</span>
+          <label>X <input type="number" data-vf="x" data-vi="${i}" value="${v.x.toFixed(2)}" step="0.1" /></label>
+          <label>Y <input type="number" data-vf="y" data-vi="${i}" value="${v.y.toFixed(2)}" step="0.1" /></label>
+          ${verts.length > 3 ? `<button class="btn-remove" data-vdel="${i}" title="Remove vertex">×</button>` : '<span></span>'}
+        </div>
+      `).join('')}
+    </div>
+  `;
+  root.querySelectorAll('[data-vf]').forEach(input => {
+    input.addEventListener('input', e => {
+      const idx = parseInt(e.target.dataset.vi, 10);
+      const field = e.target.dataset.vf;
+      const v = parseFloat(e.target.value);
+      if (isNaN(v)) return;
+      state.room.custom_vertices[idx][field] = v;
+      updateCustomBoundingBox();
+      emit('room:changed');
+    });
+  });
+  root.querySelectorAll('[data-vdel]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.vdel, 10);
+      state.room.custom_vertices.splice(idx, 1);
+      if (state.room.surfaces.edges) state.room.surfaces.edges.splice(idx, 1);
+      updateCustomBoundingBox();
+      renderVertexList();
+      renderSurfaceMaterials();
+      emit('room:changed');
+    });
+  });
+}
+
+function updateCustomBoundingBox() {
+  const v = state.room.custom_vertices;
+  if (!v || v.length === 0) return;
+  const minX = Math.min(...v.map(p => p.x));
+  const minY = Math.min(...v.map(p => p.y));
+  const maxX = Math.max(...v.map(p => p.x));
+  const maxY = Math.max(...v.map(p => p.y));
+  state.room.width_m = Math.max(maxX - minX, 0.5);
+  state.room.depth_m = Math.max(maxY - minY, 0.5);
 }
 
 function renderCeilingParams() {
@@ -158,18 +233,53 @@ function wireShapeInputs() {
 
 function renderSurfaceMaterials() {
   const root = document.getElementById('surface-materials');
-  const labels = state.room.shape === 'rectangular' ? RECT_SURFACE_LABELS : NONRECT_SURFACE_LABELS;
   root.innerHTML = '';
+
+  if (state.room.shape === 'custom') {
+    const group1 = document.createElement('div');
+    group1.className = 'field-group';
+    for (const [id, label] of [['floor', 'Floor'], ['ceiling', 'Ceiling']]) {
+      const wrap = document.createElement('label');
+      const sel = buildMatSelect(id, state.room.surfaces[id]);
+      sel.addEventListener('change', e => {
+        state.room.surfaces[id] = e.target.value;
+        emit('room:changed');
+      });
+      wrap.append(label + ' ', sel);
+      group1.appendChild(wrap);
+    }
+    root.appendChild(group1);
+
+    const h4 = document.createElement('h4');
+    h4.textContent = 'Edge materials';
+    root.appendChild(h4);
+
+    const nEdges = (state.room.custom_vertices || []).length;
+    if (!state.room.surfaces.edges || state.room.surfaces.edges.length !== nEdges) {
+      state.room.surfaces.edges = Array.from({ length: nEdges }, (_, i) => state.room.surfaces.edges?.[i] ?? 'gypsum-board');
+    }
+    const edgeGroup = document.createElement('div');
+    edgeGroup.className = 'field-group';
+    for (let i = 0; i < nEdges; i++) {
+      const wrap = document.createElement('label');
+      const sel = buildMatSelect(`edge-${i}`, state.room.surfaces.edges[i]);
+      sel.addEventListener('change', e => {
+        state.room.surfaces.edges[i] = e.target.value;
+        emit('room:changed');
+      });
+      wrap.append(`Edge ${i + 1} `, sel);
+      edgeGroup.appendChild(wrap);
+    }
+    root.appendChild(edgeGroup);
+    return;
+  }
+
+  const labels = state.room.shape === 'rectangular' ? RECT_SURFACE_LABELS : NONRECT_SURFACE_LABELS;
   const group = document.createElement('div');
   group.className = 'field-group';
   for (const [id, label] of labels) {
     const wrap = document.createElement('label');
-    const sel = document.createElement('select');
-    sel.dataset.surf = id;
-    sel.innerHTML = materialsRef.list
-      .map(m => `<option value="${m.id}">${m.name}</option>`)
-      .join('');
-    sel.value = state.room.surfaces[id] ?? materialsRef.list[0].id;
+    const sel = buildMatSelect(id, state.room.surfaces[id]);
     sel.addEventListener('change', e => {
       state.room.surfaces[id] = e.target.value;
       emit('room:changed');
@@ -178,6 +288,14 @@ function renderSurfaceMaterials() {
     group.appendChild(wrap);
   }
   root.appendChild(group);
+}
+
+function buildMatSelect(dataKey, currentValue) {
+  const sel = document.createElement('select');
+  sel.dataset.key = dataKey;
+  sel.innerHTML = materialsRef.list.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  sel.value = currentValue ?? materialsRef.list[0].id;
+  return sel;
 }
 
 function applyPreset(key) {
@@ -197,3 +315,18 @@ function applyPreset(key) {
   render();
   emit('room:changed');
 }
+
+// Listen for room:changed to re-render panel when draw mode finishes
+import { on } from './events.js';
+on('room:changed', () => {
+  const root = document.getElementById('panel-room');
+  if (!root) return;
+  const shapeSel = root.querySelector('[data-f="shape"]');
+  if (shapeSel && shapeSel.value !== state.room.shape) {
+    shapeSel.value = state.room.shape;
+    render();
+  } else if (state.room.shape === 'custom') {
+    renderShapeParams();
+    renderSurfaceMaterials();
+  }
+});

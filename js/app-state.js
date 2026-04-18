@@ -13,8 +13,9 @@ export const POSTURE_LABELS = {
 
 export const SHAPE_LABELS = {
   rectangular: 'Rectangular',
-  polygon: 'Polygon',
+  polygon: 'Regular polygon',
   round: 'Round',
+  custom: 'Custom (drawn)',
 };
 
 export const CEILING_LABELS = {
@@ -44,6 +45,7 @@ export const state = {
     polygon_sides: 6,
     polygon_radius_m: 2.5,
     round_radius_m: 2.5,
+    custom_vertices: null,
     ceiling_type: 'flat',
     ceiling_dome_rise_m: 0.8,
     surfaces: {
@@ -54,6 +56,7 @@ export const state = {
       wall_east: 'gypsum-board',
       wall_west: 'gypsum-board',
       walls: 'gypsum-board',
+      edges: null,
     },
   },
   sources: [],
