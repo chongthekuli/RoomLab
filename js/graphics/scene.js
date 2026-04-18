@@ -529,14 +529,23 @@ function rebuildZones() {
     }
     shape.closePath();
 
-    // SPL heatmap (if sources present)
+    // SPL heatmap (if sources present).
+    // Grid density scales with zone bbox so every heatmap canvas lands roughly
+    // at a 0.5 m cell target — the court (28×15 m) gets ~60 cells across,
+    // a 1 m tier strip gets just enough samples to read. Cap at 80 so huge
+    // zones don't explode into 10k+ samples per frame.
     let heatmapTex = null;
     let splInfo = null;
     if (state.sources.length > 0) {
+      const xs = zone.vertices.map(v => v.x);
+      const ys = zone.vertices.map(v => v.y);
+      const bw = Math.max(...xs) - Math.min(...xs);
+      const bd = Math.max(...ys) - Math.min(...ys);
+      const adaptiveGrid = Math.max(24, Math.min(80, Math.ceil(Math.max(bw, bd) / 0.5)));
       splInfo = computeZoneSPLGrid({
         zone, sources: state.sources,
         getSpeakerDef: url => getCachedLoudspeaker(url),
-        room: state.room, gridSize: 24, freq_hz: 1000, earAbove_m: 1.2,
+        room: state.room, gridSize: adaptiveGrid, freq_hz: 1000, earAbove_m: 1.2,
       });
       if (splInfo && isFinite(splInfo.maxSPL_db)) {
         state.results.zoneGrids.push(splInfo);
@@ -595,13 +604,9 @@ function rebuildZones() {
       zonesGroup.add(mesh);
     }
 
-    // Outline edges
-    const outline = zone.vertices.map(v => new THREE.Vector3(v.x, zone.elevation_m + 0.02, v.y));
-    outline.push(outline[0]);
-    zonesGroup.add(new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(outline),
-      new THREE.LineBasicMaterial({ color: colorInt, linewidth: 2 })
-    ));
+    // Per-zone colored outlines were removed: they created a cluttered rainbow
+    // wireframe over every seating step. The solid bowl geometry already shows
+    // step boundaries, and the heatmap texture shows zone extents when ON.
   }
 
   rebuildStadiumFurniture();
@@ -625,8 +630,11 @@ function rebuildZones() {
 function rebuildBowlStructure(room) {
   const s = room.stadiumStructure;
   if (!s) return;
+  // Clean architectural-model gray. No brown tint — lets the colored heatmap
+  // planes read clearly against a neutral base when overlaid, and gives an
+  // EASE/Odeon-style monochrome look when the heatmap is toggled off.
   const concreteMat = new THREE.MeshStandardMaterial({
-    color: 0x6a5a45, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide,
+    color: 0xdddddd, roughness: 0.8, side: THREE.DoubleSide,
   });
   const profile = buildStadiumStructureProfile(s);
   if (!profile) return;
@@ -858,10 +866,14 @@ function rebuildHeatmap() {
   if (state.zones && state.zones.length > 0) return;
 
   const ear = earHeightFor(getSelectedListener());
+  // Adaptive grid so the room-level canvas stays near a 0.5 m cell target
+  // (an 8 m studio → 16 cells; a 60 m arena → 80 cells, capped).
+  const longestDim = Math.max(state.room.width_m ?? 0, state.room.depth_m ?? 0);
+  const roomGrid = Math.max(40, Math.min(120, Math.ceil(longestDim / 0.5)));
   const splResult = computeSPLGrid({
     sources: state.sources,
     getSpeakerDef: url => getCachedLoudspeaker(url),
-    room: state.room, gridSize: 40, freq_hz: 1000, earHeight_m: ear,
+    room: state.room, gridSize: roomGrid, freq_hz: 1000, earHeight_m: ear,
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
   const { grid, cellsX, cellsY } = splResult;
