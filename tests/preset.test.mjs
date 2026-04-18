@@ -46,5 +46,27 @@ state.sources[0].power_watts = 999;
 applyPresetToState('auditorium');
 assert(PRESETS.hifi.sources[0].power_watts !== 999, 'Preset template not mutated by state edit');
 
+// stadiumStructure is copied to state.room when the preset defines one.
+// This bug was shipped for several commits — the unified profile rendering
+// was a dead branch because state.room.stadiumStructure stayed undefined.
+applyPresetToState('auditorium');
+assert(state.room.stadiumStructure != null, 'Auditorium: stadiumStructure copied to state.room');
+assert(state.room.stadiumStructure.lowerBowl != null, 'Auditorium: lowerBowl on stadiumStructure');
+assert(state.room.stadiumStructure.upperBowl != null, 'Auditorium: upperBowl on stadiumStructure');
+assert(Array.isArray(state.room.stadiumStructure.vomitories?.centerAnglesDeg),
+  'Auditorium: vomitories.centerAnglesDeg propagated');
+
+// Switching to a preset without stadiumStructure clears state.room.stadiumStructure to null.
+applyPresetToState('hifi');
+assert(state.room.stadiumStructure === null, 'Hi-fi: stadiumStructure cleared to null');
+
+// Deep clone: mutating the state copy must not mutate the preset's template.
+applyPresetToState('auditorium');
+state.room.stadiumStructure.catwalkHeight_m = -999;
+applyPresetToState('hifi'); // clear
+applyPresetToState('auditorium'); // re-apply
+assert(state.room.stadiumStructure.catwalkHeight_m !== -999,
+  'stadiumStructure deep-cloned (no template mutation)');
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll preset tests passed.');

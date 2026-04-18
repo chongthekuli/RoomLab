@@ -182,6 +182,7 @@ export const state = {
     ceiling_type: 'dome',
     ceiling_dome_rise_m: 1.5,
     custom_vertices: null,
+    stadiumStructure: null,
     surfaces: {
       floor: 'wood-floor',
       ceiling: 'acoustic-tile',
@@ -497,6 +498,11 @@ export function applyPresetToState(key) {
     state.listeners = p.listeners.map(deepClone);
     state.selectedListenerId = state.listeners[0]?.id ?? null;
   }
+  // Stadium structure descriptor (bowl profiles, vomitories, catwalk) — read by
+  // scene.js/rebuildBowlStructure to build solid concrete lathe meshes. MUST be
+  // copied or the bowl structure won't render. Default to null when a preset
+  // doesn't define one.
+  state.room.stadiumStructure = p.stadiumStructure ? deepClone(p.stadiumStructure) : null;
 }
 
 // Kept for backward-compatibility references
