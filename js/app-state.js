@@ -207,25 +207,33 @@ export const DEFAULT_PRESET_KEY = 'auditorium';
 export const PRESETS = {
   auditorium: (() => {
     // Sports arena modeled after University of Wyoming Arena-Auditorium.
-    // 60 m polygon plan (24 sides approximates the geodesic dome).
-    // Walls 12 m + 10 m dome rise → 22 m at apex.
-    // NCAA basketball court (28.7 × 15.2 m) at center.
+    // 60 m polygon plan (36 sides — finer resolution so 10° vomitories align
+    // cleanly with wall segments). Walls 12 m + 10 m dome rise → 22 m at apex.
+    // NCAA basketball court (28.7 × 15.2 m) at center; bowls start at r=18 m
+    // to leave a 1.76 m out-of-bounds apron (court corners reach r≈16.24 m).
     //
     // Bowl structure (solid stepped volumes via LatheGeometry — see scene.js/rebuildBowlStructure):
-    //   Lower bowl:  r = 15 → 22 m, tiers at 0.3–2.55 m, tread = 1.17 m, riser = 0.45 m → rake 21°
-    //   Concourse:   flat ring r = 22 → 24 m at z = 2.55 m (walkway behind lower bowl)
-    //   Upper bowl:  r = 24 → 29 m, tiers at 5.8–8.3 m, tread = 0.83 m, riser = 0.5 m → rake 31°
+    //   Retaining wall: r = 18 m, z = 0 → 1.0 m (front of house, first row sits at 1 m)
+    //   Lower bowl:     r = 18 → 24 m, tiers at 1.0–3.25 m, tread = 1.0 m, riser = 0.45 m → rake 24°
+    //   Concourse:      flat ring r = 24 → 26 m at z = 3.25 m (walkway behind lower bowl)
+    //   Upper bowl:     r = 26 → 29 m, tiers at 7.0–8.75 m, tread = 0.5 m, riser = 0.35 m → rake 35°
     //
-    // 1 m "service corridor" (r = 29 → 30) between upper bowl outer edge and room wall.
+    // 4 vomitories (10° each at cardinal compass points) — narrow tunnel entrances,
+    // 10° wide, with a ceiling at z=3.25 m (same level as the concourse).
+    // 1 m service corridor (r = 29 → 30) between upper bowl back wall and room wall.
     // Center-hung PA cluster: 8 line-array elements on a 4 m ring at 15 m height.
+    //
+    // Upper bowl rake is 35° — top of the safe-egress band (building codes cap
+    // seating rake around 35°). Earlier reviewer suggestions of 0.6–0.8 m step
+    // on a 0.5 m tread would give 50–58° rake which violates that band.
     const cx = 30, cy = 30;
-    const lowerBowl = { r_in: 15, r_out: 22, floor_z: 0,    tier_heights_m: [0.3,  0.75, 1.2,  1.65, 2.1,  2.55] };
-    const upperBowl = { r_in: 24, r_out: 29, floor_z: 2.55, tier_heights_m: [5.8,  6.3,  6.8,  7.3,  7.8,  8.3] };
-    const concourse = { r_in: 22, r_out: 24, elevation_m: 2.55 };
+    const lowerBowl = { r_in: 18, r_out: 24, floor_z: 0,    tier_heights_m: [1.0, 1.45, 1.9, 2.35, 2.8, 3.25] };
+    const upperBowl = { r_in: 26, r_out: 29, floor_z: 3.25, tier_heights_m: [7.0, 7.35, 7.7, 8.05, 8.4, 8.75] };
+    const concourse = { r_in: 24, r_out: 26, elevation_m: 3.25 };
     return {
       label: 'Sports arena (dome)',
       shape: 'polygon', ceiling_type: 'dome',
-      polygon_sides: 24, polygon_radius_m: 30,
+      polygon_sides: 36, polygon_radius_m: 30,
       width_m: 60, height_m: 12, depth_m: 60,
       ceiling_dome_rise_m: 10,
       surfaces: {
@@ -240,48 +248,49 @@ export const PRESETS = {
         cx, cy, lowerBowl, upperBowl, concourse,
         catwalkHeight_m: 15, catwalkRadius_m: 10,
         vomitories: {
-          // 4 vomitories at cardinal angles (0/90/180/270°), each 20° wide.
-          // Leaves 4 bowl sectors at 45/135/225/315° (diagonals), each 70° wide.
+          // 4 vomitories at cardinal angles (0/90/180/270°), each 10° wide (narrow tunnels).
+          // Leaves 4 bowl sectors at 45/135/225/315° (diagonals), each 80° wide.
           centerAnglesDeg: [0, 90, 180, 270],
-          widthDeg: 20,
+          widthDeg: 10,
         },
       },
       zones: [
         { id: 'Z_court', label: 'Court', vertices: rectVerts(15.65, 22.4, 44.35, 37.6), elevation_m: 0, material_id: 'wood-floor' },
         // Concourse split into 4 quadrants aligned with bowl sectors (leaves vomitory gaps clear).
         ...generateTieredBowl({
-          cx, cy, r_in: 22, r_out: 24,
-          tier_heights_m: [2.55],
+          cx, cy, r_in: 24, r_out: 26,
+          tier_heights_m: [3.25],
           sectorCount: 4, material_id: 'concrete-painted',
           idPrefix: 'Z_co', labelPrefix: 'Concourse',
-          gapDeg: 20, startAngleDeg: 45,
-          sectorLabelsOverride: ['NE', 'SE', 'SW', 'NW'],
+          gapDeg: 10, startAngleDeg: 45,
+          sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
         }),
         ...generateTieredBowl({
-          cx, cy, r_in: 15, r_out: 22,
+          cx, cy, r_in: 18, r_out: 24,
           tier_heights_m: lowerBowl.tier_heights_m,
           sectorCount: 4, material_id: 'carpet-heavy',
           idPrefix: 'Z_lb', labelPrefix: 'Lower',
-          gapDeg: 20, startAngleDeg: 45,
-          sectorLabelsOverride: ['NE', 'SE', 'SW', 'NW'],
+          gapDeg: 10, startAngleDeg: 45,
+          sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
         }),
         ...generateTieredBowl({
-          cx, cy, r_in: 24, r_out: 29,
+          cx, cy, r_in: 26, r_out: 29,
           tier_heights_m: upperBowl.tier_heights_m,
           sectorCount: 4, material_id: 'carpet-heavy',
           idPrefix: 'Z_ub', labelPrefix: 'Upper',
-          gapDeg: 20, startAngleDeg: 45,
-          sectorLabelsOverride: ['NE', 'SE', 'SW', 'NW'],
+          gapDeg: 10, startAngleDeg: 45,
+          sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
         }),
       ],
       sources: generateCenterCluster({ cx, cy, cz: 15, ring_r: 4, count: 8, modelUrl: SPKLA, power_watts: 500, pitch: -25 }),
       listeners: [
-        // Positions chosen to land inside NE/SE/SW/NW quadrants (not in vomitory gaps at cardinals).
-        { id: 'L1', label: 'Courtside VIP',         position: { x: 17,   y: 30   }, elevation_m: 0,    posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L2', label: 'Lower bowl row 1 SE',   position: { x: 42,   y: 42   }, elevation_m: 0.3,  posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L3', label: 'Lower bowl row 4 SW',   position: { x: 16,   y: 44   }, elevation_m: 1.65, posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L4', label: 'Upper bowl row 3 NE',   position: { x: 48,   y: 12.5 }, elevation_m: 6.8,  posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L5', label: 'Concourse walker',      position: { x: 46.3, y: 46.3 }, elevation_m: 2.55, posture: 'standing',      custom_ear_height_m: null },
+        // Positions land inside SE/SW/NW/NE quadrants (not in 10° vomitory gaps at cardinals).
+        // SE = +x+y direction (state y grows "back" = south); NE = +x-y, etc.
+        { id: 'L1', label: 'Courtside VIP',          position: { x: 22,   y: 30   }, elevation_m: 0,    posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L2', label: 'Lower bowl row 1 SE',    position: { x: 43,   y: 43   }, elevation_m: 1.0,  posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L3', label: 'Lower bowl row 6 SW',    position: { x: 13,   y: 47   }, elevation_m: 3.25, posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L4', label: 'Upper bowl row 3 NW',    position: { x: 11,   y: 11   }, elevation_m: 7.7,  posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L5', label: 'Concourse walker NE',    position: { x: 48,   y: 12   }, elevation_m: 3.25, posture: 'standing',      custom_ear_height_m: null },
       ],
     };
   })(),

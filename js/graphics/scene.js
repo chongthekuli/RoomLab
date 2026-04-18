@@ -273,18 +273,22 @@ function rebuildRoom(isFirst) {
       const segmentInVomitory = (midX, midZ) => {
         if (vomAnglesRad.length === 0 || vomHalfWidth <= 0) return false;
         const angle = Math.atan2(midZ - cz, midX - cx);
+        // Small epsilon so segment midpoints that fall exactly at the vomitory
+        // half-width boundary (common with matched polygon/vomitory resolutions,
+        // e.g., 36-gon + 10° vomitory → midpoints at ±5°) are counted as inside.
+        const eps = 0.01;
         for (const vc of vomAnglesRad) {
           let diff = angle - vc;
           while (diff >  Math.PI) diff -= 2 * Math.PI;
           while (diff < -Math.PI) diff += 2 * Math.PI;
-          if (Math.abs(diff) < vomHalfWidth) return true;
+          if (Math.abs(diff) < vomHalfWidth + eps) return true;
         }
         return false;
       };
-      // In vomitory angular range, wall is partial: spans from tunnel ceiling (z=3.5)
-      // to the dome (z=h). Below 3.5m is the tunnel portal. Outside vomitory range,
-      // wall is full height.
-      const TUNNEL_CEILING_Z = 3.5;
+      // In vomitory angular range, wall is partial: spans from tunnel ceiling
+      // (z = concourse elevation, typically 3.25 m) to the dome (z = h). Below
+      // the tunnel ceiling is the portal. Outside vomitory range, wall is full height.
+      const TUNNEL_CEILING_Z = room.stadiumStructure?.concourse?.elevation_m ?? 3.25;
       for (let i = 0; i < n; i++) {
         const v1 = verts[i];
         const v2 = verts[(i + 1) % n];
@@ -699,7 +703,10 @@ function buildTunnelCeilings(room, mat) {
   const s = room.stadiumStructure;
   const vom = s?.vomitories;
   if (!vom || !vom.widthDeg || !vom.centerAnglesDeg?.length) return;
-  const tunnelZ = 3.5;
+  // Tunnel ceiling sits at the concourse elevation so it aligns cleanly with
+  // the walkway behind the lower bowl — no vertical gap between tunnel top and
+  // the stadium structure at the sector/vomitory boundary.
+  const tunnelZ = s.concourse?.elevation_m ?? 3.25;
   const r_inner = s.lowerBowl?.r_in ?? 15;
   const r_outer = room.polygon_radius_m ?? 30;
   const halfWidthRad = (vom.widthDeg / 2) * Math.PI / 180;
