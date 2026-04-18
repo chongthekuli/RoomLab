@@ -311,6 +311,10 @@ function applyPreset(key) {
   if (p.round_radius_m != null) state.room.round_radius_m = p.round_radius_m;
   if (p.ceiling_dome_rise_m != null) state.room.ceiling_dome_rise_m = p.ceiling_dome_rise_m;
   Object.assign(state.room.surfaces, p.surfaces);
+  if (p.zones) {
+    state.zones = p.zones.map(z => JSON.parse(JSON.stringify(z)));
+    state.selectedZoneId = state.zones[0]?.id ?? null;
+  }
   syncBoundingBoxToShape();
   render();
   emit('room:changed');

@@ -1,4 +1,4 @@
-import { state, DEFAULT_HIFI_SOURCES, DEFAULT_LISTENER } from './app-state.js';
+import { state, DEFAULT_AUDITORIUM_SOURCES, DEFAULT_LISTENER, DEFAULT_AUDITORIUM_ZONES } from './app-state.js';
 import { loadMaterials } from './physics/materials.js';
 import { loadLoudspeaker } from './physics/loudspeaker.js';
 import { mountRoomPanel } from './ui/panel-room.js';
@@ -36,13 +36,19 @@ async function boot() {
 
   if (state.sources.length === 0) {
     const defaultModel = SPEAKER_CATALOG[0].url;
-    for (const s of DEFAULT_HIFI_SOURCES) {
+    for (const s of DEFAULT_AUDITORIUM_SOURCES) {
       state.sources.push({ modelUrl: defaultModel, ...structuredClone(s) });
     }
   }
   if (state.listeners.length === 0) {
     state.listeners.push(structuredClone(DEFAULT_LISTENER));
     state.selectedListenerId = DEFAULT_LISTENER.id;
+  }
+  if (state.zones.length === 0) {
+    for (const z of DEFAULT_AUDITORIUM_ZONES) {
+      state.zones.push(structuredClone(z));
+    }
+    state.selectedZoneId = DEFAULT_AUDITORIUM_ZONES[0].id;
   }
 
   setupTabs();
