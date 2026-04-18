@@ -2,7 +2,7 @@ import { state, earHeightFor, getSelectedListener } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
-import { roomPlanVertices } from '../physics/room-shape.js';
+import { roomPlanVertices, isInsideRoom } from '../physics/room-shape.js';
 
 let materialsRef;
 
@@ -208,6 +208,10 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room) {
   sources.forEach((src, i) => {
     const sx = x0 + (src.position.x / room.width_m) * pxW;
     const sy = y0 + (src.position.y / room.depth_m) * pxD;
+    const outside = !isInsideRoom(src.position.x, src.position.y, room);
+    const fill = outside ? '#ff5a3c' : '#fff';
+    const stroke = outside ? '#8a1200' : '#000';
+
     const yaw_rad = src.aim.yaw * Math.PI / 180;
     const size = 13;
     const aimX = Math.sin(yaw_rad);
@@ -221,9 +225,11 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room) {
     const br  = { x: sx - size * 0.5 * aimX + size * 0.6 * rightX,
                   y: sy - size * 0.5 * aimY + size * 0.6 * rightY };
 
-    s += `<polygon points="${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${bl.x.toFixed(1)},${bl.y.toFixed(1)} ${br.x.toFixed(1)},${br.y.toFixed(1)}" fill="#fff" stroke="#000" stroke-width="1.5" />`;
-    s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2" fill="#000" />`;
-    s += `<text x="${sx.toFixed(1)}" y="${(sy - 18).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-spk">S${i + 1}</text>`;
+    s += `<polygon points="${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${bl.x.toFixed(1)},${bl.y.toFixed(1)} ${br.x.toFixed(1)},${br.y.toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" />`;
+    s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2" fill="${stroke}" />`;
+    const lblFill = outside ? '#ff5a3c' : '#fff';
+    const lblText = outside ? `S${i + 1} ⚠` : `S${i + 1}`;
+    s += `<text x="${sx.toFixed(1)}" y="${(sy - 18).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-spk" fill="${lblFill}">${lblText}</text>`;
   });
   return s;
 }

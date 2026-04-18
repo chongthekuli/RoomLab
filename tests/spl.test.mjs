@@ -1,4 +1,9 @@
-import { computeDirectSPL, localAngles } from '../js/physics/spl-calculator.js';
+import {
+  computeDirectSPL,
+  localAngles,
+  computeMultiSourceSPL,
+  computeListenerBreakdown,
+} from '../js/physics/spl-calculator.js';
 
 const speaker = {
   acoustic: { sensitivity_db_1w_1m: 97 },
@@ -28,50 +33,37 @@ function assertClose(actual, expected, tol, label) {
   if (!ok) failed++;
 }
 
-// On-axis, 1m, 1W → SPL should equal sensitivity
+// --- Single-source SPL tests ---
 const t1 = computeDirectSPL({ speakerDef: speaker, speakerState: baseState, listenerPos: { x: 0, y: 1, z: 0 } });
 assertClose(t1.spl_db, 97, 0.01, 'On-axis 1m 1W = sensitivity (97 dB)');
 
-// 2m doubles distance → -6 dB
 const t2 = computeDirectSPL({ speakerDef: speaker, speakerState: baseState, listenerPos: { x: 0, y: 2, z: 0 } });
 assertClose(t2.spl_db, 97 - 20 * Math.log10(2), 0.01, '2m: -6 dB from 1m');
 
-// 4m quadruples distance → -12 dB
 const t3 = computeDirectSPL({ speakerDef: speaker, speakerState: baseState, listenerPos: { x: 0, y: 4, z: 0 } });
 assertClose(t3.spl_db, 97 - 20 * Math.log10(4), 0.01, '4m: -12 dB from 1m');
 
-// 10W increases SPL by +10 dB
 const s10 = { ...baseState, power_watts: 10 };
 const t4 = computeDirectSPL({ speakerDef: speaker, speakerState: s10, listenerPos: { x: 0, y: 1, z: 0 } });
 assertClose(t4.spl_db, 97 + 10, 0.01, '10W: +10 dB from 1W');
 
-// 90° off-axis should apply -3 dB from directivity grid
 const t5 = computeDirectSPL({ speakerDef: speaker, speakerState: baseState, listenerPos: { x: 1, y: 0, z: 0 } });
 assertClose(t5.spl_db, 97 - 3, 0.01, '90° off-axis: -3 dB directivity');
 
-// localAngles: listener straight ahead
 const a1 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: 0 }, { x: 0, y: 1, z: 0 });
 assertClose(a1.azimuth_deg, 0, 0.01, 'localAngles on-axis azimuth=0');
 assertClose(a1.elevation_deg, 0, 0.01, 'localAngles on-axis elevation=0');
 
-// localAngles: listener to the right
 const a2 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: 0 }, { x: 1, y: 0, z: 0 });
 assertClose(a2.azimuth_deg, 90, 0.01, 'Listener at +X = azimuth 90°');
 
-// Rotated speaker (yaw=90°): listener at +X should now be on-axis (azimuth=0)
 const a3 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 90, pitch: 0 }, { x: 1, y: 0, z: 0 });
 assertClose(a3.azimuth_deg, 0, 0.01, 'Yaw=90° speaker: +X listener = on-axis');
 
-// Pitch: listener at (0, 3, 3) → horizDist=3, dz=3, raw elev=45°.
-// Speaker pitched up 30° → local elevation = 45 - 30 = 15°.
 const a4 = localAngles({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: 30 }, { x: 0, y: 3, z: 3 });
 assertClose(a4.elevation_deg, 15, 0.01, 'Pitch up 30° on a 45° listener → local elev 15°');
 
 // --- Multi-source SPL tests ---
-import { computeMultiSourceSPL } from '../js/physics/spl-calculator.js';
-
-// Two co-located 1W speakers, both on-axis to listener at 1m
-// Each contributes 97 dB; pressure sum = 2 × 10^9.7 → total = 97 + 10·log₁₀(2) ≈ 100.01 dB
 const coLocated = [
   { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
   { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
@@ -83,7 +75,6 @@ const t6 = computeMultiSourceSPL({
 });
 assertClose(t6, 97 + 10 * Math.log10(2), 0.01, 'Two identical co-located sources = +3 dB');
 
-// Four identical sources → +6 dB
 const four = Array.from({ length: 4 }, () => ({
   modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1,
 }));
@@ -93,7 +84,6 @@ const t7 = computeMultiSourceSPL({
 });
 assertClose(t7, 97 + 10 * Math.log10(4), 0.01, 'Four identical sources = +6 dB');
 
-// Empty source list returns -Infinity
 const t8 = computeMultiSourceSPL({
   sources: [], getSpeakerDef: lookup,
   listenerPos: { x: 0, y: 1, z: 0 },
@@ -102,10 +92,7 @@ const t8ok = t8 === -Infinity;
 console.log(`${t8ok ? 'PASS' : 'FAIL'}  Empty sources returns -Infinity  actual=${t8}`);
 if (!t8ok) failed++;
 
-// --- Listener breakdown tests ---
-import { computeListenerBreakdown } from '../js/physics/spl-calculator.js';
-
-// One speaker at origin, one listener 1m on-axis. Breakdown returns 97 dB for speaker 1.
+// --- Listener breakdown tests (no room) ---
 const br1 = computeListenerBreakdown({
   sources: [{ modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 }],
   getSpeakerDef: () => speaker,
@@ -114,7 +101,6 @@ const br1 = computeListenerBreakdown({
 assertClose(br1.perSpeaker[0].spl_db, 97, 0.01, 'Breakdown single speaker SPL');
 assertClose(br1.total_spl_db, 97, 0.01, 'Breakdown total with 1 source = single SPL');
 
-// Two co-located speakers → total +3 dB, each contribution 97
 const br2 = computeListenerBreakdown({
   sources: [
     { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
@@ -126,6 +112,53 @@ const br2 = computeListenerBreakdown({
 assertClose(br2.perSpeaker[0].spl_db, 97, 0.01, 'Breakdown speaker 1 of 2');
 assertClose(br2.perSpeaker[1].spl_db, 97, 0.01, 'Breakdown speaker 2 of 2');
 assertClose(br2.total_spl_db, 97 + 10 * Math.log10(2), 0.01, 'Breakdown total with 2 co-located = +3 dB');
+
+// --- Wall transmission loss (bug fix) ---
+const rectRoom = {
+  shape: 'rectangular',
+  width_m: 5, height_m: 3, depth_m: 5,
+  surfaces: { floor: 'f', ceiling: 'c', wall_north: 'w', wall_south: 'w', wall_east: 'w', wall_west: 'w' },
+};
+
+// Both inside: no TL
+const s_in = { position: { x: 2.5, y: 1, z: 1 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
+const l_in = { x: 2.5, y: 2, z: 1 };
+const t_both_in = computeDirectSPL({ speakerDef: speaker, speakerState: s_in, listenerPos: l_in, room: rectRoom });
+assertClose(t_both_in.spl_db, 97, 0.01, 'Both inside: no TL');
+const t_both_in_flag = t_both_in.through_wall === false;
+console.log(`${t_both_in_flag ? 'PASS' : 'FAIL'}  through_wall=false when both inside`);
+if (!t_both_in_flag) failed++;
+
+// Speaker outside, listener inside: -30 dB applied
+const s_out = { position: { x: 10, y: 1, z: 1 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
+const t_out = computeDirectSPL({ speakerDef: speaker, speakerState: s_out, listenerPos: l_in, room: rectRoom });
+const expectedFree = 97 - 20 * Math.log10(Math.sqrt(7.5 * 7.5 + 1 * 1));
+const expectedAttn = -3 + (8 / 90) * 3;
+const expectedOut = expectedFree + expectedAttn - 30;
+assertClose(t_out.spl_db, expectedOut, 0.05, 'Speaker outside → -30 dB TL');
+const t_out_flag = t_out.through_wall === true;
+console.log(`${t_out_flag ? 'PASS' : 'FAIL'}  through_wall=true when speaker outside`);
+if (!t_out_flag) failed++;
+
+// No room param: backward compat, no TL
+const t_no_room = computeDirectSPL({ speakerDef: speaker, speakerState: s_out, listenerPos: l_in });
+const t_no_tl_ok = Math.abs(t_no_room.spl_db - (expectedFree + expectedAttn)) < 0.05;
+console.log(`${t_no_tl_ok ? 'PASS' : 'FAIL'}  No room param: no TL (backward compat)  actual=${t_no_room.spl_db.toFixed(3)}`);
+if (!t_no_tl_ok) failed++;
+
+// Breakdown flags outside speakers
+const br3 = computeListenerBreakdown({
+  sources: [
+    { modelUrl: 'x', position: { x: 2.5, y: 1, z: 1 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
+    { modelUrl: 'x', position: { x: 10, y: 1, z: 1 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 },
+  ],
+  getSpeakerDef: () => speaker,
+  listenerPos: { x: 2.5, y: 2, z: 1 },
+  room: rectRoom,
+});
+const br3_ok = br3.perSpeaker[0].outsideRoom === false && br3.perSpeaker[1].outsideRoom === true;
+console.log(`${br3_ok ? 'PASS' : 'FAIL'}  Breakdown outsideRoom flags correct`);
+if (!br3_ok) failed++;
 
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');

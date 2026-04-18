@@ -62,6 +62,7 @@ function renderListenerSection() {
     getSpeakerDef: url => getCachedLoudspeaker(url),
     listenerPos: pos,
     freq_hz: 1000,
+    room: state.room,
   });
 
   const postureLabel = POSTURE_LABELS[lst.posture] ?? lst.posture;
@@ -70,8 +71,15 @@ function renderListenerSection() {
   const rows = breakdown.perSpeaker.map(p => {
     const splStr = isFinite(p.spl_db) ? `${p.spl_db.toFixed(1)} dB` : '—';
     const rStr = p.r != null ? `${p.r.toFixed(2)} m` : '—';
-    return `<tr><td>Speaker ${p.idx + 1}</td><td>${splStr}</td><td>${rStr}</td></tr>`;
+    const badge = p.outsideRoom
+      ? ' <span class="badge-warn" title="Speaker is outside the room — SPL reduced by 30 dB for wall transmission loss">outside</span>'
+      : (p.through_wall ? ' <span class="badge-warn" title="Path crosses a wall — SPL reduced by 30 dB">through wall</span>' : '');
+    return `<tr><td>Speaker ${p.idx + 1}${badge}</td><td>${splStr}</td><td>${rStr}</td></tr>`;
   }).join('');
+  const anyOutside = breakdown.perSpeaker.some(p => p.outsideRoom);
+  const outsideNote = anyOutside
+    ? `<div class="lr-note">One or more speakers are outside the room. A 30 dB wall transmission loss is applied to their contribution.</div>`
+    : '';
 
   root.innerHTML = `
     <div class="listener-results">
@@ -83,6 +91,7 @@ function renderListenerSection() {
           <thead><tr><th>Source</th><th>SPL</th><th>Distance</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
+        ${outsideNote}
       ` : ''}
     </div>
   `;

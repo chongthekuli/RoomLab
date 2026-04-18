@@ -275,6 +275,28 @@ section h3 {
 }
 .listener-results .lr-title { font-size: 0.85rem; }
 .listener-results .lr-sub { font-size: 0.74rem; color: var(--muted); margin-top: 0.15rem; }
+.listener-results .lr-note {
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  background: #fde7dc;
+  border: 1px solid #f0a080;
+  border-radius: 4px;
+  color: #8a3000;
+  font-size: 0.73rem;
+  line-height: 1.4;
+}
+.badge-warn {
+  display: inline-block;
+  background: #ff5a3c;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 0.3rem;
+  letter-spacing: 0.02em;
+}
 .listener-results .lr-total { margin-top: 0.4rem; }
 .listener-results .big-num { font-size: 1.5rem; font-weight: 600; color: #5a4400; }
 .listener-results .sub { font-size: 0.75rem; color: var(--muted); }

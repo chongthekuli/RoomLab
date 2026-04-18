@@ -285,8 +285,10 @@ function rebuildSources() {
   }
 
   for (const src of state.sources) {
+    const outside = !isInsideRoom(src.position.x, src.position.y, state.room);
     const coneGeo = new THREE.ConeGeometry(0.22, 0.6, 20);
-    const coneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x333333 });
+    const coneColor = outside ? 0xff5a3c : 0xffffff;
+    const coneMat = new THREE.MeshStandardMaterial({ color: coneColor, emissive: outside ? 0x550000 : 0x333333 });
     const cone = new THREE.Mesh(coneGeo, coneMat);
     cone.position.set(src.position.x, src.position.z, src.position.y);
 
