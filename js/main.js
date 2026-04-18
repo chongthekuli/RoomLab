@@ -1,23 +1,17 @@
 import { loadMaterials } from './physics/materials.js';
 import { mountRoomPanel } from './ui/panel-room.js';
 import { mountResultsPanel } from './ui/panel-results.js';
+import { mount2DViewport } from './graphics/room-2d.js';
 
 async function boot() {
   const materials = await loadMaterials();
   mountRoomPanel({ materials });
   mountResultsPanel({ materials });
-
-  document.getElementById('viewport').innerHTML = `
-    <div class="viewport-empty">
-      <div class="title">3D viewport — Phase 3</div>
-      <div class="sub">Change room dimensions or a surface material on the left.<br>
-      Reverberation time updates live on the right.</div>
-    </div>
-  `;
+  mount2DViewport({ materials });
 }
 
 boot().catch(err => {
   console.error('RoomLAB boot failed', err);
   const vp = document.getElementById('viewport');
-  if (vp) vp.innerHTML = `<div class="viewport-empty"><div class="title">Startup error</div><div class="sub">${err.message}</div></div>`;
+  if (vp) vp.innerHTML = `<div class="viewport-2d"><div class="vp-header">Startup error: ${err.message}</div></div>`;
 });

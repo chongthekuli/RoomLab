@@ -4,22 +4,28 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RoomLAB</title>
-  <link rel="stylesheet" href="css/main.css" />
-  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/main.css?v=3" />
+  <link rel="stylesheet" href="css/theme.css?v=3" />
 </head>
 <body>
   <header id="app-header"><h1>RoomLAB</h1></header>
   <main id="app-root">
     <aside id="panel-left">
       <section id="panel-room"><h2>Room</h2></section>
-      <section id="panel-sources"><h2>Sources</h2></section>
-      <section id="panel-library"><h2>Library</h2></section>
+      <section id="panel-sources">
+        <h2>Sources</h2>
+        <div class="phase-placeholder">Loudspeaker placement &amp; aim — coming in Phase 3.</div>
+      </section>
+      <section id="panel-library">
+        <h2>Library</h2>
+        <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files — coming in Phase 3.</div>
+      </section>
     </aside>
     <section id="viewport"></section>
     <aside id="panel-right">
       <section id="panel-results"><h2>Results</h2></section>
     </aside>
   </main>
-  <script type="module" src="js/main.js"></script>
+  <script type="module" src="js/main.js?v=3"></script>
 </body>
 </html>
