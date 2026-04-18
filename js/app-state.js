@@ -107,6 +107,40 @@ function generateBowl({ cx, cy, r_in, r_out, elevation_m, material_id, idPrefix,
   return zones;
 }
 
+// Tiered bowl: each sector is divided into multiple stepped tiers (rows of seats).
+// Each tier is a thin ring sub-sector at its own elevation, creating a visible
+// staircase profile in 3D when sampled by the per-zone heatmap planes.
+function generateTieredBowl({
+  cx, cy, r_in, r_out, tier_heights_m, sectorCount = 4,
+  material_id, idPrefix, labelPrefix, startAngleDeg,
+}) {
+  const sectorLabels = sectorCount === 4 ? ['E', 'S', 'W', 'N']
+    : sectorCount === 8 ? ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']
+    : null;
+  const sectorStep = 360 / sectorCount;
+  const start = startAngleDeg ?? -sectorStep / 2;
+  const tierCount = tier_heights_m.length;
+  const tierRadialDepth = (r_out - r_in) / tierCount;
+  const zones = [];
+  for (let s = 0; s < sectorCount; s++) {
+    const ts = start + s * sectorStep;
+    const te = ts + sectorStep;
+    const sLabel = sectorLabels?.[s] ?? (s + 1);
+    for (let t = 0; t < tierCount; t++) {
+      const ri = r_in + t * tierRadialDepth;
+      const ro = ri + tierRadialDepth;
+      zones.push({
+        id: `${idPrefix}${s + 1}_${t + 1}`,
+        label: `${labelPrefix} ${sLabel} row ${t + 1}`,
+        vertices: ringSectorVerts(cx, cy, ri, ro, ts, te, 4),
+        elevation_m: tier_heights_m[t],
+        material_id,
+      });
+    }
+  }
+  return zones;
+}
+
 function generateCenterCluster({ cx, cy, cz, ring_r, count = 8, modelUrl, power_watts = 500, pitch = -25 }) {
   const sources = [];
   const step = 360 / count;
@@ -162,16 +196,18 @@ export const DEFAULT_PRESET_KEY = 'auditorium';
 
 export const PRESETS = {
   auditorium: (() => {
-    // Sports arena modeled after University of Wyoming Arena-Auditorium (~11,600-seat geodesic dome).
-    // Scaled for simulation: 50m polygon (24 sides approximates dome), 8m walls + 8m dome rise
-    // (16m apex). NCAA basketball court at center (28.7 x 15.2m). Two tier bowl (lower+upper)
-    // wrapping 360 deg as 8 ring sectors each. Center-hung PA cluster of 8 speakers at 12m.
+    // Sports arena modeled after University of Wyoming Arena-Auditorium (~11,600 seats, geodesic dome).
+    // 50 m polygon plan (24 sides approximates the dome). Walls 12 m + 8 m dome rise → 20 m at apex.
+    // NCAA basketball court (28.7 × 15.2 m) at center. Two continuous bowls wrapping 360°, each
+    // divided into 4 quadrants × 4 stepped tiers = 16 stadium rows per bowl (32 tiered zones).
+    // Between lower bowl top (2.8 m) and upper bowl bottom (6 m) is the concourse. Center-hung
+    // PA cluster of 8 line-array elements at 15 m.
     const cx = 25, cy = 25;
     return {
       label: 'Sports arena (dome)',
       shape: 'polygon', ceiling_type: 'dome',
       polygon_sides: 24, polygon_radius_m: 25,
-      width_m: 50, height_m: 8, depth_m: 50,
+      width_m: 50, height_m: 12, depth_m: 50,
       ceiling_dome_rise_m: 8,
       surfaces: {
         floor: 'wood-floor', ceiling: 'gypsum-board', walls: 'gypsum-board',
@@ -180,14 +216,25 @@ export const PRESETS = {
       },
       zones: [
         { id: 'Z_court', label: 'Court', vertices: rectVerts(10.65, 17.4, 39.35, 32.6), elevation_m: 0, material_id: 'wood-floor' },
-        ...generateBowl({ cx, cy, r_in: 16, r_out: 22, elevation_m: 2.5, material_id: 'carpet-heavy', idPrefix: 'Z_lb', labelPrefix: 'Lower', count: 8 }),
-        ...generateBowl({ cx, cy, r_in: 22, r_out: 24.5, elevation_m: 7, material_id: 'carpet-heavy', idPrefix: 'Z_ub', labelPrefix: 'Upper', count: 8 }),
+        ...generateTieredBowl({
+          cx, cy, r_in: 16, r_out: 22,
+          tier_heights_m: [0.4, 1.2, 2.0, 2.8],
+          sectorCount: 4, material_id: 'carpet-heavy',
+          idPrefix: 'Z_lb', labelPrefix: 'Lower',
+        }),
+        ...generateTieredBowl({
+          cx, cy, r_in: 22.5, r_out: 24.5,
+          tier_heights_m: [6.0, 6.8, 7.6, 8.4],
+          sectorCount: 4, material_id: 'carpet-heavy',
+          idPrefix: 'Z_ub', labelPrefix: 'Upper',
+        }),
       ],
-      sources: generateCenterCluster({ cx, cy, cz: 12, ring_r: 3, count: 8, modelUrl: SPKLA, power_watts: 500, pitch: -25 }),
+      sources: generateCenterCluster({ cx, cy, cz: 15, ring_r: 3, count: 8, modelUrl: SPKLA, power_watts: 500, pitch: -25 }),
       listeners: [
-        { id: 'L1', label: 'Courtside VIP',    position: { x: 12,  y: 25   }, elevation_m: 0,   posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L2', label: 'Lower bowl south', position: { x: 25,  y: 44   }, elevation_m: 2.5, posture: 'sitting_chair', custom_ear_height_m: null },
-        { id: 'L3', label: 'Upper bowl NW',    position: { x: 8.7, y: 8.7  }, elevation_m: 7,   posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L1', label: 'Courtside VIP',       position: { x: 12,   y: 25   }, elevation_m: 0,   posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L2', label: 'Lower bowl front S',  position: { x: 25,   y: 41.2 }, elevation_m: 0.4, posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L3', label: 'Lower bowl back E',   position: { x: 46.2, y: 25   }, elevation_m: 2.8, posture: 'sitting_chair', custom_ear_height_m: null },
+        { id: 'L4', label: 'Upper bowl mid N',    position: { x: 25,   y: 1.8  }, elevation_m: 7.2, posture: 'sitting_chair', custom_ear_height_m: null },
       ],
     };
   })(),
