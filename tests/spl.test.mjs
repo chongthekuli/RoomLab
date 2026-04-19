@@ -286,5 +286,39 @@ import { expandLineArrayToElements, expandSources } from '../js/app-state.js';
   if (!ok) failed++;
 }
 
+// --- Back-pivot geometry: adjacent cabinets must share a back edge.
+// Bottom-back corner of element i should equal top-back corner of element i+1
+// for any splay pattern — that's what keeps real line-array cabinets from
+// overlapping when the hang has progressive splay.
+{
+  const la = {
+    kind: 'line-array',
+    modelUrl: 'data/loudspeakers/line-array-element.json',
+    origin: { x: 0, y: 0, z: 10 },
+    baseYaw_deg: 0,
+    topTilt_deg: 0,
+    splayAnglesDeg: [5, 5],  // 3 elements, strong splay to make overlap obvious if math is wrong
+    elementSpacing_m: 0.42,
+    power_watts_each: 500,
+  };
+  const els = expandLineArrayToElements(la);
+  // For element i, bottom-back corner = rig[i+1] by construction. Verify
+  // that rig[i+1] is h=0.42 below rig[i] along element i's cabinet-down axis.
+  const h = 0.42;
+  let ok = true;
+  for (let i = 0; i < els.length - 1; i++) {
+    const p = els[i].aim.pitch * Math.PI / 180;
+    const expectedNextX = els[i].rigPoint.x + h * 0 * Math.sin(p);   // yaw=0
+    const expectedNextY = els[i].rigPoint.y + h * 1 * Math.sin(p);
+    const expectedNextZ = els[i].rigPoint.z + h * (-Math.cos(p));
+    const dx = Math.abs(els[i + 1].rigPoint.x - expectedNextX);
+    const dy = Math.abs(els[i + 1].rigPoint.y - expectedNextY);
+    const dz = Math.abs(els[i + 1].rigPoint.z - expectedNextZ);
+    if (dx > 1e-6 || dy > 1e-6 || dz > 1e-6) { ok = false; break; }
+  }
+  console.log(`${ok ? 'PASS' : 'FAIL'}  Back-pivot: adjacent cabinets share their back edge (no overlap)`);
+  if (!ok) failed++;
+}
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');

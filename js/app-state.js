@@ -237,10 +237,25 @@ function generateCenterCluster({ cx, cy, cz, ring_r, count = 8, modelUrl, power_
 //   }
 // Element count = splayAnglesDeg.length + 1 (first element has no leading splay).
 // ---------------------------------------------------------------------------
+// Cabinet dimensions by speaker model. Mirror of the table in scene.js —
+// kept here because expansion math needs depth to compute the cabinet center
+// offset from the top-back rigging pin.
+function lineArrayCabinetDims(modelUrl) {
+  const url = modelUrl || '';
+  if (/line-array/i.test(url)) return { h: 0.42, d: 0.45 };
+  if (/compact-6/i.test(url))  return { h: 0.36, d: 0.24 };
+  return { h: 0.66, d: 0.38 };
+}
+
 export function expandLineArrayToElements(src) {
   const splays = src.splayAnglesDeg || [];
   const n = (src.elementCount ?? (splays.length + 1));
-  const spacing = src.elementSpacing_m ?? 0.42;
+  const dims = lineArrayCabinetDims(src.modelUrl);
+  // elementSpacing_m is the cabinet height — adjacent cabinets butt against
+  // each other along their back edges (spacing = h means bottom-back of
+  // cabinet i is the top-back of cabinet i+1).
+  const h = src.elementSpacing_m ?? dims.h;
+  const d = src.cabinetDepth_m ?? dims.d;
   const topTilt = src.topTilt_deg ?? 0;
   const yaw = src.baseYaw_deg ?? 0;
   const origin = src.origin || src.position || { x: 0, y: 0, z: 0 };
@@ -249,22 +264,31 @@ export function expandLineArrayToElements(src) {
 
   const elements = [];
   let curPitch = topTilt;
+  // curRig is the TOP-BACK corner of the current cabinet — real line-array
+  // rigging pivots around this point, so adjacent cabinets share their back
+  // edge and only splay the fronts apart (no back-side overlap).
   let curRig = { x: origin.x, y: origin.y, z: origin.z };
 
   for (let i = 0; i < n; i++) {
     const pitchRad = curPitch * Math.PI / 180;
-    // State frame: x=width, y=depth, z=height. With yaw=0 aim=+y, pitch tilts
-    // aim toward +z. The "down along cabinet" direction (from rigging pin to
-    // bottom-back of cabinet) is -UP where UP = aim rotated 90° toward +z.
+    // Cabinet-local axes expressed in world state coords (x=width, y=depth, z=height):
+    //   aim = local −Z (front face normal, the direction the speaker points)
+    //   up  = local +Y (cabinet vertical, tilted forward when pitch<0)
+    //   down = local −Y, back = local +Z
+    const aimX =  Math.sin(yawRad) * Math.cos(pitchRad);
+    const aimY =  Math.cos(yawRad) * Math.cos(pitchRad);
+    const aimZ =  Math.sin(pitchRad);
     const downX =  Math.sin(yawRad) * Math.sin(pitchRad);
     const downY =  Math.cos(yawRad) * Math.sin(pitchRad);
     const downZ = -Math.cos(pitchRad);
-    // Acoustic center is half-spacing below the rig pin along the cabinet's
-    // down direction — good approximation of the driver position.
+    // Geometric center of cabinet (rendering + point-source location): from
+    // the top-back rig, go h/2 DOWN and d/2 FORWARD. Placing the rig at the
+    // top-back corner matches real rigging hardware and makes the back edges
+    // of adjacent cabinets align when splayed.
     const center = {
-      x: curRig.x + (spacing / 2) * downX,
-      y: curRig.y + (spacing / 2) * downY,
-      z: curRig.z + (spacing / 2) * downZ,
+      x: curRig.x + (h / 2) * downX + (d / 2) * aimX,
+      y: curRig.y + (h / 2) * downY + (d / 2) * aimY,
+      z: curRig.z + (h / 2) * downZ + (d / 2) * aimZ,
     };
     elements.push({
       modelUrl: src.modelUrl,
@@ -276,15 +300,14 @@ export function expandLineArrayToElements(src) {
       elementIndex: i,
       rigPoint: { ...curRig },
     });
-    // Advance rig pin of next element = bottom-back of this element.
+    // Next element's top-back rig = this element's bottom-back corner.
     curRig = {
-      x: curRig.x + spacing * downX,
-      y: curRig.y + spacing * downY,
-      z: curRig.z + spacing * downZ,
+      x: curRig.x + h * downX,
+      y: curRig.y + h * downY,
+      z: curRig.z + h * downZ,
     };
-    // Apply splay so next element tilts further DOWN. Industry convention:
-    // positive splay = "this much more downward than the element above".
-    // Pitch is negative for downward aim, so a +2° splay subtracts 2 from pitch.
+    // Apply splay: positive splay = "this much more downward than the
+    // element above". Pitch is negative for downward aim, so splay subtracts.
     curPitch -= splays[i] ?? 0;
   }
   return elements;

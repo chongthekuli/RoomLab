@@ -540,20 +540,23 @@ function buildSpeakerEnclosure(src, groupInt, outside) {
   encl.add(grill);
   addDriverDetails(encl, type, w, h, baffleZ);
 
-  // Rigging point on top for line-array elements — the small purple anchor
-  // dot visible in EASE LAL Configurator and EASE Focus above the hang.
+  // Rigging pin on top-back corner of the cabinet (real line-array rigging
+  // lives at the top-back — that's the pivot point around which splay is
+  // applied). Put it at local +Z = back side, slightly inboard from the
+  // corner so the rail threading through it reads cleanly.
   if (type === 'line-array') {
+    const pinZ = d * 0.42;  // near the back face (local +Z)
     const rig = new THREE.Mesh(
       new THREE.SphereGeometry(0.055, 14, 14),
       new THREE.MeshStandardMaterial({ color: 0xc79bff, emissive: 0x4a1a88, roughness: 0.35, metalness: 0.6 }),
     );
-    rig.position.set(0, h / 2 + 0.06, -d * 0.22);
+    rig.position.set(0, h / 2 + 0.06, pinZ);
     encl.add(rig);
     const pin = new THREE.Mesh(
       new THREE.CylinderGeometry(0.014, 0.014, 0.08, 10),
       new THREE.MeshStandardMaterial({ color: 0x989ba2, metalness: 0.85, roughness: 0.25 }),
     );
-    pin.position.set(0, h / 2 + 0.02, -d * 0.22);
+    pin.position.set(0, h / 2 + 0.02, pinZ);
     encl.add(pin);
   }
 
