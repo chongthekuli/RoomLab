@@ -8,6 +8,7 @@ import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomC
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
+import { loadCharacterRig } from './character-loader.js';
 
 let scene, camera, renderer, controls;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
@@ -41,6 +42,10 @@ let walkMode = false;
 let walkPhase = 0;            // stride phase for leg/arm swing animation
 let tpController = null;
 let tpLastTs = 0;
+// Rigged GLTF character (loaded async). When present, the avatar swaps to
+// this rig and procedural animation layers are bypassed in favor of the
+// AnimationMixer's idle/walk/run crossfade.
+let riggedAvatar = null;
 // 6-layer procedural animation state — driven by controller onAnimate().
 const animState = {
   jumpPhase: 'grounded',      // 'anticipate' | 'airborne' | 'landing' | 'grounded'
@@ -702,6 +707,30 @@ function initWalkthrough() {
     }
   };
   tpController.onAnimate = applyAvatarAnimation;
+
+  // --- Async GLTF character load (graceful fallback) ---
+  // Kick off loading assets/models/hitman.glb in the background. If it
+  // resolves, swap the procedural primitive avatar for the rigged GLTF +
+  // AnimationMixer. If it 404s / fails to parse / is blocked by CORS,
+  // keep the procedural avatar — scene stays playable either way.
+  loadCharacterRig('assets/models/hitman.glb')
+    .then(rig => {
+      riggedAvatar = rig;
+      // Remove procedural avatar from scene, add rigged root at the same
+      // position / rotation so swap is visually seamless.
+      rig.root.position.copy(avatar.position);
+      rig.root.rotation.copy(avatar.rotation);
+      scene.remove(avatar);
+      scene.add(rig.root);
+      tpController.character = rig.root;
+      shadowsNeedRefresh = true;
+      // eslint-disable-next-line no-console
+      console.info('[walkthrough] loaded rigged character:', rig.clipNames);
+    })
+    .catch(err => {
+      // eslint-disable-next-line no-console
+      console.info('[walkthrough] hitman.glb not available, using procedural avatar:', err?.message ?? err);
+    });
 }
 
 function placeAvatarAtDefault() {
@@ -761,6 +790,19 @@ export function setWalkthroughMode(on) {
 // position/yaw/vy/collision/camera only).
 function applyAvatarAnimation(ctx) {
   const dt = ctx.dt;
+
+  // --- Rigged GLTF fast path ---
+  // When assets/models/hitman.glb loaded successfully, let the AnimationMixer
+  // handle all locomotion via crossfades between idle / walk / run clips and
+  // bypass the procedural joint-group pose code (which wouldn't find
+  // avatarParts on a SkinnedMesh anyway).
+  if (riggedAvatar) {
+    riggedAvatar.setState({ moving: ctx.moving, running: ctx.running });
+    riggedAvatar.update(dt);
+    // Still update the SPL readout overlay at the avatar's ear height.
+    if (walkSplOverlay) updateWalkSplReadout(ctx, AVATAR_EYE_HEIGHT);
+    return;
+  }
 
   // --- Run factor (smoothed) ---
   animState.runFactor += ((ctx.running ? 1 : 0) - animState.runFactor) * (1 - Math.exp(-dt / 0.15));
@@ -900,41 +942,43 @@ function applyAvatarAnimation(ctx) {
   }
 
   // --- Live SPL readout ---
-  if (walkSplOverlay) {
-    // Convert Three.js → state frame for SPL: (x, z) → (x, y); y → z.
-    const px = tpController.pos.x;
-    const py = tpController.pos.z;
-    const pz = tpController.pos.y + eyeHeight;
-    const listenerPos = { x: px, y: py, z: pz };
-    const flat = expandSources(state.sources);
-    const spl = flat.length > 0
-      ? computeMultiSourceSPL({
-          sources: flat,
-          getSpeakerDef: url => getCachedLoudspeaker(url),
-          listenerPos, room: state.room,
-          ...currentPhysicsOpts(state.room),
-        })
-      : NaN;
-    walkSplOverlay.querySelector('.walk-spl-big').textContent = isFinite(spl) ? spl.toFixed(1) + ' dB' : '— dB';
-    const earVal = walkSplOverlay.querySelector('[data-f="ear"]');
-    const poseVal = walkSplOverlay.querySelector('[data-f="pose"]');
-    const xyzVal = walkSplOverlay.querySelector('[data-f="xyz"]');
-    if (earVal) earVal.textContent = eyeHeight.toFixed(2) + ' m';
-    if (poseVal) {
-      poseVal.textContent = !ctx.grounded
-        ? 'jumping'
-        : (animState.crouchF > 0.5 ? 'crouching' : 'standing');
-    }
-    if (xyzVal) xyzVal.textContent = px.toFixed(1) + ' · ' + py.toFixed(1) + ' · ' + pz.toFixed(2);
-  }
+  if (walkSplOverlay) updateWalkSplReadout(ctx, eyeHeight);
 
-  // Reset key — controller has its own R handling? No, we need to listen.
+  // Reset key — edge-trigger would be cleaner but this is idempotent.
   if (ctx.keys.has('KeyR')) {
-    // Edge-triggered would be better; for now just re-place on each R press
-    // (idempotent if held).
     placeAvatarAtDefault();
     ctx.keys.delete('KeyR');
   }
+}
+
+// SPL readout overlay — shared between the rigged and procedural paths.
+// Samples the current multi-source SPL at the avatar's ear and updates the
+// top-right HTML overlay with the dB value, ear height, pose, and XYZ.
+function updateWalkSplReadout(ctx, eyeHeight) {
+  const px = tpController.pos.x;
+  const py = tpController.pos.z;
+  const pz = tpController.pos.y + eyeHeight;
+  const listenerPos = { x: px, y: py, z: pz };
+  const flat = expandSources(state.sources);
+  const spl = flat.length > 0
+    ? computeMultiSourceSPL({
+        sources: flat,
+        getSpeakerDef: url => getCachedLoudspeaker(url),
+        listenerPos, room: state.room,
+        ...currentPhysicsOpts(state.room),
+      })
+    : NaN;
+  walkSplOverlay.querySelector('.walk-spl-big').textContent = isFinite(spl) ? spl.toFixed(1) + ' dB' : '— dB';
+  const earVal = walkSplOverlay.querySelector('[data-f="ear"]');
+  const poseVal = walkSplOverlay.querySelector('[data-f="pose"]');
+  const xyzVal = walkSplOverlay.querySelector('[data-f="xyz"]');
+  if (earVal) earVal.textContent = eyeHeight.toFixed(2) + ' m';
+  if (poseVal) {
+    poseVal.textContent = !ctx.grounded
+      ? 'jumping'
+      : (animState.crouchF > 0.5 ? 'crouching' : 'standing');
+  }
+  if (xyzVal) xyzVal.textContent = px.toFixed(1) + ' · ' + py.toFixed(1) + ' · ' + pz.toFixed(2);
 }
 
 function disposeGroup(g) {
