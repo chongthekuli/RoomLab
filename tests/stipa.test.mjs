@@ -109,5 +109,42 @@ expect(reverb.sti < dry.sti - 0.1, 'Large reverberant hall gives LOWER STI than 
 expect(dry.ti_per_band.length === 7,  'Dry room returns 7 per-band TI values');
 expect(dry.ti_per_band.every(v => v >= 0 && v <= 1), 'All TI values in [0, 1]');
 
+// --- Spatial variation (D/R-aware MTF regression) ---
+// Previously, STIPA gave the same STI at every listener in a reverb-
+// dominated room because MTF = m_rev × (D+R)/(D+R+N) applied the reverb
+// smearing to the direct field too. With the D/R-aware form
+// MTF = (D + R·m_rev)/(D+R+N), close-to-source listeners see MTF ≈ 1 and
+// far listeners see MTF ≈ m_rev — producing real spatial variation.
+{
+  const arenaSpeaker = {
+    acoustic: { sensitivity_db_1w_1m: 100, directivity_index_db: 10 },
+    directivity: { azimuth_deg: [-180, 0, 180], elevation_deg: [-90, 0, 90], attenuation_db: {} },
+  };
+  const arenaSrc = {
+    position: { x: 30, y: 30, z: 15 }, aim: { yaw: 0, pitch: -45, roll: 0 },
+    power_watts: 500, modelUrl: 'arena.json',
+  };
+  const bigRoom = {
+    shape: 'rectangular', width_m: 60, height_m: 20, depth_m: 60,
+    ceiling_type: 'flat',
+    surfaces: { floor: 'wood-floor', ceiling: 'panel', walls: 'carpet',
+                wall_north: 'carpet', wall_south: 'carpet',
+                wall_east: 'carpet', wall_west: 'carpet' },
+  };
+  const closeStiR = computeSTIPA({
+    sources: [arenaSrc], getSpeakerDef: () => arenaSpeaker,
+    listenerPos: { x: 30, y: 30, z: 1.6 },   // 13 m from source (near)
+    room: bigRoom, materials: reflectiveMaterials,
+  });
+  const farStiR = computeSTIPA({
+    sources: [arenaSrc], getSpeakerDef: () => arenaSpeaker,
+    listenerPos: { x: 58, y: 58, z: 1.6 },   // ~45 m diagonal (far)
+    room: bigRoom, materials: reflectiveMaterials,
+  });
+  console.log(`    Near STI=${closeStiR.sti.toFixed(3)}  Far STI=${farStiR.sti.toFixed(3)}`);
+  expect(closeStiR.sti > farStiR.sti + 0.05,
+    'Close-to-source STI > far-reverb STI (spatial D/R variation present)');
+}
+
 if (failed > 0) { console.log(`\n${failed} STIPA test(s) FAILED`); process.exit(1); }
 console.log('\nAll STIPA tests passed.');

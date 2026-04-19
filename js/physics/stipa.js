@@ -100,16 +100,30 @@ export function precomputeSTIPAContext({ sources, getSpeakerDef, room, materials
 // Sample STIPA at one listener position using the precomputed context.
 // Returns just the STI scalar (not the full per-band breakdown) since this
 // is called per-vertex at 10k+ samples for heatmap generation.
+//
+// MTF formulation — direct-to-reverb aware (Bradley 1986, ISO 9921, EASE /
+// CATT / ODEON convention):
+//     MTF(f_m) = (D + R·m_rev) / (D + R + N)
+// where D = direct power sum, R = reverb power sum, N = noise power, and
+// m_rev = 1/sqrt(1 + (2π·f_m·T/13.8)²). The direct field is impulse-like
+// and preserves modulation (MTF=1 on the direct component); only the
+// reverb component is smeared by m_rev. Previously the code computed
+//     MTF = m_rev · (D+R)/(D+R+N)
+// which applied the reverb smear to the direct field too — that collapses
+// to a spatially uniform STI whenever D+R >> N, because the reverb term
+// and noise term are both position-independent in a diffuse-field model.
+// With the D/R-aware form, positions near sources (D >> R) get MTF ≈ 1
+// and STI rises, while reverb-dominated positions still get MTF ≈ m_rev.
 export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC_35_PER_BAND) {
   const { rt60_per_band, roomR_per_band, sourceCtx } = stipaCtx;
   let sti = 0;
+  let prevTi = 0;
 
-  // TI per band — inlined to avoid array allocations in the hot path.
   for (let k = 0; k < STIPA_BANDS.length; k++) {
     const fhz = STIPA_BANDS[k];
     const R = roomR_per_band[k];
-    // Total-field signal SPL at this band.
-    let pressureSum = 0;
+    let directPower = 0;
+    let reverbPower = 0;
     for (let i = 0; i < sourceCtx.length; i++) {
       const s = sourceCtx[i];
       const { r, azimuth_deg, elevation_deg } = localAngles(
@@ -119,23 +133,24 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
       const attn = interpolateAttenuation(s.def.directivity, azimuth_deg, elevation_deg, fhz);
       const airAbs = airAbsorptionAt(fhz) * clampedR;
       const direct_db = s.sens + s.p10 - 20 * Math.log10(clampedR) + attn - airAbs;
-      if (isFinite(direct_db)) pressureSum += Math.pow(10, direct_db / 10);
+      if (isFinite(direct_db)) directPower += Math.pow(10, direct_db / 10);
       if (R > 0) {
         const L_rev = s.L_w + 10 * Math.log10(4 / R);
-        pressureSum += Math.pow(10, L_rev / 10);
+        reverbPower += Math.pow(10, L_rev / 10);
       }
     }
-    const signal = pressureSum > 0 ? 10 * Math.log10(pressureSum) : -Infinity;
     const ambient_k = ambientNoise_per_band[k] ?? 40;
-    const snr_db = isFinite(signal) ? (signal - ambient_k) : -30;
+    const noisePower = Math.pow(10, ambient_k / 10);
+    const denom = directPower + reverbPower + noisePower;
     const T = rt60_per_band[k];
 
     // MTF mean over the 2 STIPA modulation frequencies for this band.
     const fms = STIPA_MOD_FREQS[fhz];
-    const noiseTerm = 1 / (1 + Math.pow(10, -snr_db / 10));
-    const rt1 = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fms[0] * T / 13.8, 2));
-    const rt2 = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fms[1] * T / 13.8, 2));
-    const m_mean = ((rt1 + rt2) / 2) * noiseTerm;
+    const mRev1 = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fms[0] * T / 13.8, 2));
+    const mRev2 = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fms[1] * T / 13.8, 2));
+    const mtf1 = (directPower + reverbPower * mRev1) / denom;
+    const mtf2 = (directPower + reverbPower * mRev2) / denom;
+    const m_mean = (mtf1 + mtf2) / 2;
     const m_safe = m_mean < 0.0001 ? 0.0001 : (m_mean > 0.9999 ? 0.9999 : m_mean);
     const snr_app_raw = 10 * Math.log10(m_safe / (1 - m_safe));
     const snr_app = snr_app_raw < -SNR_APP_CLAMP ? -SNR_APP_CLAMP :
@@ -143,12 +158,10 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
     const ti_k = (snr_app + SNR_APP_CLAMP) / (2 * SNR_APP_CLAMP);
 
     sti += STI_ALPHA_MALE[k] * ti_k;
-    // Cache TI for the redundancy correction on next iteration.
-    sourceCtx._prevTi = sourceCtx._prevTi ?? 0;
     if (k > 0 && k - 1 < STI_BETA_MALE.length) {
-      sti -= STI_BETA_MALE[k - 1] * Math.sqrt(Math.max(0, sourceCtx._prevTi * ti_k));
+      sti -= STI_BETA_MALE[k - 1] * Math.sqrt(Math.max(0, prevTi * ti_k));
     }
-    sourceCtx._prevTi = ti_k;
+    prevTi = ti_k;
   }
   return sti < 0 ? 0 : (sti > 1 ? 1 : sti);
 }
@@ -159,11 +172,12 @@ export function computeSTIPA({
   temperature_C = 20,
 }) {
   const ctx = precomputeSTIPAContext({ sources, getSpeakerDef, room, materials, zones });
-  // Re-run the detailed version for the full return shape (single-listener use).
   const rt60_per_band = ctx.rt60_per_band;
   const roomR_per_band = ctx.roomR_per_band;
-  const signalSPL_per_band = STIPA_BANDS.map((fhz, k) => {
-    let pressureSum = 0;
+  // Split direct and reverb power per band so MTF can apply the reverb-
+  // smearing m_rev ONLY to the reverb component (Bradley 1986 / ISO 9921).
+  const dr_per_band = STIPA_BANDS.map((fhz, k) => {
+    let D = 0, R_p = 0;
     const R = roomR_per_band[k];
     for (const s of ctx.sourceCtx) {
       const { r, azimuth_deg, elevation_deg } = localAngles(
@@ -173,24 +187,29 @@ export function computeSTIPA({
       const attn = interpolateAttenuation(s.def.directivity, azimuth_deg, elevation_deg, fhz);
       const airAbs = airAbsorptionAt(fhz) * clampedR;
       const direct_db = s.sens + s.p10 - 20 * Math.log10(clampedR) + attn - airAbs;
-      if (isFinite(direct_db)) pressureSum += Math.pow(10, direct_db / 10);
+      if (isFinite(direct_db)) D += Math.pow(10, direct_db / 10);
       if (R > 0) {
         const L_rev = s.L_w + 10 * Math.log10(4 / R);
-        pressureSum += Math.pow(10, L_rev / 10);
+        R_p += Math.pow(10, L_rev / 10);
       }
     }
-    return pressureSum > 0 ? 10 * Math.log10(pressureSum) : -Infinity;
+    return { D, R: R_p };
+  });
+  const signalSPL_per_band = dr_per_band.map(({ D, R }) => {
+    const total = D + R;
+    return total > 0 ? 10 * Math.log10(total) : -Infinity;
   });
   const ti_per_band = STIPA_BANDS.map((fhz, k) => {
     const T = rt60_per_band[k];
-    const signal = signalSPL_per_band[k];
+    const { D, R } = dr_per_band[k];
     const ambient_k = ambientNoise_per_band[k] ?? 40;
-    const snr_db = isFinite(signal) ? (signal - ambient_k) : -30;
+    const noisePower = Math.pow(10, ambient_k / 10);
+    const denom = D + R + noisePower;
+    if (denom <= 0) return 0;
     const modFreqs = STIPA_MOD_FREQS[fhz];
     const mtf = modFreqs.map(fm => {
-      const reverbTerm = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fm * T / 13.8, 2));
-      const noiseTerm  = 1 / (1 + Math.pow(10, -snr_db / 10));
-      return reverbTerm * noiseTerm;
+      const mRev = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fm * T / 13.8, 2));
+      return (D + R * mRev) / denom;
     });
     const m_mean = (mtf[0] + mtf[1]) / 2;
     const m_safe = Math.max(0.0001, Math.min(0.9999, m_mean));
