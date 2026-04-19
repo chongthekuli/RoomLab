@@ -22,7 +22,10 @@ let avatarParts = null;       // { armL, armR, legL, legR, body }
 let activeCamera = null;
 let walkMode = false;
 let walkPhase = 0;            // stride phase for leg/arm swing animation
-const walkState = { x: 0, y: 0, heading: 0 };
+// walkState.z tracks the terrain height beneath the avatar's feet — lerped
+// toward the target elevation each frame so steps animate smoothly instead
+// of snapping.
+const walkState = { x: 0, y: 0, z: 0, heading: 0 };
 const walkKeys = new Set();
 let walkLastTs = 0;
 const WALK_SPEED_MS    = 2.8;
@@ -30,6 +33,12 @@ const WALK_TURN_RADS   = 1.6;
 const AVATAR_EYE_HEIGHT = 1.68;
 const CAM_BACK_M = 3.2;
 const CAM_UP_M   = 2.1;
+// Stair-climbing bounds. 0.5 m up matches Unity's default character controller
+// Step Offset; 1.0 m down is a reasonable drop threshold before a tier edge
+// reads as "too high to step off" and blocks movement.
+const STEP_UP_MAX_M   = 0.5;
+const STEP_DOWN_MAX_M = 1.0;
+const STEP_LERP_SPEED_MS = 2.5;  // vertical m/s when transitioning tiers
 
 // Flip all heatmap visibility in one place. Structural geometry (bowls, walls,
 // floor, outlines) stays visible. Kept as a named export so the UI toolbar
@@ -318,6 +327,71 @@ function buildSuitedManAvatar() {
   return root;
 }
 
+// -------------------------------------------------------------------------
+// Walkable terrain height lookup: given (x, y) in state coords, return the
+// concrete z-level under that point so the avatar can climb the stadium
+// tiers instead of clipping through them. Handles court floor (0), lower
+// bowl stepped tiers, concourse plateau, upper bowl stepped tiers, and
+// vomitory tunnels. Non-stadium presets fall through to z=0 (flat floor).
+// -------------------------------------------------------------------------
+function terrainHeightAt(x, y, room) {
+  if (!room) return 0;
+  const s = room.stadiumStructure;
+  if (!s) return 0;
+  const dx = x - s.cx;
+  const dy = y - s.cy;
+  const r = Math.hypot(dx, dy);
+
+  // Vomitory passages stay at z=0 regardless of radius — they're tunnels
+  // that pass under the concourse from the court to the outside ring.
+  const vom = s.vomitories;
+  if (vom?.centerAnglesDeg?.length && vom.widthDeg > 0) {
+    const halfWidth = (vom.widthDeg / 2) * Math.PI / 180;
+    const angle = Math.atan2(dy, dx);
+    for (const cDeg of vom.centerAnglesDeg) {
+      let diff = angle - (cDeg * Math.PI / 180);
+      while (diff >  Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      if (Math.abs(diff) < halfWidth) return 0;
+    }
+  }
+
+  // Inside lower bowl inner radius → open court floor.
+  const lb = s.lowerBowl;
+  if (lb && r < lb.r_in) return 0;
+  // Lower bowl stepped tiers
+  if (lb && r >= lb.r_in && r < lb.r_out) {
+    const tread = (lb.r_out - lb.r_in) / lb.tier_heights_m.length;
+    const t = Math.min(lb.tier_heights_m.length - 1, Math.floor((r - lb.r_in) / tread));
+    return lb.tier_heights_m[t];
+  }
+  // Concourse flat ring
+  const co = s.concourse;
+  if (co && r >= co.r_in && r < co.r_out) return co.elevation_m;
+  // Upper bowl stepped tiers
+  const ub = s.upperBowl;
+  if (ub && r >= ub.r_in && r < ub.r_out) {
+    const tread = (ub.r_out - ub.r_in) / ub.tier_heights_m.length;
+    const t = Math.min(ub.tier_heights_m.length - 1, Math.floor((r - ub.r_in) / tread));
+    return ub.tier_heights_m[t];
+  }
+  // Service corridor / back wall area — treat as ground level.
+  return 0;
+}
+
+// Movement guard: check wall collision AND step-height limits. Allows small
+// auto-climbs (up to STEP_UP_MAX_M), prevents teleporting onto tall tiers or
+// falling dangerously far.
+function canWalkTo(newX, newY, currentZ, room) {
+  // Wall check — must remain inside the room polygon at eye height.
+  if (!isInsideRoom3D({ x: newX, y: newY, z: currentZ + AVATAR_EYE_HEIGHT }, room)) return false;
+  const targetZ = terrainHeightAt(newX, newY, room);
+  const dz = targetZ - currentZ;
+  if (dz >  STEP_UP_MAX_M)   return false;  // too tall to step up
+  if (dz < -STEP_DOWN_MAX_M) return false;  // too far to drop
+  return true;
+}
+
 function initWalkthrough() {
   const w = Math.max(container.clientWidth, 1);
   const h = Math.max(container.clientHeight, 1);
@@ -362,7 +436,10 @@ function placeAvatarAtDefault() {
   const cy = (room.depth_m ?? 20) / 2;
   walkState.x = cx;
   walkState.y = cy;
+  walkState.z = terrainHeightAt(cx, cy, room);
+  walkState.camZ = walkState.z;   // camera-y tracking state
   walkState.heading = 0;
+  walkPhase = 0;
 }
 
 // Public toggle called by main.js when the user clicks the Walkthrough tab.
@@ -411,13 +488,15 @@ function tickWalkthrough(now) {
     const step = WALK_SPEED_MS * (running ? 2.0 : 1.0) * dt;
     const newX = walkState.x + mx * step;
     const newY = walkState.y + my * step;
-    // Wall collision: check eye-height point. Slide along walls by trying
-    // axis-separately when the diagonal move would leave the room.
-    if (isInsideRoom3D({ x: newX, y: newY, z: AVATAR_EYE_HEIGHT }, state.room)) {
+    // Collision + stair check. canWalkTo combines the wall test with the
+    // step-up/step-down limits so the avatar can climb tier steps (≤0.5 m)
+    // but not teleport onto tall walls or plunge off the upper bowl.
+    // Slide along whichever axis is still clear if the diagonal is blocked.
+    if (canWalkTo(newX, newY, walkState.z, state.room)) {
       walkState.x = newX; walkState.y = newY;
-    } else if (isInsideRoom3D({ x: newX, y: walkState.y, z: AVATAR_EYE_HEIGHT }, state.room)) {
+    } else if (canWalkTo(newX, walkState.y, walkState.z, state.room)) {
       walkState.x = newX;
-    } else if (isInsideRoom3D({ x: walkState.x, y: newY, z: AVATAR_EYE_HEIGHT }, state.room)) {
+    } else if (canWalkTo(walkState.x, newY, walkState.z, state.room)) {
       walkState.y = newY;
     }
   }
@@ -454,15 +533,29 @@ function tickWalkthrough(now) {
   // Small vertical bob — body dips slightly on each footfall.
   const bob = isMoving ? Math.abs(Math.cos(walkPhase)) * 0.025 : 0;
 
-  // Sync avatar transform (state → Three.js: x→x, z→y, y→z).
-  avatar.position.set(walkState.x, bob, walkState.y);
+  // Stair climbing: sample terrain height at current (x,y) and ease the
+  // avatar's feet toward that target. Exponential lerp with tau ≈ 0.15 s
+  // reads as "body plants smoothly on the new tier" instead of snapping
+  // (per Unity CharacterController / Sebastian Lague kinematic controller
+  // conventions). The camera uses a SEPARATE slower lerp (tau ≈ 0.35 s) so
+  // multi-tier climbs don't jolt the view — this is the classic Cinemachine
+  // YDamping pattern and the biggest motion-sickness mitigation.
+  const targetZ = terrainHeightAt(walkState.x, walkState.y, state.room);
+  const tauBody = 0.15;
+  const tauCam  = 0.35;
+  walkState.z   += (targetZ - walkState.z)   * (1 - Math.exp(-dt / tauBody));
+  walkState.camZ += (walkState.z - walkState.camZ) * (1 - Math.exp(-dt / tauCam));
+
+  // Sync avatar transform (state → Three.js: x→x, z→y, y→z). Feet sit on
+  // walkState.z; bob adds the small per-footfall dip.
+  avatar.position.set(walkState.x, walkState.z + bob, walkState.y);
   avatar.rotation.y = walkState.heading;
 
-  // 3rd-person camera: behind avatar (opposite of facing direction).
+  // 3rd-person camera: behind avatar using the independently-smoothed camZ.
   const camX = walkState.x - fx * CAM_BACK_M;
   const camZ = walkState.y - fy * CAM_BACK_M;
-  walkCamera.position.set(camX, CAM_UP_M, camZ);
-  walkCamera.lookAt(walkState.x, AVATAR_EYE_HEIGHT, walkState.y);
+  walkCamera.position.set(camX, walkState.camZ + CAM_UP_M, camZ);
+  walkCamera.lookAt(walkState.x, walkState.camZ + AVATAR_EYE_HEIGHT, walkState.y);
 }
 
 function disposeGroup(g) {
