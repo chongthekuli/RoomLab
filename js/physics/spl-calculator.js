@@ -1,5 +1,6 @@
 import { interpolateAttenuation } from './loudspeaker.js';
 import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea } from './room-shape.js';
+import { computeRT60Band } from './rt60.js';
 
 export const WALL_TRANSMISSION_LOSS_DB = 30;
 
@@ -48,27 +49,20 @@ export function airAbsorptionAt(freq_hz) {
 
 // Hopkins-Stryker room constant R = S · α̅ / (1 − α̅) at the given octave
 // band. Used to combine direct SPL with the diffuse reverberant field.
-// Needs the materials database so it can resolve each surface's absorption.
+// Delegates to the RT60 module's surface enumeration (roomSurfaces) so the
+// absorption budget matches what the Results panel shows for RT60. Non-
+// standard bands (e.g. 1000 Hz halfway between 500 and 2000 in the
+// materials JSON) interpolate linearly to the nearest band.
 export function computeRoomConstant(room, materials, freq_hz) {
-  const bandIdx = materials?.frequency_bands_hz?.indexOf(freq_hz) ?? -1;
+  if (!materials?.frequency_bands_hz) return 0;
+  const bandIdx = materials.frequency_bands_hz.indexOf(freq_hz);
   if (bandIdx < 0) return 0;
-  const surf = room.surfaces ?? {};
-  const alphaFor = id => materials.byId[id]?.absorption[bandIdx] ?? 0;
-  const wallId = surf.walls ?? surf.wall_north ?? 'gypsum-board';
-  const S_walls   = wallPerimeter(room) * (room.height_m ?? 0);
-  const S_floor   = baseArea(room);
-  const S_ceiling = ceilingArea(room);
-  const S_total = S_walls + S_floor + S_ceiling;
-  if (S_total <= 0) return 0;
-  // Weighted mean absorption.
-  const alpha_bar = (
-    S_walls * alphaFor(wallId) +
-    S_floor * alphaFor(surf.floor) +
-    S_ceiling * alphaFor(surf.ceiling)
-  ) / S_total;
-  // Numerically-safe cap. Fully-absorbing room → no reverberant field.
+  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx });
+  const S = rt.totalArea_m2;
+  const alpha_bar = rt.meanAbsorption;
+  if (S <= 0) return 0;
   if (alpha_bar >= 0.995) return 1e9;
-  return S_total * alpha_bar / (1 - alpha_bar);
+  return S * alpha_bar / (1 - alpha_bar);
 }
 
 function pathCrossesBoundary(speakerState, listenerPos, room) {
@@ -168,13 +162,20 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
   return { r, azimuth_deg, elevation_deg, attn_db: attn, spl_db, through_wall };
 }
 
-// Approximate sound power level from on-axis sensitivity + input power.
-// Assumes roughly spherical radiation — the +11 dB offset converts 1-m SPL
-// on-axis to PWL for an omnidirectional source; directional sources with
-// Q > 1 will over-estimate L_w slightly, under-estimating reverberant lift.
+// Sound power level from on-axis sensitivity + input power + directivity.
+// For an omnidirectional source: L_w = L_p(1m, 1W) + 11 dB. For a directional
+// source with directivity index DI: L_w = L_p(on-axis, 1m, 1W) + 11 − DI,
+// because the on-axis sensitivity OVERSTATES the total radiated power by DI
+// dB (most energy is concentrated in the main beam).
+//
+// Without this correction, a line-array element with DI ≈ 12 dB was
+// contributing ~12 dB more reverberant energy than it physically could —
+// making the diffuse field dominate and masking per-source power changes
+// (the exact symptom the user reported).
 function approxSoundPowerLevel(speakerDef, power_watts) {
   const sens = speakerDef.acoustic.sensitivity_db_1w_1m;
-  return sens + 10 * Math.log10(power_watts) + 11;
+  const DI = speakerDef.acoustic.directivity_index_db ?? 3;  // default mild Q
+  return sens + 10 * Math.log10(power_watts) + 11 - DI;
 }
 
 /**

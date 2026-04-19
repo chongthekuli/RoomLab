@@ -17,7 +17,8 @@
   "acoustic": {
     "sensitivity_db_1w_1m": 97.0,
     "frequency_range_hz": [55, 18000],
-    "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000]
+    "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000],
+    "directivity_index_db": 6.0
   },
   "placement": {
     "position_m": { "x": 0.0, "y": 2.5, "z": 0.0 },

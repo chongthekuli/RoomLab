@@ -414,5 +414,45 @@ import { airAbsorptionAt, AIR_ABSORPTION_DB_PER_M, computeRoomConstant, speedOfS
   if (Math.abs(cohLift - 6) >= 0.1) failed++;
 }
 
+// --- Power-change visibility with reverberant field -----------------------
+// User-reported bug: dropping one source from 500 W to 5 W produced almost
+// no change in audience SPL because the reverberant field was dominating
+// (inflated by ignoring each source's directivity index in L_w). With DI
+// correction, a ≥10 dB change at a listener in the source's on-axis path
+// must be visible.
+{
+  const directiveSpeaker = {
+    acoustic: { sensitivity_db_1w_1m: 100, directivity_index_db: 12 },
+    directivity: speaker.directivity,
+  };
+  const materials = {
+    frequency_bands_hz: [125, 250, 500, 1000, 2000, 4000],
+    byId: {
+      'gypsum-board': { absorption: [0.1, 0.08, 0.05, 0.04, 0.07, 0.09] },
+      'wood-floor':   { absorption: [0.15, 0.11, 0.10, 0.07, 0.06, 0.07] },
+    },
+  };
+  const room = {
+    shape: 'rectangular', width_m: 60, height_m: 12, depth_m: 60,
+    ceiling_type: 'flat',
+    surfaces: { floor: 'wood-floor', ceiling: 'gypsum-board', walls: 'gypsum-board',
+                wall_north: 'gypsum-board', wall_south: 'gypsum-board',
+                wall_east: 'gypsum-board', wall_west: 'gypsum-board' },
+  };
+  const R = computeRoomConstant(room, materials, 1000);
+  const listener = { x: 30, y: 45, z: 2 };  // on-axis of srcHigh
+  const srcHigh = { modelUrl: 'la', position: { x: 30, y: 30, z: 10 }, aim: { yaw: 0, pitch: 0 }, power_watts: 500 };
+  const srcLow  = { modelUrl: 'la', position: { x: 30, y: 30, z: 10 }, aim: { yaw: 0, pitch: 0 }, power_watts: 5 };
+  const getDef = () => directiveSpeaker;
+  const splHigh = computeMultiSourceSPL({ sources: [srcHigh], getSpeakerDef: getDef, listenerPos: listener, room, roomConstantR: R });
+  const splLow  = computeMultiSourceSPL({ sources: [srcLow],  getSpeakerDef: getDef, listenerPos: listener, room, roomConstantR: R });
+  const diff = splHigh - splLow;
+  // 500 W → 5 W is 100× power = -20 dB on direct. With reverb the diffuse
+  // term also drops 20 dB, so total should drop ~20 dB (plus or minus a
+  // small non-linearity where one term dominates).
+  console.log(`${diff > 10 ? 'PASS' : 'FAIL'}  100× power change visible at on-axis listener (splHigh−splLow = ${diff.toFixed(1)} dB, need > 10)`);
+  if (diff <= 10) failed++;
+}
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');
