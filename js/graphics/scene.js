@@ -74,7 +74,7 @@ export async function mount3DViewport({ materials }) {
   rebuildHeatmap();
   animate();
 
-  on('room:changed', () => { rebuildRoom(false); rebuildZones(); rebuildHeatmap(); });
+  on('room:changed', () => { rebuildRoom(false); rebuildZones(); rebuildHeatmap(); rebuildAimLines(); });
   on('source:changed', () => { rebuildSources(); rebuildZones(); rebuildHeatmap(); });
   on('source:model_changed', () => { rebuildSources(); rebuildZones(); rebuildHeatmap(); });
   on('listener:changed', () => { rebuildListeners(); rebuildHeatmap(); });
@@ -1100,12 +1100,6 @@ function rebuildSources() { shadowsNeedRefresh = true;
   } else {
     disposeGroup(sourcesGroup);
   }
-  if (!aimLinesGroup) {
-    aimLinesGroup = new THREE.Group();
-    scene.add(aimLinesGroup);
-  } else {
-    disposeGroup(aimLinesGroup);
-  }
 
   // Visual rigging for each line-array hang: a top frame bar + a thick
   // backbone rail that threads through every element's rigging pin so the
@@ -1219,40 +1213,79 @@ function rebuildSources() { shadowsNeedRefresh = true;
       sourcesGroup.add(ring);
     }
 
-    // Directivity indicator — thin line from the speaker along its aim
-    // vector, extending 8 m. Coloured by speaker group if set. Lives in
-    // aimLinesGroup so the toolbar toggle flips all of them at once.
-    {
-      const aimLen = 8;
-      const yr = src.aim.yaw * Math.PI / 180;
-      const pr = src.aim.pitch * Math.PI / 180;
-      // aim in state coords: (sin y · cos p, cos y · cos p, sin p).
-      const ax = Math.sin(yr) * Math.cos(pr);
-      const ay = Math.cos(yr) * Math.cos(pr);
-      const az = Math.sin(pr);
-      // state → Three.js (x, z, y).
-      const start = new THREE.Vector3(src.position.x, src.position.z, src.position.y);
-      const end = new THREE.Vector3(
-        src.position.x + aimLen * ax,
-        src.position.z + aimLen * az,
-        src.position.y + aimLen * ay,
-      );
-      const lineGeo = new THREE.BufferGeometry().setFromPoints([start, end]);
-      const lineMat = new THREE.LineBasicMaterial({
-        color: groupInt ?? 0xffcc5a,
-        transparent: true,
-        opacity: 0.85,
-      });
-      aimLinesGroup.add(new THREE.Line(lineGeo, lineMat));
-      // Arrowhead — small cone at the end of the aim line, oriented along aim.
-      const head = new THREE.Mesh(
-        new THREE.ConeGeometry(0.18, 0.5, 10),
-        new THREE.MeshBasicMaterial({ color: groupInt ?? 0xffcc5a, transparent: true, opacity: 0.9 }),
-      );
-      head.position.copy(end);
-      head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(ax, az, ay).normalize());
-      aimLinesGroup.add(head);
+  }
+
+  rebuildAimLines();
+}
+
+// Raycaster used for aim-line termination. Allocated once so per-element
+// aim-line construction stays cheap.
+const _aimRaycaster = new THREE.Raycaster();
+
+// Builds the aim-line indicators: for every speaker element, cast a ray
+// from its acoustic center along its aim vector and terminate the line at
+// the first hit with room geometry (walls, floor, dome, bowl concrete).
+// Lines extend up to 120 m if nothing is in the path.
+function rebuildAimLines() {
+  if (!aimLinesGroup) {
+    aimLinesGroup = new THREE.Group();
+    scene.add(aimLinesGroup);
+  } else {
+    disposeGroup(aimLinesGroup);
+  }
+  if (!roomGroup) return;
+  const MAX_AIM_LEN = 120;
+
+  for (const src of expandSources(state.sources)) {
+    const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
+    const colour = groupHex ? parseInt(groupHex.slice(1), 16) : 0xffcc5a;
+
+    const yr = src.aim.yaw * Math.PI / 180;
+    const pr = src.aim.pitch * Math.PI / 180;
+    // aim in state coords: (sin y · cos p, cos y · cos p, sin p).
+    const ax = Math.sin(yr) * Math.cos(pr);
+    const ay = Math.cos(yr) * Math.cos(pr);
+    const az = Math.sin(pr);
+    // state → Three.js: x→x, z→y (height), y→z (depth).
+    const originWorld = new THREE.Vector3(src.position.x, src.position.z, src.position.y);
+    const dirWorld = new THREE.Vector3(ax, az, ay).normalize();
+
+    _aimRaycaster.set(originWorld, dirWorld);
+    _aimRaycaster.far = MAX_AIM_LEN;
+    const hits = _aimRaycaster.intersectObject(roomGroup, true);
+    // First valid hit (skip heatmap layers inside roomGroup if any).
+    let dist = MAX_AIM_LEN;
+    for (const h of hits) {
+      const tag = h.object.userData?.tag ?? '';
+      if (tag.startsWith('heatmap_')) continue;
+      dist = h.distance;
+      break;
     }
+
+    const end = originWorld.clone().addScaledVector(dirWorld, dist);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([originWorld, end]);
+    const lineMat = new THREE.LineBasicMaterial({
+      color: colour, transparent: true, opacity: 0.9,
+    });
+    aimLinesGroup.add(new THREE.Line(lineGeo, lineMat));
+
+    // Arrowhead at the hit point, oriented along the aim direction.
+    const head = new THREE.Mesh(
+      new THREE.ConeGeometry(0.22, 0.6, 12),
+      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.95 }),
+    );
+    head.position.copy(end).addScaledVector(dirWorld, -0.3);  // offset back so tip sits on the hit
+    head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirWorld);
+    aimLinesGroup.add(head);
+
+    // Small dot at the impact point — makes it crystal clear what each
+    // speaker is aimed at.
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 12, 10),
+      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.95 }),
+    );
+    dot.position.copy(end);
+    aimLinesGroup.add(dot);
   }
 
   aimLinesGroup.visible = !!state.display.showAimLines;
