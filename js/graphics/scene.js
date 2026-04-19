@@ -147,26 +147,61 @@ export async function mount3DViewport({ materials }) {
   if (!container) return;
 
   initScene();
+
+  // RAF-coalesced rebuild dispatcher — Martina audit #4. When the user drags
+  // a zone-occupancy slider, the `input` event fires on every pixel change
+  // and the naive `on('room:changed', …)` handler used to run rebuildRoom
+  // + rebuildZones + rebuildHeatmap synchronously on each tick. For the
+  // 48-zone arena preset that's 2.4 M SPL samples per drag step → UI stall.
+  // Collapsing to one rebuild per animation frame keeps the slider feel
+  // live AND avoids the freeze.
+  let _pendingRebuild = null;   // bitfield of pending rebuild tasks
+  let _rebuildRAF = 0;
+  const REBUILD_ROOM = 1 << 0;
+  const REBUILD_SOURCES = 1 << 1;
+  const REBUILD_LISTENERS = 1 << 2;
+  const REBUILD_ZONES = 1 << 3;
+  const REBUILD_HEATMAP = 1 << 4;
+  const REBUILD_AIM = 1 << 5;
+  const REBUILD_ROOM_FULL = 1 << 6;
+  const queueRebuild = (flags) => {
+    _pendingRebuild = (_pendingRebuild ?? 0) | flags;
+    if (_rebuildRAF) return;
+    _rebuildRAF = requestAnimationFrame(() => {
+      const f = _pendingRebuild ?? 0;
+      _pendingRebuild = null;
+      _rebuildRAF = 0;
+      if (f & REBUILD_ROOM_FULL) rebuildRoom(true);
+      else if (f & REBUILD_ROOM) rebuildRoom(false);
+      if (f & REBUILD_SOURCES) rebuildSources();
+      if (f & REBUILD_LISTENERS) rebuildListeners();
+      if (f & REBUILD_ZONES) rebuildZones();
+      if (f & REBUILD_HEATMAP) rebuildHeatmap();
+      if (f & REBUILD_AIM) rebuildAimLines();
+    });
+  };
+
+  // Register event subscriptions BEFORE the first paint — Martina audit #8.
+  // If they sit after the rebuilds, a preset-click that lands between
+  // boot's Promise.all(loadLoudspeaker…) and mount3DViewport completing
+  // emits scene:reset into the void and the 3D view shows stale geometry.
+  on('room:changed', () => queueRebuild(REBUILD_ROOM | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_AIM));
+  on('source:changed', () => queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP));
+  on('source:model_changed', () => queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP));
+  on('listener:changed', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
+  on('listener:selected', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
+  on('scene:reset', () => queueRebuild(
+    REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP
+  ));
+
+  // Initial paint: fire the rebuilds synchronously (no user-drag coalescing
+  // needed on boot; they run once and we want the viewport ready).
   rebuildRoom(true);
   rebuildSources();
   rebuildListeners();
   rebuildZones();
   rebuildHeatmap();
   animate();
-
-  on('room:changed', () => { rebuildRoom(false); rebuildZones(); rebuildHeatmap(); rebuildAimLines(); });
-  on('source:changed', () => { rebuildSources(); rebuildZones(); rebuildHeatmap(); });
-  on('source:model_changed', () => { rebuildSources(); rebuildZones(); rebuildHeatmap(); });
-  on('listener:changed', () => { rebuildListeners(); rebuildHeatmap(); });
-  on('listener:selected', () => { rebuildListeners(); rebuildHeatmap(); });
-  // Preset swap replaces the entire scene; rebuild everything.
-  on('scene:reset', () => {
-    rebuildRoom(false);
-    rebuildSources();
-    rebuildListeners();
-    rebuildZones();
-    rebuildHeatmap();
-  });
 
   window.addEventListener('resize', onResize);
   document.addEventListener('viewport:tab-changed', e => {
@@ -688,6 +723,21 @@ function placeAvatarAtDefault() {
 
 // Public toggle called by main.js when the user clicks the Walkthrough tab.
 export function setWalkthroughMode(on) {
+  // Martina audit #20 — if mount3DViewport threw during init, walkCamera
+  // / tpController / avatar won't exist, and the user's tab click would
+  // silently put us in an inconsistent state. Guard + surface the error.
+  if (on && (!walkCamera || !tpController || !avatar)) {
+    console.warn('[scene] walkthrough unavailable — 3D viewport failed to mount');
+    const v3 = document.getElementById('view-3d');
+    if (v3 && !v3.querySelector('.walk-unavailable')) {
+      const banner = document.createElement('div');
+      banner.className = 'walk-unavailable viewport-loading';
+      banner.textContent = 'Walkthrough unavailable — the 3D viewport did not mount.';
+      v3.appendChild(banner);
+    }
+    walkMode = false;
+    return;
+  }
   walkMode = !!on;
   if (walkMode) {
     placeAvatarAtDefault();
@@ -695,18 +745,20 @@ export function setWalkthroughMode(on) {
     avatar.scale.set(1, 1, 1);
     if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
     if (avatarParts?.spine) avatarParts.spine.rotation.set(0, 0, 0);
-    controls.enabled = false;
+    if (controls) controls.enabled = false;
     activeCamera = walkCamera;
     tpController.enable();
     walkHint?.classList.remove('hidden');
     walkSplOverlay?.classList.remove('hidden');
     tpLastTs = performance.now();
   } else {
-    avatar.visible = false;
-    avatar.scale.set(1, 1, 1);
-    if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
-    if (avatarParts?.spine) avatarParts.spine.rotation.set(0, 0, 0);
-    controls.enabled = true;
+    if (avatar) {
+      avatar.visible = false;
+      avatar.scale.set(1, 1, 1);
+      if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
+      if (avatarParts?.spine) avatarParts.spine.rotation.set(0, 0, 0);
+    }
+    if (controls) controls.enabled = true;
     activeCamera = camera;
     tpController?.disable();
     walkHint?.classList.add('hidden');

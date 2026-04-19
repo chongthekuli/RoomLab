@@ -85,6 +85,17 @@ export class ThirdPersonController {
     this._bobRunAmp  = 0.045;   // m — pronounced
     this._pitchJolt = 0;        // radians, decays each frame
     this._pitchJoltTau = 0.22;  // s
+
+    // --- Pre-allocated scratch vectors — Martina audit #3. ---------------
+    // At 60 Hz the walkthrough update path was creating 6 fresh Vector3s
+    // per frame: _canMoveTo (2), _groundSnap (2), camera-collision (2).
+    // Over a 6-second walk that's ~2,200 throwaway vectors → GC hitches.
+    // Reuse a handful of instance-level scratch buffers instead.
+    this._scratchDxz      = new THREE.Vector3();
+    this._scratchFrom     = new THREE.Vector3();
+    this._scratchDown     = new THREE.Vector3(0, -1, 0);
+    this._scratchHead     = new THREE.Vector3();
+    this._scratchToCam    = new THREE.Vector3();
     this.cameraEyeHeight = 1.4;       // where the camera "looks" relative to feet
 
     // --- Input ------------------------------------------------------------
@@ -222,21 +233,20 @@ export class ThirdPersonController {
   }
 
   _canMoveTo(newX, newZ) {
-    const dxz = new THREE.Vector3(newX - this.pos.x, 0, newZ - this.pos.z);
+    const dxz = this._scratchDxz.set(newX - this.pos.x, 0, newZ - this.pos.z);
     const dist = dxz.length();
     if (dist < 1e-6) return true;
     dxz.normalize();
     // Cast from chest height so we don't hit floors / short steps.
-    const from = new THREE.Vector3(this.pos.x, this.pos.y + this.characterHeight * 0.55, this.pos.z);
+    const from = this._scratchFrom.set(this.pos.x, this.pos.y + this.characterHeight * 0.55, this.pos.z);
     this.raycaster.set(from, dxz);
     this.raycaster.far = dist + this.characterRadius;
     return this._structuralHits(this.raycaster).length === 0;
   }
 
   _groundSnap() {
-    const from = new THREE.Vector3(this.pos.x, this.pos.y + this.characterHeight, this.pos.z);
-    const dir = new THREE.Vector3(0, -1, 0);
-    this.raycaster.set(from, dir);
+    const from = this._scratchFrom.set(this.pos.x, this.pos.y + this.characterHeight, this.pos.z);
+    this.raycaster.set(from, this._scratchDown);
     this.raycaster.far = this.characterHeight + 3;
     const hits = this._structuralHits(this.raycaster);
     if (hits.length === 0) { this.grounded = false; return; }
@@ -317,8 +327,8 @@ export class ThirdPersonController {
     // short of the hit so the camera never clips through walls or
     // ceilings. Viktor audit item #4 — the "refuse to ship" finding.
     const headY = this.pos.y + this.cameraEyeHeight;
-    const head = new THREE.Vector3(this.pos.x, headY, this.pos.z);
-    const toCam = new THREE.Vector3().subVectors(this.idealOffset, head);
+    const head = this._scratchHead.set(this.pos.x, headY, this.pos.z);
+    const toCam = this._scratchToCam.subVectors(this.idealOffset, head);
     const wantDist = toCam.length();
     if (wantDist > 1e-3) {
       toCam.divideScalar(wantDist);

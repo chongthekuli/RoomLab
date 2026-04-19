@@ -66,14 +66,17 @@ function render() {
   listRoot.innerHTML = state.listeners.map((lst) => {
     const isSelected = lst.id === state.selectedListenerId;
     const earH = earHeightFor(lst);
+    const id = escapeAttr(lst.id);
+    const label = escapeHtml(lst.label);
+    const labelAttr = escapeAttr(lst.label);
     return `
-      <div class="listener-card ${isSelected ? 'selected' : ''}" data-listener-id="${lst.id}">
+      <div class="listener-card ${isSelected ? 'selected' : ''}" data-listener-id="${id}">
         <div class="source-header">
-          <span>${lst.label}</span>
-          <button class="btn-remove" data-remove-id="${lst.id}" title="Remove" aria-label="Remove ${lst.label}">×</button>
+          <span>${label}</span>
+          <button class="btn-remove" data-remove-id="${id}" title="Remove" aria-label="Remove ${labelAttr}">×</button>
         </div>
         <div class="field-group">
-          <label>Label <input type="text" data-f="label" value="${lst.label}" /></label>
+          <label>Label <input type="text" data-f="label" value="${labelAttr}" /></label>
         </div>
         <div class="source-row triplet">
           <label>X <input type="number" data-f="x" value="${lst.position.x.toFixed(2)}" step="0.1" /><span class="unit">m</span></label>
@@ -83,8 +86,8 @@ function render() {
         <div class="field-group">
           <label>Posture
             <select data-f="posture">
-              ${Object.entries(POSTURE_LABELS).map(([k, label]) =>
-                `<option value="${k}" ${k === lst.posture ? 'selected' : ''}>${label}</option>`
+              ${Object.entries(POSTURE_LABELS).map(([k, pl]) =>
+                `<option value="${escapeAttr(k)}" ${k === lst.posture ? 'selected' : ''}>${escapeHtml(pl)}</option>`
               ).join('')}
             </select>
           </label>
@@ -96,7 +99,7 @@ function render() {
         ` : `
           <div class="listener-derived">Ear height: <strong>${earH.toFixed(2)} m</strong></div>
         `}
-        <button class="btn-select ${isSelected ? 'active' : ''}" data-select-id="${lst.id}">${isSelected ? '● Selected' : '○ Select'}</button>
+        <button class="btn-select ${isSelected ? 'active' : ''}" data-select-id="${id}">${isSelected ? '● Selected' : '○ Select'}</button>
       </div>
     `;
   }).join('');
@@ -145,3 +148,8 @@ function updateListener(id, field, value) {
   if (field === 'posture' && prevPosture !== value) render();
   emit('listener:changed');
 }
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }

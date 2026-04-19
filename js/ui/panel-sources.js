@@ -105,10 +105,11 @@ function render() {
 function renderSpeakerCard(src, i) {
   const grp = groupById(src.groupId);
   const groupBadge = grp
-    ? `<span class="group-badge" style="background:${grp.color}">${grp.id}</span>`
+    ? `<span class="group-badge" style="background:${escapeAttr(grp.color)}">${escapeHtml(grp.id)}</span>`
     : '';
+  const grpBorder = grp ? `style="border-left: 4px solid ${escapeAttr(grp.color)}"` : '';
   return `
-    <div class="source-card" data-source-idx="${i}" ${grp ? `style="border-left: 4px solid ${grp.color}"` : ''}>
+    <div class="source-card" data-source-idx="${i}" ${grpBorder}>
       <div class="source-header">
         <span>Speaker ${i + 1} ${groupBadge}</span>
         <button class="btn-remove" data-remove-idx="${i}" title="Remove this speaker" aria-label="Remove speaker ${i + 1}">×</button>
@@ -116,13 +117,13 @@ function renderSpeakerCard(src, i) {
       <div class="field-group">
         <label>Model
           <select data-f="model">
-            ${catalogRef.map(c => `<option value="${c.url}" ${c.url === src.modelUrl ? 'selected' : ''}>${c.label}</option>`).join('')}
+            ${catalogRef.map(c => `<option value="${escapeAttr(c.url)}" ${c.url === src.modelUrl ? 'selected' : ''}>${escapeHtml(c.label)}</option>`).join('')}
           </select>
         </label>
         <label>Group
           <select data-f="groupId">
             <option value="">— None —</option>
-            ${SPEAKER_GROUPS.map(g => `<option value="${g.id}" ${g.id === src.groupId ? 'selected' : ''}>${g.label}</option>`).join('')}
+            ${SPEAKER_GROUPS.map(g => `<option value="${escapeAttr(g.id)}" ${g.id === src.groupId ? 'selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}
           </select>
         </label>
       </div>
@@ -148,8 +149,9 @@ function renderSpeakerCard(src, i) {
 function renderLineArrayCard(src, i) {
   const grp = groupById(src.groupId);
   const groupBadge = grp
-    ? `<span class="group-badge" style="background:${grp.color}">${grp.id}</span>`
+    ? `<span class="group-badge" style="background:${escapeAttr(grp.color)}">${escapeHtml(grp.id)}</span>`
     : '';
+  const grpBorder = grp ? `style="border-left: 4px solid ${escapeAttr(grp.color)}"` : '';
   const splays = src.splayAnglesDeg || [];
   const elementCount = splays.length + 1;
   const splayStr = splays.map(v => v.toFixed(1)).join(', ');
@@ -161,21 +163,21 @@ function renderLineArrayCard(src, i) {
     perElement.push(`#${k + 2}: ${cum.toFixed(1)}°`);
   }
   return `
-    <div class="source-card line-array-card" data-source-idx="${i}" ${grp ? `style="border-left: 4px solid ${grp.color}"` : ''}>
+    <div class="source-card line-array-card" data-source-idx="${i}" ${grpBorder}>
       <div class="source-header">
-        <span>Line array ${src.id ?? i + 1} ${groupBadge} <span class="sub">${elementCount} elements</span></span>
+        <span>Line array ${escapeHtml(src.id ?? i + 1)} ${groupBadge} <span class="sub">${elementCount} elements</span></span>
         <button class="btn-remove" data-remove-idx="${i}" title="Remove this line array">×</button>
       </div>
       <div class="field-group">
         <label>Model
           <select data-f="model">
-            ${catalogRef.map(c => `<option value="${c.url}" ${c.url === src.modelUrl ? 'selected' : ''}>${c.label}</option>`).join('')}
+            ${catalogRef.map(c => `<option value="${escapeAttr(c.url)}" ${c.url === src.modelUrl ? 'selected' : ''}>${escapeHtml(c.label)}</option>`).join('')}
           </select>
         </label>
         <label>Group
           <select data-f="groupId">
             <option value="">— None —</option>
-            ${SPEAKER_GROUPS.map(g => `<option value="${g.id}" ${g.id === src.groupId ? 'selected' : ''}>${g.label}</option>`).join('')}
+            ${SPEAKER_GROUPS.map(g => `<option value="${escapeAttr(g.id)}" ${g.id === src.groupId ? 'selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}
           </select>
         </label>
       </div>
@@ -271,3 +273,8 @@ function updateLineArray(idx, field, value) {
   }
   emit('source:changed');
 }
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
