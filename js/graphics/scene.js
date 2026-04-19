@@ -138,16 +138,19 @@ function initScene() {
 // avatarParts captures the swinging groups so tickWalkthrough() can drive
 // their rotation.x without walking the scene graph every frame.
 function buildSuitedManAvatar() {
-  // Palette — keep close to "business attire" conventions.
-  const SKIN      = 0xe6b089;
-  const SKIN_SHAD = 0xcc9a78;
-  const SUIT      = 0x1e2634;
-  const SUIT_DARK = 0x0a0f18;
-  const SHIRT     = 0xf5f2ea;
-  const TIE       = 0x8b1e2a;
-  const PANTS     = 0x141a22;
-  const SHOE      = 0x0a0a0a;
-  const HAIR      = 0x1f130a;
+  // Palette — John Wick style: entirely black suit, black shirt, black tie,
+  // pale skin, long dark hair, stubble/beard.
+  const SKIN      = 0xd9b798;   // paler, slightly warm
+  const SKIN_SHAD = 0xb89378;
+  const LIP       = 0x7a4a3a;
+  const SUIT      = 0x0d0e12;   // near-black with faint blue
+  const SUIT_DARK = 0x050609;   // shadow detail
+  const SHIRT     = 0x1a1a1e;   // black button-down visible in the V
+  const TIE       = 0x08080a;
+  const PANTS     = 0x0a0b10;
+  const SHOE      = 0x070707;
+  const HAIR      = 0x1a120a;   // very dark brown
+  const BEARD     = 0x24180e;   // slightly lighter stubble tone
 
   const mat = (color, opts = {}) => new THREE.MeshStandardMaterial({
     color, roughness: opts.r ?? 0.78, metalness: opts.m ?? 0.04,
@@ -164,74 +167,104 @@ function buildSuitedManAvatar() {
 
   // --- Head group -----------------------------------------------------------
   const headG = new THREE.Group();
-  headG.position.set(0, 1.54, 0); // top of neck
-  // Head (oval by y-scale)
-  const head = mesh(new THREE.SphereGeometry(0.11, 24, 20), mat(SKIN, { r: 0.6 }), [0, 0.12, 0]);
-  head.scale.set(0.95, 1.10, 0.92);
+  headG.position.set(0, 1.54, 0);
+
+  // Head — slight oval, pale skin.
+  const head = mesh(new THREE.SphereGeometry(0.11, 24, 20), mat(SKIN, { r: 0.55 }), [0, 0.12, 0]);
+  head.scale.set(0.93, 1.12, 0.9);
   headG.add(head);
-  // Hair cap — volume on top + back
-  const hair = mesh(
-    new THREE.SphereGeometry(0.116, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.55),
-    mat(HAIR, { r: 0.85 }),
-    [0, 0.14, -0.005],
-  );
-  hair.scale.set(0.96, 1.0, 1.0);
-  headG.add(hair);
-  // Back-of-hair to cover the head properly
-  const hairBack = mesh(new THREE.SphereGeometry(0.105, 20, 12), mat(HAIR, { r: 0.85 }), [0, 0.11, -0.025]);
-  hairBack.scale.set(0.95, 0.9, 0.75);
+
+  // --- Hair: long, flowing, parted slightly. Built from 3 shapes:
+  //   1) Top cap — bulk of hair over the skull, parted.
+  //   2) Side/back drape — curtain that wraps behind head down to shoulders.
+  //   3) Front strand suggestions on either side of the face.
+  const hairMat = mat(HAIR, { r: 0.88 });
+  // Top volume — full skull cap slightly expanded.
+  const hairTop = mesh(new THREE.SphereGeometry(0.118, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMat, [0, 0.13, -0.004]);
+  hairTop.scale.set(0.98, 1.0, 1.02);
+  headG.add(hairTop);
+  // Back drape — elongated flattened ellipsoid behind head down to neck/shoulder.
+  const hairBack = mesh(new THREE.SphereGeometry(0.13, 20, 16), hairMat, [0, -0.02, -0.04]);
+  hairBack.scale.set(0.85, 1.8, 0.55);
   headG.add(hairBack);
-  // Ears
-  headG.add(mesh(new THREE.SphereGeometry(0.022, 10, 8), mat(SKIN_SHAD), [-0.10, 0.11, 0]));
-  headG.add(mesh(new THREE.SphereGeometry(0.022, 10, 8), mat(SKIN_SHAD), [ 0.10, 0.11, 0]));
-  // Eyes — white sclera + dark pupil
-  const scleraMat = mat(0xf5f1ea, { r: 0.45 });
-  const pupilMat = mat(0x16232e, { r: 0.4 });
-  const eyeR_s = mesh(new THREE.SphereGeometry(0.017, 12, 10), scleraMat, [ 0.034, 0.125, 0.093]);
-  const eyeL_s = mesh(new THREE.SphereGeometry(0.017, 12, 10), scleraMat, [-0.034, 0.125, 0.093]);
-  const eyeR_p = mesh(new THREE.SphereGeometry(0.009, 10, 8), pupilMat, [ 0.034, 0.125, 0.102]);
-  const eyeL_p = mesh(new THREE.SphereGeometry(0.009, 10, 8), pupilMat, [-0.034, 0.125, 0.102]);
-  headG.add(eyeR_s, eyeL_s, eyeR_p, eyeL_p);
-  // Eyebrows
+  // Side locks — thin vertical boxes hanging in front of each ear, chin-length.
+  const lockGeo = new THREE.BoxGeometry(0.028, 0.22, 0.05);
+  const lockR = mesh(lockGeo, hairMat, [ 0.095, 0.00, 0.015]);
+  lockR.rotation.z = -0.05;
+  headG.add(lockR);
+  const lockL = mesh(lockGeo, hairMat, [-0.095, 0.00, 0.015]);
+  lockL.rotation.z = 0.05;
+  headG.add(lockL);
+
+  // Ears (mostly hidden by hair, but present).
+  headG.add(mesh(new THREE.SphereGeometry(0.020, 10, 8), mat(SKIN_SHAD), [-0.105, 0.105, 0]));
+  headG.add(mesh(new THREE.SphereGeometry(0.020, 10, 8), mat(SKIN_SHAD), [ 0.105, 0.105, 0]));
+
+  // --- Eyes — slightly sunken. Sclera + dark pupil + subtle under-eye shadow.
+  const scleraMat = mat(0xefe8dc, { r: 0.45 });
+  const pupilMat  = mat(0x1a2b36, { r: 0.4 });
+  headG.add(mesh(new THREE.SphereGeometry(0.016, 12, 10), scleraMat, [ 0.034, 0.124, 0.091]));
+  headG.add(mesh(new THREE.SphereGeometry(0.016, 12, 10), scleraMat, [-0.034, 0.124, 0.091]));
+  headG.add(mesh(new THREE.SphereGeometry(0.009, 10, 8), pupilMat, [ 0.034, 0.124, 0.100]));
+  headG.add(mesh(new THREE.SphereGeometry(0.009, 10, 8), pupilMat, [-0.034, 0.124, 0.100]));
+
+  // Heavy serious brows (thicker, slight inward slant).
   const browMat = mat(HAIR, { r: 0.8 });
-  const browR = mesh(new THREE.BoxGeometry(0.032, 0.006, 0.01), browMat, [ 0.034, 0.145, 0.095]);
-  const browL = mesh(new THREE.BoxGeometry(0.032, 0.006, 0.01), browMat, [-0.034, 0.145, 0.095]);
+  const browR = mesh(new THREE.BoxGeometry(0.038, 0.009, 0.012), browMat, [ 0.035, 0.148, 0.093]);
+  browR.rotation.z = -0.12;
+  const browL = mesh(new THREE.BoxGeometry(0.038, 0.009, 0.012), browMat, [-0.035, 0.148, 0.093]);
+  browL.rotation.z = 0.12;
   headG.add(browR, browL);
-  // Nose
-  const nose = mesh(new THREE.ConeGeometry(0.013, 0.04, 10), mat(SKIN_SHAD, { r: 0.5 }), [0, 0.10, 0.103]);
+
+  // Nose — cone pointing forward.
+  const nose = mesh(new THREE.ConeGeometry(0.014, 0.045, 10), mat(SKIN_SHAD, { r: 0.55 }), [0, 0.095, 0.105]);
   nose.rotation.x = Math.PI / 2;
   headG.add(nose);
-  // Mouth
-  headG.add(mesh(new THREE.BoxGeometry(0.032, 0.007, 0.005), mat(0x5a2222, { r: 0.6 }), [0, 0.075, 0.098]));
+
+  // --- Beard: stubble covering lower jaw + cheeks + chin + moustache band.
+  const beardMat = mat(BEARD, { r: 0.95 });
+  // Main beard volume: squashed sphere around the chin/lower face
+  const beardMain = mesh(new THREE.SphereGeometry(0.10, 20, 16, 0, Math.PI * 2, Math.PI * 0.42, Math.PI * 0.55), beardMat, [0, 0.095, -0.005]);
+  beardMain.scale.set(1.0, 1.05, 1.05);
+  headG.add(beardMain);
+  // Moustache band — thin horizontal box under the nose.
+  headG.add(mesh(new THREE.BoxGeometry(0.06, 0.012, 0.018), beardMat, [0, 0.072, 0.100]));
+  // Chin beard goatee — small box on the chin point
+  headG.add(mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), beardMat, [0, 0.040, 0.095]));
+
+  // Mouth — subtle line, slightly turned down (serious).
+  headG.add(mesh(new THREE.BoxGeometry(0.030, 0.006, 0.005), mat(LIP, { r: 0.6 }), [0, 0.060, 0.100]));
+
   parts.body.add(headG);
 
   // --- Neck -----------------------------------------------------------------
   parts.body.add(mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.08, 14), mat(SKIN), [0, 1.50, 0]));
 
-  // --- Torso (jacket) + shirt + tie + lapels + buttons ---------------------
-  const jacket = mesh(new THREE.BoxGeometry(0.42, 0.56, 0.26), mat(SUIT, { r: 0.75 }), [0, 1.18, 0]);
+  // --- Torso (black jacket) + black shirt in the V + black tie + lapels -----
+  const jacket = mesh(new THREE.BoxGeometry(0.44, 0.58, 0.26), mat(SUIT, { r: 0.7, m: 0.06 }), [0, 1.17, 0]);
   parts.body.add(jacket);
-  // Shirt triangle in the V
-  parts.body.add(mesh(new THREE.BoxGeometry(0.1, 0.18, 0.012), mat(SHIRT, { r: 0.7 }), [0, 1.40, 0.133]));
-  // Collar (two small angled boxes)
-  const collarL = mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), mat(SHIRT), [-0.05, 1.46, 0.130]);
-  collarL.rotation.z = -0.35;
-  const collarR = mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), mat(SHIRT), [ 0.05, 1.46, 0.130]);
-  collarR.rotation.z = 0.35;
+  // Dark shirt visible under the open jacket — John Wick wears a black
+  // button-down, not a white dress shirt.
+  parts.body.add(mesh(new THREE.BoxGeometry(0.12, 0.22, 0.014), mat(SHIRT, { r: 0.65 }), [0, 1.39, 0.133]));
+  // Shirt collar points (dark).
+  const collarL = mesh(new THREE.BoxGeometry(0.07, 0.045, 0.02), mat(SHIRT, { r: 0.6 }), [-0.05, 1.455, 0.128]);
+  collarL.rotation.z = -0.32;
+  const collarR = mesh(new THREE.BoxGeometry(0.07, 0.045, 0.02), mat(SHIRT, { r: 0.6 }), [ 0.05, 1.455, 0.128]);
+  collarR.rotation.z = 0.32;
   parts.body.add(collarL, collarR);
-  // Tie knot + body
-  parts.body.add(mesh(new THREE.BoxGeometry(0.055, 0.055, 0.018), mat(TIE, { r: 0.55 }), [0, 1.435, 0.138]));
-  parts.body.add(mesh(new THREE.BoxGeometry(0.045, 0.30, 0.018), mat(TIE, { r: 0.55 }), [0, 1.26, 0.138]));
-  // Lapels — thin angled boards on either side of the V
-  const lapelGeo = new THREE.BoxGeometry(0.03, 0.34, 0.025);
-  const lapelL = mesh(lapelGeo, mat(SUIT_DARK, { r: 0.7 }), [-0.08, 1.34, 0.128]);
+  // Black tie — knot + body. Slightly more sheen than the shirt so it reads.
+  parts.body.add(mesh(new THREE.BoxGeometry(0.055, 0.055, 0.018), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.435, 0.141]));
+  parts.body.add(mesh(new THREE.BoxGeometry(0.048, 0.32, 0.018), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.25, 0.141]));
+  // Lapels — angled panels, slightly lighter than suit to catch light.
+  const lapelGeo = new THREE.BoxGeometry(0.03, 0.34, 0.028);
+  const lapelL = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [-0.085, 1.33, 0.128]);
   lapelL.rotation.z = 0.14;
-  const lapelR = mesh(lapelGeo, mat(SUIT_DARK, { r: 0.7 }), [ 0.08, 1.34, 0.128]);
+  const lapelR = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [ 0.085, 1.33, 0.128]);
   lapelR.rotation.z = -0.14;
   parts.body.add(lapelL, lapelR);
-  // Buttons down the front
+  // Buttons — barely visible dark stubs.
   for (let b = 0; b < 3; b++) {
-    parts.body.add(mesh(new THREE.SphereGeometry(0.009, 10, 8), mat(0x111111, { r: 0.35, m: 0.4 }), [0, 1.22 - b * 0.085, 0.133]));
+    parts.body.add(mesh(new THREE.SphereGeometry(0.008, 10, 8), mat(0x050505, { r: 0.3, m: 0.45 }), [0, 1.21 - b * 0.085, 0.135]));
   }
 
   // --- Pelvis (visible band at top of pants) --------------------------------
