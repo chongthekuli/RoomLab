@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
@@ -85,16 +86,35 @@ export async function mount3DViewport({ materials }) {
 
 function initScene() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0e1116);
+  // Deep slate background with a subtle vertical gradient look (dark at top
+  // fading to near-black at the horizon) via a shader-free approach: solid
+  // base color, tone-mapping handles perceptual brightness in the final pass.
+  scene.background = new THREE.Color(0x12151b);
+  // Depth fog so the far end of the arena doesn't pop — fades geometry into
+  // the background at 50-110 m. Matches scene size; keeps the horizon soft.
+  scene.fog = new THREE.Fog(0x12151b, 55, 110);
 
   const w = Math.max(container.clientWidth, 1);
   const h = Math.max(container.clientHeight, 1);
 
-  camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 200);
+  // 38° FOV is the architectural-photography convention — reduces distortion
+  // on the bowl curve and gives a more "cinematic" compression than 45°.
+  camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 300);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // Modern archviz defaults: ACES filmic tone mapping gives cinematic contrast
+  // response (deepens shadows, softens highlights). sRGB output-color-space
+  // matches what every monitor expects. Exposure 1.0 is neutral; +/−0.15
+  // would skew bright/dark. These two lines are the biggest cheap polish win.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // Soft shadow maps — enabled but only sparingly cast (see dir-light setup
+  // below). PCFSoftShadowMap is the middle ground between perf and quality.
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.innerHTML = '';
   container.style.position = 'relative';
   container.appendChild(renderer.domElement);
@@ -119,17 +139,52 @@ function initScene() {
   controls.minDistance = 1;
   controls.maxDistance = 80;
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.55);
-  dir.position.set(5, 12, 7);
-  scene.add(dir);
+  // --- Lighting rig — 3-light archviz setup -----------------------------
+  // Hemisphere gives a subtle sky/ground tint that replaces flat ambient —
+  // slightly warmer up top, cooler below, mimicking daylight bounce.
+  const hemi = new THREE.HemisphereLight(0xbfd0e8, 0x2a2620, 0.4);
+  hemi.position.set(0, 30, 0);
+  scene.add(hemi);
 
-  const grid = new THREE.GridHelper(40, 40, 0x2a2f38, 0x1a1d22);
+  // Key: main directional light from a high front-right angle, slightly warm.
+  // Only this light casts shadows (perf-friendly on arena-scale scenes).
+  const key = new THREE.DirectionalLight(0xfff4e0, 1.15);
+  key.position.set(25, 40, 18);
+  key.castShadow = true;
+  key.shadow.mapSize.width = 2048;
+  key.shadow.mapSize.height = 2048;
+  key.shadow.camera.near = 5;
+  key.shadow.camera.far = 120;
+  key.shadow.camera.left   = -45;
+  key.shadow.camera.right  =  45;
+  key.shadow.camera.top    =  45;
+  key.shadow.camera.bottom = -45;
+  key.shadow.bias = -0.0005;
+  key.shadow.normalBias = 0.02;
+  scene.add(key);
+
+  // Fill: cooler counter-light from opposite side, no shadows, lower intensity.
+  const fill = new THREE.DirectionalLight(0xa8c0d8, 0.35);
+  fill.position.set(-22, 28, -10);
+  scene.add(fill);
+
+  // Rim / ambient lift so dome + bowl back don't fall into pure black.
+  const ambient = new THREE.AmbientLight(0xffffff, 0.22);
+  scene.add(ambient);
+
+  // Procedural image-based lighting via RoomEnvironment — bakes subtle
+  // environment reflections onto every MeshStandardMaterial without
+  // shipping an HDR file. Kills the "matte clay" look on speakers and
+  // concrete without costing runtime performance after the one-time bake.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+  // Subtle floor grid only — no more axes helper (looked like a WIP viewport).
+  const grid = new THREE.GridHelper(60, 30, 0x262b33, 0x1a1d22);
   grid.position.y = -0.01;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.35;
   scene.add(grid);
-
-  const axes = new THREE.AxesHelper(0.5);
-  scene.add(axes);
 
   initWalkthrough();
   activeCamera = camera;
@@ -592,7 +647,7 @@ function makeFloorCeilingShape(room) {
   return shape;
 }
 
-function rebuildRoom(isFirst) {
+function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
   if (!roomGroup) {
     roomGroup = new THREE.Group();
     scene.add(roomGroup);
@@ -1028,7 +1083,7 @@ function buildSpeakerEnclosure(src, groupInt, outside) {
   return encl;
 }
 
-function rebuildSources() {
+function rebuildSources() { shadowsNeedRefresh = true;
   if (!sourcesGroup) {
     sourcesGroup = new THREE.Group();
     scene.add(sourcesGroup);
@@ -1150,7 +1205,7 @@ function rebuildSources() {
   }
 }
 
-function rebuildListeners() {
+function rebuildListeners() { shadowsNeedRefresh = true;
   if (!listenersGroup) {
     listenersGroup = new THREE.Group();
     scene.add(listenersGroup);
@@ -1195,7 +1250,7 @@ function rebuildListeners() {
   }
 }
 
-function rebuildZones() {
+function rebuildZones() { shadowsNeedRefresh = true;
   if (!zonesGroup) {
     zonesGroup = new THREE.Group();
     scene.add(zonesGroup);
@@ -1986,9 +2041,38 @@ function onResize() {
   renderer.setSize(w, h);
 }
 
+// Set shadow-casting flags on every mesh based on its userData tag. Called
+// once per animate() frame when a rebuild flagged shadowsNeedRefresh. Keeps
+// shadows on the heavy architectural geometry (concrete bowl, speakers,
+// listeners) and off transparent/overlay meshes (heatmaps, grid, avatar
+// body that would self-shadow in walkthrough mode).
+let shadowsNeedRefresh = true;
+function applyShadowFlags() {
+  scene.traverse(obj => {
+    if (!obj.isMesh) return;
+    const tag = obj.userData.tag ?? '';
+    const mat = obj.userData.acoustic_material ?? '';
+    // Heatmap layers, avatar, and grid never participate in shadows.
+    if (tag === 'heatmap_layer' || tag === 'walk_avatar') { obj.castShadow = obj.receiveShadow = false; return; }
+    if (tag.startsWith('heatmap_')) { obj.castShadow = obj.receiveShadow = false; return; }
+    // Concrete bowl + tunnel ceilings: cast and receive.
+    if (mat === 'concrete' || tag.startsWith('stadium') || tag.startsWith('tunnel_ceiling')) {
+      obj.castShadow = true;  obj.receiveShadow = true;  return;
+    }
+    // Speaker cabinets + catwalk: cast only.
+    if (mat === 'speaker_cabinet' || tag === 'catwalk_truss') {
+      obj.castShadow = true;  obj.receiveShadow = false; return;
+    }
+    // Everything else in the room shell just receives (floor, walls, dome).
+    obj.castShadow = false;
+    obj.receiveShadow = true;
+  });
+}
+
 function animate(ts) {
   requestAnimationFrame(animate);
   if (!renderer || !scene || !activeCamera) return;
+  if (shadowsNeedRefresh) { applyShadowFlags(); shadowsNeedRefresh = false; }
   if (walkMode) tickWalkthrough(ts || performance.now());
   else if (controls) controls.update();
   renderer.render(scene, activeCamera);

@@ -1,10 +1,50 @@
+/* Dark-slate engineering-tool palette — matches EASE / Odeon / NIRO chrome.
+   The white panels + dark viewport combo in the old palette read as "web app";
+   a unified slate across chrome + viewport reads as "instrument". */
 :root {
-  --bg: #ffffff;
-  --bg-viewport: #0e1116;
-  --fg: #1a1a1a;
-  --muted: #6a6a6a;
-  --border: #e3e3e3;
-  --accent: #2f6feb;
+  /* Background scale, darkest → lightest */
+  --bg:          #1a1d23;   /* app body */
+  --bg-panel:    #20242c;   /* side rails */
+  --bg-elev:     #262b34;   /* cards, inputs, elevated sections */
+  --bg-viewport: #0e1116;   /* 3D canvas background (unchanged) */
+
+  /* Foreground scale */
+  --fg:          #e4e6ea;   /* primary text */
+  --fg-strong:   #ffffff;   /* headings, hero numbers */
+  --muted:       #8a929d;   /* captions, labels */
+  --muted-dim:   #5a616c;   /* disabled, helper text */
+
+  /* Strokes */
+  --border:        #2a2f38;
+  --border-strong: #3a4048;
+
+  /* Accents — one cold/blue primary, plus data-vis chip colors */
+  --accent:       #4aa3ff;
+  --accent-hover: #6ab4ff;
+  --accent-dim:   #1d3a66;
+
+  --data-cyan:  #5ccfe6;
+  --data-amber: #ffb454;
+  --data-green: #a3d977;
+  --data-red:   #ff6b6b;
+
+  /* Geometry */
+  --radius:    3px;
+  --radius-lg: 5px;
+
+  /* Shadows — subtle inset highlight + drop so cards read elevated */
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-pop:  0 4px 14px rgba(0, 0, 0, 0.45);
+
+  /* Spacing scale (4/8/12/16/24) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
 }
 
-body { background: var(--bg); color: var(--fg); }
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
