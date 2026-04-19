@@ -11,6 +11,24 @@ let scene, camera, renderer, controls;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
 let materialsRef, container;
 
+// --- Walkthrough (3rd-person) mode ---------------------------------------
+// A suited-man avatar the user can drive around the actual simulated scene
+// with W/A/S/D + Q/E keys, seeing the venue from human scale. Shares the
+// same Three.js scene as 3D View — only the camera swaps when the user
+// switches tabs, so speakers / heatmaps / bowl structure are all visible
+// from inside the room.
+let walkCamera, avatar, walkHint;
+let activeCamera = null;
+let walkMode = false;
+const walkState = { x: 0, y: 0, heading: 0 }; // state-frame position + yaw
+const walkKeys = new Set();
+let walkLastTs = 0;
+const WALK_SPEED_MS    = 2.8;   // m/s forward/strafe
+const WALK_TURN_RADS   = 1.6;   // rad/s for Q/E turn
+const AVATAR_EYE_HEIGHT = 1.68; // realistic eye height
+const CAM_BACK_M = 3.2;
+const CAM_UP_M   = 2.1;
+
 // Flip all heatmap visibility in one place. Structural geometry (bowls, walls,
 // floor, outlines) stays visible. Kept as a named export so the UI toolbar
 // button and any future API can toggle from outside.
@@ -101,6 +119,203 @@ function initScene() {
 
   const axes = new THREE.AxesHelper(0.5);
   scene.add(axes);
+
+  initWalkthrough();
+  activeCamera = camera;
+}
+
+// Suited-man avatar built from primitives so we stay zero-asset. Head, suit
+// jacket, tie, white shirt collar, sleeves, trouser legs, black shoes.
+// Rooted at y=0 (feet on floor) facing local -Z so a lookAt-style rotation
+// around Y gives correct heading.
+function buildSuitedManAvatar() {
+  const g = new THREE.Group();
+  const mkMesh = (geo, color, { roughness = 0.75, metalness = 0.05 } = {}) =>
+    new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness, metalness }));
+
+  // Head
+  const head = mkMesh(new THREE.SphereGeometry(0.12, 20, 18), 0xf2c29a);
+  head.position.set(0, 1.72, 0);
+  g.add(head);
+  // Hair cap
+  const hair = mkMesh(new THREE.SphereGeometry(0.124, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2.2), 0x2a1c10);
+  hair.position.set(0, 1.72, 0);
+  g.add(hair);
+  // Neck
+  g.add(Object.assign(mkMesh(new THREE.CylinderGeometry(0.05, 0.055, 0.07, 12), 0xe5b48b), { position: new THREE.Vector3(0, 1.6, 0) }));
+
+  // Torso: suit jacket (dark navy) with a small V at the collar for shirt+tie.
+  const torso = mkMesh(new THREE.BoxGeometry(0.42, 0.58, 0.24), 0x1c2433);
+  torso.position.set(0, 1.28, 0);
+  g.add(torso);
+  // White shirt triangle visible in the V of the jacket
+  const shirt = mkMesh(new THREE.BoxGeometry(0.12, 0.22, 0.02), 0xf5f3ee);
+  shirt.position.set(0, 1.45, 0.122);
+  g.add(shirt);
+  // Tie
+  const tie = mkMesh(new THREE.BoxGeometry(0.06, 0.28, 0.02), 0x8b1e2a);
+  tie.position.set(0, 1.38, 0.13);
+  g.add(tie);
+  // Lapel lines (suggestive, thin boxes)
+  const lapelL = mkMesh(new THREE.BoxGeometry(0.03, 0.32, 0.03), 0x10161f);
+  lapelL.position.set(-0.075, 1.42, 0.115);
+  lapelL.rotation.z = 0.15;
+  g.add(lapelL);
+  const lapelR = mkMesh(new THREE.BoxGeometry(0.03, 0.32, 0.03), 0x10161f);
+  lapelR.position.set(0.075, 1.42, 0.115);
+  lapelR.rotation.z = -0.15;
+  g.add(lapelR);
+
+  // Arms: jacket sleeves
+  const armGeo = new THREE.CylinderGeometry(0.065, 0.07, 0.55, 14);
+  const armL = mkMesh(armGeo, 0x1c2433);
+  armL.position.set(-0.26, 1.28, 0);
+  armL.rotation.z = 0.08;
+  g.add(armL);
+  const armR = mkMesh(armGeo, 0x1c2433);
+  armR.position.set(0.26, 1.28, 0);
+  armR.rotation.z = -0.08;
+  g.add(armR);
+  // Hands (skin)
+  g.add(Object.assign(mkMesh(new THREE.SphereGeometry(0.065, 12, 10), 0xe5b48b), { position: new THREE.Vector3(-0.28, 1.0, 0) }));
+  g.add(Object.assign(mkMesh(new THREE.SphereGeometry(0.065, 12, 10), 0xe5b48b), { position: new THREE.Vector3( 0.28, 1.0, 0) }));
+
+  // Legs: dark trousers
+  const legGeo = new THREE.CylinderGeometry(0.09, 0.085, 0.9, 14);
+  const legL = mkMesh(legGeo, 0x12171f);
+  legL.position.set(-0.11, 0.53, 0);
+  g.add(legL);
+  const legR = mkMesh(legGeo, 0x12171f);
+  legR.position.set(0.11, 0.53, 0);
+  g.add(legR);
+
+  // Shoes: polished black
+  const shoeGeo = new THREE.BoxGeometry(0.14, 0.08, 0.28);
+  const shoeL = mkMesh(shoeGeo, 0x0a0a0a, { roughness: 0.3, metalness: 0.2 });
+  shoeL.position.set(-0.11, 0.04, 0.04);
+  g.add(shoeL);
+  const shoeR = mkMesh(shoeGeo, 0x0a0a0a, { roughness: 0.3, metalness: 0.2 });
+  shoeR.position.set(0.11, 0.04, 0.04);
+  g.add(shoeR);
+
+  g.visible = false;
+  g.userData.tag = 'walk_avatar';
+  return g;
+}
+
+function initWalkthrough() {
+  const w = Math.max(container.clientWidth, 1);
+  const h = Math.max(container.clientHeight, 1);
+  walkCamera = new THREE.PerspectiveCamera(60, w / h, 0.05, 300);
+
+  avatar = buildSuitedManAvatar();
+  scene.add(avatar);
+
+  // Control-hint overlay (hidden until walk mode is active).
+  walkHint = document.createElement('div');
+  walkHint.className = 'walk-hint hidden';
+  walkHint.id = 'walk-hint';
+  walkHint.innerHTML = `
+    <strong>Walkthrough</strong>
+    <span>W / A / S / D — walk</span>
+    <span>Q / E — turn left / right</span>
+    <span>↑ ↓ ← → — same as W/A/S/D</span>
+    <span>Shift — run · R — reset position</span>
+  `;
+  container.appendChild(walkHint);
+
+  // Keyboard capture — only active in walk mode. Ignores input focus in
+  // form fields so typing in the Sources panel doesn't drive the avatar.
+  const isFormField = el => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
+  document.addEventListener('keydown', e => {
+    if (!walkMode || isFormField(e.target)) return;
+    walkKeys.add(e.code);
+    if (e.code === 'KeyR') placeAvatarAtDefault();
+    // Prevent page scrolling while walking with arrows.
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ShiftLeft','ShiftRight'].includes(e.code)) {
+      e.preventDefault();
+    }
+  });
+  document.addEventListener('keyup', e => walkKeys.delete(e.code));
+  window.addEventListener('blur', () => walkKeys.clear());
+}
+
+function placeAvatarAtDefault() {
+  const room = state.room;
+  // For arena preset use the court center; everywhere else use room center.
+  const cx = (room.width_m ?? 20) / 2;
+  const cy = (room.depth_m ?? 20) / 2;
+  walkState.x = cx;
+  walkState.y = cy;
+  walkState.heading = 0;
+}
+
+// Public toggle called by main.js when the user clicks the Walkthrough tab.
+export function setWalkthroughMode(on) {
+  walkMode = !!on;
+  if (walkMode) {
+    placeAvatarAtDefault();
+    avatar.visible = true;
+    controls.enabled = false;
+    activeCamera = walkCamera;
+    walkHint?.classList.remove('hidden');
+    walkLastTs = performance.now();
+  } else {
+    avatar.visible = false;
+    controls.enabled = true;
+    activeCamera = camera;
+    walkHint?.classList.add('hidden');
+    walkKeys.clear();
+  }
+  onResize();
+}
+
+// Per-frame: read keys, move avatar with wall collision, sync camera behind.
+function tickWalkthrough(now) {
+  const dt = Math.min(0.1, (now - walkLastTs) / 1000);
+  walkLastTs = now;
+  if (!walkMode) return;
+
+  // Turn
+  if (walkKeys.has('KeyQ') || walkKeys.has('ArrowLeft'))  walkState.heading += WALK_TURN_RADS * dt;
+  if (walkKeys.has('KeyE') || walkKeys.has('ArrowRight')) walkState.heading -= WALK_TURN_RADS * dt;
+
+  // Move vector in state-frame (x=width, y=depth). yaw=0 faces +y.
+  const fx = Math.sin(walkState.heading), fy = Math.cos(walkState.heading);
+  const rx = fy, ry = -fx; // right = forward rotated -90°
+  let mx = 0, my = 0;
+  if (walkKeys.has('KeyW') || walkKeys.has('ArrowUp'))   { mx += fx; my += fy; }
+  if (walkKeys.has('KeyS') || walkKeys.has('ArrowDown')) { mx -= fx; my -= fy; }
+  if (walkKeys.has('KeyA')) { mx -= rx; my -= ry; }
+  if (walkKeys.has('KeyD')) { mx += rx; my += ry; }
+
+  if (mx !== 0 || my !== 0) {
+    const len = Math.hypot(mx, my);
+    mx /= len; my /= len;
+    const running = walkKeys.has('ShiftLeft') || walkKeys.has('ShiftRight');
+    const step = WALK_SPEED_MS * (running ? 2.0 : 1.0) * dt;
+    const newX = walkState.x + mx * step;
+    const newY = walkState.y + my * step;
+    // Wall collision: check eye-height point. Slide along walls by trying
+    // axis-separately when the diagonal move would leave the room.
+    if (isInsideRoom3D({ x: newX, y: newY, z: AVATAR_EYE_HEIGHT }, state.room)) {
+      walkState.x = newX; walkState.y = newY;
+    } else if (isInsideRoom3D({ x: newX, y: walkState.y, z: AVATAR_EYE_HEIGHT }, state.room)) {
+      walkState.x = newX;
+    } else if (isInsideRoom3D({ x: walkState.x, y: newY, z: AVATAR_EYE_HEIGHT }, state.room)) {
+      walkState.y = newY;
+    }
+  }
+
+  // Sync avatar transform (state → Three.js: x→x, z→y, y→z).
+  avatar.position.set(walkState.x, 0, walkState.y);
+  avatar.rotation.y = walkState.heading;
+
+  // 3rd-person camera: behind avatar (opposite of facing direction).
+  const camX = walkState.x - fx * CAM_BACK_M;
+  const camZ = walkState.y - fy * CAM_BACK_M;
+  walkCamera.position.set(camX, CAM_UP_M, camZ);
+  walkCamera.lookAt(walkState.x, AVATAR_EYE_HEIGHT, walkState.y);
 }
 
 function disposeGroup(g) {
@@ -1524,12 +1739,17 @@ function onResize() {
   if (w === 0 || h === 0) return;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (walkCamera) {
+    walkCamera.aspect = w / h;
+    walkCamera.updateProjectionMatrix();
+  }
   renderer.setSize(w, h);
 }
 
-function animate() {
+function animate(ts) {
   requestAnimationFrame(animate);
-  if (!controls || !renderer || !scene || !camera) return;
-  controls.update();
-  renderer.render(scene, camera);
+  if (!renderer || !scene || !activeCamera) return;
+  if (walkMode) tickWalkthrough(ts || performance.now());
+  else if (controls) controls.update();
+  renderer.render(scene, activeCamera);
 }

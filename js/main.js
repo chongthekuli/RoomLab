@@ -7,7 +7,7 @@ import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mount2DViewport } from './graphics/room-2d.js';
-import { mount3DViewport, toggleHeatmaps } from './graphics/scene.js';
+import { mount3DViewport, toggleHeatmaps, setWalkthroughMode } from './graphics/scene.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -16,9 +16,11 @@ function setupTabs() {
     tab.addEventListener('click', () => {
       const target = tab.dataset.view;
       tabs.forEach(t => t.classList.toggle('active', t === tab));
-      views.forEach(v => {
-        v.hidden = v.id !== `view-${target}`;
-      });
+      // Walkthrough shares the 3D viewport container — it just swaps the
+      // camera. Any view other than "walk" exits walkthrough mode.
+      const visibleViewId = target === 'walk' ? 'view-3d' : `view-${target}`;
+      views.forEach(v => { v.hidden = v.id !== visibleViewId; });
+      setWalkthroughMode(target === 'walk');
       document.dispatchEvent(new CustomEvent('viewport:tab-changed', { detail: { view: target } }));
     });
   });
