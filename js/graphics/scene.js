@@ -38,9 +38,23 @@ let walkPhase = 0;            // stride phase for leg/arm swing animation
 // toward the target elevation each frame so steps animate smoothly instead
 // of snapping. jumpOffset + vz add projectile motion on top of terrain;
 // crouchF (0 standing → 1 crouched) scales body + eye height.
+// animState drives 6 procedural motion layers (jump anticipate / airborne
+// apex / landing absorb / crouch / turn-lean / run pump). Each layer
+// contributes to the avatar's pose per frame; the renderer combines them
+// and applies to the knee / elbow / body transforms.
 const walkState = {
   x: 0, y: 0, z: 0, heading: 0,
   camZ: 0, vz: 0, jumpOffset: 0, crouchF: 0,
+  animState: {
+    jumpPhase: 'grounded',   // 'anticipate' | 'airborne' | 'landing' | 'grounded'
+    jumpT: 0,                // progress 0..1 through the current phase
+    impactVel: 0,            // vertical velocity magnitude at touchdown
+    landingAmount: 0,        // 0..1 strength of landing squash
+    prevHeading: 0,          // for angular-velocity derivation
+    yawRate: 0,              // rad/s, smoothed
+    turnLean: 0,             // smoothed body roll
+    runFactor: 0,            // 0..1 walk → run blend
+  },
 };
 let walkSplOverlay = null;
 const walkKeys = new Set();
@@ -478,40 +492,52 @@ function buildSuitedManAvatar() {
   // Belt
   parts.body.add(mesh(new THREE.BoxGeometry(0.405, 0.03, 0.245), mat(0x0a0a0a, { r: 0.3, m: 0.25 }), [0, 0.925, 0]));
 
-  // --- Arm factory — Group pivots at the shoulder ---------------------------
+  // --- Arm factory — nested pivots: shoulder → elbow → (forearm + hand) ----
+  // Bending the elbow is rotation on arm.elbow.rotation.x. The forearm group
+  // is positioned at the elbow joint (y=-0.26 below shoulder), so rotating
+  // it around X swings the forearm downward/backward naturally.
   const makeArm = (sign) => {
     const arm = new THREE.Group();
     arm.position.set(sign * 0.23, 1.42, 0); // shoulder anchor
-    // Shoulder cap sphere for roundness
+    // Shoulder cap + upper arm — attached directly to the arm group so they
+    // rotate with the shoulder pivot but NOT with the elbow.
     arm.add(mesh(new THREE.SphereGeometry(0.085, 14, 12), mat(SUIT, { r: 0.75 }), [0, 0, 0]));
-    // Upper arm — cylinder whose TOP sits at the pivot (centered −0.13 below)
     arm.add(mesh(new THREE.CylinderGeometry(0.063, 0.057, 0.26, 14), mat(SUIT, { r: 0.78 }), [0, -0.13, 0]));
-    // Elbow
-    arm.add(mesh(new THREE.SphereGeometry(0.058, 12, 10), mat(SUIT, { r: 0.75 }), [0, -0.26, 0]));
-    // Forearm
-    arm.add(mesh(new THREE.CylinderGeometry(0.057, 0.048, 0.26, 14), mat(SUIT, { r: 0.8 }), [0, -0.39, 0]));
-    // Hand (skin, slightly flattened)
-    const hand = mesh(new THREE.SphereGeometry(0.055, 12, 10), mat(SKIN, { r: 0.65 }), [0, -0.55, 0]);
+    // Elbow group — anchored at the elbow joint. Upper arm ends at y=-0.26.
+    const elbow = new THREE.Group();
+    elbow.position.set(0, -0.26, 0);
+    arm.add(elbow);
+    // Elbow joint sphere + forearm + hand all live inside the elbow group.
+    elbow.add(mesh(new THREE.SphereGeometry(0.058, 12, 10), mat(SUIT, { r: 0.75 }), [0, 0, 0]));
+    elbow.add(mesh(new THREE.CylinderGeometry(0.057, 0.048, 0.26, 14), mat(SUIT, { r: 0.8 }), [0, -0.13, 0]));
+    const hand = mesh(new THREE.SphereGeometry(0.055, 12, 10), mat(SKIN, { r: 0.65 }), [0, -0.29, 0]);
     hand.scale.set(0.9, 1.15, 0.75);
-    arm.add(hand);
+    elbow.add(hand);
+    arm.userData.elbow = elbow;
     return arm;
   };
   parts.armL = makeArm(-1);
   parts.armR = makeArm( 1);
   root.add(parts.armL, parts.armR);
 
-  // --- Leg factory — Group pivots at the hip --------------------------------
+  // --- Leg factory — nested pivots: hip → knee → (shin + shoe) --------------
+  // Bending the knee is rotation on leg.knee.rotation.x. The shin group sits
+  // at y=-0.42 below the hip, so rotating it around X folds the lower leg
+  // (essential for crouching without the shoe sinking into the floor).
   const makeLeg = (sign) => {
     const leg = new THREE.Group();
     leg.position.set(sign * 0.11, 0.86, 0); // hip anchor
-    // Thigh
+    // Thigh — attached to hip pivot.
     leg.add(mesh(new THREE.CylinderGeometry(0.085, 0.072, 0.42, 14), mat(PANTS), [0, -0.21, 0]));
-    // Knee
-    leg.add(mesh(new THREE.SphereGeometry(0.072, 12, 10), mat(PANTS), [0, -0.42, 0]));
-    // Shin / calf
-    leg.add(mesh(new THREE.CylinderGeometry(0.068, 0.05, 0.40, 14), mat(PANTS), [0, -0.63, 0]));
-    // Shoe — box slightly forward of ankle so toes point ahead
-    leg.add(mesh(new THREE.BoxGeometry(0.13, 0.08, 0.28), mat(SHOE, { r: 0.28, m: 0.3 }), [0, -0.82, 0.05]));
+    // Knee group — pivot at the knee joint. Shin + shoe live inside so they
+    // rotate around the knee when the knee bends.
+    const knee = new THREE.Group();
+    knee.position.set(0, -0.42, 0);
+    leg.add(knee);
+    knee.add(mesh(new THREE.SphereGeometry(0.072, 12, 10), mat(PANTS), [0, 0, 0]));
+    knee.add(mesh(new THREE.CylinderGeometry(0.068, 0.05, 0.40, 14), mat(PANTS), [0, -0.22, 0]));
+    knee.add(mesh(new THREE.BoxGeometry(0.13, 0.08, 0.28), mat(SHOE, { r: 0.28, m: 0.3 }), [0, -0.42, 0.05]));
+    leg.userData.knee = knee;
     return leg;
   };
   parts.legL = makeLeg(-1);
@@ -632,8 +658,11 @@ function initWalkthrough() {
     if (e.code === 'KeyR') placeAvatarAtDefault();
     // Edge-triggered jump: only initiate if the avatar is on the ground
     // (no existing jump in progress) to prevent double-jumping / flying.
-    if (e.code === 'Space' && walkState.jumpOffset < 0.02 && walkState.vz <= 0.01) {
-      walkState.vz = JUMP_VELOCITY_MS;
+    // Sets the anticipation phase; state machine fires the actual impulse
+    // after the 0.10 s wind-up.
+    if (e.code === 'Space' && walkState.animState.jumpPhase === 'grounded') {
+      walkState.animState.jumpPhase = 'anticipate';
+      walkState.animState.jumpT = 0;
     }
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ShiftLeft','ShiftRight','Space','KeyC','ControlLeft','ControlRight'].includes(e.code)) {
       e.preventDefault();
@@ -664,8 +693,16 @@ export function setWalkthroughMode(on) {
     walkState.vz = 0;
     walkState.jumpOffset = 0;
     walkState.crouchF = 0;
+    walkState.animState.jumpPhase = 'grounded';
+    walkState.animState.jumpT = 0;
+    walkState.animState.landingAmount = 0;
+    walkState.animState.turnLean = 0;
+    walkState.animState.runFactor = 0;
+    walkState.animState.yawRate = 0;
+    walkState.animState.prevHeading = walkState.heading;
     avatar.visible = true;
     avatar.scale.set(1, 1, 1);
+    if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
     controls.enabled = false;
     activeCamera = walkCamera;
     walkHint?.classList.remove('hidden');
@@ -674,6 +711,7 @@ export function setWalkthroughMode(on) {
   } else {
     avatar.visible = false;
     avatar.scale.set(1, 1, 1);
+    if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
     controls.enabled = true;
     activeCamera = camera;
     walkHint?.classList.add('hidden');
@@ -722,37 +760,38 @@ function tickWalkthrough(now) {
     }
   }
 
-  // Drive walk cycle. Phase advances when moving; arms & legs swing about
-  // the shoulder/hip pivots. When idle, pose decays back to neutral so the
-  // character isn't frozen mid-stride.
-  const isMoving = (mx !== 0 || my !== 0);
+  // --- Run factor (smoothed) --------------------------------------------
+  const aS = walkState.animState;
   const running = walkKeys.has('ShiftLeft') || walkKeys.has('ShiftRight');
-  const strideHz = running ? 2.4 : 1.7;          // steps per second
-  if (isMoving) {
-    walkPhase += dt * Math.PI * 2 * strideHz;
-  }
-  if (avatarParts) {
-    const legAmp = 0.45, armAmp = 0.35;
-    if (isMoving) {
-      const s = Math.sin(walkPhase);
-      // Legs swing opposite each other. Negative rot.x moves lower leg
-      // toward +Z (avatar-forward).
-      avatarParts.legL.rotation.x = -s * legAmp;
-      avatarParts.legR.rotation.x =  s * legAmp;
-      // Arms counter-swing relative to same-side leg.
-      avatarParts.armL.rotation.x =  s * armAmp;
-      avatarParts.armR.rotation.x = -s * armAmp;
-    } else {
-      // Lerp limbs back to neutral when stopped.
-      const k = 0.82;
-      avatarParts.legL.rotation.x *= k;
-      avatarParts.legR.rotation.x *= k;
-      avatarParts.armL.rotation.x *= k;
-      avatarParts.armR.rotation.x *= k;
-    }
-  }
-  // Small vertical bob — body dips slightly on each footfall.
-  const bob = isMoving ? Math.abs(Math.cos(walkPhase)) * 0.025 : 0;
+  aS.runFactor += ((running ? 1 : 0) - aS.runFactor) * (1 - Math.exp(-dt / 0.15));
+
+  // --- Walk cycle phase — stride frequency blends walk (1.7 Hz) → run (2.6 Hz)
+  const isMoving = (mx !== 0 || my !== 0);
+  const strideHz = 1.7 + aS.runFactor * 0.9;
+  if (isMoving) walkPhase += dt * Math.PI * 2 * strideHz;
+
+  // Arm / leg swing amplitude scales into run (×2.1 arms, ×1.5 legs).
+  const legAmp = 0.45 * (1 + aS.runFactor * 0.5);
+  const armAmp = 0.35 * (1 + aS.runFactor * 1.1);
+  const s_leg = Math.sin(walkPhase);
+  const s_arm = s_leg;
+  const legRotL = isMoving ? -s_leg * legAmp : 0;
+  const legRotR = isMoving ?  s_leg * legAmp : 0;
+  const armRotL = isMoving ?  s_arm * armAmp : 0;
+  const armRotR = isMoving ? -s_arm * armAmp : 0;
+
+  // Vertical bob — 2.5 cm walking, up to 4 cm running, on twice the stride freq.
+  const bobAmp = 0.025 + aS.runFactor * 0.015;
+  const bob = isMoving ? Math.abs(Math.cos(walkPhase)) * bobAmp : 0;
+
+  // --- Turn-lean — body rolls into yaw rate (cinemachine-style). ---------
+  let dh = walkState.heading - aS.prevHeading;
+  while (dh >  Math.PI) dh -= 2 * Math.PI;
+  while (dh < -Math.PI) dh += 2 * Math.PI;
+  aS.yawRate += ((dh / Math.max(dt, 0.001)) - aS.yawRate) * 0.2;
+  aS.prevHeading = walkState.heading;
+  const leanTarget = Math.max(-0.35, Math.min(0.35, -aS.yawRate * 0.18));
+  aS.turnLean += (leanTarget - aS.turnLean) * 0.12;
 
   // Stair climbing: sample terrain height at current (x,y) and ease the
   // avatar's feet toward that target. Body tau ≈ 0.15 s; camera tau ≈ 0.35 s
@@ -764,36 +803,128 @@ function tickWalkthrough(now) {
   walkState.z   += (targetZ - walkState.z)   * (1 - Math.exp(-dt / tauBody));
   walkState.camZ += (walkState.z - walkState.camZ) * (1 - Math.exp(-dt / tauCam));
 
-  // Jump physics — projectile motion on top of the terrain height. Initial
-  // velocity set at keydown; gravity pulls back down each frame. Lands when
-  // jumpOffset falls to 0 and velocity is negative.
-  if (walkState.jumpOffset > 0 || walkState.vz > 0) {
+  // --- Jump state machine (anticipate → airborne → landing → grounded) --
+  // Anticipation (0.10 s pre-squat) reads as weight and wind-up; gravity
+  // governs the airborne arc; landing adds a 0.22 s absorb whose amplitude
+  // scales with impact velocity (higher falls → bigger squash).
+  if (aS.jumpPhase === 'anticipate') {
+    aS.jumpT += dt / 0.10;
+    if (aS.jumpT >= 1) {
+      aS.jumpT = 0;
+      aS.jumpPhase = 'airborne';
+      walkState.vz = JUMP_VELOCITY_MS;    // impulse fires after anticipation
+    }
+  } else if (aS.jumpPhase === 'airborne') {
     walkState.vz -= GRAVITY_MS2 * dt;
     walkState.jumpOffset += walkState.vz * dt;
-    if (walkState.jumpOffset < 0) {
+    aS.jumpT += dt;                        // tracks airtime for blend-in
+    if (walkState.jumpOffset <= 0 && walkState.vz <= 0) {
+      aS.impactVel = Math.abs(walkState.vz);
+      aS.landingAmount = Math.min(1, Math.max(0.3, aS.impactVel / 8));
       walkState.jumpOffset = 0;
       walkState.vz = 0;
+      aS.jumpPhase = 'landing';
+      aS.jumpT = 0;
+    }
+  } else if (aS.jumpPhase === 'landing') {
+    aS.jumpT += dt / 0.22;
+    if (aS.jumpT >= 1) {
+      aS.jumpT = 1;
+      aS.jumpPhase = 'grounded';
+      aS.landingAmount = 0;
     }
   }
-
-  // Crouch — lerp toward target based on held key. C or Ctrl = crouching.
+  // --- Crouch factor (smoothed) -----------------------------------------
   const crouchHeld = walkKeys.has('KeyC') || walkKeys.has('ControlLeft') || walkKeys.has('ControlRight');
   const crouchTarget = crouchHeld ? 1 : 0;
   walkState.crouchF += (crouchTarget - walkState.crouchF) * (1 - Math.exp(-dt / 0.12));
-  const bodyScale = 1 - walkState.crouchF * CROUCH_FACTOR;
+
+  // --- Pose layers — accumulate contributions from each motion layer. ----
+  // baseline
+  let bodyScale = 1;
+  let thighL_rot = legRotL, thighR_rot = legRotR;
+  let kneeL_rot = 0, kneeR_rot = 0;
+  let armL_rot = armRotL, armR_rot = armRotR;
+  let elbowL_rot = 0, elbowR_rot = 0;
+  let torsoTilt = 0;
+  let yExtra = 0;         // extra vertical offset from jump physics layers
+
+  // Layer 4: Crouch — squash + knee fold + torso lean + shoulder pitch.
+  const cF = walkState.crouchF;
+  bodyScale *= (1 - cF * CROUCH_FACTOR);
+  thighL_rot += cF * 0.45; thighR_rot += cF * 0.45;
+  kneeL_rot  += cF * -0.55; kneeR_rot  += cF * -0.55;
+  torsoTilt  += cF * 0.25;
+  armL_rot   += cF * 0.30; armR_rot += cF * 0.30;
+
+  // Layer 6: Run pump — torso tilt forward when running.
+  torsoTilt += aS.runFactor * 0.18;
+
+  // Layer 1: Jump anticipation — ease-in cubic over 0.10 s. Pre-squat body,
+  // knees bend, arms swing back.
+  if (aS.jumpPhase === 'anticipate') {
+    const t = aS.jumpT;
+    const tSm = t * t * (3 - 2 * t);
+    bodyScale *= (1 - 0.18 * tSm);
+    thighL_rot += 0.35 * tSm; thighR_rot += 0.35 * tSm;
+    kneeL_rot  += -0.45 * tSm; kneeR_rot  += -0.45 * tSm;
+    armL_rot   += -0.6 * tSm; armR_rot += -0.6 * tSm;
+    yExtra += -0.09 * tSm;
+  }
+  // Layer 2: Airborne apex — arms up, leg tuck asymmetric (personality).
+  if (aS.jumpPhase === 'airborne') {
+    const blend = Math.min(1, aS.jumpT / 0.08);
+    armL_rot   += 0.9 * blend;
+    armR_rot   += 0.9 * blend;
+    elbowL_rot += -0.3 * blend;
+    elbowR_rot += -0.3 * blend;
+    thighL_rot += (0.5 + 0.15) * blend;
+    thighR_rot += (0.5 - 0.15) * blend;
+    kneeL_rot  += -0.6 * blend;
+    kneeR_rot  += -0.6 * blend;
+    torsoTilt  += 0.12 * blend;
+  }
+  // Layer 3: Landing absorb — peak at t=0.04/0.22≈0.18 then ease out.
+  if (aS.jumpPhase === 'landing') {
+    const t = aS.jumpT, peakT = 0.18;
+    const strength = aS.landingAmount * (t < peakT
+      ? (t / peakT)                                      // ramp in
+      : Math.pow(1 - (t - peakT) / (1 - peakT), 2));     // ease-out quad
+    bodyScale *= (1 - 0.22 * strength);
+    thighL_rot += 0.55 * strength; thighR_rot += 0.55 * strength;
+    kneeL_rot  += -0.65 * strength; kneeR_rot  += -0.65 * strength;
+    torsoTilt  += 0.08 * strength;
+    yExtra += -0.14 * strength;
+  }
+
   const eyeHeight = AVATAR_EYE_HEIGHT * bodyScale;
 
-  // Sync avatar transform. Body Y scale squashes during crouch so the
-  // character visibly dips. Feet sit on walkState.z + jumpOffset.
-  avatar.position.set(walkState.x, walkState.z + walkState.jumpOffset + bob, walkState.y);
+  // --- Apply to avatar parts --------------------------------------------
+  avatar.position.set(walkState.x, walkState.z + walkState.jumpOffset + bob + yExtra, walkState.y);
   avatar.rotation.y = walkState.heading;
   avatar.scale.y = bodyScale;
+  if (avatarParts?.body) avatarParts.body.rotation.set(torsoTilt, 0, aS.turnLean);
+  if (avatarParts?.legL) {
+    avatarParts.legL.rotation.x = thighL_rot;
+    if (avatarParts.legL.userData.knee) avatarParts.legL.userData.knee.rotation.x = kneeL_rot;
+  }
+  if (avatarParts?.legR) {
+    avatarParts.legR.rotation.x = thighR_rot;
+    if (avatarParts.legR.userData.knee) avatarParts.legR.userData.knee.rotation.x = kneeR_rot;
+  }
+  if (avatarParts?.armL) {
+    avatarParts.armL.rotation.x = armL_rot;
+    if (avatarParts.armL.userData.elbow) avatarParts.armL.userData.elbow.rotation.x = elbowL_rot;
+  }
+  if (avatarParts?.armR) {
+    avatarParts.armR.rotation.x = armR_rot;
+    if (avatarParts.armR.userData.elbow) avatarParts.armR.userData.elbow.rotation.x = elbowR_rot;
+  }
 
   // 3rd-person camera — behind avatar using independently-smoothed camZ.
-  // Camera height scales with crouch so view drops when ducking.
   const camX = walkState.x - fx * CAM_BACK_M;
   const camZ = walkState.y - fy * CAM_BACK_M;
-  const camY = walkState.camZ + walkState.jumpOffset + CAM_UP_M * bodyScale;
+  const camY = walkState.camZ + walkState.jumpOffset + yExtra + CAM_UP_M * bodyScale;
   walkCamera.position.set(camX, camY, camZ);
   walkCamera.lookAt(walkState.x, walkState.camZ + walkState.jumpOffset + eyeHeight, walkState.y);
 
