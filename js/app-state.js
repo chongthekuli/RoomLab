@@ -358,9 +358,13 @@ export const state = {
   selectedZoneId: null,
   results: { rt60: null, splGrid: null, zoneGrids: [] },
   display: { showHeatmaps: true, showAimLines: false, showIsobars: true, isobarStep_db: 3 },
-  // Physics model toggles (see spl-calculator.js). Reverberant field is on by
-  // default — it's a critical part of "real room" SPL vs. direct-only.
-  physics: { reverberantField: true, coherent: false, airAbsorption: true, freq_hz: 1000 },
+  // Physics model toggles (see spl-calculator.js). Reverberant field is OFF
+  // by default — the Hopkins-Stryker statistical reverb is spatially uniform,
+  // so when it dominates (high-R reflective venues) it masks per-source
+  // direct-field coverage differences. EASE / Odeon keep the main heatmap
+  // as direct-field and report reverberant/total SPL as statistical numbers.
+  // Users can enable it via the "Reverb field" toolbar toggle.
+  physics: { reverberantField: false, coherent: false, airAbsorption: true, freq_hz: 1000 },
 };
 
 export const DEFAULT_PRESET_KEY = 'auditorium';

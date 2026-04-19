@@ -7,7 +7,7 @@ import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mount2DViewport } from './graphics/room-2d.js';
-import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, setWalkthroughMode } from './graphics/scene.js';
+import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, setWalkthroughMode } from './graphics/scene.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -54,6 +54,14 @@ function setupTabs() {
     probeBtn.addEventListener('click', () => {
       toggleProbe();
       probeBtn.classList.toggle('active');
+    });
+  }
+
+  const reverbBtn = document.getElementById('toggle-reverb');
+  if (reverbBtn) {
+    reverbBtn.addEventListener('click', () => {
+      toggleReverbField();
+      reverbBtn.classList.toggle('active', state.physics.reverberantField);
     });
   }
 }

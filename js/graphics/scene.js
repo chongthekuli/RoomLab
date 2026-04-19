@@ -80,6 +80,20 @@ export function toggleIsobars(force) {
   rebuildZones();
 }
 
+// Reverberant-field toggle. Because the Hopkins-Stryker diffuse model is
+// spatially UNIFORM, turning it on lifts every listener position by the
+// same amount — useful for "total SPL" readouts but it masks coverage
+// differences between speaker groups on the heatmap. Default off so the
+// main visual answers "where does each speaker hit" instead of "what's
+// the statistical total".
+export function toggleReverbField(force) {
+  const next = typeof force === 'boolean' ? force : !state.physics.reverberantField;
+  state.physics.reverberantField = next;
+  // Re-sample every heatmap surface with the new option.
+  rebuildZones();
+  rebuildHeatmap();
+}
+
 // Probe tool toggle — enables hover SPL readout over the 3D viewport.
 export function toggleProbe(force) {
   const next = typeof force === 'boolean' ? force : !probeActive;
