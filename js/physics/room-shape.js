@@ -174,14 +174,17 @@ function polygonArea2D(verts) {
   return Math.abs(a) / 2;
 }
 
-// Wrap roomSurfaces with zone-aware accounting. Zones at floor level (z≈0)
-// carve their area out of the base floor (they replace that patch of the
-// floor acoustically). Elevated zones — e.g. stadium bowl tiers — ADD to
-// the total absorbing surface because the bowl concrete/carpet is real
-// surface nowhere else in the enumeration.
+// Wrap roomSurfaces with zone-aware accounting. Every zone's 2D footprint
+// is subtracted from the base floor regardless of the zone's elevation —
+// because acoustically a sound wave traveling down only ever hits the
+// topmost surface in a given column, and an elevated zone (bowl tier,
+// concourse mezzanine) blocks the floor beneath it. The zone itself is
+// added as a new surface with its own material + occupancy.
 //
-// Without this, the arena preset reported ~16 s RT60 because 900+ m² of
-// carpeted bowl seating wasn't contributing any Sabines to the budget.
+// Previously only ground-level zones (|elev| < 0.1 m) carved the floor,
+// which double-counted stadium bowl footprints: the raked carpet zone was
+// added AND the full wood floor underneath stayed in the Sabine budget.
+// Dr. Chen flagged this in the C2 audit finding.
 export function roomEffectiveSurfaces(room, zones = []) {
   const base = roomSurfaces(room);
   if (!zones || zones.length === 0) return base;
@@ -191,8 +194,7 @@ export function roomEffectiveSurfaces(room, zones = []) {
     if (!z.vertices || z.vertices.length < 3 || !z.material_id) continue;
     const area = polygonArea2D(z.vertices);
     if (area <= 0) continue;
-    const elev = z.elevation_m ?? 0;
-    if (Math.abs(elev) < 0.1) floorCarveOut += area;
+    floorCarveOut += area;
     out.push({
       id: 'zone_' + z.id,
       area_m2: area,

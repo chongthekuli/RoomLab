@@ -359,6 +359,43 @@ import { computeAllBands } from '../js/physics/rt60.js';
   if (dropMid <= 1) failed++;
 }
 
+// --- Elevated zone carves floor (C2 fix, Dr. Chen audit) ------------------
+// An elevated zone's 2D footprint must be subtracted from the base floor —
+// physically, a sound wave traveling down only hits the topmost surface in
+// that column, so the floor below a bowl tier / concourse cannot also be
+// absorbing sound. Before the fix, only zones with |elev|<0.1 m carved the
+// floor; bowl tiers at elev=3.25 m double-counted their footprint (both as
+// wood floor and as raked carpet).
+import { roomEffectiveSurfaces } from '../js/physics/room-shape.js';
+{
+  const room = {
+    shape: 'rectangular', width_m: 10, height_m: 4, depth_m: 10,
+    ceiling_type: 'flat',
+    surfaces: { floor: 'wood', ceiling: 'concrete', walls: 'concrete',
+                wall_north: 'concrete', wall_south: 'concrete',
+                wall_east: 'concrete', wall_west: 'concrete' },
+  };
+  // 6×6 m mezzanine at elev=3 m — covers 36 m² of the 100 m² floor.
+  const zones = [{
+    id: 'mezz', material_id: 'concrete', elevation_m: 3,
+    vertices: [{x:2,y:2},{x:8,y:2},{x:8,y:8},{x:2,y:8}],
+  }];
+  const surfaces = roomEffectiveSurfaces(room, zones);
+  const floor = surfaces.find(s => s.id === 'floor');
+  const zoneS = surfaces.find(s => s.id === 'zone_mezz');
+  const okCarve = Math.abs(floor.area_m2 - 64) < 1e-6;
+  const okZone  = Math.abs(zoneS.area_m2 - 36) < 1e-6;
+  const total = surfaces.filter(s => s.id === 'floor' || s.id === 'zone_mezz')
+                        .reduce((a, s) => a + s.area_m2, 0);
+  const okTotal = Math.abs(total - 100) < 1e-6;  // never more than the raw footprint
+  console.log(`${okCarve ? 'PASS' : 'FAIL'}  Elevated zone carves floor (floor=${floor.area_m2} m², expected 64)`);
+  console.log(`${okZone ? 'PASS' : 'FAIL'}  Zone surface area preserved (${zoneS.area_m2} m², expected 36)`);
+  console.log(`${okTotal ? 'PASS' : 'FAIL'}  Floor + zone area = footprint (${total} m², no double-count)`);
+  if (!okCarve) failed++;
+  if (!okZone)  failed++;
+  if (!okTotal) failed++;
+}
+
 // --- Audience occupancy blending ----------------------------------------
 // Seated audience α (ISO 3382-1) replaces a fraction of seating absorption
 // equal to the occupancy percentage. Empty bowl (occ=0) → carpet α only.
