@@ -142,7 +142,9 @@ function buildSuitedManAvatar() {
   hair.position.set(0, 1.72, 0);
   g.add(hair);
   // Neck
-  g.add(Object.assign(mkMesh(new THREE.CylinderGeometry(0.05, 0.055, 0.07, 12), 0xe5b48b), { position: new THREE.Vector3(0, 1.6, 0) }));
+  const neck = mkMesh(new THREE.CylinderGeometry(0.05, 0.055, 0.07, 12), 0xe5b48b);
+  neck.position.set(0, 1.6, 0);
+  g.add(neck);
 
   // Torso: suit jacket (dark navy) with a small V at the collar for shirt+tie.
   const torso = mkMesh(new THREE.BoxGeometry(0.42, 0.58, 0.24), 0x1c2433);
@@ -177,8 +179,12 @@ function buildSuitedManAvatar() {
   armR.rotation.z = -0.08;
   g.add(armR);
   // Hands (skin)
-  g.add(Object.assign(mkMesh(new THREE.SphereGeometry(0.065, 12, 10), 0xe5b48b), { position: new THREE.Vector3(-0.28, 1.0, 0) }));
-  g.add(Object.assign(mkMesh(new THREE.SphereGeometry(0.065, 12, 10), 0xe5b48b), { position: new THREE.Vector3( 0.28, 1.0, 0) }));
+  const handL = mkMesh(new THREE.SphereGeometry(0.065, 12, 10), 0xe5b48b);
+  handL.position.set(-0.28, 1.0, 0);
+  g.add(handL);
+  const handR = mkMesh(new THREE.SphereGeometry(0.065, 12, 10), 0xe5b48b);
+  handR.position.set(0.28, 1.0, 0);
+  g.add(handR);
 
   // Legs: dark trousers
   const legGeo = new THREE.CylinderGeometry(0.09, 0.085, 0.9, 14);
