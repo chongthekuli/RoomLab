@@ -492,11 +492,13 @@ function buildSpeakerEnclosure(src, groupInt, outside) {
   const dims = speakerCabinetDims(src.modelUrl);
   const { w, h, d, type } = dims;
 
-  // Matte-black cabinet body. Line-array elements get a strong wedge (45%
-  // back-height), conventional cabinets a mild taper (90% back-height).
+  // Matte-black cabinet body. Line-array elements are RECTANGULAR boxes
+  // (stacking flat face-to-face is the point of a line array — the wedge
+  // was confusing the visual). Conventional cabinets get a subtle taper.
   const bodyColor = outside ? 0x6a1a0c : 0x1a1d22;
-  const splayAmount = type === 'line-array' ? 0.55 : 0.10;
-  const bodyGeo = buildWedgeGeometry(w, h, d, splayAmount);
+  const bodyGeo = type === 'line-array'
+    ? new THREE.BoxGeometry(w, h, d)
+    : buildWedgeGeometry(w, h, d, 0.10);
   const body = new THREE.Mesh(
     bodyGeo,
     new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.72, metalness: 0.3 }),
@@ -562,32 +564,76 @@ function rebuildSources() {
     disposeGroup(sourcesGroup);
   }
 
-  // Draw a subtle rigging line per line-array hang so the column of elements
-  // reads as one physical object rather than N disjoint boxes.
+  // Visual rigging for each line-array hang: a top frame bar + a thick
+  // backbone rail that threads through every element's rigging pin so the
+  // column reads as ONE physical hang (not N floating boxes).
   for (const src of state.sources) {
     if (src.kind !== 'line-array') continue;
     const origin = src.origin ?? { x: 0, y: 0, z: 0 };
     const elements = expandSources([src]);
-    const lastRig = elements[elements.length - 1]?.rigPoint ?? origin;
-    // Drop-line from the origin down to the last rig point, tracing the hang.
-    const pts = [];
-    pts.push(new THREE.Vector3(origin.x, origin.z + 0.4, origin.y)); // 0.4 m above for hang point motor
+    const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
+    const groupInt = groupHex ? parseInt(groupHex.slice(1), 16) : null;
+
+    // Top rigging frame bar (the horizontal flying frame in EASE Focus).
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(1.0, 0.12, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x2a2d34, roughness: 0.5, metalness: 0.75 }),
+    );
+    frame.position.set(origin.x, origin.z + 0.5, origin.y);
+    // Rotate flying frame to align with the hang's yaw.
+    frame.rotation.y = -(src.baseYaw_deg ?? 0) * Math.PI / 180;
+    sourcesGroup.add(frame);
+    // Motor chain hoist above the frame
+    const motor = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.4, 10),
+      new THREE.MeshStandardMaterial({ color: 0x888b92, roughness: 0.4, metalness: 0.8 }),
+    );
+    motor.position.set(origin.x, origin.z + 0.8, origin.y);
+    sourcesGroup.add(motor);
+
+    // Thick backbone rail — one visible Tube connecting frame bottom
+    // through every element rig point to the last element's bottom.
+    // Drawn as a short cylinder between each pair of consecutive rig points.
+    const railMat = new THREE.MeshStandardMaterial({
+      color: groupInt ?? 0x444850, roughness: 0.4, metalness: 0.85,
+    });
+    const topPt = new THREE.Vector3(origin.x, origin.z + 0.4, origin.y);
+    const pts = [topPt];
     for (const el of elements) {
       pts.push(new THREE.Vector3(el.rigPoint.x, el.rigPoint.z, el.rigPoint.y));
     }
-    pts.push(new THREE.Vector3(lastRig.x, lastRig.z, lastRig.y));
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: 0x8a8d94 }),
-    );
-    sourcesGroup.add(line);
-    // Motor / hang bar block above origin
-    const motor = new THREE.Mesh(
-      new THREE.BoxGeometry(0.35, 0.18, 0.25),
-      new THREE.MeshStandardMaterial({ color: 0x2a2d34, roughness: 0.7, metalness: 0.5 }),
-    );
-    motor.position.set(origin.x, origin.z + 0.5, origin.y);
-    sourcesGroup.add(motor);
+    // Extend past the last element by half-spacing along the last down-vector
+    // so the rail visually enters the bottom element.
+    const last = elements[elements.length - 1];
+    if (last) {
+      const pRad = last.aim.pitch * Math.PI / 180;
+      const yRad = (src.baseYaw_deg ?? 0) * Math.PI / 180;
+      const sp = src.elementSpacing_m ?? 0.42;
+      const dx = sp * Math.sin(yRad) * Math.sin(pRad);
+      const dy = sp * Math.cos(yRad) * Math.sin(pRad);
+      const dz = -sp * Math.cos(pRad);
+      pts.push(new THREE.Vector3(
+        last.rigPoint.x + dx,
+        last.rigPoint.z + dz,
+        last.rigPoint.y + dy,
+      ));
+    }
+    for (let k = 0; k < pts.length - 1; k++) {
+      const a = pts[k], b = pts[k + 1];
+      const len = a.distanceTo(b);
+      if (len < 0.01) continue;
+      const seg = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.03, len, 6),
+        railMat,
+      );
+      // Cylinder default axis is +Y. Orient from a to b.
+      seg.position.copy(a).addScaledVector(new THREE.Vector3().subVectors(b, a), 0.5);
+      seg.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3().subVectors(b, a).normalize(),
+      );
+      sourcesGroup.add(seg);
+    }
   }
 
   for (const src of expandSources(state.sources)) {

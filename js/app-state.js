@@ -421,14 +421,15 @@ export const PRESETS = {
       // adjacent elements — a classic small-arena center cluster pattern.
       // Each "source" below is a COMPOUND line-array descriptor; the physics
       // and renderer call expandSources() to unpack it into 4 elements.
-      // 4 line-array hangs (cardinal compass) × 4 elements each, default
-      // progressive J-splays [2, 5, 10]. Flown angle −12° puts top element
-      // near horizontal for long throw to upper bowl, lower elements tilt
-      // progressively down for near-field court/lower-bowl coverage.
+      // 4 line-array hangs (cardinal compass) × 6 elements each, default
+      // progressive J-splays [1, 2, 3, 5, 8]. Flown angle −8° puts top
+      // element near horizontal for long throw to upper bowl, lower elements
+      // tilt progressively down. 6 elements × 0.42 m = 2.5 m tall column —
+      // clearly visible as a stacked line array from arena camera distance.
       sources: generateCenterLineArrayCluster({
-        cx, cy, cz: 14, ring_r: 5, hangCount: 4, elementsPerArray: 4,
+        cx, cy, cz: 15, ring_r: 5, hangCount: 4, elementsPerArray: 6,
         modelUrl: SPKLA, power_watts_each: 500,
-        topTilt_deg: -12, elementSpacing_m: 0.42,
+        topTilt_deg: -8, elementSpacing_m: 0.42,
       }),
       listeners: [
         // Positions land inside SE/SW/NW/NE quadrants (not in 10° vomitory gaps at cardinals).
