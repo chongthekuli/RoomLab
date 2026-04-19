@@ -325,6 +325,40 @@ import { expandLineArrayToElements, expandSources } from '../js/app-state.js';
   if (!ok) failed++;
 }
 
+// --- Zone absorption integration ----------------------------------------
+// Arena preset had 16 s RT60 at mid band because the bowl tiers + court
+// zones weren't contributing to the RT60 budget. With zones included the
+// same room drops to ~10 s (still high because empty concrete + carpet
+// seating with no audience, but physically correct).
+import { computeAllBands } from '../js/physics/rt60.js';
+{
+  const room = {
+    shape: 'rectangular', width_m: 10, height_m: 4, depth_m: 10,
+    ceiling_type: 'flat',
+    surfaces: { floor: 'concrete', ceiling: 'concrete', walls: 'concrete',
+                wall_north: 'concrete', wall_south: 'concrete',
+                wall_east: 'concrete', wall_west: 'concrete' },
+  };
+  const mat = {
+    frequency_bands_hz: [125, 250, 500, 1000, 2000, 4000],
+    byId: {
+      concrete: { absorption: [0.01, 0.02, 0.02, 0.02, 0.02, 0.03] },
+      absorber: { absorption: [0.50, 0.70, 0.90, 0.90, 0.85, 0.80] },
+    },
+  };
+  const zones = [{
+    id: 'abs', label: 'Audience patch', material_id: 'absorber',
+    elevation_m: 0.5, vertices: [
+      { x: 2, y: 2 }, { x: 8, y: 2 }, { x: 8, y: 8 }, { x: 2, y: 8 },
+    ],
+  }];
+  const without = computeAllBands({ room, materials: mat });
+  const withZ = computeAllBands({ room, materials: mat, zones });
+  const dropMid = without[3].sabine_s - withZ[3].sabine_s;
+  console.log(`${dropMid > 1 ? 'PASS' : 'FAIL'}  Absorbing zone drops RT60 at 1 kHz (without=${without[3].sabine_s.toFixed(2)}s, with=${withZ[3].sabine_s.toFixed(2)}s)`);
+  if (dropMid <= 1) failed++;
+}
+
 // --- ISO 9613-1 air absorption -------------------------------------------
 import { airAbsorptionAt, AIR_ABSORPTION_DB_PER_M, computeRoomConstant, speedOfSound, DEFAULT_TEMPERATURE_C } from '../js/physics/spl-calculator.js';
 {

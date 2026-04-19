@@ -53,11 +53,11 @@ export function airAbsorptionAt(freq_hz) {
 // absorption budget matches what the Results panel shows for RT60. Non-
 // standard bands (e.g. 1000 Hz halfway between 500 and 2000 in the
 // materials JSON) interpolate linearly to the nearest band.
-export function computeRoomConstant(room, materials, freq_hz) {
+export function computeRoomConstant(room, materials, freq_hz, zones = []) {
   if (!materials?.frequency_bands_hz) return 0;
   const bandIdx = materials.frequency_bands_hz.indexOf(freq_hz);
   if (bandIdx < 0) return 0;
-  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx });
+  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones });
   const S = rt.totalArea_m2;
   const alpha_bar = rt.meanAbsorption;
   if (S <= 0) return 0;

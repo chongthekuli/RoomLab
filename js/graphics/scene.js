@@ -926,6 +926,7 @@ function updateWalkSplReadout(ctx, eyeHeight) {
       sources: flat,
       getSpeakerDef: url => getCachedLoudspeaker(url),
       listenerPos, room: state.room, materials: materialsRef,
+      zones: state.zones,
     });
     _stipaLast = s;
   }
@@ -1940,7 +1941,7 @@ function currentPhysicsOpts(room) {
     airAbsorption: phys.airAbsorption !== false,
     coherent: !!phys.coherent,
     roomConstantR: phys.reverberantField && materialsRef
-      ? computeRoomConstant(room, materialsRef, freq)
+      ? computeRoomConstant(room, materialsRef, freq, state.zones)
       : 0,
   };
 }
@@ -1962,7 +1963,7 @@ function sampleSurfaceColors(geo, anchors, sources, room, splOpts = {}) {
   // L_w aren't recomputed for every one of ~10k vertices.
   const useSTI = state.display.heatmapMode === 'stipa';
   const stipaCtx = useSTI
-    ? precomputeSTIPAContext({ sources, getSpeakerDef: getDef, room, materials: materialsRef })
+    ? precomputeSTIPAContext({ sources, getSpeakerDef: getDef, room, materials: materialsRef, zones: state.zones })
     : null;
 
   for (let i = 0; i < anchors.length; i++) {

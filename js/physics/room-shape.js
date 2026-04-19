@@ -163,6 +163,45 @@ export function isInsideRoom3D(pos, room) {
   return true;
 }
 
+// Shoelace polygon area (2D).
+function polygonArea2D(verts) {
+  let a = 0;
+  const n = verts.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    a += verts[i].x * verts[j].y - verts[j].x * verts[i].y;
+  }
+  return Math.abs(a) / 2;
+}
+
+// Wrap roomSurfaces with zone-aware accounting. Zones at floor level (z≈0)
+// carve their area out of the base floor (they replace that patch of the
+// floor acoustically). Elevated zones — e.g. stadium bowl tiers — ADD to
+// the total absorbing surface because the bowl concrete/carpet is real
+// surface nowhere else in the enumeration.
+//
+// Without this, the arena preset reported ~16 s RT60 because 900+ m² of
+// carpeted bowl seating wasn't contributing any Sabines to the budget.
+export function roomEffectiveSurfaces(room, zones = []) {
+  const base = roomSurfaces(room);
+  if (!zones || zones.length === 0) return base;
+  const out = base.map(s => ({ ...s }));
+  let floorCarveOut = 0;
+  for (const z of zones) {
+    if (!z.vertices || z.vertices.length < 3 || !z.material_id) continue;
+    const area = polygonArea2D(z.vertices);
+    if (area <= 0) continue;
+    const elev = z.elevation_m ?? 0;
+    if (Math.abs(elev) < 0.1) floorCarveOut += area;
+    out.push({ id: 'zone_' + z.id, area_m2: area, materialId: z.material_id });
+  }
+  if (floorCarveOut > 0) {
+    const fi = out.findIndex(s => s.id === 'floor');
+    if (fi >= 0) out[fi].area_m2 = Math.max(0, out[fi].area_m2 - floorCarveOut);
+  }
+  return out;
+}
+
 export function roomSurfaces(room) {
   const shape = getShape(room);
   const b = baseArea(room);

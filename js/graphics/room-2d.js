@@ -323,7 +323,7 @@ function renderNormal(vp) {
       airAbsorption: phys.airAbsorption !== false,
       coherent: !!phys.coherent,
       roomConstantR: phys.reverberantField && materialsRef
-        ? computeRoomConstant(state.room, materialsRef, freq) : 0,
+        ? computeRoomConstant(state.room, materialsRef, freq, state.zones) : 0,
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;

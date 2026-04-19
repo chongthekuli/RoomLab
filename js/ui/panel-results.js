@@ -100,7 +100,7 @@ function renderListenerSection() {
     room: state.room,
     airAbsorption: phys.airAbsorption !== false,
     roomConstantR: phys.reverberantField && materialsRef
-      ? computeRoomConstant(state.room, materialsRef, freq) : 0,
+      ? computeRoomConstant(state.room, materialsRef, freq, state.zones) : 0,
   });
 
   const postureLabel = POSTURE_LABELS[lst.posture] ?? lst.posture;
@@ -152,7 +152,7 @@ function renderListenerSection() {
 }
 
 function renderRT60() {
-  const bands = computeAllBands({ room: state.room, materials: materialsRef });
+  const bands = computeAllBands({ room: state.room, materials: materialsRef, zones: state.zones });
   const f500 = bands.find(b => b.frequency_hz === 500);
   const f1k  = bands.find(b => b.frequency_hz === 1000);
   const mid = ((f500?.sabine_s ?? 0) + (f1k?.sabine_s ?? 0)) / 2;

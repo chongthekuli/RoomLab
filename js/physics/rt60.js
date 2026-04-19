@@ -1,4 +1,4 @@
-import { roomSurfaces, roomVolume } from './room-shape.js';
+import { roomSurfaces, roomEffectiveSurfaces, roomVolume } from './room-shape.js';
 
 const SABINE_CONSTANT = 0.161;
 
@@ -13,8 +13,10 @@ export function eyring({ volume_m3, totalArea_m2, meanAbsorption }) {
   return SABINE_CONSTANT * volume_m3 / (-totalArea_m2 * Math.log(1 - meanAbsorption));
 }
 
-export function computeRT60Band({ room, materials, bandIndex }) {
-  const surfaces = roomSurfaces(room);
+export function computeRT60Band({ room, materials, bandIndex, zones = [] }) {
+  // Include zone absorption so stadium bowl carpet + court wood actually
+  // contribute. Without this the arena preset reports ~16 s RT60.
+  const surfaces = roomEffectiveSurfaces(room, zones);
   let totalArea_m2 = 0;
   let totalAbsorption_sabins = 0;
   for (const s of surfaces) {
@@ -34,9 +36,9 @@ export function computeRT60Band({ room, materials, bandIndex }) {
   };
 }
 
-export function computeAllBands({ room, materials }) {
+export function computeAllBands({ room, materials, zones = [] }) {
   return materials.frequency_bands_hz.map((frequency_hz, i) => ({
     frequency_hz,
-    ...computeRT60Band({ room, materials, bandIndex: i }),
+    ...computeRT60Band({ room, materials, bandIndex: i, zones }),
   }));
 }
