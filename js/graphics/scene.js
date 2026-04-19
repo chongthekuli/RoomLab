@@ -224,7 +224,14 @@ function initScene() {
   ssaoPass.minDistance = 0.003;
   ssaoPass.maxDistance = 0.08;
   composer.addPass(ssaoPass);
-  bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.45, 0.8, 0.85);
+  // UnrealBloomPass(resolution, strength, radius, threshold). Threshold is
+  // applied to LINEAR HDR luminance (pre-tonemap) — well-lit gypsum walls
+  // in this scene hit 1.0-1.5 linear under the three-point rig + IBL, so
+  // threshold must sit ABOVE that to avoid blooming the whole room white.
+  // Scoreboard emissive at intensity 2.2 (blue channel ~1.94) still clears
+  // a threshold of 1.2 comfortably. Strength 0.22 keeps halos subtle —
+  // visible glow on actual emissives, no room-wide wash.
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.22, 0.5, 1.2);
   composer.addPass(bloomPass);
   composer.addPass(new SMAAPass(w * renderer.getPixelRatio(), h * renderer.getPixelRatio()));
   const outputPass = new OutputPass();
