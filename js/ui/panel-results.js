@@ -157,13 +157,18 @@ function renderRT60() {
   const f1k  = bands.find(b => b.frequency_hz === 1000);
   const mid = ((f500?.sabine_s ?? 0) + (f1k?.sabine_s ?? 0)) / 2;
   const rating = ratingFor(mid);
-  const first = bands[0];
+  // α̅ varies per band (gypsum α=0.29 at 125 Hz vs 0.04 at 1k), so the meta
+  // line must use the same mid-band average the headline RT60 is built from —
+  // otherwise the displayed volume/surface/α don't satisfy Sabine for the
+  // displayed RT60.
+  const midAlpha = ((f500?.meanAbsorption ?? 0) + (f1k?.meanAbsorption ?? 0)) / 2;
+  const geom = bands[0]; // Volume + totalArea are band-invariant
 
   document.getElementById('rt60-summary').innerHTML = `
     <div class="big ${rating.klass}">${isFinite(mid) ? mid.toFixed(2) : '∞'}<span class="unit"> s</span></div>
     <div class="sub">Mid-band average RT60 (500 Hz + 1 kHz, Sabine)</div>
     <div class="rating ${rating.klass}">${rating.label}</div>
-    <div class="sub meta">Volume ${first.volume_m3.toFixed(1)} m³ · Surface ${first.totalArea_m2.toFixed(1)} m² · Mean α ${first.meanAbsorption.toFixed(2)}</div>
+    <div class="sub meta">Volume ${geom.volume_m3.toFixed(1)} m³ · Surface ${geom.totalArea_m2.toFixed(1)} m² · Mean α ${midAlpha.toFixed(2)} (500 Hz+1 kHz)</div>
   `;
 
   document.querySelector('#rt60-table tbody').innerHTML = bands.map(b => `
