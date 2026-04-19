@@ -68,6 +68,23 @@ export class ThirdPersonController {
     this.idealLookAt = new THREE.Vector3();
     this.offsetLerpTau = 0.12;
     this.lookAtLerpTau = 0.16;
+
+    // --- Walkthrough "juice" — Viktor rendering audit item #3. -----------
+    // Without these, the walkthrough camera is a tripod on wheels. With
+    // them, sprint feels fast, jumps feel weighty, and the lens "breathes"
+    // with the avatar.
+    this.fovIdle    = 55;
+    this.fovWalking = 58;
+    this.fovRunning = 62;
+    this.fovTau     = 0.22;     // exponential lerp tau (s)
+    this._fovTarget = this.fovIdle;
+    this._bobPhase  = 0;
+    this._bobWalkHz = 6.5;      // rad/s cadence at walk speed
+    this._bobRunHz  = 9.5;      // rad/s cadence at sprint speed
+    this._bobWalkAmp = 0.022;   // m — subtle
+    this._bobRunAmp  = 0.045;   // m — pronounced
+    this._pitchJolt = 0;        // radians, decays each frame
+    this._pitchJoltTau = 0.22;  // s
     this.cameraEyeHeight = 1.4;       // where the camera "looks" relative to feet
 
     // --- Input ------------------------------------------------------------
@@ -295,6 +312,25 @@ export class ThirdPersonController {
       this.pos.z + Math.cos(this.yaw) * 0.35,
     );
 
+    // Camera collision — raycast from character head toward idealOffset.
+    // If a structural surface lies between, pull idealOffset in to just
+    // short of the hit so the camera never clips through walls or
+    // ceilings. Viktor audit item #4 — the "refuse to ship" finding.
+    const headY = this.pos.y + this.cameraEyeHeight;
+    const head = new THREE.Vector3(this.pos.x, headY, this.pos.z);
+    const toCam = new THREE.Vector3().subVectors(this.idealOffset, head);
+    const wantDist = toCam.length();
+    if (wantDist > 1e-3) {
+      toCam.divideScalar(wantDist);
+      this.raycaster.set(head, toCam);
+      this.raycaster.far = wantDist;
+      const hits = this._structuralHits(this.raycaster);
+      const allowedDist = hits.length > 0
+        ? Math.max(this.cameraDistanceMin * 0.6, hits[0].distance - 0.18)
+        : wantDist;
+      this.idealOffset.copy(head).addScaledVector(toCam, allowedDist);
+    }
+
     // Exponential lerp for springy follow. dt-adjusted so behavior is
     // frame-rate independent.
     const offT = 1 - Math.exp(-dt / this.offsetLerpTau);
@@ -305,8 +341,46 @@ export class ThirdPersonController {
     this.currentOffset.lerp(this.idealOffset, offT);
     this.currentLookAt.lerp(this.idealLookAt, laT);
 
+    // Head-bob — inject a sin-based vertical oscillation into the camera
+    // position at a cadence that scales with gait. Only while moving on
+    // the ground. Zero additional raycasts — pure math.
+    const moving = move.magnitude > 0.1;
+    let bobY = 0;
+    if (moving && this.grounded) {
+      const hz = running ? this._bobRunHz : this._bobWalkHz;
+      const amp = running ? this._bobRunAmp : this._bobWalkAmp;
+      this._bobPhase += dt * hz;
+      bobY = Math.sin(this._bobPhase) * amp;
+    } else {
+      // Decay the phase slowly so standing-after-walking doesn't abruptly
+      // reset and cause a visible snap.
+      this._bobPhase *= Math.exp(-dt / 0.8);
+    }
+
     this.worldCamera.position.copy(this.currentOffset);
+    this.worldCamera.position.y += bobY;
     this.worldCamera.lookAt(this.currentLookAt);
+
+    // Landing pitch-jolt — on the just-landed frame, seed a downward
+    // pitch nudge proportional to impact velocity. Decays exponentially.
+    if (this._justLanded) {
+      const impactMag = Math.min(1, Math.abs(this._impactVy) / 8);
+      this._pitchJolt = -0.10 * impactMag;
+    }
+    if (Math.abs(this._pitchJolt) > 1e-4) {
+      this.worldCamera.rotateX(this._pitchJolt);
+      this._pitchJolt *= Math.exp(-dt / this._pitchJoltTau);
+    }
+
+    // FOV kick — breathe between idle / walking / sprinting. Viktor
+    // suggested 55/58/64; 62 reads visibly fast without making the
+    // scene lens-distorted on a 60 m arena.
+    this._fovTarget = running ? this.fovRunning : (moving ? this.fovWalking : this.fovIdle);
+    const fovLerp = 1 - Math.exp(-dt / this.fovTau);
+    if (this.worldCamera.isPerspectiveCamera) {
+      this.worldCamera.fov += (this._fovTarget - this.worldCamera.fov) * fovLerp;
+      this.worldCamera.updateProjectionMatrix();
+    }
 
     if (this.onAnimate) {
       this.onAnimate({

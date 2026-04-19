@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
@@ -12,6 +18,7 @@ import { ThirdPersonController } from './third-person-controller.js';
 import { loadCharacterRig } from './character-loader.js';
 
 let scene, camera, renderer, controls;
+let composer, ssaoPass, bloomPass;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
 let aimLinesGroup, audienceGroup;
 let audienceBodyGeo = null, audienceHeadGeo = null;
@@ -184,16 +191,16 @@ function initScene() {
   // on the bowl curve and gives a more "cinematic" compression than 45°.
   camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 300);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  // Post-processing chain owns the final tone-map + sRGB encode, so the
+  // renderer itself must not double-apply them. Viktor audit: "move
+  // toneMapping onto OutputPass — composer renders to linear internally".
+  // antialias:false on the renderer → SMAAPass handles AA at the end of the
+  // chain, avoiding the double-AA cost.
+  renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setSize(w, h);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  // Modern archviz defaults: ACES filmic tone mapping gives cinematic contrast
-  // response (deepens shadows, softens highlights). sRGB output-color-space
-  // matches what every monitor expects. Exposure 1.0 is neutral; +/−0.15
-  // would skew bright/dark. These two lines are the biggest cheap polish win.
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping;
   // Soft shadow maps — enabled but only sparingly cast (see dir-light setup
   // below). PCFSoftShadowMap is the middle ground between perf and quality.
   renderer.shadowMap.enabled = true;
@@ -201,6 +208,33 @@ function initScene() {
   container.innerHTML = '';
   container.style.position = 'relative';
   container.appendChild(renderer.domElement);
+
+  // EffectComposer chain — SSAO for contact shadows in creases + under
+  // speakers, UnrealBloom for the emissive LED faces on the scoreboard
+  // and speaker grills, SMAA to clean aliased line-array cabinets, and
+  // OutputPass for the final ACES tone-map + sRGB encode. Viktor's #1
+  // CRITICAL item — it moves the scene from "Blender Eevee" to "Unity
+  // URP" territory for ~2.5 ms/frame on integrated graphics.
+  composer = new EffectComposer(renderer);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(w, h);
+  composer.addPass(new RenderPass(scene, camera));
+  ssaoPass = new SSAOPass(scene, camera, w, h);
+  ssaoPass.kernelRadius = 0.8;
+  ssaoPass.minDistance = 0.003;
+  ssaoPass.maxDistance = 0.08;
+  composer.addPass(ssaoPass);
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.45, 0.8, 0.85);
+  composer.addPass(bloomPass);
+  composer.addPass(new SMAAPass(w * renderer.getPixelRatio(), h * renderer.getPixelRatio()));
+  const outputPass = new OutputPass();
+  composer.addPass(outputPass);
+  // Tone-map + exposure live on the final OutputPass. ACES gives cinematic
+  // contrast response (deepens shadows, softens highlights). Exposure 1.05
+  // is slightly brighter than neutral — pushes the scoreboard emissives
+  // above bloom threshold without crushing the darks.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
 
   // SPL legend overlay (HTML over the WebGL canvas, right side, vertical).
   // Gradient is fixed to the palette used by splColorRGB (60–110 dB range);
@@ -2611,9 +2645,13 @@ function rebuildStadiumFurniture() {
     const bodyMat = new THREE.MeshStandardMaterial({
       color: 0x0a0a0a, metalness: 0.4, roughness: 0.55,
     });
+    // Pushed above the bloom threshold (≥1.0) so the LED faces actually
+    // glow into the dark dome under the UnrealBloomPass. Albedo held to
+    // black so the emissive does all the work — otherwise the surface
+    // "muddies" in the composite pass. Viktor audit item #2.
     const ledMat = new THREE.MeshStandardMaterial({
-      color: 0x111111, metalness: 0.2, roughness: 0.35,
-      emissive: 0x1a4d6e, emissiveIntensity: 0.6,
+      color: 0x000000, metalness: 0.2, roughness: 0.35,
+      emissive: 0x4aa0e0, emissiveIntensity: 2.2,
     });
     const scoreboard = new THREE.Group();
     // Core box (top + bottom show as body, sides show as LED faces — use
@@ -2827,6 +2865,11 @@ function onResize() {
     walkCamera.updateProjectionMatrix();
   }
   renderer.setSize(w, h);
+  if (composer) {
+    composer.setSize(w, h);
+    if (ssaoPass) ssaoPass.setSize(w, h);
+    if (bloomPass) bloomPass.setSize(w, h);
+  }
 }
 
 // Set shadow-casting flags on every mesh based on its userData tag. Called
@@ -2840,9 +2883,21 @@ function applyShadowFlags() {
     if (!obj.isMesh) return;
     const tag = obj.userData.tag ?? '';
     const mat = obj.userData.acoustic_material ?? '';
-    // Heatmap layers, avatar, and grid never participate in shadows.
-    if (tag === 'heatmap_layer' || tag === 'walk_avatar') { obj.castShadow = obj.receiveShadow = false; return; }
+    // Heatmaps never cast/receive — they're overlay layers.
+    if (tag === 'heatmap_layer') { obj.castShadow = obj.receiveShadow = false; return; }
     if (tag.startsWith('heatmap_')) { obj.castShadow = obj.receiveShadow = false; return; }
+    // Avatar casts AND receives — Viktor audit item #6: "avatar looks
+    // pasted onto the floor without contact shadow; solvable with
+    // shadowSide front-side, not by disabling shadows entirely."
+    if (tag === 'walk_avatar') {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+      if (obj.material) {
+        if (Array.isArray(obj.material)) obj.material.forEach(m => { m.shadowSide = THREE.FrontSide; });
+        else obj.material.shadowSide = THREE.FrontSide;
+      }
+      return;
+    }
     // Concrete bowl + tunnel ceilings: cast and receive.
     if (mat === 'concrete' || tag.startsWith('stadium') || tag.startsWith('tunnel_ceiling')) {
       obj.castShadow = true;  obj.receiveShadow = true;  return;
@@ -2869,5 +2924,15 @@ function animate(ts) {
   } else if (controls) {
     controls.update();
   }
-  renderer.render(scene, activeCamera);
+  // Route through the EffectComposer chain (SSAO + Bloom + SMAA + OutputPass).
+  // The RenderPass needs the active camera each frame because walkthrough
+  // swaps to walkCamera — we reseat it before render.
+  if (composer) {
+    const renderPass = composer.passes[0];
+    if (renderPass && renderPass.camera !== activeCamera) renderPass.camera = activeCamera;
+    if (ssaoPass && ssaoPass.camera !== activeCamera) ssaoPass.camera = activeCamera;
+    composer.render();
+  } else {
+    renderer.render(scene, activeCamera);
+  }
 }
