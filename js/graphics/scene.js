@@ -7,6 +7,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant } from '../physics/spl-calculator.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
+import { ThirdPersonController } from './third-person-controller.js';
 
 let scene, camera, renderer, controls;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
@@ -29,51 +30,32 @@ let probeRaycaster = null;
 const _probeMouse = { x: 0, y: 0 };
 let probeActive = false;
 
-let walkCamera, avatar, walkHint;
+// ThirdPersonController owns: movement, orbit/chase camera, WASD, mouse
+// drag, wheel zoom, raycast collision. Scene.js still builds the avatar
+// (procedural Group) and drives the 6 procedural animation layers via
+// the controller's onAnimate hook.
+let walkCamera, avatar, walkHint, walkSplOverlay;
 let avatarParts = null;       // { armL, armR, legL, legR, body }
 let activeCamera = null;
 let walkMode = false;
 let walkPhase = 0;            // stride phase for leg/arm swing animation
-// walkState.z tracks the terrain height beneath the avatar's feet — lerped
-// toward the target elevation each frame so steps animate smoothly instead
-// of snapping. jumpOffset + vz add projectile motion on top of terrain;
-// crouchF (0 standing → 1 crouched) scales body + eye height.
-// animState drives 6 procedural motion layers (jump anticipate / airborne
-// apex / landing absorb / crouch / turn-lean / run pump). Each layer
-// contributes to the avatar's pose per frame; the renderer combines them
-// and applies to the knee / elbow / body transforms.
-const walkState = {
-  x: 0, y: 0, z: 0, heading: 0,
-  camZ: 0, vz: 0, jumpOffset: 0, crouchF: 0,
-  animState: {
-    jumpPhase: 'grounded',   // 'anticipate' | 'airborne' | 'landing' | 'grounded'
-    jumpT: 0,                // progress 0..1 through the current phase
-    impactVel: 0,            // vertical velocity magnitude at touchdown
-    landingAmount: 0,        // 0..1 strength of landing squash
-    prevHeading: 0,          // for angular-velocity derivation
-    yawRate: 0,              // rad/s, smoothed
-    turnLean: 0,             // smoothed body roll
-    runFactor: 0,            // 0..1 walk → run blend
-  },
+let tpController = null;
+let tpLastTs = 0;
+// 6-layer procedural animation state — driven by controller onAnimate().
+const animState = {
+  jumpPhase: 'grounded',      // 'anticipate' | 'airborne' | 'landing' | 'grounded'
+  jumpT: 0,
+  impactVel: 0,
+  landingAmount: 0,
+  prevYaw: 0,
+  yawRate: 0,
+  turnLean: 0,
+  runFactor: 0,
+  crouchF: 0,
 };
-let walkSplOverlay = null;
-const walkKeys = new Set();
-let walkLastTs = 0;
-const WALK_SPEED_MS    = 2.8;
-const WALK_TURN_RADS   = 1.6;
 const AVATAR_EYE_HEIGHT = 1.68;
 const CROUCH_FACTOR = 0.28;       // crouched body is 1 − 0.28 = 72 % of standing
-const CROUCH_EAR_MIN = AVATAR_EYE_HEIGHT * (1 - CROUCH_FACTOR); // ≈1.21 m
-const JUMP_VELOCITY_MS = 3.6;     // initial upward velocity when jumping
-const GRAVITY_MS2 = 9.81;
-const CAM_BACK_M = 3.2;
-const CAM_UP_M   = 2.1;
-// Stair-climbing bounds. 0.5 m up matches Unity's default character controller
-// Step Offset; 1.0 m down is a reasonable drop threshold before a tier edge
-// reads as "too high to step off" and blocks movement.
-const STEP_UP_MAX_M   = 0.5;
-const STEP_DOWN_MAX_M = 1.0;
-const STEP_LERP_SPEED_MS = 2.5;  // vertical m/s when transitioning tiers
+const JUMP_VELOCITY_MS = 4.0;     // initial upward velocity when jumping
 
 // Flip all heatmap visibility in one place. Structural geometry (bowls, walls,
 // floor, outlines) stays visible. Kept as a named export so the UI toolbar
@@ -602,23 +584,11 @@ function terrainHeightAt(x, y, room) {
   return 0;
 }
 
-// Movement guard: check wall collision AND step-height limits. Allows small
-// auto-climbs (up to STEP_UP_MAX_M), prevents teleporting onto tall tiers or
-// falling dangerously far.
-function canWalkTo(newX, newY, currentZ, room) {
-  // Wall check — must remain inside the room polygon at eye height.
-  if (!isInsideRoom3D({ x: newX, y: newY, z: currentZ + AVATAR_EYE_HEIGHT }, room)) return false;
-  const targetZ = terrainHeightAt(newX, newY, room);
-  const dz = targetZ - currentZ;
-  if (dz >  STEP_UP_MAX_M)   return false;  // too tall to step up
-  if (dz < -STEP_DOWN_MAX_M) return false;  // too far to drop
-  return true;
-}
 
 function initWalkthrough() {
   const w = Math.max(container.clientWidth, 1);
   const h = Math.max(container.clientHeight, 1);
-  walkCamera = new THREE.PerspectiveCamera(60, w / h, 0.05, 300);
+  walkCamera = new THREE.PerspectiveCamera(55, w / h, 0.05, 300);
 
   avatar = buildSuitedManAvatar();
   scene.add(avatar);
@@ -629,15 +599,15 @@ function initWalkthrough() {
   walkHint.id = 'walk-hint';
   walkHint.innerHTML = `
     <strong>Walkthrough</strong>
-    <span>W / A / S / D — walk</span>
-    <span>Q / E — turn left / right</span>
-    <span>Space — jump · C — crouch (hold)</span>
+    <span>W / A / S / D — move (camera-relative)</span>
+    <span>Mouse drag — orbit camera</span>
+    <span>Mouse wheel — zoom</span>
+    <span>Space — jump · C / Ctrl — crouch (hold)</span>
     <span>Shift — run · R — reset</span>
   `;
   container.appendChild(walkHint);
 
-  // Live SPL readout that tracks the avatar's ear position. Updated every
-  // frame in tickWalkthrough when walk mode is active.
+  // Live SPL readout at the avatar's ear position (top-right).
   walkSplOverlay = document.createElement('div');
   walkSplOverlay.className = 'walk-spl hidden';
   walkSplOverlay.id = 'walk-spl';
@@ -649,40 +619,46 @@ function initWalkthrough() {
   `;
   container.appendChild(walkSplOverlay);
 
-  // Keyboard capture — only active in walk mode. Ignores input focus in
-  // form fields so typing in the Sources panel doesn't drive the avatar.
-  const isFormField = el => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
-  document.addEventListener('keydown', e => {
-    if (!walkMode || isFormField(e.target)) return;
-    walkKeys.add(e.code);
-    if (e.code === 'KeyR') placeAvatarAtDefault();
-    // Edge-triggered jump: only initiate if the avatar is on the ground
-    // (no existing jump in progress) to prevent double-jumping / flying.
-    // Sets the anticipation phase; state machine fires the actual impulse
-    // after the 0.10 s wind-up.
-    if (e.code === 'Space' && walkState.animState.jumpPhase === 'grounded') {
-      walkState.animState.jumpPhase = 'anticipate';
-      walkState.animState.jumpT = 0;
-    }
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ShiftLeft','ShiftRight','Space','KeyC','ControlLeft','ControlRight'].includes(e.code)) {
-      e.preventDefault();
-    }
+  // --- ThirdPersonController ------------------------------------------------
+  // Owns movement / camera / input / raycast collision. Drives the avatar's
+  // position + yaw. We keep the procedural animation layers here in scene.js
+  // and wire them in via the onAnimate callback.
+  tpController = new ThirdPersonController({
+    worldCamera: walkCamera,
+    domElement: renderer.domElement,
+    // Lazy getter — roomGroup is created by rebuildRoom AFTER initWalkthrough.
+    getCollidables: () => roomGroup,
+    character: avatar,
   });
-  document.addEventListener('keyup', e => walkKeys.delete(e.code));
-  window.addEventListener('blur', () => walkKeys.clear());
+  tpController.onJump = () => {
+    // Kick off the anticipation phase — state machine fires the actual impulse
+    // after the 0.10 s wind-up via controller.jump() below.
+    if (animState.jumpPhase === 'grounded') {
+      animState.jumpPhase = 'anticipate';
+      animState.jumpT = 0;
+    }
+  };
+  tpController.onAnimate = applyAvatarAnimation;
 }
 
 function placeAvatarAtDefault() {
   const room = state.room;
-  // For arena preset use the court center; everywhere else use room center.
   const cx = (room.width_m ?? 20) / 2;
   const cy = (room.depth_m ?? 20) / 2;
-  walkState.x = cx;
-  walkState.y = cy;
-  walkState.z = terrainHeightAt(cx, cy, room);
-  walkState.camZ = walkState.z;   // camera-y tracking state
-  walkState.heading = 0;
+  const gz = terrainHeightAt(cx, cy, room);
+  // State frame (x=width, y=depth, z=height) → Three.js (x, z, y).
+  tpController.setPosition(new THREE.Vector3(cx, gz + 0.05, cy));
+  tpController.setYaw(0);
+  tpController.vy = 0;
   walkPhase = 0;
+  animState.jumpPhase = 'grounded';
+  animState.jumpT = 0;
+  animState.landingAmount = 0;
+  animState.turnLean = 0;
+  animState.runFactor = 0;
+  animState.yawRate = 0;
+  animState.crouchF = 0;
+  animState.prevYaw = tpController.yaw;
 }
 
 // Public toggle called by main.js when the user clicks the Walkthrough tab.
@@ -690,180 +666,114 @@ export function setWalkthroughMode(on) {
   walkMode = !!on;
   if (walkMode) {
     placeAvatarAtDefault();
-    walkState.vz = 0;
-    walkState.jumpOffset = 0;
-    walkState.crouchF = 0;
-    walkState.animState.jumpPhase = 'grounded';
-    walkState.animState.jumpT = 0;
-    walkState.animState.landingAmount = 0;
-    walkState.animState.turnLean = 0;
-    walkState.animState.runFactor = 0;
-    walkState.animState.yawRate = 0;
-    walkState.animState.prevHeading = walkState.heading;
     avatar.visible = true;
     avatar.scale.set(1, 1, 1);
     if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
     controls.enabled = false;
     activeCamera = walkCamera;
+    tpController.enable();
     walkHint?.classList.remove('hidden');
     walkSplOverlay?.classList.remove('hidden');
-    walkLastTs = performance.now();
+    tpLastTs = performance.now();
   } else {
     avatar.visible = false;
     avatar.scale.set(1, 1, 1);
     if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
     controls.enabled = true;
     activeCamera = camera;
+    tpController?.disable();
     walkHint?.classList.add('hidden');
     walkSplOverlay?.classList.add('hidden');
-    walkKeys.clear();
   }
   onResize();
 }
 
-// Per-frame: read keys, move avatar with wall collision, sync camera behind.
-function tickWalkthrough(now) {
-  const dt = Math.min(0.1, (now - walkLastTs) / 1000);
-  walkLastTs = now;
-  if (!walkMode) return;
+// Fires from the controller's per-frame callback. Runs the 6 procedural
+// animation layers (walk cycle / crouch / jump anticipate / airborne apex /
+// landing absorb / turn-lean / run pump), applies the combined pose to the
+// avatar's body/knee/elbow transforms, and updates the live SPL readout.
+// Reset pose state is now fully owned by scene.js (the controller handles
+// position/yaw/vy/collision/camera only).
+function applyAvatarAnimation(ctx) {
+  const dt = ctx.dt;
 
-  // Turn
-  if (walkKeys.has('KeyQ') || walkKeys.has('ArrowLeft'))  walkState.heading += WALK_TURN_RADS * dt;
-  if (walkKeys.has('KeyE') || walkKeys.has('ArrowRight')) walkState.heading -= WALK_TURN_RADS * dt;
+  // --- Run factor (smoothed) ---
+  animState.runFactor += ((ctx.running ? 1 : 0) - animState.runFactor) * (1 - Math.exp(-dt / 0.15));
 
-  // Move vector in state-frame (x=width, y=depth). yaw=0 faces +y.
-  const fx = Math.sin(walkState.heading), fy = Math.cos(walkState.heading);
-  const rx = fy, ry = -fx; // right = forward rotated -90°
-  let mx = 0, my = 0;
-  if (walkKeys.has('KeyW') || walkKeys.has('ArrowUp'))   { mx += fx; my += fy; }
-  if (walkKeys.has('KeyS') || walkKeys.has('ArrowDown')) { mx -= fx; my -= fy; }
-  if (walkKeys.has('KeyA')) { mx -= rx; my -= ry; }
-  if (walkKeys.has('KeyD')) { mx += rx; my += ry; }
-
-  if (mx !== 0 || my !== 0) {
-    const len = Math.hypot(mx, my);
-    mx /= len; my /= len;
-    const running = walkKeys.has('ShiftLeft') || walkKeys.has('ShiftRight');
-    const step = WALK_SPEED_MS * (running ? 2.0 : 1.0) * dt;
-    const newX = walkState.x + mx * step;
-    const newY = walkState.y + my * step;
-    // Collision + stair check. canWalkTo combines the wall test with the
-    // step-up/step-down limits so the avatar can climb tier steps (≤0.5 m)
-    // but not teleport onto tall walls or plunge off the upper bowl.
-    // Slide along whichever axis is still clear if the diagonal is blocked.
-    if (canWalkTo(newX, newY, walkState.z, state.room)) {
-      walkState.x = newX; walkState.y = newY;
-    } else if (canWalkTo(newX, walkState.y, walkState.z, state.room)) {
-      walkState.x = newX;
-    } else if (canWalkTo(walkState.x, newY, walkState.z, state.room)) {
-      walkState.y = newY;
-    }
-  }
-
-  // --- Run factor (smoothed) --------------------------------------------
-  const aS = walkState.animState;
-  const running = walkKeys.has('ShiftLeft') || walkKeys.has('ShiftRight');
-  aS.runFactor += ((running ? 1 : 0) - aS.runFactor) * (1 - Math.exp(-dt / 0.15));
-
-  // --- Walk cycle phase — stride frequency blends walk (1.7 Hz) → run (2.6 Hz)
-  const isMoving = (mx !== 0 || my !== 0);
-  const strideHz = 1.7 + aS.runFactor * 0.9;
-  if (isMoving) walkPhase += dt * Math.PI * 2 * strideHz;
-
-  // Arm / leg swing amplitude scales into run (×2.1 arms, ×1.5 legs).
-  const legAmp = 0.45 * (1 + aS.runFactor * 0.5);
-  const armAmp = 0.35 * (1 + aS.runFactor * 1.1);
+  // --- Walk cycle phase ---
+  const strideHz = 1.7 + animState.runFactor * 0.9;
+  if (ctx.moving) walkPhase += dt * Math.PI * 2 * strideHz;
+  const legAmp = 0.45 * (1 + animState.runFactor * 0.5);
+  const armAmp = 0.35 * (1 + animState.runFactor * 1.1);
   const s_leg = Math.sin(walkPhase);
-  const s_arm = s_leg;
-  const legRotL = isMoving ? -s_leg * legAmp : 0;
-  const legRotR = isMoving ?  s_leg * legAmp : 0;
-  const armRotL = isMoving ?  s_arm * armAmp : 0;
-  const armRotR = isMoving ? -s_arm * armAmp : 0;
+  const legRotL = ctx.moving ? -s_leg * legAmp : 0;
+  const legRotR = ctx.moving ?  s_leg * legAmp : 0;
+  const armRotL = ctx.moving ?  s_leg * armAmp : 0;
+  const armRotR = ctx.moving ? -s_leg * armAmp : 0;
+  const bobAmp = 0.025 + animState.runFactor * 0.015;
+  const bob = ctx.moving ? Math.abs(Math.cos(walkPhase)) * bobAmp : 0;
 
-  // Vertical bob — 2.5 cm walking, up to 4 cm running, on twice the stride freq.
-  const bobAmp = 0.025 + aS.runFactor * 0.015;
-  const bob = isMoving ? Math.abs(Math.cos(walkPhase)) * bobAmp : 0;
-
-  // --- Turn-lean — body rolls into yaw rate (cinemachine-style). ---------
-  let dh = walkState.heading - aS.prevHeading;
+  // --- Turn-lean — body rolls into yaw-rate (cinemachine-style). ---
+  let dh = ctx.yaw - animState.prevYaw;
   while (dh >  Math.PI) dh -= 2 * Math.PI;
   while (dh < -Math.PI) dh += 2 * Math.PI;
-  aS.yawRate += ((dh / Math.max(dt, 0.001)) - aS.yawRate) * 0.2;
-  aS.prevHeading = walkState.heading;
-  const leanTarget = Math.max(-0.35, Math.min(0.35, -aS.yawRate * 0.18));
-  aS.turnLean += (leanTarget - aS.turnLean) * 0.12;
+  animState.yawRate += ((dh / Math.max(dt, 0.001)) - animState.yawRate) * 0.2;
+  animState.prevYaw = ctx.yaw;
+  const leanTarget = Math.max(-0.35, Math.min(0.35, -animState.yawRate * 0.18));
+  animState.turnLean += (leanTarget - animState.turnLean) * 0.12;
 
-  // Stair climbing: sample terrain height at current (x,y) and ease the
-  // avatar's feet toward that target. Body tau ≈ 0.15 s; camera tau ≈ 0.35 s
-  // (decoupled Cinemachine YDamping pattern to avoid motion sickness on
-  // multi-tier climbs).
-  const targetZ = terrainHeightAt(walkState.x, walkState.y, state.room);
-  const tauBody = 0.15;
-  const tauCam  = 0.35;
-  walkState.z   += (targetZ - walkState.z)   * (1 - Math.exp(-dt / tauBody));
-  walkState.camZ += (walkState.z - walkState.camZ) * (1 - Math.exp(-dt / tauCam));
-
-  // --- Jump state machine (anticipate → airborne → landing → grounded) --
-  // Anticipation (0.10 s pre-squat) reads as weight and wind-up; gravity
-  // governs the airborne arc; landing adds a 0.22 s absorb whose amplitude
-  // scales with impact velocity (higher falls → bigger squash).
-  if (aS.jumpPhase === 'anticipate') {
-    aS.jumpT += dt / 0.10;
-    if (aS.jumpT >= 1) {
-      aS.jumpT = 0;
-      aS.jumpPhase = 'airborne';
-      walkState.vz = JUMP_VELOCITY_MS;    // impulse fires after anticipation
+  // --- Jump state machine ---
+  // Anticipate fires the real impulse on the controller once wind-up completes;
+  // airborne tracks its own airtime for blend-in; landing is detected from the
+  // controller's grounded flag transitioning back to true.
+  if (animState.jumpPhase === 'anticipate') {
+    animState.jumpT += dt / 0.10;
+    if (animState.jumpT >= 1) {
+      animState.jumpT = 0;
+      animState.jumpPhase = 'airborne';
+      tpController.jump(JUMP_VELOCITY_MS);
     }
-  } else if (aS.jumpPhase === 'airborne') {
-    walkState.vz -= GRAVITY_MS2 * dt;
-    walkState.jumpOffset += walkState.vz * dt;
-    aS.jumpT += dt;                        // tracks airtime for blend-in
-    if (walkState.jumpOffset <= 0 && walkState.vz <= 0) {
-      aS.impactVel = Math.abs(walkState.vz);
-      aS.landingAmount = Math.min(1, Math.max(0.3, aS.impactVel / 8));
-      walkState.jumpOffset = 0;
-      walkState.vz = 0;
-      aS.jumpPhase = 'landing';
-      aS.jumpT = 0;
+  } else if (animState.jumpPhase === 'airborne') {
+    animState.jumpT += dt;
+    if (ctx.justLanded) {
+      animState.impactVel = Math.abs(ctx.impactVy);
+      animState.landingAmount = Math.min(1, Math.max(0.3, animState.impactVel / 8));
+      animState.jumpPhase = 'landing';
+      animState.jumpT = 0;
     }
-  } else if (aS.jumpPhase === 'landing') {
-    aS.jumpT += dt / 0.22;
-    if (aS.jumpT >= 1) {
-      aS.jumpT = 1;
-      aS.jumpPhase = 'grounded';
-      aS.landingAmount = 0;
+  } else if (animState.jumpPhase === 'landing') {
+    animState.jumpT += dt / 0.22;
+    if (animState.jumpT >= 1) {
+      animState.jumpT = 1;
+      animState.jumpPhase = 'grounded';
+      animState.landingAmount = 0;
     }
   }
-  // --- Crouch factor (smoothed) -----------------------------------------
-  const crouchHeld = walkKeys.has('KeyC') || walkKeys.has('ControlLeft') || walkKeys.has('ControlRight');
-  const crouchTarget = crouchHeld ? 1 : 0;
-  walkState.crouchF += (crouchTarget - walkState.crouchF) * (1 - Math.exp(-dt / 0.12));
 
-  // --- Pose layers — accumulate contributions from each motion layer. ----
-  // baseline
+  // --- Crouch factor ---
+  const crouchHeld = ctx.keys.has('KeyC') || ctx.keys.has('ControlLeft') || ctx.keys.has('ControlRight');
+  animState.crouchF += ((crouchHeld ? 1 : 0) - animState.crouchF) * (1 - Math.exp(-dt / 0.12));
+
+  // --- Pose accumulation ---
   let bodyScale = 1;
   let thighL_rot = legRotL, thighR_rot = legRotR;
   let kneeL_rot = 0, kneeR_rot = 0;
   let armL_rot = armRotL, armR_rot = armRotR;
   let elbowL_rot = 0, elbowR_rot = 0;
   let torsoTilt = 0;
-  let yExtra = 0;         // extra vertical offset from jump physics layers
+  let yExtra = 0;
 
-  // Layer 4: Crouch — squash + knee fold + torso lean + shoulder pitch.
-  const cF = walkState.crouchF;
+  const cF = animState.crouchF;
   bodyScale *= (1 - cF * CROUCH_FACTOR);
   thighL_rot += cF * 0.45; thighR_rot += cF * 0.45;
   kneeL_rot  += cF * -0.55; kneeR_rot  += cF * -0.55;
   torsoTilt  += cF * 0.25;
   armL_rot   += cF * 0.30; armR_rot += cF * 0.30;
 
-  // Layer 6: Run pump — torso tilt forward when running.
-  torsoTilt += aS.runFactor * 0.18;
+  torsoTilt += animState.runFactor * 0.18;
 
-  // Layer 1: Jump anticipation — ease-in cubic over 0.10 s. Pre-squat body,
-  // knees bend, arms swing back.
-  if (aS.jumpPhase === 'anticipate') {
-    const t = aS.jumpT;
+  if (animState.jumpPhase === 'anticipate') {
+    const t = animState.jumpT;
     const tSm = t * t * (3 - 2 * t);
     bodyScale *= (1 - 0.18 * tSm);
     thighL_rot += 0.35 * tSm; thighR_rot += 0.35 * tSm;
@@ -871,25 +781,20 @@ function tickWalkthrough(now) {
     armL_rot   += -0.6 * tSm; armR_rot += -0.6 * tSm;
     yExtra += -0.09 * tSm;
   }
-  // Layer 2: Airborne apex — arms up, leg tuck asymmetric (personality).
-  if (aS.jumpPhase === 'airborne') {
-    const blend = Math.min(1, aS.jumpT / 0.08);
-    armL_rot   += 0.9 * blend;
-    armR_rot   += 0.9 * blend;
-    elbowL_rot += -0.3 * blend;
-    elbowR_rot += -0.3 * blend;
+  if (animState.jumpPhase === 'airborne') {
+    const blend = Math.min(1, animState.jumpT / 0.08);
+    armL_rot   += 0.9 * blend; armR_rot += 0.9 * blend;
+    elbowL_rot += -0.3 * blend; elbowR_rot += -0.3 * blend;
     thighL_rot += (0.5 + 0.15) * blend;
     thighR_rot += (0.5 - 0.15) * blend;
-    kneeL_rot  += -0.6 * blend;
-    kneeR_rot  += -0.6 * blend;
+    kneeL_rot  += -0.6 * blend; kneeR_rot  += -0.6 * blend;
     torsoTilt  += 0.12 * blend;
   }
-  // Layer 3: Landing absorb — peak at t=0.04/0.22≈0.18 then ease out.
-  if (aS.jumpPhase === 'landing') {
-    const t = aS.jumpT, peakT = 0.18;
-    const strength = aS.landingAmount * (t < peakT
-      ? (t / peakT)                                      // ramp in
-      : Math.pow(1 - (t - peakT) / (1 - peakT), 2));     // ease-out quad
+  if (animState.jumpPhase === 'landing') {
+    const t = animState.jumpT, peakT = 0.18;
+    const strength = animState.landingAmount * (t < peakT
+      ? (t / peakT)
+      : Math.pow(1 - (t - peakT) / (1 - peakT), 2));
     bodyScale *= (1 - 0.22 * strength);
     thighL_rot += 0.55 * strength; thighR_rot += 0.55 * strength;
     kneeL_rot  += -0.65 * strength; kneeR_rot  += -0.65 * strength;
@@ -899,11 +804,13 @@ function tickWalkthrough(now) {
 
   const eyeHeight = AVATAR_EYE_HEIGHT * bodyScale;
 
-  // --- Apply to avatar parts --------------------------------------------
-  avatar.position.set(walkState.x, walkState.z + walkState.jumpOffset + bob + yExtra, walkState.y);
-  avatar.rotation.y = walkState.heading;
+  // --- Apply to avatar parts ---
+  // Position Y offset (bob + yExtra) layered on top of the controller's
+  // collision-resolved position. Controller already copied pos into
+  // character.position; we add the small cosmetic offset here.
+  avatar.position.y = tpController.pos.y + bob + yExtra;
   avatar.scale.y = bodyScale;
-  if (avatarParts?.body) avatarParts.body.rotation.set(torsoTilt, 0, aS.turnLean);
+  if (avatarParts?.body) avatarParts.body.rotation.set(torsoTilt, 0, animState.turnLean);
   if (avatarParts?.legL) {
     avatarParts.legL.rotation.x = thighL_rot;
     if (avatarParts.legL.userData.knee) avatarParts.legL.userData.knee.rotation.x = kneeL_rot;
@@ -921,18 +828,13 @@ function tickWalkthrough(now) {
     if (avatarParts.armR.userData.elbow) avatarParts.armR.userData.elbow.rotation.x = elbowR_rot;
   }
 
-  // 3rd-person camera — behind avatar using independently-smoothed camZ.
-  const camX = walkState.x - fx * CAM_BACK_M;
-  const camZ = walkState.y - fy * CAM_BACK_M;
-  const camY = walkState.camZ + walkState.jumpOffset + yExtra + CAM_UP_M * bodyScale;
-  walkCamera.position.set(camX, camY, camZ);
-  walkCamera.lookAt(walkState.x, walkState.camZ + walkState.jumpOffset + eyeHeight, walkState.y);
-
-  // Live SPL readout at the avatar's ear position. Uses current physics
-  // options so it respects the Reverb / coherent toggles.
+  // --- Live SPL readout ---
   if (walkSplOverlay) {
-    const earZ_state = walkState.z + walkState.jumpOffset + eyeHeight;
-    const listenerPos = { x: walkState.x, y: walkState.y, z: earZ_state };
+    // Convert Three.js → state frame for SPL: (x, z) → (x, y); y → z.
+    const px = tpController.pos.x;
+    const py = tpController.pos.z;
+    const pz = tpController.pos.y + eyeHeight;
+    const listenerPos = { x: px, y: py, z: pz };
     const flat = expandSources(state.sources);
     const spl = flat.length > 0
       ? computeMultiSourceSPL({
@@ -946,14 +848,21 @@ function tickWalkthrough(now) {
     const earVal = walkSplOverlay.querySelector('[data-f="ear"]');
     const poseVal = walkSplOverlay.querySelector('[data-f="pose"]');
     const xyzVal = walkSplOverlay.querySelector('[data-f="xyz"]');
-    if (earVal) earVal.textContent = earZ_state.toFixed(2) + ' m';
+    if (earVal) earVal.textContent = eyeHeight.toFixed(2) + ' m';
     if (poseVal) {
-      poseVal.textContent = walkState.jumpOffset > 0.05
+      poseVal.textContent = !ctx.grounded
         ? 'jumping'
-        : (walkState.crouchF > 0.5 ? 'crouching' : 'standing');
+        : (animState.crouchF > 0.5 ? 'crouching' : 'standing');
     }
-    if (xyzVal) xyzVal.textContent =
-      walkState.x.toFixed(1) + '  ·  ' + walkState.y.toFixed(1) + '  ·  ' + earZ_state.toFixed(2);
+    if (xyzVal) xyzVal.textContent = px.toFixed(1) + ' · ' + py.toFixed(1) + ' · ' + pz.toFixed(2);
+  }
+
+  // Reset key — controller has its own R handling? No, we need to listen.
+  if (ctx.keys.has('KeyR')) {
+    // Edge-triggered would be better; for now just re-place on each R press
+    // (idempotent if held).
+    placeAvatarAtDefault();
+    ctx.keys.delete('KeyR');
   }
 }
 
@@ -2640,7 +2549,13 @@ function animate(ts) {
   requestAnimationFrame(animate);
   if (!renderer || !scene || !activeCamera) return;
   if (shadowsNeedRefresh) { applyShadowFlags(); shadowsNeedRefresh = false; }
-  if (walkMode) tickWalkthrough(ts || performance.now());
-  else if (controls) controls.update();
+  if (walkMode && tpController) {
+    const now = ts || performance.now();
+    const dt = Math.min(0.1, (now - tpLastTs) / 1000);
+    tpLastTs = now;
+    tpController.update(dt);
+  } else if (controls) {
+    controls.update();
+  }
   renderer.render(scene, activeCamera);
 }
