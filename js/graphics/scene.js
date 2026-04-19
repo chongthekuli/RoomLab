@@ -2602,6 +2602,43 @@ function rebuildStadiumFurniture() {
     line.userData.acoustic_material = 'steel';
     zonesGroup.add(line);
   }
+
+  // Center-hung 4-sided LED video board. Dark panel body with emissive LED
+  // sides so it reads as "screens" at any lighting level. Hung from the
+  // catwalk above it via 4 short cables.
+  const sb = s.scoreboard;
+  if (sb) {
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a0a, metalness: 0.4, roughness: 0.55,
+    });
+    const ledMat = new THREE.MeshStandardMaterial({
+      color: 0x111111, metalness: 0.2, roughness: 0.35,
+      emissive: 0x1a4d6e, emissiveIntensity: 0.6,
+    });
+    const scoreboard = new THREE.Group();
+    // Core box (top + bottom show as body, sides show as LED faces — use
+    // an array of materials per face: +x,-x,+y,-y,+z,-z order).
+    const boxGeo = new THREE.BoxGeometry(sb.width_m, sb.height_m, sb.width_m);
+    const faceMats = [ledMat, ledMat, bodyMat, bodyMat, ledMat, ledMat];
+    const box = new THREE.Mesh(boxGeo, faceMats);
+    box.position.set(0, 0, 0);
+    box.userData.acoustic_material = sb.material_id ?? 'led-glass';
+    box.userData.tag = 'scoreboard_box';
+    scoreboard.add(box);
+    // 4 short hanger cables from box-top corners up to catwalk underside
+    const topY = sb.height_m / 2;
+    const catY = catwalkHeight - sb.center_z_m;   // in group-local coords
+    for (const [dx, dz] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {
+      const hx = dx * sb.width_m / 2;
+      const hz = dz * sb.width_m / 2;
+      const pts = [new THREE.Vector3(hx, topY, hz), new THREE.Vector3(hx * 0.4, catY, hz * 0.4)];
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), cableMat);
+      line.userData.acoustic_material = 'steel';
+      scoreboard.add(line);
+    }
+    scoreboard.position.set(sb.cx, sb.center_z_m, sb.cy);
+    zonesGroup.add(scoreboard);
+  }
 }
 
 function zoneHeatmapTexture(splInfo) {

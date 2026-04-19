@@ -73,8 +73,42 @@ export function domeVolume(room) {
   return Math.PI * d / 6 * (3 * a * a + d * d);
 }
 
+// Arena presets carry a `stadiumStructure` that occupies real floor-to-
+// catwalk volume in concrete (bowl tiers + concourse ring). Elena's audit:
+// the raw polygon+dome volume overstates air volume by ~10%, which
+// inflates Sabine RT60 by the same. Subtract the modeled concrete solids.
+export function stadiumSolidVolume(stadiumStructure) {
+  if (!stadiumStructure) return 0;
+  const v = stadiumStructure.vomitories;
+  const vomFrac = v ? (v.centerAnglesDeg?.length ?? 0) * (v.widthDeg ?? 0) / 360 : 0;
+  const usedFrac = Math.max(0, Math.min(1, 1 - vomFrac));
+  let vol = 0;
+  const lb = stadiumStructure.lowerBowl;
+  if (lb && Array.isArray(lb.tier_heights_m) && lb.tier_heights_m.length > 0) {
+    const meanZ = lb.tier_heights_m.reduce((a, b) => a + b, 0) / lb.tier_heights_m.length;
+    vol += Math.PI * (lb.r_out * lb.r_out - lb.r_in * lb.r_in) * meanZ * usedFrac;
+  }
+  const co = stadiumStructure.concourse;
+  if (co && co.elevation_m > 0) {
+    vol += Math.PI * (co.r_out * co.r_out - co.r_in * co.r_in) * co.elevation_m * usedFrac;
+  }
+  const ub = stadiumStructure.upperBowl;
+  if (ub && Array.isArray(ub.tier_heights_m) && ub.tier_heights_m.length > 0) {
+    const meanZ = ub.tier_heights_m.reduce((a, b) => a + b, 0) / ub.tier_heights_m.length;
+    const rakeH = Math.max(0, meanZ - (ub.floor_z ?? 0));
+    vol += Math.PI * (ub.r_out * ub.r_out - ub.r_in * ub.r_in) * rakeH * usedFrac;
+  }
+  // Scoreboard: small but nonzero volume occupied by the LED cube.
+  const sb = stadiumStructure.scoreboard;
+  if (sb) {
+    vol += sb.width_m * sb.width_m * sb.height_m;
+  }
+  return vol;
+}
+
 export function roomVolume(room) {
-  return baseArea(room) * room.height_m + domeVolume(room);
+  const gross = baseArea(room) * room.height_m + domeVolume(room);
+  return Math.max(0, gross - stadiumSolidVolume(room.stadiumStructure));
 }
 
 export function roomCenter(room) {
@@ -205,6 +239,18 @@ export function roomEffectiveSurfaces(room, zones = []) {
   if (floorCarveOut > 0) {
     const fi = out.findIndex(s => s.id === 'floor');
     if (fi >= 0) out[fi].area_m2 = Math.max(0, out[fi].area_m2 - floorCarveOut);
+  }
+  // Center-hung scoreboard — 4 LED side faces + steel top/bottom.
+  // Acoustically significant as a hard reflector in the center of the room.
+  const sb = room.stadiumStructure?.scoreboard;
+  if (sb) {
+    const sides = 4 * sb.width_m * sb.height_m;
+    const topBot = 2 * sb.width_m * sb.width_m;
+    out.push({
+      id: 'scoreboard',
+      area_m2: sides + topBot,
+      materialId: sb.material_id ?? 'led-glass',
+    });
   }
   return out;
 }

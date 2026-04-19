@@ -56,6 +56,11 @@
       "id": "audience-seated",
       "name": "Upholstered seat — occupied (Beranek, per m²)",
       "absorption": [0.60, 0.74, 0.88, 0.96, 0.93, 0.85, 0.80]
+    },
+    {
+      "id": "led-glass",
+      "name": "LED video wall panel (flat glass + steel chassis)",
+      "absorption": [0.18, 0.06, 0.04, 0.03, 0.02, 0.02, 0.02]
     }
   ]
 }

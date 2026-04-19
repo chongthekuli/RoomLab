@@ -404,7 +404,10 @@ export const PRESETS = {
     // seating rake around 35°). Earlier reviewer suggestions of 0.6–0.8 m step
     // on a 0.5 m tread would give 50–58° rake which violates that band.
     const cx = 30, cy = 30;
-    const lowerBowl = { r_in: 18, r_out: 24, floor_z: 0,    tier_heights_m: [1.0, 1.45, 1.9, 2.35, 2.8, 3.25] };
+    // Elena+Mac audit: apron was only 1.76 m (r_in=18 vs court corner r=16.24).
+    // NCAA Rule 1-19 recommends 3 ft minimum, 10 ft for championship venues;
+    // real benches + scorer's table need ~3.5 m. Pushed r_in to 20 m → 3.76 m.
+    const lowerBowl = { r_in: 20, r_out: 24, floor_z: 0,    tier_heights_m: [1.0, 1.45, 1.9, 2.35, 2.8, 3.25] };
     const upperBowl = { r_in: 26, r_out: 29, floor_z: 3.25, tier_heights_m: [7.0, 7.35, 7.7, 8.05, 8.4, 8.75] };
     const concourse = { r_in: 24, r_out: 26, elevation_m: 3.25 };
     return {
@@ -434,6 +437,17 @@ export const PRESETS = {
           centerAnglesDeg: [0, 90, 180, 270],
           widthDeg: 10,
         },
+        // Center-hung 4-sided LED cube — every modern arena has one.
+        // Mac: "no scoreboard is like modeling a concert without the PA".
+        // Bottom at z=10, top at z=14 → sits between catwalk (15 m) and
+        // PA cluster top (~16.7 m). 6×6×4 m is MSG-class; 4000 kg.
+        scoreboard: {
+          cx, cy,
+          center_z_m: 12,
+          width_m: 6,    // footprint (square in plan)
+          height_m: 4,   // vertical extent
+          material_id: 'led-glass',
+        },
       },
       zones: [
         { id: 'Z_court', label: 'Court', vertices: rectVerts(15.65, 22.4, 44.35, 37.6), elevation_m: 0, material_id: 'wood-floor' },
@@ -447,7 +461,7 @@ export const PRESETS = {
           sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
         }),
         ...generateTieredBowl({
-          cx, cy, r_in: 18, r_out: 24,
+          cx, cy, r_in: 20, r_out: 24,
           tier_heights_m: lowerBowl.tier_heights_m,
           sectorCount: 4, material_id: 'upholstered-seat-empty',
           idPrefix: 'Z_lb', labelPrefix: 'Lower',
