@@ -364,8 +364,24 @@ function buildSuitedManAvatar() {
   };
 
   const root = new THREE.Group();
-  const parts = { armL: null, armR: null, legL: null, legR: null, body: new THREE.Group() };
-  root.add(parts.body);
+  // --- Rig hierarchy ---
+  //   root
+  //     legL, legR        (hip-pivot groups attached to the root/pelvis level)
+  //     spine             (Group pivoting at the waist, y=0.92 m)
+  //       body            (upper torso, head, tie, shirt, neck, pelvis band)
+  //       armL, armR      (shoulder-pivot groups, attached to the spine so
+  //                        arms lean + tilt WITH the torso — previous bug had
+  //                        only body leaning and arms/head detaching)
+  // Legs stay at root so stride rotations happen at the hip independent of
+  // upper-body sway. Spine carries torso tilt + turn-lean.
+  const parts = { armL: null, armR: null, legL: null, legR: null, body: new THREE.Group(), spine: new THREE.Group() };
+  parts.spine.position.set(0, 0.92, 0);    // waist pivot
+  // body stays at root-frame coordinates internally but lives inside spine,
+  // so we offset body.position.y to cancel spine.position and keep the
+  // existing absolute positions of head/torso/etc. unchanged.
+  parts.body.position.y = -0.92;
+  parts.spine.add(parts.body);
+  root.add(parts.spine);
 
   // --- Head group -----------------------------------------------------------
   const headG = new THREE.Group();
@@ -500,7 +516,11 @@ function buildSuitedManAvatar() {
   };
   parts.armL = makeArm(-1);
   parts.armR = makeArm( 1);
-  root.add(parts.armL, parts.armR);
+  // Shoulder anchor was (sign*0.23, 1.42, 0) in root frame; subtract 0.92 so
+  // the world position is unchanged when the arms live inside the spine.
+  parts.armL.position.y -= 0.92;
+  parts.armR.position.y -= 0.92;
+  parts.spine.add(parts.armL, parts.armR);
 
   // --- Leg factory — nested pivots: hip → knee → (shin + shoe) --------------
   // Bending the knee is rotation on leg.knee.rotation.x. The shin group sits
@@ -669,6 +689,7 @@ export function setWalkthroughMode(on) {
     avatar.visible = true;
     avatar.scale.set(1, 1, 1);
     if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
+    if (avatarParts?.spine) avatarParts.spine.rotation.set(0, 0, 0);
     controls.enabled = false;
     activeCamera = walkCamera;
     tpController.enable();
@@ -679,6 +700,7 @@ export function setWalkthroughMode(on) {
     avatar.visible = false;
     avatar.scale.set(1, 1, 1);
     if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
+    if (avatarParts?.spine) avatarParts.spine.rotation.set(0, 0, 0);
     controls.enabled = true;
     activeCamera = camera;
     tpController?.disable();
@@ -810,7 +832,13 @@ function applyAvatarAnimation(ctx) {
   // character.position; we add the small cosmetic offset here.
   avatar.position.y = tpController.pos.y + bob + yExtra;
   avatar.scale.y = bodyScale;
-  if (avatarParts?.body) avatarParts.body.rotation.set(torsoTilt, 0, animState.turnLean);
+  // Spine carries upper-body tilt + lean so torso + head + arms all move
+  // together. Order YXZ: Y first (no-op here), then X (pitch forward), then
+  // Z (roll for turn-lean) — in spine-local frame after the yaw on root.
+  if (avatarParts?.spine) {
+    avatarParts.spine.rotation.order = 'YXZ';
+    avatarParts.spine.rotation.set(torsoTilt, 0, animState.turnLean);
+  }
   if (avatarParts?.legL) {
     avatarParts.legL.rotation.x = thighL_rot;
     if (avatarParts.legL.userData.knee) avatarParts.legL.userData.knee.rotation.x = kneeL_rot;
