@@ -18,14 +18,16 @@ let materialsRef, container;
 // switches tabs, so speakers / heatmaps / bowl structure are all visible
 // from inside the room.
 let walkCamera, avatar, walkHint;
+let avatarParts = null;       // { armL, armR, legL, legR, body }
 let activeCamera = null;
 let walkMode = false;
-const walkState = { x: 0, y: 0, heading: 0 }; // state-frame position + yaw
+let walkPhase = 0;            // stride phase for leg/arm swing animation
+const walkState = { x: 0, y: 0, heading: 0 };
 const walkKeys = new Set();
 let walkLastTs = 0;
-const WALK_SPEED_MS    = 2.8;   // m/s forward/strafe
-const WALK_TURN_RADS   = 1.6;   // rad/s for Q/E turn
-const AVATAR_EYE_HEIGHT = 1.68; // realistic eye height
+const WALK_SPEED_MS    = 2.8;
+const WALK_TURN_RADS   = 1.6;
+const AVATAR_EYE_HEIGHT = 1.68;
 const CAM_BACK_M = 3.2;
 const CAM_UP_M   = 2.1;
 
@@ -124,89 +126,163 @@ function initScene() {
   activeCamera = camera;
 }
 
-// Suited-man avatar built from primitives so we stay zero-asset. Head, suit
-// jacket, tie, white shirt collar, sleeves, trouser legs, black shoes.
-// Rooted at y=0 (feet on floor) facing local -Z so a lookAt-style rotation
-// around Y gives correct heading.
+// Suited-man avatar built from primitives — ~1.78 m tall with realistic
+// proportions (1/8 head rule), facial features, and joint-group structure
+// so arms/legs can swing around shoulder/hip pivots during walk animation.
+//
+// Hierarchy:
+//   avatar (root)
+//     body           (non-moving parts: head, torso, pelvis, tie, etc.)
+//     armL, armR     (Groups pivoting at shoulder)
+//     legL, legR     (Groups pivoting at hip)
+// avatarParts captures the swinging groups so tickWalkthrough() can drive
+// their rotation.x without walking the scene graph every frame.
 function buildSuitedManAvatar() {
-  const g = new THREE.Group();
-  const mkMesh = (geo, color, { roughness = 0.75, metalness = 0.05 } = {}) =>
-    new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness, metalness }));
+  // Palette — keep close to "business attire" conventions.
+  const SKIN      = 0xe6b089;
+  const SKIN_SHAD = 0xcc9a78;
+  const SUIT      = 0x1e2634;
+  const SUIT_DARK = 0x0a0f18;
+  const SHIRT     = 0xf5f2ea;
+  const TIE       = 0x8b1e2a;
+  const PANTS     = 0x141a22;
+  const SHOE      = 0x0a0a0a;
+  const HAIR      = 0x1f130a;
 
-  // Head
-  const head = mkMesh(new THREE.SphereGeometry(0.12, 20, 18), 0xf2c29a);
-  head.position.set(0, 1.72, 0);
-  g.add(head);
-  // Hair cap
-  const hair = mkMesh(new THREE.SphereGeometry(0.124, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2.2), 0x2a1c10);
-  hair.position.set(0, 1.72, 0);
-  g.add(hair);
-  // Neck
-  const neck = mkMesh(new THREE.CylinderGeometry(0.05, 0.055, 0.07, 12), 0xe5b48b);
-  neck.position.set(0, 1.6, 0);
-  g.add(neck);
+  const mat = (color, opts = {}) => new THREE.MeshStandardMaterial({
+    color, roughness: opts.r ?? 0.78, metalness: opts.m ?? 0.04,
+  });
+  const mesh = (geo, m, pos) => {
+    const x = new THREE.Mesh(geo, m);
+    if (pos) x.position.set(pos[0], pos[1], pos[2]);
+    return x;
+  };
 
-  // Torso: suit jacket (dark navy) with a small V at the collar for shirt+tie.
-  const torso = mkMesh(new THREE.BoxGeometry(0.42, 0.58, 0.24), 0x1c2433);
-  torso.position.set(0, 1.28, 0);
-  g.add(torso);
-  // White shirt triangle visible in the V of the jacket
-  const shirt = mkMesh(new THREE.BoxGeometry(0.12, 0.22, 0.02), 0xf5f3ee);
-  shirt.position.set(0, 1.45, 0.122);
-  g.add(shirt);
-  // Tie
-  const tie = mkMesh(new THREE.BoxGeometry(0.06, 0.28, 0.02), 0x8b1e2a);
-  tie.position.set(0, 1.38, 0.13);
-  g.add(tie);
-  // Lapel lines (suggestive, thin boxes)
-  const lapelL = mkMesh(new THREE.BoxGeometry(0.03, 0.32, 0.03), 0x10161f);
-  lapelL.position.set(-0.075, 1.42, 0.115);
-  lapelL.rotation.z = 0.15;
-  g.add(lapelL);
-  const lapelR = mkMesh(new THREE.BoxGeometry(0.03, 0.32, 0.03), 0x10161f);
-  lapelR.position.set(0.075, 1.42, 0.115);
-  lapelR.rotation.z = -0.15;
-  g.add(lapelR);
+  const root = new THREE.Group();
+  const parts = { armL: null, armR: null, legL: null, legR: null, body: new THREE.Group() };
+  root.add(parts.body);
 
-  // Arms: jacket sleeves
-  const armGeo = new THREE.CylinderGeometry(0.065, 0.07, 0.55, 14);
-  const armL = mkMesh(armGeo, 0x1c2433);
-  armL.position.set(-0.26, 1.28, 0);
-  armL.rotation.z = 0.08;
-  g.add(armL);
-  const armR = mkMesh(armGeo, 0x1c2433);
-  armR.position.set(0.26, 1.28, 0);
-  armR.rotation.z = -0.08;
-  g.add(armR);
-  // Hands (skin)
-  const handL = mkMesh(new THREE.SphereGeometry(0.065, 12, 10), 0xe5b48b);
-  handL.position.set(-0.28, 1.0, 0);
-  g.add(handL);
-  const handR = mkMesh(new THREE.SphereGeometry(0.065, 12, 10), 0xe5b48b);
-  handR.position.set(0.28, 1.0, 0);
-  g.add(handR);
+  // --- Head group -----------------------------------------------------------
+  const headG = new THREE.Group();
+  headG.position.set(0, 1.54, 0); // top of neck
+  // Head (oval by y-scale)
+  const head = mesh(new THREE.SphereGeometry(0.11, 24, 20), mat(SKIN, { r: 0.6 }), [0, 0.12, 0]);
+  head.scale.set(0.95, 1.10, 0.92);
+  headG.add(head);
+  // Hair cap — volume on top + back
+  const hair = mesh(
+    new THREE.SphereGeometry(0.116, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    mat(HAIR, { r: 0.85 }),
+    [0, 0.14, -0.005],
+  );
+  hair.scale.set(0.96, 1.0, 1.0);
+  headG.add(hair);
+  // Back-of-hair to cover the head properly
+  const hairBack = mesh(new THREE.SphereGeometry(0.105, 20, 12), mat(HAIR, { r: 0.85 }), [0, 0.11, -0.025]);
+  hairBack.scale.set(0.95, 0.9, 0.75);
+  headG.add(hairBack);
+  // Ears
+  headG.add(mesh(new THREE.SphereGeometry(0.022, 10, 8), mat(SKIN_SHAD), [-0.10, 0.11, 0]));
+  headG.add(mesh(new THREE.SphereGeometry(0.022, 10, 8), mat(SKIN_SHAD), [ 0.10, 0.11, 0]));
+  // Eyes — white sclera + dark pupil
+  const scleraMat = mat(0xf5f1ea, { r: 0.45 });
+  const pupilMat = mat(0x16232e, { r: 0.4 });
+  const eyeR_s = mesh(new THREE.SphereGeometry(0.017, 12, 10), scleraMat, [ 0.034, 0.125, 0.093]);
+  const eyeL_s = mesh(new THREE.SphereGeometry(0.017, 12, 10), scleraMat, [-0.034, 0.125, 0.093]);
+  const eyeR_p = mesh(new THREE.SphereGeometry(0.009, 10, 8), pupilMat, [ 0.034, 0.125, 0.102]);
+  const eyeL_p = mesh(new THREE.SphereGeometry(0.009, 10, 8), pupilMat, [-0.034, 0.125, 0.102]);
+  headG.add(eyeR_s, eyeL_s, eyeR_p, eyeL_p);
+  // Eyebrows
+  const browMat = mat(HAIR, { r: 0.8 });
+  const browR = mesh(new THREE.BoxGeometry(0.032, 0.006, 0.01), browMat, [ 0.034, 0.145, 0.095]);
+  const browL = mesh(new THREE.BoxGeometry(0.032, 0.006, 0.01), browMat, [-0.034, 0.145, 0.095]);
+  headG.add(browR, browL);
+  // Nose
+  const nose = mesh(new THREE.ConeGeometry(0.013, 0.04, 10), mat(SKIN_SHAD, { r: 0.5 }), [0, 0.10, 0.103]);
+  nose.rotation.x = Math.PI / 2;
+  headG.add(nose);
+  // Mouth
+  headG.add(mesh(new THREE.BoxGeometry(0.032, 0.007, 0.005), mat(0x5a2222, { r: 0.6 }), [0, 0.075, 0.098]));
+  parts.body.add(headG);
 
-  // Legs: dark trousers
-  const legGeo = new THREE.CylinderGeometry(0.09, 0.085, 0.9, 14);
-  const legL = mkMesh(legGeo, 0x12171f);
-  legL.position.set(-0.11, 0.53, 0);
-  g.add(legL);
-  const legR = mkMesh(legGeo, 0x12171f);
-  legR.position.set(0.11, 0.53, 0);
-  g.add(legR);
+  // --- Neck -----------------------------------------------------------------
+  parts.body.add(mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.08, 14), mat(SKIN), [0, 1.50, 0]));
 
-  // Shoes: polished black
-  const shoeGeo = new THREE.BoxGeometry(0.14, 0.08, 0.28);
-  const shoeL = mkMesh(shoeGeo, 0x0a0a0a, { roughness: 0.3, metalness: 0.2 });
-  shoeL.position.set(-0.11, 0.04, 0.04);
-  g.add(shoeL);
-  const shoeR = mkMesh(shoeGeo, 0x0a0a0a, { roughness: 0.3, metalness: 0.2 });
-  shoeR.position.set(0.11, 0.04, 0.04);
-  g.add(shoeR);
+  // --- Torso (jacket) + shirt + tie + lapels + buttons ---------------------
+  const jacket = mesh(new THREE.BoxGeometry(0.42, 0.56, 0.26), mat(SUIT, { r: 0.75 }), [0, 1.18, 0]);
+  parts.body.add(jacket);
+  // Shirt triangle in the V
+  parts.body.add(mesh(new THREE.BoxGeometry(0.1, 0.18, 0.012), mat(SHIRT, { r: 0.7 }), [0, 1.40, 0.133]));
+  // Collar (two small angled boxes)
+  const collarL = mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), mat(SHIRT), [-0.05, 1.46, 0.130]);
+  collarL.rotation.z = -0.35;
+  const collarR = mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), mat(SHIRT), [ 0.05, 1.46, 0.130]);
+  collarR.rotation.z = 0.35;
+  parts.body.add(collarL, collarR);
+  // Tie knot + body
+  parts.body.add(mesh(new THREE.BoxGeometry(0.055, 0.055, 0.018), mat(TIE, { r: 0.55 }), [0, 1.435, 0.138]));
+  parts.body.add(mesh(new THREE.BoxGeometry(0.045, 0.30, 0.018), mat(TIE, { r: 0.55 }), [0, 1.26, 0.138]));
+  // Lapels — thin angled boards on either side of the V
+  const lapelGeo = new THREE.BoxGeometry(0.03, 0.34, 0.025);
+  const lapelL = mesh(lapelGeo, mat(SUIT_DARK, { r: 0.7 }), [-0.08, 1.34, 0.128]);
+  lapelL.rotation.z = 0.14;
+  const lapelR = mesh(lapelGeo, mat(SUIT_DARK, { r: 0.7 }), [ 0.08, 1.34, 0.128]);
+  lapelR.rotation.z = -0.14;
+  parts.body.add(lapelL, lapelR);
+  // Buttons down the front
+  for (let b = 0; b < 3; b++) {
+    parts.body.add(mesh(new THREE.SphereGeometry(0.009, 10, 8), mat(0x111111, { r: 0.35, m: 0.4 }), [0, 1.22 - b * 0.085, 0.133]));
+  }
 
-  g.visible = false;
-  g.userData.tag = 'walk_avatar';
-  return g;
+  // --- Pelvis (visible band at top of pants) --------------------------------
+  parts.body.add(mesh(new THREE.BoxGeometry(0.40, 0.12, 0.24), mat(PANTS), [0, 0.86, 0]));
+  // Belt
+  parts.body.add(mesh(new THREE.BoxGeometry(0.405, 0.03, 0.245), mat(0x0a0a0a, { r: 0.3, m: 0.25 }), [0, 0.925, 0]));
+
+  // --- Arm factory — Group pivots at the shoulder ---------------------------
+  const makeArm = (sign) => {
+    const arm = new THREE.Group();
+    arm.position.set(sign * 0.23, 1.42, 0); // shoulder anchor
+    // Shoulder cap sphere for roundness
+    arm.add(mesh(new THREE.SphereGeometry(0.085, 14, 12), mat(SUIT, { r: 0.75 }), [0, 0, 0]));
+    // Upper arm — cylinder whose TOP sits at the pivot (centered −0.13 below)
+    arm.add(mesh(new THREE.CylinderGeometry(0.063, 0.057, 0.26, 14), mat(SUIT, { r: 0.78 }), [0, -0.13, 0]));
+    // Elbow
+    arm.add(mesh(new THREE.SphereGeometry(0.058, 12, 10), mat(SUIT, { r: 0.75 }), [0, -0.26, 0]));
+    // Forearm
+    arm.add(mesh(new THREE.CylinderGeometry(0.057, 0.048, 0.26, 14), mat(SUIT, { r: 0.8 }), [0, -0.39, 0]));
+    // Hand (skin, slightly flattened)
+    const hand = mesh(new THREE.SphereGeometry(0.055, 12, 10), mat(SKIN, { r: 0.65 }), [0, -0.55, 0]);
+    hand.scale.set(0.9, 1.15, 0.75);
+    arm.add(hand);
+    return arm;
+  };
+  parts.armL = makeArm(-1);
+  parts.armR = makeArm( 1);
+  root.add(parts.armL, parts.armR);
+
+  // --- Leg factory — Group pivots at the hip --------------------------------
+  const makeLeg = (sign) => {
+    const leg = new THREE.Group();
+    leg.position.set(sign * 0.11, 0.86, 0); // hip anchor
+    // Thigh
+    leg.add(mesh(new THREE.CylinderGeometry(0.085, 0.072, 0.42, 14), mat(PANTS), [0, -0.21, 0]));
+    // Knee
+    leg.add(mesh(new THREE.SphereGeometry(0.072, 12, 10), mat(PANTS), [0, -0.42, 0]));
+    // Shin / calf
+    leg.add(mesh(new THREE.CylinderGeometry(0.068, 0.05, 0.40, 14), mat(PANTS), [0, -0.63, 0]));
+    // Shoe — box slightly forward of ankle so toes point ahead
+    leg.add(mesh(new THREE.BoxGeometry(0.13, 0.08, 0.28), mat(SHOE, { r: 0.28, m: 0.3 }), [0, -0.82, 0.05]));
+    return leg;
+  };
+  parts.legL = makeLeg(-1);
+  parts.legR = makeLeg( 1);
+  root.add(parts.legL, parts.legR);
+
+  root.visible = false;
+  root.userData.tag = 'walk_avatar';
+  avatarParts = parts;
+  return root;
 }
 
 function initWalkthrough() {
@@ -313,8 +389,40 @@ function tickWalkthrough(now) {
     }
   }
 
+  // Drive walk cycle. Phase advances when moving; arms & legs swing about
+  // the shoulder/hip pivots. When idle, pose decays back to neutral so the
+  // character isn't frozen mid-stride.
+  const isMoving = (mx !== 0 || my !== 0);
+  const running = walkKeys.has('ShiftLeft') || walkKeys.has('ShiftRight');
+  const strideHz = running ? 2.4 : 1.7;          // steps per second
+  if (isMoving) {
+    walkPhase += dt * Math.PI * 2 * strideHz;
+  }
+  if (avatarParts) {
+    const legAmp = 0.45, armAmp = 0.35;
+    if (isMoving) {
+      const s = Math.sin(walkPhase);
+      // Legs swing opposite each other. Negative rot.x moves lower leg
+      // toward +Z (avatar-forward).
+      avatarParts.legL.rotation.x = -s * legAmp;
+      avatarParts.legR.rotation.x =  s * legAmp;
+      // Arms counter-swing relative to same-side leg.
+      avatarParts.armL.rotation.x =  s * armAmp;
+      avatarParts.armR.rotation.x = -s * armAmp;
+    } else {
+      // Lerp limbs back to neutral when stopped.
+      const k = 0.82;
+      avatarParts.legL.rotation.x *= k;
+      avatarParts.legR.rotation.x *= k;
+      avatarParts.armL.rotation.x *= k;
+      avatarParts.armR.rotation.x *= k;
+    }
+  }
+  // Small vertical bob — body dips slightly on each footfall.
+  const bob = isMoving ? Math.abs(Math.cos(walkPhase)) * 0.025 : 0;
+
   // Sync avatar transform (state → Three.js: x→x, z→y, y→z).
-  avatar.position.set(walkState.x, 0, walkState.y);
+  avatar.position.set(walkState.x, bob, walkState.y);
   avatar.rotation.y = walkState.heading;
 
   // 3rd-person camera: behind avatar (opposite of facing direction).
