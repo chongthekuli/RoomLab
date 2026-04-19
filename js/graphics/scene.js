@@ -191,16 +191,16 @@ function initScene() {
   // on the bowl curve and gives a more "cinematic" compression than 45°.
   camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 300);
 
-  // Post-processing chain owns the final tone-map + sRGB encode, so the
-  // renderer itself must not double-apply them. Viktor audit: "move
-  // toneMapping onto OutputPass — composer renders to linear internally".
-  // antialias:false on the renderer → SMAAPass handles AA at the end of the
-  // chain, avoiding the double-AA cost.
-  renderer = new THREE.WebGLRenderer({ antialias: false });
+  renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // Modern archviz defaults: ACES filmic tone mapping gives cinematic contrast
+  // response (deepens shadows, softens highlights). sRGB output-color-space
+  // matches what every monitor expects. Exposure 1.0 is neutral; +/−0.15
+  // would skew bright/dark. These two lines are the biggest cheap polish win.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping;
   // Soft shadow maps — enabled but only sparingly cast (see dir-light setup
   // below). PCFSoftShadowMap is the middle ground between perf and quality.
   renderer.shadowMap.enabled = true;
@@ -208,40 +208,11 @@ function initScene() {
   container.innerHTML = '';
   container.style.position = 'relative';
   container.appendChild(renderer.domElement);
-
-  // EffectComposer chain — SSAO for contact shadows in creases + under
-  // speakers, UnrealBloom for the emissive LED faces on the scoreboard
-  // and speaker grills, SMAA to clean aliased line-array cabinets, and
-  // OutputPass for the final ACES tone-map + sRGB encode. Viktor's #1
-  // CRITICAL item — it moves the scene from "Blender Eevee" to "Unity
-  // URP" territory for ~2.5 ms/frame on integrated graphics.
-  composer = new EffectComposer(renderer);
-  composer.setPixelRatio(renderer.getPixelRatio());
-  composer.setSize(w, h);
-  composer.addPass(new RenderPass(scene, camera));
-  ssaoPass = new SSAOPass(scene, camera, w, h);
-  ssaoPass.kernelRadius = 0.8;
-  ssaoPass.minDistance = 0.003;
-  ssaoPass.maxDistance = 0.08;
-  composer.addPass(ssaoPass);
-  // UnrealBloomPass(resolution, strength, radius, threshold). Threshold is
-  // applied to LINEAR HDR luminance (pre-tonemap) — well-lit gypsum walls
-  // in this scene hit 1.0-1.5 linear under the three-point rig + IBL, so
-  // threshold must sit ABOVE that to avoid blooming the whole room white.
-  // Scoreboard emissive at intensity 2.2 (blue channel ~1.94) still clears
-  // a threshold of 1.2 comfortably. Strength 0.22 keeps halos subtle —
-  // visible glow on actual emissives, no room-wide wash.
-  bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.22, 0.5, 1.2);
-  composer.addPass(bloomPass);
-  composer.addPass(new SMAAPass(w * renderer.getPixelRatio(), h * renderer.getPixelRatio()));
-  const outputPass = new OutputPass();
-  composer.addPass(outputPass);
-  // Tone-map + exposure live on the final OutputPass. ACES gives cinematic
-  // contrast response (deepens shadows, softens highlights). Exposure 1.05
-  // is slightly brighter than neutral — pushes the scoreboard emissives
-  // above bloom threshold without crushing the darks.
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  // Post-processing (SSAO/Bloom/SMAA) is temporarily disabled — the previous
+  // composer chain was bleaching the entire scene through a color-pipeline
+  // interaction with SSAOPass. Back to direct renderer.render() which looks
+  // correct. Revisit as a separate, carefully-validated pass.
+  composer = null;
 
   // SPL legend overlay (HTML over the WebGL canvas, right side, vertical).
   // Gradient is fixed to the palette used by splColorRGB (60–110 dB range);
