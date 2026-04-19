@@ -396,6 +396,49 @@ function rebuildRoom(isFirst) {
   }
 }
 
+// Rough cabinet dimensions (width × height × depth in meters) by speaker type.
+// Line-array elements are wider than tall (Nexo STM / JBL VRX-family shape);
+// compact monitors are small; 2-way cabinets are taller than wide. These are
+// visual-only — the physics still runs against the loudspeaker JSON directivity.
+function speakerCabinetDims(modelUrl) {
+  const url = modelUrl || '';
+  if (/line-array/i.test(url))  return { w: 0.90, h: 0.28, d: 0.55, type: 'line-array' };
+  if (/compact-6/i.test(url))   return { w: 0.22, h: 0.32, d: 0.22, type: 'compact' };
+  return { w: 0.38, h: 0.60, d: 0.35, type: 'cabinet' };
+}
+
+// Builds a speaker enclosure group oriented so its front face (local -Z) points
+// along the aim vector. Used by both lookAt() + optional roll-about-aim.
+function buildSpeakerEnclosure(src, groupInt, outside) {
+  const { w, h, d } = speakerCabinetDims(src.modelUrl);
+
+  // Matte-black cabinet body like a real pro speaker. When the speaker is
+  // outside the room we tint it red to echo the existing warning signal.
+  const bodyColor = outside ? 0x6a1a0c : 0x141618;
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.75, metalness: 0.25 }),
+  );
+
+  // Front grill panel — slightly inset, tinted by speaker-group color so the
+  // user can see which group a box belongs to at a glance.
+  const grillColor = outside ? 0xff5a3c : (groupInt ?? 0x3a4048);
+  const grillEmissive = outside ? 0x551100 : (groupInt ? (groupInt & 0x333333) : 0x111111);
+  const grill = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.95, h * 0.88, 0.03),
+    new THREE.MeshStandardMaterial({
+      color: grillColor, roughness: 0.95, metalness: 0, emissive: grillEmissive,
+    }),
+  );
+  grill.position.set(0, 0, -d / 2 - 0.015);
+
+  const encl = new THREE.Group();
+  encl.add(body);
+  encl.add(grill);
+  encl.userData.acoustic_material = 'speaker_cabinet';
+  return encl;
+}
+
 function rebuildSources() {
   if (!sourcesGroup) {
     sourcesGroup = new THREE.Group();
@@ -408,37 +451,36 @@ function rebuildSources() {
     const outside = !isInsideRoom3D(src.position, state.room);
     const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
     const groupInt = groupHex ? parseInt(groupHex.slice(1), 16) : null;
-    const coneGeo = new THREE.ConeGeometry(0.22, 0.6, 20);
-    const coneColor = outside ? 0xff5a3c : (groupInt ?? 0xffffff);
-    const coneMat = new THREE.MeshStandardMaterial({
-      color: coneColor,
-      emissive: outside ? 0x550000 : (groupInt ? (groupInt & 0x666666) : 0x333333),
-    });
-    const cone = new THREE.Mesh(coneGeo, coneMat);
-    cone.position.set(src.position.x, src.position.z, src.position.y);
 
+    const encl = buildSpeakerEnclosure(src, groupInt, outside);
+    encl.position.set(src.position.x, src.position.z, src.position.y);
+
+    // Orient via lookAt so line-array boxes stay horizontally level even at
+    // non-zero pitch (unlike setFromUnitVectors which can roll the box).
     const yaw = src.aim.yaw * Math.PI / 180;
     const pitch = src.aim.pitch * Math.PI / 180;
-    const aim = new THREE.Vector3(
-      Math.sin(yaw) * Math.cos(pitch),
-      Math.sin(pitch),
-      Math.cos(yaw) * Math.cos(pitch)
+    const aimX = Math.sin(yaw) * Math.cos(pitch);
+    const aimY = Math.sin(pitch);
+    const aimZ = Math.cos(yaw) * Math.cos(pitch);
+    encl.lookAt(
+      encl.position.x + aimX,
+      encl.position.y + aimY,
+      encl.position.z + aimZ,
     );
-    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), aim);
-    sourcesGroup.add(cone);
+    // Optional roll about the aim axis (rotation around local -Z which now
+    // points along the aim direction after lookAt).
+    if (src.aim.roll) {
+      encl.rotateOnAxis(new THREE.Vector3(0, 0, -1), src.aim.roll * Math.PI / 180);
+    }
+    sourcesGroup.add(encl);
 
-    const ball = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 12, 12),
-      new THREE.MeshStandardMaterial({ color: groupInt ?? 0x000000 })
-    );
-    ball.position.copy(cone.position);
-    sourcesGroup.add(ball);
-
-    // Group indicator ring below the speaker
+    // Group indicator ring on the floor below the speaker — keeps the visual
+    // cue from the cone era so users can track which color belongs to which
+    // speaker when looking straight down.
     if (groupInt && !outside) {
       const ring = new THREE.Mesh(
         new THREE.TorusGeometry(0.35, 0.04, 8, 32),
-        new THREE.MeshBasicMaterial({ color: groupInt })
+        new THREE.MeshBasicMaterial({ color: groupInt }),
       );
       ring.rotation.x = Math.PI / 2;
       ring.position.set(src.position.x, 0.02, src.position.y);
