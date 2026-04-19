@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000],
   "materials": [
     {
@@ -33,9 +33,29 @@
       "absorption": [0.15, 0.11, 0.10, 0.07, 0.06, 0.07, 0.07]
     },
     {
+      "id": "metal-deck-acoustic",
+      "name": "Perforated metal deck w/ 50mm mineral wool (arena ceiling)",
+      "absorption": [0.35, 0.65, 0.80, 0.70, 0.65, 0.60, 0.55]
+    },
+    {
+      "id": "perforated-panel-fabric",
+      "name": "Fabric-wrapped fiberglass wall panel 50mm",
+      "absorption": [0.17, 0.55, 0.85, 0.95, 0.93, 0.88, 0.85]
+    },
+    {
+      "id": "arena-wall-mixed",
+      "name": "Arena wall — 20% perforated panel / 80% gypsum (typical coverage)",
+      "absorption": [0.27, 0.19, 0.21, 0.22, 0.24, 0.25, 0.25]
+    },
+    {
+      "id": "upholstered-seat-empty",
+      "name": "Upholstered seat — empty (Beranek, per m²)",
+      "absorption": [0.35, 0.45, 0.57, 0.61, 0.59, 0.55, 0.50]
+    },
+    {
       "id": "audience-seated",
-      "name": "Seated audience (fully occupied, per m²)",
-      "absorption": [0.46, 0.51, 0.56, 0.64, 0.71, 0.75, 0.78]
+      "name": "Upholstered seat — occupied (Beranek, per m²)",
+      "absorption": [0.60, 0.74, 0.88, 0.96, 0.93, 0.85, 0.80]
     }
   ]
 }

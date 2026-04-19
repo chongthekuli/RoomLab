@@ -414,9 +414,13 @@ export const PRESETS = {
       width_m: 60, height_m: 12, depth_m: 60,
       ceiling_dome_rise_m: 10,
       surfaces: {
-        floor: 'wood-floor', ceiling: 'gypsum-board', walls: 'gypsum-board',
-        wall_north: 'gypsum-board', wall_south: 'gypsum-board',
-        wall_east: 'gypsum-board', wall_west: 'gypsum-board',
+        // Real arenas (e.g., MSG after 2013 renovation, Wyoming Arena-
+        // Auditorium) use perforated metal deck ceilings with fiberglass
+        // batt insulation and a mix of gypsum + fabric-wrapped panels on
+        // the walls. Gypsum-everywhere was giving RT60 ~10 s vs real ~3 s.
+        floor: 'wood-floor', ceiling: 'metal-deck-acoustic', walls: 'arena-wall-mixed',
+        wall_north: 'arena-wall-mixed', wall_south: 'arena-wall-mixed',
+        wall_east: 'arena-wall-mixed', wall_west: 'arena-wall-mixed',
       },
       // stadiumStructure is read by scene.js to build solid LatheGeometry bowl meshes
       // (per sector, with end caps) + cut the room wall at vomitory angles.
@@ -445,7 +449,7 @@ export const PRESETS = {
         ...generateTieredBowl({
           cx, cy, r_in: 18, r_out: 24,
           tier_heights_m: lowerBowl.tier_heights_m,
-          sectorCount: 4, material_id: 'carpet-heavy',
+          sectorCount: 4, material_id: 'upholstered-seat-empty',
           idPrefix: 'Z_lb', labelPrefix: 'Lower',
           gapDeg: 10, startAngleDeg: 45,
           sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
@@ -454,7 +458,7 @@ export const PRESETS = {
         ...generateTieredBowl({
           cx, cy, r_in: 26, r_out: 29,
           tier_heights_m: upperBowl.tier_heights_m,
-          sectorCount: 4, material_id: 'carpet-heavy',
+          sectorCount: 4, material_id: 'upholstered-seat-empty',
           idPrefix: 'Z_ub', labelPrefix: 'Upper',
           gapDeg: 10, startAngleDeg: 45,
           sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
