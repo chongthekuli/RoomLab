@@ -7,7 +7,7 @@ import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mount2DViewport } from './graphics/room-2d.js';
-import { mount3DViewport, toggleHeatmaps, setWalkthroughMode } from './graphics/scene.js';
+import { mount3DViewport, toggleHeatmaps, toggleAimLines, setWalkthroughMode } from './graphics/scene.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -30,6 +30,14 @@ function setupTabs() {
     heatBtn.addEventListener('click', () => {
       toggleHeatmaps();
       heatBtn.classList.toggle('active', state.display.showHeatmaps);
+    });
+  }
+
+  const aimBtn = document.getElementById('toggle-aim-lines');
+  if (aimBtn) {
+    aimBtn.addEventListener('click', () => {
+      toggleAimLines();
+      aimBtn.classList.toggle('active', state.display.showAimLines);
     });
   }
 }

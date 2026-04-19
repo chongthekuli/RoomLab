@@ -155,7 +155,7 @@ function generateTieredBowl({
 // outward+down at its audience quadrant. Each "source" here is a compound
 // line-array descriptor — `expandSources` unpacks it to individual elements
 // at SPL-compute / render time.
-function generateCenterLineArrayCluster({ cx, cy, cz, ring_r, hangCount = 4, elementsPerArray = 4, modelUrl, power_watts_each = 500, topTilt_deg = -12, splayAnglesDeg = null, elementSpacing_m = 0.42 }) {
+function generateCenterLineArrayCluster({ cx, cy, cz, ring_r, hangCount = 4, elementsPerArray = 4, modelUrl, power_watts_each = 500, topTilt_deg = -12, splayAnglesDeg = null, elementSpacing_m = 0.42, startAngleDeg = 0 }) {
   const arrays = [];
   // Industry-standard progressive J-curve splays (K2/J8/SOUNDVISION style):
   // upper boxes near 0° for long-throw line-source behavior, lower boxes
@@ -174,7 +174,7 @@ function generateCenterLineArrayCluster({ cx, cy, cz, ring_r, hangCount = 4, ele
     ?? new Array(Math.max(0, elementsPerArray - 1)).fill(3);
   const step = 360 / hangCount;
   for (let i = 0; i < hangCount; i++) {
-    const a_deg = i * step;
+    const a_deg = startAngleDeg + i * step;
     const a_rad = a_deg * Math.PI / 180;
     const ox = cx + ring_r * Math.cos(a_rad);
     const oy = cy + ring_r * Math.sin(a_rad);
@@ -357,7 +357,7 @@ export const state = {
   zones: [],
   selectedZoneId: null,
   results: { rt60: null, splGrid: null, zoneGrids: [] },
-  display: { showHeatmaps: true },
+  display: { showHeatmaps: true, showAimLines: false },
 };
 
 export const DEFAULT_PRESET_KEY = 'auditorium';
@@ -444,13 +444,15 @@ export const PRESETS = {
       // adjacent elements — a classic small-arena center cluster pattern.
       // Each "source" below is a COMPOUND line-array descriptor; the physics
       // and renderer call expandSources() to unpack it into 4 elements.
-      // 4 line-array hangs (cardinal compass) × 6 elements each, default
-      // progressive J-splays [1, 2, 3, 5, 8]. Flown angle −8° puts top
-      // element near horizontal for long throw to upper bowl, lower elements
-      // tilt progressively down. 6 elements × 0.42 m = 2.5 m tall column —
-      // clearly visible as a stacked line array from arena camera distance.
+      // 4 line-array hangs at the diagonal sector centers (SE/SW/NW/NE) so
+      // each hang is positioned OVER an audience sector and aimed radially
+      // outward at that sector. Previous startAngleDeg=0 put the hangs at
+      // cardinal points — which is where the vomitories (doors) are, so the
+      // arrays were aiming at empty walkways instead of audience. Sectors
+      // span the 80° between adjacent vomitories.
       sources: generateCenterLineArrayCluster({
         cx, cy, cz: 15, ring_r: 5, hangCount: 4, elementsPerArray: 6,
+        startAngleDeg: 45,
         modelUrl: SPKLA, power_watts_each: 500,
         topTilt_deg: -8, elementSpacing_m: 0.42,
       }),

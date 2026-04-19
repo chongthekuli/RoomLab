@@ -10,6 +10,7 @@ import { getMaterialTexture, getMaterialPalette } from './textures.js';
 
 let scene, camera, renderer, controls;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
+let aimLinesGroup;
 let materialsRef, container;
 
 // --- Walkthrough (3rd-person) mode ---------------------------------------
@@ -49,6 +50,15 @@ export function toggleHeatmaps(force) {
   state.display.showHeatmaps = next;
   if (heatmapGroup) heatmapGroup.visible = next;
   if (heatmapMesh) heatmapMesh.visible = next;
+}
+
+// Aim-line indicator toggle — draws a thin coloured line from every speaker
+// element along its aim direction, extending ~8 m so the user can see where
+// each box is actually pointing. Off by default (adds visual noise when on).
+export function toggleAimLines(force) {
+  const next = typeof force === 'boolean' ? force : !state.display.showAimLines;
+  state.display.showAimLines = next;
+  if (aimLinesGroup) aimLinesGroup.visible = next;
 }
 
 export async function mount3DViewport({ materials }) {
@@ -1090,6 +1100,12 @@ function rebuildSources() { shadowsNeedRefresh = true;
   } else {
     disposeGroup(sourcesGroup);
   }
+  if (!aimLinesGroup) {
+    aimLinesGroup = new THREE.Group();
+    scene.add(aimLinesGroup);
+  } else {
+    disposeGroup(aimLinesGroup);
+  }
 
   // Visual rigging for each line-array hang: a top frame bar + a thick
   // backbone rail that threads through every element's rigging pin so the
@@ -1202,7 +1218,44 @@ function rebuildSources() { shadowsNeedRefresh = true;
       ring.position.set(src.position.x, 0.02, src.position.y);
       sourcesGroup.add(ring);
     }
+
+    // Directivity indicator — thin line from the speaker along its aim
+    // vector, extending 8 m. Coloured by speaker group if set. Lives in
+    // aimLinesGroup so the toolbar toggle flips all of them at once.
+    {
+      const aimLen = 8;
+      const yr = src.aim.yaw * Math.PI / 180;
+      const pr = src.aim.pitch * Math.PI / 180;
+      // aim in state coords: (sin y · cos p, cos y · cos p, sin p).
+      const ax = Math.sin(yr) * Math.cos(pr);
+      const ay = Math.cos(yr) * Math.cos(pr);
+      const az = Math.sin(pr);
+      // state → Three.js (x, z, y).
+      const start = new THREE.Vector3(src.position.x, src.position.z, src.position.y);
+      const end = new THREE.Vector3(
+        src.position.x + aimLen * ax,
+        src.position.z + aimLen * az,
+        src.position.y + aimLen * ay,
+      );
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([start, end]);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: groupInt ?? 0xffcc5a,
+        transparent: true,
+        opacity: 0.85,
+      });
+      aimLinesGroup.add(new THREE.Line(lineGeo, lineMat));
+      // Arrowhead — small cone at the end of the aim line, oriented along aim.
+      const head = new THREE.Mesh(
+        new THREE.ConeGeometry(0.18, 0.5, 10),
+        new THREE.MeshBasicMaterial({ color: groupInt ?? 0xffcc5a, transparent: true, opacity: 0.9 }),
+      );
+      head.position.copy(end);
+      head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(ax, az, ay).normalize());
+      aimLinesGroup.add(head);
+    }
   }
+
+  aimLinesGroup.visible = !!state.display.showAimLines;
 }
 
 function rebuildListeners() { shadowsNeedRefresh = true;
