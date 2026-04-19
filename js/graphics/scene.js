@@ -392,10 +392,8 @@ function buildSuitedManAvatar() {
   head.scale.set(0.94, 1.12, 0.92);
   headG.add(head);
 
-  // Cheek highlights — subtle darker skin patches at the jaw line for shape.
-  const cheekMat = mat(SKIN_SHAD, { r: 0.6 });
-  headG.add(mesh(new THREE.SphereGeometry(0.042, 14, 12), cheekMat, [-0.072, 0.08, 0.058]));
-  headG.add(mesh(new THREE.SphereGeometry(0.042, 14, 12), cheekMat, [ 0.072, 0.08, 0.058]));
+  // (Cheek "blush" spheres removed — they were reading as makeup patches,
+  // not skin shading. Ambient lighting does the cheek falloff for free.)
 
   // --- Hair: covers ONLY the top of the skull so the face is visible.
   //   • Top cap — thin half-sphere layer on top of the head.
@@ -470,51 +468,47 @@ function buildSuitedManAvatar() {
   // --- Neck -----------------------------------------------------------------
   parts.body.add(mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.08, 14), mat(SKIN), [0, 1.50, 0]));
 
-  // --- Torso (black jacket) — tapered cylinder so the silhouette has real
-  // shoulder-to-waist shape instead of reading as a refrigerator box. 14-
-  // sided for smoothness. Z-scaled to make the front-back depth 62% of the
-  // width so the chest is appropriately flatter.
-  const jacketGeo = new THREE.CylinderGeometry(0.24, 0.195, 0.58, 14);
+  // --- Torso — realistic proportions for a 1.78 m man. Chest ≈ 0.36 m wide
+  // × 0.24 m deep, waist ≈ 0.32 m wide × 0.22 m deep. Previous version's
+  // 0.48 m-wide torso read as a trashcan; shoulder caps now provide the
+  // wider silhouette at the top without inflating the whole barrel.
+  const jacketGeo = new THREE.CylinderGeometry(0.18, 0.16, 0.56, 16);
   const jacket = mesh(jacketGeo, mat(SUIT, { r: 0.7, m: 0.06 }), [0, 1.17, 0]);
-  jacket.scale.z = 0.62;
+  jacket.scale.z = 0.68;
   parts.body.add(jacket);
-  // A second flatter "chest plate" cylinder just in front of the upper torso
-  // gives the pectoral + shoulder mass that a round cylinder alone misses.
-  const chest = mesh(
-    new THREE.CylinderGeometry(0.21, 0.22, 0.22, 14),
-    mat(SUIT, { r: 0.72, m: 0.06 }),
-    [0, 1.34, 0.01],
-  );
-  chest.scale.z = 0.7;
-  parts.body.add(chest);
 
   // Dark shirt visible in the V of the jacket opening.
-  parts.body.add(mesh(new THREE.BoxGeometry(0.11, 0.22, 0.012), mat(SHIRT, { r: 0.65 }), [0, 1.39, 0.13]));
-  // Shirt collar points (dark, angled).
-  const collarL = mesh(new THREE.BoxGeometry(0.065, 0.045, 0.018), mat(SHIRT, { r: 0.6 }), [-0.046, 1.455, 0.126]);
+  parts.body.add(mesh(new THREE.BoxGeometry(0.09, 0.22, 0.012), mat(SHIRT, { r: 0.65 }), [0, 1.39, 0.108]));
+  // Shirt collar points.
+  const collarL = mesh(new THREE.BoxGeometry(0.058, 0.042, 0.016), mat(SHIRT, { r: 0.6 }), [-0.038, 1.455, 0.105]);
   collarL.rotation.z = -0.32;
-  const collarR = mesh(new THREE.BoxGeometry(0.065, 0.045, 0.018), mat(SHIRT, { r: 0.6 }), [ 0.046, 1.455, 0.126]);
+  const collarR = mesh(new THREE.BoxGeometry(0.058, 0.042, 0.016), mat(SHIRT, { r: 0.6 }), [ 0.038, 1.455, 0.105]);
   collarR.rotation.z = 0.32;
   parts.body.add(collarL, collarR);
-  // Black tie — knot + body. Slightly more sheen than the shirt so it reads.
-  parts.body.add(mesh(new THREE.BoxGeometry(0.05, 0.05, 0.016), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.435, 0.138]));
-  parts.body.add(mesh(new THREE.BoxGeometry(0.044, 0.32, 0.016), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.25, 0.138]));
-  // Lapels — angled panels catching slight highlight.
-  const lapelGeo = new THREE.BoxGeometry(0.028, 0.32, 0.026);
-  const lapelL = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [-0.08, 1.33, 0.12]);
+  // Tie — knot + body.
+  parts.body.add(mesh(new THREE.BoxGeometry(0.045, 0.05, 0.014), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.435, 0.115]));
+  parts.body.add(mesh(new THREE.BoxGeometry(0.04, 0.3, 0.014), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.26, 0.115]));
+  // Lapels.
+  const lapelGeo = new THREE.BoxGeometry(0.025, 0.3, 0.022);
+  const lapelL = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [-0.065, 1.33, 0.10]);
   lapelL.rotation.z = 0.14;
-  const lapelR = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [ 0.08, 1.33, 0.12]);
+  const lapelR = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [ 0.065, 1.33, 0.10]);
   lapelR.rotation.z = -0.14;
   parts.body.add(lapelL, lapelR);
-  // Buttons along the jacket midline.
+  // Buttons.
   for (let b = 0; b < 3; b++) {
-    parts.body.add(mesh(new THREE.SphereGeometry(0.008, 10, 8), mat(0x050505, { r: 0.3, m: 0.45 }), [0, 1.21 - b * 0.085, 0.128]));
+    parts.body.add(mesh(new THREE.SphereGeometry(0.007, 10, 8), mat(0x050505, { r: 0.3, m: 0.45 }), [0, 1.21 - b * 0.085, 0.107]));
   }
 
-  // --- Pelvis (visible band at top of pants) --------------------------------
-  parts.body.add(mesh(new THREE.BoxGeometry(0.40, 0.12, 0.24), mat(PANTS), [0, 0.86, 0]));
-  // Belt
-  parts.body.add(mesh(new THREE.BoxGeometry(0.405, 0.03, 0.245), mat(0x0a0a0a, { r: 0.3, m: 0.25 }), [0, 0.925, 0]));
+  // --- Pelvis (visible band at top of pants) — narrowed to match the
+  // tapered torso so there's no sudden bulge at the waist.
+  const pelvis = mesh(new THREE.CylinderGeometry(0.16, 0.17, 0.12, 14), mat(PANTS), [0, 0.86, 0]);
+  pelvis.scale.z = 0.7;
+  parts.body.add(pelvis);
+  // Belt — thin dark band around the waist.
+  const belt = mesh(new THREE.CylinderGeometry(0.172, 0.172, 0.028, 14), mat(0x050505, { r: 0.3, m: 0.3 }), [0, 0.925, 0]);
+  belt.scale.z = 0.7;
+  parts.body.add(belt);
 
   // --- Arm factory — nested pivots: shoulder → elbow → (forearm + hand) ----
   // Bending the elbow is rotation on arm.elbow.rotation.x. The forearm group
@@ -522,7 +516,7 @@ function buildSuitedManAvatar() {
   // it around X swings the forearm downward/backward naturally.
   const makeArm = (sign) => {
     const arm = new THREE.Group();
-    arm.position.set(sign * 0.23, 1.42, 0); // shoulder anchor
+    arm.position.set(sign * 0.20, 1.42, 0); // shoulder anchor — closer to chest so biceps hug torso
     // Shoulder cap — smaller, blends into the tapered chest instead of
     // sticking out like a ball.
     arm.add(mesh(new THREE.SphereGeometry(0.068, 14, 12), mat(SUIT, { r: 0.75 }), [0, 0, 0]));
