@@ -361,7 +361,13 @@ export const state = {
   zones: [],
   selectedZoneId: null,
   results: { rt60: null, splGrid: null, zoneGrids: [] },
-  display: { showHeatmaps: true, showAimLines: false, showIsobars: true, isobarStep_db: 3 },
+  display: {
+    showHeatmaps: true, showAimLines: false, showIsobars: true, isobarStep_db: 3,
+    // Heatmap metric — 'spl' paints SPL dB vertex colors + the 60–110 dB
+    // legend; 'stipa' paints the IEC 60268-16 speech-intelligibility index
+    // (0–1) + a different legend scale. Toggled from the toolbar.
+    heatmapMode: 'spl',
+  },
   // Physics model toggles (see spl-calculator.js). Reverberant field is OFF
   // by default — the Hopkins-Stryker statistical reverb is spatially uniform,
   // so when it dominates (high-R reflective venues) it masks per-source

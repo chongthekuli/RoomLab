@@ -5,7 +5,7 @@ import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, 
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant } from '../physics/spl-calculator.js';
-import { computeSTIPA } from '../physics/stipa.js';
+import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
@@ -87,6 +87,18 @@ export function toggleAimLines(force) {
   const next = typeof force === 'boolean' ? force : !state.display.showAimLines;
   state.display.showAimLines = next;
   if (aimLinesGroup) aimLinesGroup.visible = next;
+}
+
+// Heatmap-metric toggle — cycles the 3D heatmap between SPL (dB coverage)
+// and STIPA (IEC 60268-16 speech-intelligibility index, 0–1). The vertex
+// color palette and right-side legend both swap. Rebuilds zones so the
+// surface meshes re-sample with the new metric.
+export function toggleHeatmapMode(force) {
+  const curr = state.display.heatmapMode ?? 'spl';
+  const next = typeof force === 'string' ? force : (curr === 'spl' ? 'stipa' : 'spl');
+  state.display.heatmapMode = next;
+  rebuildZones();
+  rebuildHeatmap();
 }
 
 // Isobar toggle — show/hide the marching-squares contour lines. Triggers a
@@ -1942,27 +1954,44 @@ function sampleSurfaceColors(geo, anchors, sources, room, splOpts = {}) {
   const getDef = url => getCachedLoudspeaker(url);
   const splValues = new Float32Array(anchors.length);
   let minSPL = Infinity, maxSPL = -Infinity, sum = 0, count = 0;
+
+  // --- STIPA heatmap mode ---
+  // When the user has toggled the toolbar to STI mode, per-vertex color is
+  // the speech-intelligibility index (0-1) rather than SPL dB. Precompute
+  // the STIPA context once per surface so RT60 + room constant + per-source
+  // L_w aren't recomputed for every one of ~10k vertices.
+  const useSTI = state.display.heatmapMode === 'stipa';
+  const stipaCtx = useSTI
+    ? precomputeSTIPAContext({ sources, getSpeakerDef: getDef, room, materials: materialsRef })
+    : null;
+
   for (let i = 0; i < anchors.length; i++) {
-    const spl = computeMultiSourceSPL({
-      sources, getSpeakerDef: getDef,
-      listenerPos: anchors[i], room,
-      ...splOpts,
-    });
-    splValues[i] = spl;
-    if (isFinite(spl)) {
-      if (spl < minSPL) minSPL = spl;
-      if (spl > maxSPL) maxSPL = spl;
-      sum += spl; count++;
-      const [r, g, b] = splColorRGB(spl);
+    let value;            // SPL in dB, or STI in [0,1]
+    if (useSTI) {
+      value = computeSTIPAAt(stipaCtx, anchors[i]);
+    } else {
+      value = computeMultiSourceSPL({
+        sources, getSpeakerDef: getDef,
+        listenerPos: anchors[i], room,
+        ...splOpts,
+      });
+    }
+    splValues[i] = value;
+    if (isFinite(value)) {
+      if (value < minSPL) minSPL = value;
+      if (value > maxSPL) maxSPL = value;
+      sum += value; count++;
+      const [r, g, b] = useSTI ? stiColorRGB(value) : splColorRGB(value);
       colorAttr.setXYZ(i, r / 255, g / 255, b / 255);
     } else {
-      // No-signal cells (through too many walls etc.) draw dark gray so the
-      // surface still reads as a continuous region rather than vanishing.
       colorAttr.setXYZ(i, 0.12, 0.12, 0.14);
     }
   }
   colorAttr.needsUpdate = true;
   return {
+    // Fields named *_db even though they carry STI when useSTI — keeps the
+    // existing Results panel / legend code path working. Interpretation is
+    // resolved by state.display.heatmapMode at display time.
     minSPL_db: count > 0 ? minSPL : 0,
     maxSPL_db: count > 0 ? maxSPL : 0,
     avgSPL_db: count > 0 ? sum / count : 0,
@@ -2557,8 +2586,28 @@ function updateSPLLegend() {
     return;
   }
   legend.classList.remove('hidden');
-  legend.querySelector('.legend-max').textContent = maxVal.toFixed(0) + ' dB';
-  legend.querySelector('.legend-min').textContent = minVal.toFixed(0) + ' dB';
+
+  // Swap gradient + label format based on the current heatmap metric.
+  const mode = state.display.heatmapMode;
+  const title = legend.querySelector('.legend-title');
+  const bar = legend.querySelector('.legend-bar');
+  const maxL = legend.querySelector('.legend-max');
+  const minL = legend.querySelector('.legend-min');
+  if (mode === 'stipa') {
+    if (title) title.textContent = 'STI';
+    // Gradient matches stiColorRGB: red (bad) → orange (poor) → yellow
+    // (fair) → green (good) → teal (excellent). Top of bar = 1.00.
+    if (bar) bar.style.background = 'linear-gradient(to top, ' +
+      '#aa1e1e 0%, #e67828 30%, #e6c832 45%, #6ec85a 60%, #28aa82 75%, #148ca0 100%)';
+    if (maxL) maxL.textContent = maxVal.toFixed(2);
+    if (minL) minL.textContent = minVal.toFixed(2);
+  } else {
+    if (title) title.textContent = 'SPL';
+    if (bar) bar.style.background = 'linear-gradient(to top, ' +
+      '#1a1a4a 0%, #0066cc 25%, #00cc66 50%, #ffcc00 75%, #ff3300 100%)';
+    if (maxL) maxL.textContent = maxVal.toFixed(0) + ' dB';
+    if (minL) minL.textContent = minVal.toFixed(0) + ' dB';
+  }
 }
 
 function splColorRGB(spl_db) {
@@ -2567,6 +2616,19 @@ function splColorRGB(spl_db) {
   if (t < 0.50) return interpRGB([0, 102, 204], [0, 204, 102], (t - 0.25) / 0.25);
   if (t < 0.75) return interpRGB([0, 204, 102], [255, 204, 0], (t - 0.50) / 0.25);
   return interpRGB([255, 204, 0], [255, 51, 0], (t - 0.75) / 0.25);
+}
+
+// STIPA color palette mapped to the IEC 60268-16 5-tier rating bands.
+// Red (bad) → orange (poor) → yellow (fair) → green (good) → teal (excellent).
+// Legend ticks at 0.00 / 0.30 / 0.45 / 0.60 / 0.75 / 1.00 match the rating
+// boundaries so the user can read off "poor vs fair" from the colour alone.
+function stiColorRGB(sti) {
+  const t = Math.max(0, Math.min(1, sti));
+  if (t < 0.30) return interpRGB([170,  30,  30], [230, 120,  40], t / 0.30);           // bad → poor
+  if (t < 0.45) return interpRGB([230, 120,  40], [230, 200,  50], (t - 0.30) / 0.15);  // poor → fair
+  if (t < 0.60) return interpRGB([230, 200,  50], [110, 200,  90], (t - 0.45) / 0.15);  // fair → good
+  if (t < 0.75) return interpRGB([110, 200,  90], [ 40, 170, 130], (t - 0.60) / 0.15);  // good → excellent
+  return interpRGB([40, 170, 130], [20, 140, 170], (t - 0.75) / 0.25);                  // excellent → top
 }
 
 function interpRGB(a, b, t) {

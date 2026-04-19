@@ -69,101 +69,144 @@ const NC_35_PER_BAND = [55, 50, 45, 40, 36, 34, 33];
  * @returns {{ sti:number, ti_per_band:number[], rating:string, bands:number[],
  *             rt60_per_band:number[], signalSPL_per_band:number[] }}
  */
+// Precompute per-frame STIPA context (RT60 per band, room constant R per
+// band, per-source L_w and directivity def). Feed this once to
+// computeSTIPAAt for each listener position — ~10× faster than calling
+// computeSTIPA independently for every vertex of a heatmap surface.
+export function precomputeSTIPAContext({ sources, getSpeakerDef, room, materials }) {
+  const rt60_per_band = STIPA_BANDS.map(fhz => {
+    const bandIdx = materials?.frequency_bands_hz?.indexOf(fhz) ?? -1;
+    if (bandIdx < 0) return 0.5;
+    return computeRT60Band({ room, materials, bandIndex: bandIdx }).sabine_s;
+  });
+  const roomR_per_band = STIPA_BANDS.map(fhz =>
+    materials ? computeRoomConstant(room, materials, fhz) : 0
+  );
+  const sourceCtx = [];
+  for (const src of sources) {
+    const def = getSpeakerDef(src.modelUrl);
+    if (!def) continue;
+    const sens = def.acoustic.sensitivity_db_1w_1m;
+    const DI = def.acoustic.directivity_index_db ?? 3;
+    const p10 = 10 * Math.log10(Math.max(1e-6, src.power_watts || 1));
+    sourceCtx.push({
+      src, def, sens, DI, p10,
+      L_w: sens + p10 + 11 - DI,   // flat-across-bands approximation
+    });
+  }
+  return { rt60_per_band, roomR_per_band, sourceCtx };
+}
+
+// Sample STIPA at one listener position using the precomputed context.
+// Returns just the STI scalar (not the full per-band breakdown) since this
+// is called per-vertex at 10k+ samples for heatmap generation.
+export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC_35_PER_BAND) {
+  const { rt60_per_band, roomR_per_band, sourceCtx } = stipaCtx;
+  let sti = 0;
+
+  // TI per band — inlined to avoid array allocations in the hot path.
+  for (let k = 0; k < STIPA_BANDS.length; k++) {
+    const fhz = STIPA_BANDS[k];
+    const R = roomR_per_band[k];
+    // Total-field signal SPL at this band.
+    let pressureSum = 0;
+    for (let i = 0; i < sourceCtx.length; i++) {
+      const s = sourceCtx[i];
+      const { r, azimuth_deg, elevation_deg } = localAngles(
+        s.src.position, s.src.aim, listenerPos
+      );
+      const clampedR = r < 0.1 ? 0.1 : r;
+      const attn = interpolateAttenuation(s.def.directivity, azimuth_deg, elevation_deg, fhz);
+      const airAbs = airAbsorptionAt(fhz) * clampedR;
+      const direct_db = s.sens + s.p10 - 20 * Math.log10(clampedR) + attn - airAbs;
+      if (isFinite(direct_db)) pressureSum += Math.pow(10, direct_db / 10);
+      if (R > 0) {
+        const L_rev = s.L_w + 10 * Math.log10(4 / R);
+        pressureSum += Math.pow(10, L_rev / 10);
+      }
+    }
+    const signal = pressureSum > 0 ? 10 * Math.log10(pressureSum) : -Infinity;
+    const ambient_k = ambientNoise_per_band[k] ?? 40;
+    const snr_db = isFinite(signal) ? (signal - ambient_k) : -30;
+    const T = rt60_per_band[k];
+
+    // MTF mean over the 2 STIPA modulation frequencies for this band.
+    const fms = STIPA_MOD_FREQS[fhz];
+    const noiseTerm = 1 / (1 + Math.pow(10, -snr_db / 10));
+    const rt1 = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fms[0] * T / 13.8, 2));
+    const rt2 = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fms[1] * T / 13.8, 2));
+    const m_mean = ((rt1 + rt2) / 2) * noiseTerm;
+    const m_safe = m_mean < 0.0001 ? 0.0001 : (m_mean > 0.9999 ? 0.9999 : m_mean);
+    const snr_app_raw = 10 * Math.log10(m_safe / (1 - m_safe));
+    const snr_app = snr_app_raw < -SNR_APP_CLAMP ? -SNR_APP_CLAMP :
+                    (snr_app_raw >  SNR_APP_CLAMP ?  SNR_APP_CLAMP : snr_app_raw);
+    const ti_k = (snr_app + SNR_APP_CLAMP) / (2 * SNR_APP_CLAMP);
+
+    sti += STI_ALPHA_MALE[k] * ti_k;
+    // Cache TI for the redundancy correction on next iteration.
+    sourceCtx._prevTi = sourceCtx._prevTi ?? 0;
+    if (k > 0 && k - 1 < STI_BETA_MALE.length) {
+      sti -= STI_BETA_MALE[k - 1] * Math.sqrt(Math.max(0, sourceCtx._prevTi * ti_k));
+    }
+    sourceCtx._prevTi = ti_k;
+  }
+  return sti < 0 ? 0 : (sti > 1 ? 1 : sti);
+}
+
 export function computeSTIPA({
   sources, getSpeakerDef, listenerPos, room, materials,
   ambientNoise_per_band = NC_35_PER_BAND,
   temperature_C = 20,
 }) {
-  // --- 1) RT60 per band ---
-  const rt60_per_band = STIPA_BANDS.map(fhz => {
-    const bandIdx = materials?.frequency_bands_hz?.indexOf(fhz) ?? -1;
-    if (bandIdx < 0) return 0.5;                // safe default
-    const rt = computeRT60Band({ room, materials, bandIndex: bandIdx });
-    return rt.sabine_s;
-  });
-
-  // --- 2) Signal SPL per band at listener — TOTAL field (direct + diffuse
-  //       reverberant). Per IEC 60268-16 §A.3.2, STIPA's MTF formula
-  //       already models reverb time-smearing in the first bracket; the
-  //       SNR bracket handles background noise. We use total SPL so the
-  //       reverb contribution isn't ignored at far-field listeners.
-  const roomR_per_band = STIPA_BANDS.map(fhz =>
-    materials ? computeRoomConstant(room, materials, fhz) : 0
-  );
+  const ctx = precomputeSTIPAContext({ sources, getSpeakerDef, room, materials });
+  // Re-run the detailed version for the full return shape (single-listener use).
+  const rt60_per_band = ctx.rt60_per_band;
+  const roomR_per_band = ctx.roomR_per_band;
   const signalSPL_per_band = STIPA_BANDS.map((fhz, k) => {
     let pressureSum = 0;
     const R = roomR_per_band[k];
-    for (const src of sources) {
-      const def = getSpeakerDef(src.modelUrl);
-      if (!def) continue;
+    for (const s of ctx.sourceCtx) {
       const { r, azimuth_deg, elevation_deg } = localAngles(
-        src.position, src.aim, listenerPos
+        s.src.position, s.src.aim, listenerPos
       );
       const clampedR = Math.max(r, 0.1);
-      const sens = def.acoustic.sensitivity_db_1w_1m;
-      const attn = interpolateAttenuation(def.directivity, azimuth_deg, elevation_deg, fhz);
+      const attn = interpolateAttenuation(s.def.directivity, azimuth_deg, elevation_deg, fhz);
       const airAbs = airAbsorptionAt(fhz) * clampedR;
-      const direct_db = sens
-        + 10 * Math.log10(src.power_watts || 1)
-        - 20 * Math.log10(clampedR)
-        + attn
-        - airAbs;
+      const direct_db = s.sens + s.p10 - 20 * Math.log10(clampedR) + attn - airAbs;
       if (isFinite(direct_db)) pressureSum += Math.pow(10, direct_db / 10);
-      // Reverberant contribution (uniform at all listener positions for a
-      // given source). L_rev = L_w + 10·log10(4/R).
       if (R > 0) {
-        const DI = def.acoustic.directivity_index_db ?? 3;
-        const L_w = sens + 10 * Math.log10(src.power_watts || 1) + 11 - DI;
-        const L_rev = L_w + 10 * Math.log10(4 / R);
+        const L_rev = s.L_w + 10 * Math.log10(4 / R);
         pressureSum += Math.pow(10, L_rev / 10);
       }
     }
     return pressureSum > 0 ? 10 * Math.log10(pressureSum) : -Infinity;
   });
-
-  // --- 3) TI per band ---
   const ti_per_band = STIPA_BANDS.map((fhz, k) => {
     const T = rt60_per_band[k];
     const signal = signalSPL_per_band[k];
     const ambient_k = ambientNoise_per_band[k] ?? 40;
-    // SNR at this band. If signal is −Inf (no coverage), SNR is very negative.
     const snr_db = isFinite(signal) ? (signal - ambient_k) : -30;
     const modFreqs = STIPA_MOD_FREQS[fhz];
-    // MTF for each modulation frequency — combined reverb + noise.
     const mtf = modFreqs.map(fm => {
       const reverbTerm = 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * fm * T / 13.8, 2));
       const noiseTerm  = 1 / (1 + Math.pow(10, -snr_db / 10));
       return reverbTerm * noiseTerm;
     });
-    // Mean MTF over the 2 modulation frequencies.
     const m_mean = (mtf[0] + mtf[1]) / 2;
-    // Clamp to (0, 1) open interval to keep log10 well-defined.
     const m_safe = Math.max(0.0001, Math.min(0.9999, m_mean));
-    // Apparent SNR, clamped to ±15 dB per the spec.
     const snr_app_raw = 10 * Math.log10(m_safe / (1 - m_safe));
     const snr_app = Math.max(-SNR_APP_CLAMP, Math.min(SNR_APP_CLAMP, snr_app_raw));
-    // TI in [0, 1].
     return (snr_app + SNR_APP_CLAMP) / (2 * SNR_APP_CLAMP);
   });
-
-  // --- 4) Weighted STI with redundancy correction ---
   let sti = 0;
-  for (let k = 0; k < STIPA_BANDS.length; k++) {
-    sti += STI_ALPHA_MALE[k] * ti_per_band[k];
-  }
-  for (let k = 0; k < STI_BETA_MALE.length; k++) {         // 6 adjacent-band pairs
+  for (let k = 0; k < STIPA_BANDS.length; k++) sti += STI_ALPHA_MALE[k] * ti_per_band[k];
+  for (let k = 0; k < STI_BETA_MALE.length; k++) {
     sti -= STI_BETA_MALE[k] * Math.sqrt(Math.max(0, ti_per_band[k] * ti_per_band[k + 1]));
   }
   sti = Math.max(0, Math.min(1, sti));
-
   return {
-    sti,
-    ti_per_band,
-    rating: stipaRating(sti),
-    bands: STIPA_BANDS,
-    rt60_per_band,
-    signalSPL_per_band,
-    ambientNoise_per_band,
+    sti, ti_per_band, rating: stipaRating(sti),
+    bands: STIPA_BANDS, rt60_per_band, signalSPL_per_band, ambientNoise_per_band,
   };
 }
 
