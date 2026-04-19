@@ -396,47 +396,46 @@ function rebuildRoom(isFirst) {
   }
 }
 
-// Rough cabinet dimensions (width × height × depth in meters) by speaker type.
-// Line-array elements are wider than tall (Nexo STM / JBL VRX-family shape);
-// compact monitors are small; 2-way cabinets are taller than wide. These are
-// visual-only — the physics still runs against the loudspeaker JSON directivity.
+// Cabinet dimensions in meters by speaker type. Line-array elements are
+// scaled slightly larger than real-world (~1.2m × 0.42m × 0.7m, vs Nexo STM
+// M46 at 1.28 × 0.48 × 0.69) so they remain readable from arena-scale camera
+// distances. Visual-only — physics still runs against the loudspeaker JSON
+// directivity.
 function speakerCabinetDims(modelUrl) {
   const url = modelUrl || '';
-  if (/line-array/i.test(url))  return { w: 0.90, h: 0.28, d: 0.55, type: 'line-array' };
-  if (/compact-6/i.test(url))   return { w: 0.22, h: 0.32, d: 0.22, type: 'compact' };
-  return { w: 0.38, h: 0.60, d: 0.35, type: 'cabinet' };
+  if (/line-array/i.test(url))  return { w: 1.20, h: 0.42, d: 0.70, type: 'line-array' };
+  if (/compact-6/i.test(url))   return { w: 0.24, h: 0.36, d: 0.24, type: 'compact' };
+  return { w: 0.42, h: 0.66, d: 0.38, type: 'cabinet' };
 }
 
-// Trapezoidal prism shaped like a line-array element. The back face is shorter
-// and shifted up relative to the front, giving the characteristic wedge the
-// user sees in EASE Focus / EASE 5 — angled top face slopes down toward the
-// back, angled bottom face slopes up toward the back, so adjacent elements in
-// a hang can splay.
-function buildWedgeGeometry(w, h, d, splay = 0.22) {
+// Trapezoidal prism — front face (at local -Z) full size, back face (at +Z)
+// shorter in height, centered vertically. Gives the unmistakable wedge
+// silhouette of a pro line-array element: angled top slopes down toward the
+// back, angled bottom slopes up toward the back. With splay=0.55 the back is
+// 45% of the front height — visible from any viewing angle.
+function buildWedgeGeometry(w, h, d, splay = 0.55) {
   const hf = h / 2;                  // front half-height (full)
-  const hb = h * (1 - splay) / 2;    // back half-height (shorter)
+  const hb = h * (1 - splay) / 2;    // back half-height (shorter, centered)
   const wf = w / 2;
-  const wb = w * (1 - splay * 0.25) / 2; // slight back taper in width too
-  const yShift = h * splay * 0.25;   // back-center nudged up → element tilts back
   const verts = new Float32Array([
-    // 0..3  front face (at local -Z so lookAt() points it at aim)
+    // 0..3  front face (local -Z)
     -wf, -hf, -d/2,
      wf, -hf, -d/2,
      wf,  hf, -d/2,
     -wf,  hf, -d/2,
-    // 4..7  back face
-    -wb, -hb + yShift,  d/2,
-     wb, -hb + yShift,  d/2,
-     wb,  hb + yShift,  d/2,
-    -wb,  hb + yShift,  d/2,
+    // 4..7  back face (local +Z) — shorter height, centered at y=0
+    -wf, -hb,  d/2,
+     wf, -hb,  d/2,
+     wf,  hb,  d/2,
+    -wf,  hb,  d/2,
   ]);
   const indices = [
     0, 3, 2,  0, 2, 1,   // front (-Z normal)
     4, 5, 6,  4, 6, 7,   // back  (+Z normal)
-    3, 7, 6,  3, 6, 2,   // top
-    0, 1, 5,  0, 5, 4,   // bottom
-    0, 4, 7,  0, 7, 3,   // left
-    1, 2, 6,  1, 6, 5,   // right
+    3, 7, 6,  3, 6, 2,   // top (sloped)
+    0, 1, 5,  0, 5, 4,   // bottom (sloped)
+    0, 4, 7,  0, 7, 3,   // left (trapezoid)
+    1, 2, 6,  1, 6, 5,   // right (trapezoid)
   ];
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
@@ -447,33 +446,42 @@ function buildWedgeGeometry(w, h, d, splay = 0.22) {
 
 // Paints visible driver details on the front grille so each cabinet reads as
 // "a speaker", not a plain coloured box. Line-array elements get two
-// horizontal woofer strips (mid-bass drivers) + a horn slot in the middle;
+// horizontal woofer cones (mid-bass drivers) + a horn waveguide between them;
 // conventional cabinets get a large woofer disc + smaller tweeter above.
+// Materials are tuned to read against both light and dark backgrounds.
 function addDriverDetails(parent, type, w, h, grillZ) {
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 0.95, metalness: 0.05 });
-  const coneMat = new THREE.MeshStandardMaterial({ color: 0x1a1d24, roughness: 0.9, metalness: 0.2 });
+  const coneMat = new THREE.MeshStandardMaterial({ color: 0x3a3e48, roughness: 0.85, metalness: 0.35 });
+  const hornMat = new THREE.MeshStandardMaterial({ color: 0x8a8e98, roughness: 0.3, metalness: 0.85 });
+  const rimMat  = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 0.95, metalness: 0.05 });
   if (type === 'line-array') {
-    // Upper woofer strip
-    const wofferW = w * 0.72, wofferH = h * 0.24;
-    const upper = new THREE.Mesh(new THREE.BoxGeometry(wofferW, wofferH, 0.012), coneMat);
-    upper.position.set(0, h * 0.24, grillZ - 0.008);
+    // Upper woofer — slightly protruding cone on the baffle.
+    const wofferW = w * 0.78, wofferH = h * 0.30;
+    const upper = new THREE.Mesh(new THREE.BoxGeometry(wofferW, wofferH, 0.02), coneMat);
+    upper.position.set(0, h * 0.22, grillZ - 0.011);
     parent.add(upper);
-    // Lower woofer strip
-    const lower = new THREE.Mesh(new THREE.BoxGeometry(wofferW, wofferH, 0.012), coneMat);
-    lower.position.set(0, -h * 0.24, grillZ - 0.008);
+    // Lower woofer
+    const lower = new THREE.Mesh(new THREE.BoxGeometry(wofferW, wofferH, 0.02), coneMat);
+    lower.position.set(0, -h * 0.22, grillZ - 0.011);
     parent.add(lower);
-    // Horn slot between them
-    const horn = new THREE.Mesh(new THREE.BoxGeometry(w * 0.55, h * 0.12, 0.014), darkMat);
-    horn.position.set(0, 0, grillZ - 0.01);
+    // Central horn waveguide — bright metallic, clearly visible.
+    const horn = new THREE.Mesh(new THREE.BoxGeometry(w * 0.62, h * 0.14, 0.025), hornMat);
+    horn.position.set(0, 0, grillZ - 0.014);
     parent.add(horn);
+    // Thin dark bezels around each woofer
+    const bezelU = new THREE.Mesh(new THREE.BoxGeometry(wofferW + 0.02, wofferH + 0.015, 0.01), rimMat);
+    bezelU.position.set(0, h * 0.22, grillZ - 0.005);
+    parent.add(bezelU);
+    const bezelL = new THREE.Mesh(new THREE.BoxGeometry(wofferW + 0.02, wofferH + 0.015, 0.01), rimMat);
+    bezelL.position.set(0, -h * 0.22, grillZ - 0.005);
+    parent.add(bezelL);
   } else {
-    // Main woofer
-    const woofer = new THREE.Mesh(new THREE.CircleGeometry(Math.min(w, h) * 0.35, 24), coneMat);
+    // Main woofer (circle)
+    const woofer = new THREE.Mesh(new THREE.CircleGeometry(Math.min(w, h) * 0.36, 24), coneMat);
     woofer.position.set(0, -h * 0.12, grillZ - 0.008);
     parent.add(woofer);
-    // Tweeter (smaller, above)
-    const tweeter = new THREE.Mesh(new THREE.CircleGeometry(Math.min(w, h) * 0.13, 20), darkMat);
-    tweeter.position.set(0, h * 0.25, grillZ - 0.008);
+    // Tweeter
+    const tweeter = new THREE.Mesh(new THREE.CircleGeometry(Math.min(w, h) * 0.14, 20), hornMat);
+    tweeter.position.set(0, h * 0.26, grillZ - 0.008);
     parent.add(tweeter);
   }
 }
@@ -484,52 +492,60 @@ function buildSpeakerEnclosure(src, groupInt, outside) {
   const dims = speakerCabinetDims(src.modelUrl);
   const { w, h, d, type } = dims;
 
-  // Matte-black cabinet body. Line-array elements get a tapered wedge;
-  // conventional cabinets stay rectangular (which matches real cabinet shapes).
-  const bodyColor = outside ? 0x6a1a0c : 0x121418;
-  const bodyGeo = type === 'line-array'
-    ? buildWedgeGeometry(w, h, d, 0.22)
-    : buildWedgeGeometry(w, h, d, 0.06); // subtle taper for visual cohesion
+  // Matte-black cabinet body. Line-array elements get a strong wedge (45%
+  // back-height), conventional cabinets a mild taper (90% back-height).
+  const bodyColor = outside ? 0x6a1a0c : 0x1a1d22;
+  const splayAmount = type === 'line-array' ? 0.55 : 0.10;
+  const bodyGeo = buildWedgeGeometry(w, h, d, splayAmount);
   const body = new THREE.Mesh(
     bodyGeo,
-    new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.78, metalness: 0.25 }),
+    new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.72, metalness: 0.3 }),
   );
 
-  // Baffle/grille panel inset slightly from cabinet edges, flush with front.
-  const grillColor = outside ? 0xff5a3c : (groupInt ?? 0x3a4048);
-  const grillEmissive = outside ? 0x551100 : (groupInt ? (groupInt & 0x222222) : 0x0a0a0a);
-  const baffleZ = -d / 2 - 0.001; // just outside the front face to avoid z-fighting
+  // Bright edge lines around the trapezoid silhouette — the single biggest
+  // readability win. At arena scale (camera 20 m+ from speakers) the wedge
+  // shading alone blends into the black body; a pale outline makes the
+  // angled top/bottom faces pop from any angle.
+  const edgeColor = outside ? 0xff9a66 : 0xbfc4cc;
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(bodyGeo, 15), // 15° crease threshold shows every trapezoid seam
+    new THREE.LineBasicMaterial({ color: edgeColor, linewidth: 2 }),
+  );
+
+  // Baffle/grille panel flush with the front face, tinted by speaker group.
+  const grillColor = outside ? 0xff5a3c : (groupInt ?? 0x4a515b);
+  const grillEmissive = outside ? 0x551100 : (groupInt ? (groupInt & 0x2a2a2a) : 0x141414);
+  const baffleZ = -d / 2 - 0.002;
   const grill = new THREE.Mesh(
-    new THREE.PlaneGeometry(w * 0.93, h * 0.9),
+    new THREE.PlaneGeometry(w * 0.94, h * 0.92),
     new THREE.MeshStandardMaterial({
-      color: grillColor, roughness: 0.95, metalness: 0, emissive: grillEmissive,
+      color: grillColor, roughness: 0.9, metalness: 0.05, emissive: grillEmissive,
       side: THREE.DoubleSide,
     }),
   );
   grill.position.set(0, 0, baffleZ);
-  // PlaneGeometry normal is +Z by default; flip so it faces -Z (out the front).
-  grill.rotation.y = Math.PI;
+  grill.rotation.y = Math.PI; // face -Z
 
   const encl = new THREE.Group();
   encl.add(body);
+  encl.add(edges);
   encl.add(grill);
   addDriverDetails(encl, type, w, h, baffleZ);
 
-  // Rigging point on top for line-array elements — the small purple dot
-  // you see in EASE / LAL configurators marking the hang anchor.
+  // Rigging point on top for line-array elements — the small purple anchor
+  // dot visible in EASE LAL Configurator and EASE Focus above the hang.
   if (type === 'line-array') {
     const rig = new THREE.Mesh(
-      new THREE.SphereGeometry(0.038, 12, 12),
-      new THREE.MeshStandardMaterial({ color: 0xb586ff, emissive: 0x2a1147, roughness: 0.4, metalness: 0.6 }),
+      new THREE.SphereGeometry(0.055, 14, 14),
+      new THREE.MeshStandardMaterial({ color: 0xc79bff, emissive: 0x4a1a88, roughness: 0.35, metalness: 0.6 }),
     );
-    rig.position.set(0, h / 2 + 0.03, -d * 0.25);
+    rig.position.set(0, h / 2 + 0.06, -d * 0.22);
     encl.add(rig);
-    // Short rigging pin stub from the top of the cabinet to the anchor.
     const pin = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.01, 0.01, 0.06, 8),
-      new THREE.MeshStandardMaterial({ color: 0x888a90, metalness: 0.8, roughness: 0.3 }),
+      new THREE.CylinderGeometry(0.014, 0.014, 0.08, 10),
+      new THREE.MeshStandardMaterial({ color: 0x989ba2, metalness: 0.85, roughness: 0.25 }),
     );
-    pin.position.set(0, h / 2 + 0.005, -d * 0.25);
+    pin.position.set(0, h / 2 + 0.02, -d * 0.22);
     encl.add(pin);
   }
 
