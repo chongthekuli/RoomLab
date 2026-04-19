@@ -170,9 +170,9 @@ function rebuildRoom(isFirst) {
       side: doubleSide ? THREE.DoubleSide : THREE.FrontSide,
     });
   };
-  const floorMat = buildSurfaceMat(surfaces.floor, w, d, { opacity: 0.95 });
-  const ceilMat  = buildSurfaceMat(surfaces.ceiling, w, d, { opacity: 0.55 });
-  const wallsMat = buildSurfaceMat(wallsMatId, (w + d), h, { opacity: 0.55 });
+  const floorMat = buildSurfaceMat(surfaces.floor, w, d, { opacity: 0.98 });
+  const ceilMat  = buildSurfaceMat(surfaces.ceiling, w, d, { opacity: 0.75 });
+  const wallsMat = buildSurfaceMat(wallsMatId, (w + d), h, { opacity: 0.85 });
 
   if (shape === 'rectangular') {
     // Floor + ceiling as rectangular planes
@@ -199,7 +199,7 @@ function rebuildRoom(isFirst) {
     ];
     for (const [ww, wh, pos, rot, surfId] of wallOpts) {
       const geo = new THREE.PlaneGeometry(ww, wh);
-      const mat = buildSurfaceMat(surfId, ww, wh, { opacity: 0.55 });
+      const mat = buildSurfaceMat(surfId, ww, wh, { opacity: 0.85 });
       const m = new THREE.Mesh(geo, mat);
       m.position.set(...pos);
       m.rotation.set(...rot);
@@ -239,7 +239,7 @@ function rebuildRoom(isFirst) {
       // rectangular-wall default.
       const r = room.round_radius_m ?? 3;
       const cylGeo = new THREE.CylinderGeometry(r, r, h, 48, 1, true);
-      const cylMat = buildSurfaceMat(wallsMatId, 2 * Math.PI * r, h, { opacity: 0.55 });
+      const cylMat = buildSurfaceMat(wallsMatId, 2 * Math.PI * r, h, { opacity: 0.85 });
       const cyl = new THREE.Mesh(cylGeo, cylMat);
       cyl.position.set(cx, h/2, cz);
       cyl.userData.acoustic_material = wallsMatId;
@@ -334,7 +334,7 @@ function rebuildRoom(isFirst) {
         const geo = new THREE.PlaneGeometry(edgeLen, wallH);
         // Per-segment textured material so each wall panel's tiling matches
         // its own dimensions (seams stay square instead of stretching).
-        const segMat = buildSurfaceMat(wallsMatId, edgeLen, wallH, { opacity: 0.55 });
+        const segMat = buildSurfaceMat(wallsMatId, edgeLen, wallH, { opacity: 0.85 });
         const m = new THREE.Mesh(geo, segMat);
         const midY = (wallBottom + wallTop) / 2;
         m.position.set(midX, midY, midZ);
@@ -911,7 +911,7 @@ function rakeZAtRadius(r, bowl) {
 // sector. zFn(r) gives the world-Y height at each radius. Returns the
 // BufferGeometry plus a parallel array of state-coord listener anchors so
 // callers can sample SPL at each vertex.
-function buildRingSectorGeometry({ cx, cy, r_in, r_out, phiStart, phiLength, zFn, earAbove = 1.2, liftAbove = 0.05, cellTarget = 0.5, radialMin = 6, radialMax = 40, arcMin = 12, arcMax = 120 }) {
+function buildRingSectorGeometry({ cx, cy, r_in, r_out, phiStart, phiLength, zFn, earAbove = 1.2, liftAbove = 1.2, cellTarget = 0.5, radialMin = 6, radialMax = 40, arcMin = 12, arcMax = 120 }) {
   const radialSpan = r_out - r_in;
   const arcLen = ((r_in + r_out) / 2) * phiLength;
   const radialCells = Math.max(radialMin, Math.min(radialMax, Math.ceil(radialSpan / cellTarget)));
@@ -955,7 +955,7 @@ function buildRingSectorGeometry({ cx, cy, r_in, r_out, phiStart, phiLength, zFn
 
 // Axis-aligned rectangle grid (used for the court and for any future flat
 // audience area). Same vertex-color convention as the ring-sector builder.
-function buildRectMappingGeometry({ minX, maxX, minY, maxY, elevation, earAbove = 1.2, liftAbove = 0.05, cellTarget = 0.5 }) {
+function buildRectMappingGeometry({ minX, maxX, minY, maxY, elevation, earAbove = 1.2, liftAbove = 1.2, cellTarget = 0.5 }) {
   const w = maxX - minX, d = maxY - minY;
   const nx = Math.max(12, Math.min(80, Math.ceil(w / cellTarget)));
   const nz = Math.max(12, Math.min(80, Math.ceil(d / cellTarget)));
@@ -1028,11 +1028,14 @@ function sampleSurfaceColors(geo, anchors, sources, room) {
 // One MeshBasicMaterial shared across every mapping surface — keeps GPU state
 // changes low and makes toggle visibility flip cheap.
 function makeMappingMaterial() {
+  // Opacity reduced so the textured seating/floor material shows through the
+  // heatmap — matches the EASE/Odeon look where you can see the audience
+  // area's real material under the SPL gradient.
   return new THREE.MeshBasicMaterial({
     vertexColors: true,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.78,
+    opacity: 0.55,
     depthWrite: false,
   });
 }
