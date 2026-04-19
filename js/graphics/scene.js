@@ -403,7 +403,13 @@ function rebuildRoom(isFirst) {
 // directivity.
 function speakerCabinetDims(modelUrl) {
   const url = modelUrl || '';
-  if (/line-array/i.test(url))  return { w: 1.20, h: 0.42, d: 0.70, type: 'line-array' };
+  // Depth reduced to 0.45 m (from 0.70) so the cabinet reads as a thin box
+  // rather than a deep wedge — feedback: "back big, front small" was
+  // perspective foreshortening on a deep cabinet when tilted down. At
+  // d≈h=0.42 m the top and front faces are similar in size so perspective
+  // doesn't mislead. Still wider than real Nexo/K2 (0.65 m) but acceptable
+  // for a visual simulator.
+  if (/line-array/i.test(url))  return { w: 1.20, h: 0.42, d: 0.45, type: 'line-array' };
   if (/compact-6/i.test(url))   return { w: 0.24, h: 0.36, d: 0.24, type: 'compact' };
   return { w: 0.42, h: 0.66, d: 0.38, type: 'cabinet' };
 }
@@ -504,14 +510,14 @@ function buildSpeakerEnclosure(src, groupInt, outside) {
     new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.72, metalness: 0.3 }),
   );
 
-  // Bright edge lines around the trapezoid silhouette — the single biggest
-  // readability win. At arena scale (camera 20 m+ from speakers) the wedge
-  // shading alone blends into the black body; a pale outline makes the
-  // angled top/bottom faces pop from any angle.
-  const edgeColor = outside ? 0xff9a66 : 0xbfc4cc;
+  // Bright edge lines around each cabinet so the rectangular outline is
+  // unmistakable even at arena camera distance. For line-arrays this proves
+  // each element is a box (not a wedge) even when the stack has J-curve
+  // splay that can look wedge-shaped in the silhouette.
+  const edgeColor = outside ? 0xff9a66 : 0xeef0f4;
   const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(bodyGeo, 15), // 15° crease threshold shows every trapezoid seam
-    new THREE.LineBasicMaterial({ color: edgeColor, linewidth: 2 }),
+    new THREE.EdgesGeometry(bodyGeo, 15),
+    new THREE.LineBasicMaterial({ color: edgeColor }),
   );
 
   // Baffle/grille panel flush with the front face, tinted by speaker group.
