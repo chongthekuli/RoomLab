@@ -895,23 +895,28 @@ function rebuildZones() {
 // all in heatmapGroup so the toolbar toggle hides them in one flip.
 // -----------------------------------------------------------------------------
 
-// Linear rake z at radius r: interpolates between the first and last tier
-// elevations. The solid concrete lathe keeps the actual stepped geometry
-// underneath; the mapping surface traces the mean seating plane above it.
+// Stepped rake — returns the elevation of the tier that contains radius r.
+// A linear-interp rake sliced through the stepped concrete tiers producing
+// orange/gray stripe artifacts on the seating. Sitting the mapping surface
+// exactly on each tier's concrete top instead keeps every heatmap pixel
+// above a real seat, so the color reads as "SPL here at this row" rather
+// than "SPL on an invisible diagonal plane". With enough radial mesh cells
+// (radialMax=80 below) the vertical risers between tiers render as sharp
+// near-vertical segments, giving the staircase profile cleanly.
 function rakeZAtRadius(r, bowl) {
   const tiers = bowl.tier_heights_m;
-  const z0 = tiers[0];
-  const z1 = tiers[tiers.length - 1];
-  if (bowl.r_out <= bowl.r_in) return z0;
-  const f = Math.max(0, Math.min(1, (r - bowl.r_in) / (bowl.r_out - bowl.r_in)));
-  return z0 + (z1 - z0) * f;
+  if (r <= bowl.r_in) return tiers[0];
+  if (r >= bowl.r_out) return tiers[tiers.length - 1];
+  const tread = (bowl.r_out - bowl.r_in) / tiers.length;
+  const t = Math.min(tiers.length - 1, Math.floor((r - bowl.r_in) / tread));
+  return tiers[t];
 }
 
 // Builds an (radialCells+1) × (arcCells+1) grid of vertices across a ring
 // sector. zFn(r) gives the world-Y height at each radius. Returns the
 // BufferGeometry plus a parallel array of state-coord listener anchors so
 // callers can sample SPL at each vertex.
-function buildRingSectorGeometry({ cx, cy, r_in, r_out, phiStart, phiLength, zFn, earAbove = 1.2, liftAbove = 0.05, cellTarget = 0.5, radialMin = 6, radialMax = 40, arcMin = 12, arcMax = 120 }) {
+function buildRingSectorGeometry({ cx, cy, r_in, r_out, phiStart, phiLength, zFn, earAbove = 1.2, liftAbove = 0.05, cellTarget = 0.25, radialMin = 12, radialMax = 80, arcMin = 12, arcMax = 120 }) {
   const radialSpan = r_out - r_in;
   const arcLen = ((r_in + r_out) / 2) * phiLength;
   const radialCells = Math.max(radialMin, Math.min(radialMax, Math.ceil(radialSpan / cellTarget)));

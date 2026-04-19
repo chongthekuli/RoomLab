@@ -133,18 +133,28 @@ function paintConcretePainted(ctx) {
   const rand = mulberry(2002);
   ctx.fillStyle = '#bfbcb4';
   ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-  for (let i = 0; i < 6; i++) {
-    const cx = rand() * CANVAS_SIZE, cy = rand() * CANVAS_SIZE, r = 40 + rand() * 80;
+  // Soft staining patches
+  for (let i = 0; i < 8; i++) {
+    const cx = rand() * CANVAS_SIZE, cy = rand() * CANVAS_SIZE, r = 40 + rand() * 90;
     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    grad.addColorStop(0, 'rgba(150, 148, 140, 0.10)');
-    grad.addColorStop(1, 'rgba(150, 148, 140, 0)');
+    grad.addColorStop(0, 'rgba(140, 135, 125, 0.18)');
+    grad.addColorStop(1, 'rgba(140, 135, 125, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(cx - r, cy - r, 2 * r, 2 * r);
   }
-  for (let i = 0; i < 900; i++) {
+  // Panel expansion joints — thin darker cross so the surface reads as
+  // poured-in-place concrete panels rather than a featureless gray wash.
+  ctx.strokeStyle = 'rgba(100, 96, 88, 0.5)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(0, CANVAS_SIZE / 2); ctx.lineTo(CANVAS_SIZE, CANVAS_SIZE / 2);
+  ctx.moveTo(CANVAS_SIZE / 2, 0); ctx.lineTo(CANVAS_SIZE / 2, CANVAS_SIZE);
+  ctx.stroke();
+  // Aggregate speckle — slightly stronger
+  for (let i = 0; i < 1200; i++) {
     const x = rand() * CANVAS_SIZE, y = rand() * CANVAS_SIZE;
-    const s = 150 + Math.floor(rand() * 60);
-    ctx.fillStyle = `rgba(${s}, ${s}, ${s - 4}, 0.3)`;
+    const s = 140 + Math.floor(rand() * 75);
+    ctx.fillStyle = `rgba(${s}, ${s - 2}, ${s - 8}, 0.35)`;
     ctx.fillRect(x, y, 1, 1);
   }
 }
