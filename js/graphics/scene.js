@@ -387,102 +387,128 @@ function buildSuitedManAvatar() {
   const headG = new THREE.Group();
   headG.position.set(0, 1.54, 0);
 
-  // Head — slight oval, pale skin.
-  const head = mesh(new THREE.SphereGeometry(0.11, 24, 20), mat(SKIN, { r: 0.55 }), [0, 0.12, 0]);
-  head.scale.set(0.93, 1.12, 0.9);
+  // Head — slightly larger pale-skin oval; face is the visual focal point.
+  const head = mesh(new THREE.SphereGeometry(0.12, 28, 24), mat(SKIN, { r: 0.52 }), [0, 0.13, 0]);
+  head.scale.set(0.94, 1.12, 0.92);
   headG.add(head);
 
-  // --- Hair: long, flowing, parted slightly. Built from 3 shapes:
-  //   1) Top cap — bulk of hair over the skull, parted.
-  //   2) Side/back drape — curtain that wraps behind head down to shoulders.
-  //   3) Front strand suggestions on either side of the face.
-  const hairMat = mat(HAIR, { r: 0.88 });
-  // Top volume — full skull cap slightly expanded.
-  const hairTop = mesh(new THREE.SphereGeometry(0.118, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMat, [0, 0.13, -0.004]);
-  hairTop.scale.set(0.98, 1.0, 1.02);
+  // Cheek highlights — subtle darker skin patches at the jaw line for shape.
+  const cheekMat = mat(SKIN_SHAD, { r: 0.6 });
+  headG.add(mesh(new THREE.SphereGeometry(0.042, 14, 12), cheekMat, [-0.072, 0.08, 0.058]));
+  headG.add(mesh(new THREE.SphereGeometry(0.042, 14, 12), cheekMat, [ 0.072, 0.08, 0.058]));
+
+  // --- Hair: covers ONLY the top of the skull so the face is visible.
+  //   • Top cap — thin half-sphere layer on top of the head.
+  //   • Back nape — small patch hanging behind the ears to suggest short hair.
+  // Previous version buried the entire face under hair + beard; this version
+  // keeps the hairline at the forehead and doesn't cover cheeks/ears.
+  const hairMat = mat(HAIR, { r: 0.85 });
+  const hairTop = mesh(new THREE.SphereGeometry(0.124, 28, 16, 0, Math.PI * 2, 0, Math.PI * 0.42), hairMat, [0, 0.155, -0.002]);
+  hairTop.scale.set(0.98, 0.75, 1.02);
   headG.add(hairTop);
-  // Back drape — elongated flattened ellipsoid behind head down to neck/shoulder.
-  const hairBack = mesh(new THREE.SphereGeometry(0.13, 20, 16), hairMat, [0, -0.02, -0.04]);
-  hairBack.scale.set(0.85, 1.8, 0.55);
-  headG.add(hairBack);
-  // Side locks — thin vertical boxes hanging in front of each ear, chin-length.
-  const lockGeo = new THREE.BoxGeometry(0.028, 0.22, 0.05);
-  const lockR = mesh(lockGeo, hairMat, [ 0.095, 0.00, 0.015]);
-  lockR.rotation.z = -0.05;
-  headG.add(lockR);
-  const lockL = mesh(lockGeo, hairMat, [-0.095, 0.00, 0.015]);
-  lockL.rotation.z = 0.05;
-  headG.add(lockL);
+  // Nape — short band of hair behind the ears, doesn't wrap forward.
+  const nape = mesh(
+    new THREE.SphereGeometry(0.10, 18, 10, Math.PI * 0.45, Math.PI * 1.1, 0, Math.PI * 0.55),
+    hairMat,
+    [0, 0.12, -0.025]
+  );
+  nape.scale.set(1.05, 0.8, 0.85);
+  headG.add(nape);
 
-  // Ears (mostly hidden by hair, but present).
-  headG.add(mesh(new THREE.SphereGeometry(0.020, 10, 8), mat(SKIN_SHAD), [-0.105, 0.105, 0]));
-  headG.add(mesh(new THREE.SphereGeometry(0.020, 10, 8), mat(SKIN_SHAD), [ 0.105, 0.105, 0]));
+  // Ears — visible now that hair doesn't drape over them.
+  const earMat = mat(SKIN, { r: 0.6 });
+  const earL = mesh(new THREE.SphereGeometry(0.026, 12, 10), earMat, [-0.108, 0.115, 0.010]);
+  earL.scale.set(0.5, 1.2, 0.9);
+  const earR = mesh(new THREE.SphereGeometry(0.026, 12, 10), earMat, [ 0.108, 0.115, 0.010]);
+  earR.scale.set(0.5, 1.2, 0.9);
+  headG.add(earL, earR);
 
-  // --- Eyes — slightly sunken. Sclera + dark pupil + subtle under-eye shadow.
-  const scleraMat = mat(0xefe8dc, { r: 0.45 });
-  const pupilMat  = mat(0x1a2b36, { r: 0.4 });
-  headG.add(mesh(new THREE.SphereGeometry(0.016, 12, 10), scleraMat, [ 0.034, 0.124, 0.091]));
-  headG.add(mesh(new THREE.SphereGeometry(0.016, 12, 10), scleraMat, [-0.034, 0.124, 0.091]));
-  headG.add(mesh(new THREE.SphereGeometry(0.009, 10, 8), pupilMat, [ 0.034, 0.124, 0.100]));
-  headG.add(mesh(new THREE.SphereGeometry(0.009, 10, 8), pupilMat, [-0.034, 0.124, 0.100]));
+  // --- Eyes — larger sclera + pupil for visibility at arena distances.
+  const scleraMat = mat(0xf2ece0, { r: 0.35 });
+  const pupilMat  = mat(0x121a24, { r: 0.3 });
+  const eyeY = 0.13, eyeZ = 0.098, eyeDX = 0.038;
+  headG.add(mesh(new THREE.SphereGeometry(0.022, 14, 12), scleraMat, [ eyeDX, eyeY, eyeZ]));
+  headG.add(mesh(new THREE.SphereGeometry(0.022, 14, 12), scleraMat, [-eyeDX, eyeY, eyeZ]));
+  headG.add(mesh(new THREE.SphereGeometry(0.013, 12, 10), pupilMat, [ eyeDX, eyeY, eyeZ + 0.012]));
+  headG.add(mesh(new THREE.SphereGeometry(0.013, 12, 10), pupilMat, [-eyeDX, eyeY, eyeZ + 0.012]));
 
-  // Heavy serious brows (thicker, slight inward slant).
-  const browMat = mat(HAIR, { r: 0.8 });
-  const browR = mesh(new THREE.BoxGeometry(0.038, 0.009, 0.012), browMat, [ 0.035, 0.148, 0.093]);
-  browR.rotation.z = -0.12;
-  const browL = mesh(new THREE.BoxGeometry(0.038, 0.009, 0.012), browMat, [-0.035, 0.148, 0.093]);
-  browL.rotation.z = 0.12;
+  // Strong eyebrows — thicker angled boxes sitting above each eye.
+  const browMat = mat(HAIR, { r: 0.85 });
+  const browR = mesh(new THREE.BoxGeometry(0.048, 0.012, 0.014), browMat, [ eyeDX, eyeY + 0.028, eyeZ]);
+  browR.rotation.z = -0.1;
+  const browL = mesh(new THREE.BoxGeometry(0.048, 0.012, 0.014), browMat, [-eyeDX, eyeY + 0.028, eyeZ]);
+  browL.rotation.z = 0.1;
   headG.add(browR, browL);
 
-  // Nose — cone pointing forward.
-  const nose = mesh(new THREE.ConeGeometry(0.014, 0.045, 10), mat(SKIN_SHAD, { r: 0.55 }), [0, 0.095, 0.105]);
-  nose.rotation.x = Math.PI / 2;
+  // Nose — bridge + tip. Bridge is a slender cylinder; tip is a small sphere.
+  const nose = mesh(new THREE.CylinderGeometry(0.010, 0.016, 0.06, 10), mat(SKIN_SHAD, { r: 0.55 }), [0, 0.08, 0.110]);
+  nose.rotation.x = 0.1;
   headG.add(nose);
+  const noseTip = mesh(new THREE.SphereGeometry(0.018, 14, 12), mat(SKIN_SHAD, { r: 0.55 }), [0, 0.06, 0.125]);
+  noseTip.scale.set(1.0, 0.7, 1.0);
+  headG.add(noseTip);
 
-  // --- Beard: stubble covering lower jaw + cheeks + chin + moustache band.
-  const beardMat = mat(BEARD, { r: 0.95 });
-  // Main beard volume: squashed sphere around the chin/lower face
-  const beardMain = mesh(new THREE.SphereGeometry(0.10, 20, 16, 0, Math.PI * 2, Math.PI * 0.42, Math.PI * 0.55), beardMat, [0, 0.095, -0.005]);
-  beardMain.scale.set(1.0, 1.05, 1.05);
-  headG.add(beardMain);
-  // Moustache band — thin horizontal box under the nose.
-  headG.add(mesh(new THREE.BoxGeometry(0.06, 0.012, 0.018), beardMat, [0, 0.072, 0.100]));
-  // Chin beard goatee — small box on the chin point
-  headG.add(mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), beardMat, [0, 0.040, 0.095]));
+  // --- Stubble: light coverage only on the jaw + chin (no thick beard).
+  const beardMat = mat(BEARD, { r: 0.95, m: 0.02 });
+  // Thin jaw line — squished sphere, shorter than before so cheeks stay skin.
+  const beardJaw = mesh(
+    new THREE.SphereGeometry(0.095, 22, 16, 0, Math.PI * 2, Math.PI * 0.55, Math.PI * 0.38),
+    beardMat,
+    [0, 0.05, 0.005]
+  );
+  beardJaw.scale.set(1.05, 0.8, 1.05);
+  headG.add(beardJaw);
+  // Moustache — thin horizontal band just above the mouth.
+  headG.add(mesh(new THREE.BoxGeometry(0.048, 0.008, 0.014), beardMat, [0, 0.038, 0.118]));
 
-  // Mouth — subtle line, slightly turned down (serious).
-  headG.add(mesh(new THREE.BoxGeometry(0.030, 0.006, 0.005), mat(LIP, { r: 0.6 }), [0, 0.060, 0.100]));
+  // Mouth — pale coral-ish line, slightly turned down.
+  const mouth = mesh(new THREE.BoxGeometry(0.032, 0.006, 0.006), mat(LIP, { r: 0.55 }), [0, 0.022, 0.120]);
+  headG.add(mouth);
 
   parts.body.add(headG);
 
   // --- Neck -----------------------------------------------------------------
   parts.body.add(mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.08, 14), mat(SKIN), [0, 1.50, 0]));
 
-  // --- Torso (black jacket) + black shirt in the V + black tie + lapels -----
-  const jacket = mesh(new THREE.BoxGeometry(0.44, 0.58, 0.26), mat(SUIT, { r: 0.7, m: 0.06 }), [0, 1.17, 0]);
+  // --- Torso (black jacket) — tapered cylinder so the silhouette has real
+  // shoulder-to-waist shape instead of reading as a refrigerator box. 14-
+  // sided for smoothness. Z-scaled to make the front-back depth 62% of the
+  // width so the chest is appropriately flatter.
+  const jacketGeo = new THREE.CylinderGeometry(0.24, 0.195, 0.58, 14);
+  const jacket = mesh(jacketGeo, mat(SUIT, { r: 0.7, m: 0.06 }), [0, 1.17, 0]);
+  jacket.scale.z = 0.62;
   parts.body.add(jacket);
-  // Dark shirt visible under the open jacket — John Wick wears a black
-  // button-down, not a white dress shirt.
-  parts.body.add(mesh(new THREE.BoxGeometry(0.12, 0.22, 0.014), mat(SHIRT, { r: 0.65 }), [0, 1.39, 0.133]));
-  // Shirt collar points (dark).
-  const collarL = mesh(new THREE.BoxGeometry(0.07, 0.045, 0.02), mat(SHIRT, { r: 0.6 }), [-0.05, 1.455, 0.128]);
+  // A second flatter "chest plate" cylinder just in front of the upper torso
+  // gives the pectoral + shoulder mass that a round cylinder alone misses.
+  const chest = mesh(
+    new THREE.CylinderGeometry(0.21, 0.22, 0.22, 14),
+    mat(SUIT, { r: 0.72, m: 0.06 }),
+    [0, 1.34, 0.01],
+  );
+  chest.scale.z = 0.7;
+  parts.body.add(chest);
+
+  // Dark shirt visible in the V of the jacket opening.
+  parts.body.add(mesh(new THREE.BoxGeometry(0.11, 0.22, 0.012), mat(SHIRT, { r: 0.65 }), [0, 1.39, 0.13]));
+  // Shirt collar points (dark, angled).
+  const collarL = mesh(new THREE.BoxGeometry(0.065, 0.045, 0.018), mat(SHIRT, { r: 0.6 }), [-0.046, 1.455, 0.126]);
   collarL.rotation.z = -0.32;
-  const collarR = mesh(new THREE.BoxGeometry(0.07, 0.045, 0.02), mat(SHIRT, { r: 0.6 }), [ 0.05, 1.455, 0.128]);
+  const collarR = mesh(new THREE.BoxGeometry(0.065, 0.045, 0.018), mat(SHIRT, { r: 0.6 }), [ 0.046, 1.455, 0.126]);
   collarR.rotation.z = 0.32;
   parts.body.add(collarL, collarR);
   // Black tie — knot + body. Slightly more sheen than the shirt so it reads.
-  parts.body.add(mesh(new THREE.BoxGeometry(0.055, 0.055, 0.018), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.435, 0.141]));
-  parts.body.add(mesh(new THREE.BoxGeometry(0.048, 0.32, 0.018), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.25, 0.141]));
-  // Lapels — angled panels, slightly lighter than suit to catch light.
-  const lapelGeo = new THREE.BoxGeometry(0.03, 0.34, 0.028);
-  const lapelL = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [-0.085, 1.33, 0.128]);
+  parts.body.add(mesh(new THREE.BoxGeometry(0.05, 0.05, 0.016), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.435, 0.138]));
+  parts.body.add(mesh(new THREE.BoxGeometry(0.044, 0.32, 0.016), mat(TIE, { r: 0.45, m: 0.18 }), [0, 1.25, 0.138]));
+  // Lapels — angled panels catching slight highlight.
+  const lapelGeo = new THREE.BoxGeometry(0.028, 0.32, 0.026);
+  const lapelL = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [-0.08, 1.33, 0.12]);
   lapelL.rotation.z = 0.14;
-  const lapelR = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [ 0.085, 1.33, 0.128]);
+  const lapelR = mesh(lapelGeo, mat(0x16181f, { r: 0.5, m: 0.1 }), [ 0.08, 1.33, 0.12]);
   lapelR.rotation.z = -0.14;
   parts.body.add(lapelL, lapelR);
-  // Buttons — barely visible dark stubs.
+  // Buttons along the jacket midline.
   for (let b = 0; b < 3; b++) {
-    parts.body.add(mesh(new THREE.SphereGeometry(0.008, 10, 8), mat(0x050505, { r: 0.3, m: 0.45 }), [0, 1.21 - b * 0.085, 0.135]));
+    parts.body.add(mesh(new THREE.SphereGeometry(0.008, 10, 8), mat(0x050505, { r: 0.3, m: 0.45 }), [0, 1.21 - b * 0.085, 0.128]));
   }
 
   // --- Pelvis (visible band at top of pants) --------------------------------
@@ -497,20 +523,32 @@ function buildSuitedManAvatar() {
   const makeArm = (sign) => {
     const arm = new THREE.Group();
     arm.position.set(sign * 0.23, 1.42, 0); // shoulder anchor
-    // Shoulder cap + upper arm — attached directly to the arm group so they
-    // rotate with the shoulder pivot but NOT with the elbow.
-    arm.add(mesh(new THREE.SphereGeometry(0.085, 14, 12), mat(SUIT, { r: 0.75 }), [0, 0, 0]));
-    arm.add(mesh(new THREE.CylinderGeometry(0.063, 0.057, 0.26, 14), mat(SUIT, { r: 0.78 }), [0, -0.13, 0]));
-    // Elbow group — anchored at the elbow joint. Upper arm ends at y=-0.26.
+    // Shoulder cap — smaller, blends into the tapered chest instead of
+    // sticking out like a ball.
+    arm.add(mesh(new THREE.SphereGeometry(0.068, 14, 12), mat(SUIT, { r: 0.75 }), [0, 0, 0]));
+    // Upper arm — slightly tapered cylinder (bicep wider than elbow).
+    arm.add(mesh(new THREE.CylinderGeometry(0.058, 0.052, 0.26, 14), mat(SUIT, { r: 0.78 }), [0, -0.13, 0]));
+    // Elbow group — anchored at the elbow joint.
     const elbow = new THREE.Group();
     elbow.position.set(0, -0.26, 0);
     arm.add(elbow);
-    // Elbow joint sphere + forearm + hand all live inside the elbow group.
-    elbow.add(mesh(new THREE.SphereGeometry(0.058, 12, 10), mat(SUIT, { r: 0.75 }), [0, 0, 0]));
-    elbow.add(mesh(new THREE.CylinderGeometry(0.057, 0.048, 0.26, 14), mat(SUIT, { r: 0.8 }), [0, -0.13, 0]));
-    const hand = mesh(new THREE.SphereGeometry(0.055, 12, 10), mat(SKIN, { r: 0.65 }), [0, -0.29, 0]);
-    hand.scale.set(0.9, 1.15, 0.75);
-    elbow.add(hand);
+    elbow.add(mesh(new THREE.SphereGeometry(0.052, 12, 10), mat(SUIT, { r: 0.75 }), [0, 0, 0]));
+    // Forearm tapers from wider (near elbow) to narrower (at wrist).
+    elbow.add(mesh(new THREE.CylinderGeometry(0.051, 0.042, 0.26, 14), mat(SUIT, { r: 0.8 }), [0, -0.13, 0]));
+    // Wrist cuff — slim dark band suggests the jacket cuff ending.
+    elbow.add(mesh(new THREE.CylinderGeometry(0.044, 0.042, 0.025, 14), mat(0x050609, { r: 0.5 }), [0, -0.258, 0]));
+    // Hand — flattened mitten-shape with a thumb bump. More anatomical than
+    // a sphere. Scale anisotropically so it reads as a palm, not a ball.
+    const handG = new THREE.Group();
+    handG.position.set(0, -0.30, 0);
+    const palm = mesh(new THREE.SphereGeometry(0.05, 14, 12), mat(SKIN, { r: 0.6 }), [0, -0.015, 0]);
+    palm.scale.set(0.75, 1.3, 0.5);
+    handG.add(palm);
+    // Thumb — small sphere offset toward the body (inward).
+    const thumb = mesh(new THREE.SphereGeometry(0.022, 10, 8), mat(SKIN, { r: 0.6 }), [sign * -0.028, -0.02, 0.008]);
+    thumb.scale.set(0.8, 1.2, 0.8);
+    handG.add(thumb);
+    elbow.add(handG);
     arm.userData.elbow = elbow;
     return arm;
   };
@@ -538,7 +576,18 @@ function buildSuitedManAvatar() {
     leg.add(knee);
     knee.add(mesh(new THREE.SphereGeometry(0.072, 12, 10), mat(PANTS), [0, 0, 0]));
     knee.add(mesh(new THREE.CylinderGeometry(0.068, 0.05, 0.40, 14), mat(PANTS), [0, -0.22, 0]));
-    knee.add(mesh(new THREE.BoxGeometry(0.13, 0.08, 0.28), mat(SHOE, { r: 0.28, m: 0.3 }), [0, -0.42, 0.05]));
+    // Shoe — rounded dress-shoe shape: main foot + tapered toe cap + heel.
+    // Previously a flat box; now a 3-piece shape reads as actual footwear.
+    const shoeMat = mat(SHOE, { r: 0.25, m: 0.35 });
+    const foot = mesh(new THREE.BoxGeometry(0.10, 0.065, 0.24), shoeMat, [0, -0.43, 0.04]);
+    knee.add(foot);
+    // Toe cap — rounded semi-sphere at the front of the foot.
+    const toe = mesh(new THREE.SphereGeometry(0.05, 14, 10), shoeMat, [0, -0.44, 0.16]);
+    toe.scale.set(1.0, 0.7, 1.2);
+    knee.add(toe);
+    // Heel — small taller block at the back.
+    const heel = mesh(new THREE.BoxGeometry(0.085, 0.085, 0.07), shoeMat, [0, -0.42, -0.075]);
+    knee.add(heel);
     leg.userData.knee = knee;
     return leg;
   };
