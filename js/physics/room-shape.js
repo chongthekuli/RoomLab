@@ -193,7 +193,12 @@ export function roomEffectiveSurfaces(room, zones = []) {
     if (area <= 0) continue;
     const elev = z.elevation_m ?? 0;
     if (Math.abs(elev) < 0.1) floorCarveOut += area;
-    out.push({ id: 'zone_' + z.id, area_m2: area, materialId: z.material_id });
+    out.push({
+      id: 'zone_' + z.id,
+      area_m2: area,
+      materialId: z.material_id,
+      occupancy_percent: z.occupancy_percent ?? 0,
+    });
   }
   if (floorCarveOut > 0) {
     const fi = out.findIndex(s => s.id === 'floor');

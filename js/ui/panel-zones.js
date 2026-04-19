@@ -61,8 +61,14 @@ function render() {
         <div class="field-group">
           <label>Surface material
             <select data-f="material_id">
-              ${materialsRef.list.map(m => `<option value="${m.id}" ${m.id === z.material_id ? 'selected' : ''}>${m.name}</option>`).join('')}
+              ${materialsRef.list.filter(m => m.id !== 'audience-seated').map(m => `<option value="${m.id}" ${m.id === z.material_id ? 'selected' : ''}>${m.name}</option>`).join('')}
             </select>
+          </label>
+        </div>
+        <div class="field-group">
+          <label title="Fraction of seats occupied. Blends surface α with audience α per ISO 3382-1.">Audience occupancy
+            <input type="range" data-f="occupancy_percent" min="0" max="100" step="5" value="${z.occupancy_percent ?? 0}" />
+            <span class="derived" data-readout="occ">${z.occupancy_percent ?? 0}%</span>
           </label>
         </div>
         <div class="zone-actions">
@@ -86,7 +92,14 @@ function render() {
     const id = card.dataset.zoneId;
     card.querySelectorAll('[data-f]').forEach(input => {
       const eventName = input.tagName === 'SELECT' ? 'change' : 'input';
-      input.addEventListener(eventName, e => updateZone(id, e.target.dataset.f, e.target.value));
+      input.addEventListener(eventName, e => {
+        const f = e.target.dataset.f;
+        updateZone(id, f, e.target.value);
+        if (f === 'occupancy_percent') {
+          const readout = card.querySelector('[data-readout="occ"]');
+          if (readout) readout.textContent = `${e.target.value}%`;
+        }
+      });
     });
   });
 }
@@ -98,6 +111,11 @@ function updateZone(id, field, value) {
     case 'label': z.label = value; break;
     case 'elevation_m': z.elevation_m = parseFloat(value) || 0; break;
     case 'material_id': z.material_id = value; break;
+    case 'occupancy_percent': {
+      const v = parseFloat(value);
+      z.occupancy_percent = Math.max(0, Math.min(100, isFinite(v) ? v : 0));
+      break;
+    }
   }
   emit('room:changed');
 }

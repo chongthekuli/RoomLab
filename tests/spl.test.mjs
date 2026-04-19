@@ -359,6 +359,53 @@ import { computeAllBands } from '../js/physics/rt60.js';
   if (dropMid <= 1) failed++;
 }
 
+// --- Audience occupancy blending ----------------------------------------
+// Seated audience α (ISO 3382-1) replaces a fraction of seating absorption
+// equal to the occupancy percentage. Empty bowl (occ=0) → carpet α only.
+// Full bowl (occ=100) → audience α only. 50% → midpoint blend.
+{
+  const room = {
+    shape: 'rectangular', width_m: 20, height_m: 10, depth_m: 20,
+    ceiling_type: 'flat',
+    surfaces: { floor: 'concrete', ceiling: 'concrete', walls: 'concrete',
+                wall_north: 'concrete', wall_south: 'concrete',
+                wall_east: 'concrete', wall_west: 'concrete' },
+  };
+  const mat = {
+    frequency_bands_hz: [125, 250, 500, 1000, 2000, 4000],
+    byId: {
+      concrete: { absorption: [0.01, 0.02, 0.02, 0.02, 0.02, 0.03] },
+      carpet:   { absorption: [0.02, 0.06, 0.14, 0.37, 0.60, 0.65] },
+      'audience-seated': { absorption: [0.46, 0.51, 0.56, 0.64, 0.71, 0.75] },
+    },
+  };
+  const makeZone = (occ) => [{
+    id: 'seats', label: 'Bowl', material_id: 'carpet',
+    elevation_m: 2, occupancy_percent: occ,
+    vertices: [{x:2,y:2},{x:18,y:2},{x:18,y:18},{x:2,y:18}],
+  }];
+  const empty = computeAllBands({ room, materials: mat, zones: makeZone(0) });
+  const full  = computeAllBands({ room, materials: mat, zones: makeZone(100) });
+  const half  = computeAllBands({ room, materials: mat, zones: makeZone(50) });
+  // At 1 kHz, carpet α=0.37, audience α=0.64 → occupied room absorbs more,
+  // so RT60 drops as occupancy rises.
+  const okDirection = full[3].sabine_s < empty[3].sabine_s;
+  console.log(`${okDirection ? 'PASS' : 'FAIL'}  Occupied bowl RT60 shorter than empty (empty=${empty[3].sabine_s.toFixed(2)}s, 50%=${half[3].sabine_s.toFixed(2)}s, full=${full[3].sabine_s.toFixed(2)}s @1kHz)`);
+  if (!okDirection) failed++;
+  // 50% should land between empty and full.
+  const okMonotone = half[3].sabine_s < empty[3].sabine_s && half[3].sabine_s > full[3].sabine_s;
+  console.log(`${okMonotone ? 'PASS' : 'FAIL'}  Occupancy blend monotone (50% lies between empty and full)`);
+  if (!okMonotone) failed++;
+  // Sanity: occupancy=0 must equal no-occupancy-field (backwards compat).
+  const legacy = computeAllBands({ room, materials: mat, zones: [{
+    id: 'seats', material_id: 'carpet', elevation_m: 2,
+    vertices: [{x:2,y:2},{x:18,y:2},{x:18,y:18},{x:2,y:18}],
+  }]});
+  const okBackCompat = Math.abs(legacy[3].sabine_s - empty[3].sabine_s) < 1e-6;
+  console.log(`${okBackCompat ? 'PASS' : 'FAIL'}  Zones without occupancy_percent behave as 0% (legacy preset safe)`);
+  if (!okBackCompat) failed++;
+}
+
 // --- ISO 9613-1 air absorption -------------------------------------------
 import { airAbsorptionAt, AIR_ABSORPTION_DB_PER_M, computeRoomConstant, speedOfSound, DEFAULT_TEMPERATURE_C } from '../js/physics/spl-calculator.js';
 {

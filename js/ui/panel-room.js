@@ -293,7 +293,7 @@ function renderSurfaceMaterials() {
 function buildMatSelect(dataKey, currentValue) {
   const sel = document.createElement('select');
   sel.dataset.key = dataKey;
-  sel.innerHTML = materialsRef.list.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  sel.innerHTML = materialsRef.list.filter(m => m.id !== 'audience-seated').map(m => `<option value="${m.id}">${m.name}</option>`).join('');
   sel.value = currentValue ?? materialsRef.list[0].id;
   return sel;
 }

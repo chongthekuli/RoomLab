@@ -17,10 +17,15 @@ export function computeRT60Band({ room, materials, bandIndex, zones = [] }) {
   // Include zone absorption so stadium bowl carpet + court wood actually
   // contribute. Without this the arena preset reports ~16 s RT60.
   const surfaces = roomEffectiveSurfaces(room, zones);
+  // Seated-audience absorption replaces the seating material for the fraction
+  // of seats occupied (ISO 3382-1). α_eff = α_material·(1−occ) + α_audience·occ.
+  const audienceAlpha = materials.byId['audience-seated']?.absorption[bandIndex] ?? 0;
   let totalArea_m2 = 0;
   let totalAbsorption_sabins = 0;
   for (const s of surfaces) {
-    const alpha = materials.byId[s.materialId]?.absorption[bandIndex] ?? 0;
+    const baseAlpha = materials.byId[s.materialId]?.absorption[bandIndex] ?? 0;
+    const occ = Math.max(0, Math.min(1, (s.occupancy_percent ?? 0) / 100));
+    const alpha = occ > 0 ? baseAlpha * (1 - occ) + audienceAlpha * occ : baseAlpha;
     totalArea_m2 += s.area_m2;
     totalAbsorption_sabins += s.area_m2 * alpha;
   }
