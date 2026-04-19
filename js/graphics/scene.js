@@ -5,6 +5,7 @@ import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL } from '../physics/spl-calculator.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
+import { getMaterialTexture, getMaterialPalette } from './textures.js';
 
 let scene, camera, renderer, controls;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
@@ -149,23 +150,29 @@ function rebuildRoom(isFirst) {
   const shape = room.shape ?? 'rectangular';
   const cx = w / 2, cz = d / 2;
 
-  const bandIdx = materialsRef.frequency_bands_hz.indexOf(500);
-  const useIdx = bandIdx >= 0 ? bandIdx : 2;
-  const alphaOf = id => materialsRef.byId[id]?.absorption[useIdx] ?? 0;
   const wallsMatId = surfaces.walls ?? surfaces.wall_north ?? 'gypsum-board';
 
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: colorForAlpha(alphaOf(surfaces.floor)),
-    transparent: true, opacity: 0.55, side: THREE.DoubleSide,
-  });
-  const ceilMat = new THREE.MeshStandardMaterial({
-    color: colorForAlpha(alphaOf(surfaces.ceiling)),
-    transparent: true, opacity: 0.22, side: THREE.DoubleSide,
-  });
-  const wallsMat = new THREE.MeshStandardMaterial({
-    color: colorForAlpha(alphaOf(wallsMatId)),
-    transparent: true, opacity: 0.22, side: THREE.DoubleSide,
-  });
+  // Each surface gets its own textured MeshStandardMaterial. Texture tiling
+  // is computed from the surface's real-world dimensions so planks, tiles,
+  // and bricks read at correct scale regardless of room size. Walls/ceiling
+  // stay slightly translucent so the user can still see the interior from
+  // outside; the floor is nearly opaque.
+  const buildSurfaceMat = (materialId, widthM, heightM, { opacity = 0.6, doubleSide = true } = {}) => {
+    const tex = getMaterialTexture(materialId, widthM, heightM);
+    const palette = getMaterialPalette(materialId);
+    return new THREE.MeshStandardMaterial({
+      map: tex,
+      color: palette.tint,
+      roughness: palette.roughness,
+      metalness: palette.metalness,
+      transparent: opacity < 0.99,
+      opacity,
+      side: doubleSide ? THREE.DoubleSide : THREE.FrontSide,
+    });
+  };
+  const floorMat = buildSurfaceMat(surfaces.floor, w, d, { opacity: 0.95 });
+  const ceilMat  = buildSurfaceMat(surfaces.ceiling, w, d, { opacity: 0.55 });
+  const wallsMat = buildSurfaceMat(wallsMatId, (w + d), h, { opacity: 0.55 });
 
   if (shape === 'rectangular') {
     // Floor + ceiling as rectangular planes
@@ -192,13 +199,11 @@ function rebuildRoom(isFirst) {
     ];
     for (const [ww, wh, pos, rot, surfId] of wallOpts) {
       const geo = new THREE.PlaneGeometry(ww, wh);
-      const mat = new THREE.MeshStandardMaterial({
-        color: colorForAlpha(alphaOf(surfId)),
-        transparent: true, opacity: 0.22, side: THREE.DoubleSide,
-      });
+      const mat = buildSurfaceMat(surfId, ww, wh, { opacity: 0.55 });
       const m = new THREE.Mesh(geo, mat);
       m.position.set(...pos);
       m.rotation.set(...rot);
+      m.userData.acoustic_material = surfId;
       roomGroup.add(m);
     }
 
@@ -229,11 +234,15 @@ function rebuildRoom(isFirst) {
     }
 
     if (shape === 'round') {
-      // Cylindrical wall, open-ended
+      // Cylindrical wall, open-ended. Uses its own material so texture
+      // tiling matches the actual circumference (2πr) rather than the
+      // rectangular-wall default.
       const r = room.round_radius_m ?? 3;
       const cylGeo = new THREE.CylinderGeometry(r, r, h, 48, 1, true);
-      const cyl = new THREE.Mesh(cylGeo, wallsMat);
+      const cylMat = buildSurfaceMat(wallsMatId, 2 * Math.PI * r, h, { opacity: 0.55 });
+      const cyl = new THREE.Mesh(cylGeo, cylMat);
       cyl.position.set(cx, h/2, cz);
+      cyl.userData.acoustic_material = wallsMatId;
       roomGroup.add(cyl);
 
       // Top and bottom ring edges
@@ -251,9 +260,6 @@ function rebuildRoom(isFirst) {
       // Custom polygon: plane per edge, per-edge materials
       const verts = roomPlanVertices(room);
       const edges = room.surfaces.edges || [];
-      const bandIdx2 = materialsRef.frequency_bands_hz.indexOf(500);
-      const useIdx2 = bandIdx2 >= 0 ? bandIdx2 : 2;
-      const alphaOf2 = id => materialsRef.byId[id]?.absorption[useIdx2] ?? 0;
       const n = verts.length;
       for (let i = 0; i < n; i++) {
         const v1 = verts[i];
@@ -263,14 +269,13 @@ function rebuildRoom(isFirst) {
         if (edgeLen < 0.01) continue;
         const midX = (v1.x + v2.x) / 2;
         const midZ = (v1.y + v2.y) / 2;
+        const edgeSurfId = edges[i] ?? 'gypsum-board';
         const geo = new THREE.PlaneGeometry(edgeLen, h);
-        const edgeMat = new THREE.MeshStandardMaterial({
-          color: colorForAlpha(alphaOf2(edges[i] ?? 'gypsum-board')),
-          transparent: true, opacity: 0.22, side: THREE.DoubleSide,
-        });
+        const edgeMat = buildSurfaceMat(edgeSurfId, edgeLen, h, { opacity: 0.55 });
         const m = new THREE.Mesh(geo, edgeMat);
         m.position.set(midX, h/2, midZ);
         m.lookAt(cx, h/2, cz);
+        m.userData.acoustic_material = edgeSurfId;
         roomGroup.add(m);
       }
       const bottom = verts.map(v => new THREE.Vector3(v.x, 0, v.y));
@@ -327,7 +332,10 @@ function rebuildRoom(isFirst) {
         const wallH = wallTop - wallBottom;
         if (wallH <= 0.01) continue;
         const geo = new THREE.PlaneGeometry(edgeLen, wallH);
-        const m = new THREE.Mesh(geo, wallsMat);
+        // Per-segment textured material so each wall panel's tiling matches
+        // its own dimensions (seams stay square instead of stretching).
+        const segMat = buildSurfaceMat(wallsMatId, edgeLen, wallH, { opacity: 0.55 });
+        const m = new THREE.Mesh(geo, segMat);
         const midY = (wallBottom + wallTop) / 2;
         m.position.set(midX, midY, midZ);
         m.lookAt(cx, midY, cz);
@@ -1166,8 +1174,14 @@ function rebuildBowlStructure(room) {
   // Clean architectural-model gray. No brown tint — lets the colored heatmap
   // planes read clearly against a neutral base when overlaid, and gives an
   // EASE/Odeon-style monochrome look when the heatmap is toggled off.
+  // Concrete texture on the bowl structure for the same architectural-model
+  // look the user asked for on walls/floor/ceiling. Tile size matched to the
+  // largest bowl dimension so speckle reads consistently across all sectors.
+  const bowlRadialSpan = Math.max(1, (s.upperBowl?.r_out ?? 30) * 2);
   const concreteMat = new THREE.MeshStandardMaterial({
-    color: 0xdddddd, roughness: 0.8, side: THREE.DoubleSide,
+    map: getMaterialTexture('concrete-painted', bowlRadialSpan, bowlRadialSpan),
+    color: 0xffffff, roughness: 0.88, metalness: 0.02,
+    side: THREE.DoubleSide,
   });
   const profile = buildStadiumStructureProfile(s);
   if (!profile) return;
