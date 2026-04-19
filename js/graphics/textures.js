@@ -97,44 +97,31 @@ function mulberry(seed) {
 }
 
 function paintWoodFloor(ctx) {
-  paletteCache.set('wood-floor', { tint: 0xffffff, roughness: 0.6, metalness: 0.05 });
+  paletteCache.set('wood-floor', { tint: 0xffffff, roughness: 0.75, metalness: 0.0 });
   const rand = mulberry(1001);
-  // Warmer, richer brown base — reads as wood at arena distance.
-  ctx.fillStyle = '#7a5028';
+  ctx.fillStyle = '#8b6b3f';
   ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
   const plankH = 64;
   for (let p = 0; p < 4; p++) {
     const y = p * plankH;
-    const shade = 0.75 + rand() * 0.35;
-    const r = Math.floor(160 * shade), g = Math.floor(108 * shade), b = Math.floor(55 * shade);
+    const shade = 0.85 + rand() * 0.25;
+    const r = Math.floor(139 * shade), g = Math.floor(107 * shade), b = Math.floor(63 * shade);
     ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
     ctx.fillRect(0, y, CANVAS_SIZE, plankH - 2);
-    // Stronger grain lines — more visible from camera distance.
-    ctx.strokeStyle = 'rgba(55, 32, 12, 0.55)';
-    ctx.lineWidth = 1.2;
-    for (let i = 0; i < 9; i++) {
-      const yy = y + 4 + rand() * (plankH - 8);
+    ctx.strokeStyle = 'rgba(60, 38, 16, 0.28)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 7; i++) {
+      const yy = y + 6 + rand() * (plankH - 12);
       ctx.beginPath();
       ctx.moveTo(0, yy);
       ctx.bezierCurveTo(
-        64, yy + (rand() - 0.5) * 3,
-        192, yy + (rand() - 0.5) * 3,
-        CANVAS_SIZE, yy + (rand() - 0.5) * 3,
+        64, yy + (rand() - 0.5) * 2.5,
+        192, yy + (rand() - 0.5) * 2.5,
+        CANVAS_SIZE, yy + (rand() - 0.5) * 2.5,
       );
       ctx.stroke();
     }
-    // Knots — random dark circular marks
-    if (rand() < 0.6) {
-      const kx = rand() * CANVAS_SIZE, ky = y + 8 + rand() * (plankH - 18);
-      const kr = 3 + rand() * 4;
-      const grad = ctx.createRadialGradient(kx, ky, 0, kx, ky, kr);
-      grad.addColorStop(0, 'rgba(40, 22, 8, 0.9)');
-      grad.addColorStop(1, 'rgba(40, 22, 8, 0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(kx - kr, ky - kr, 2 * kr, 2 * kr);
-    }
-    // Dark plank seam
-    ctx.fillStyle = '#2a1808';
+    ctx.fillStyle = '#352412';
     ctx.fillRect(0, y + plankH - 2, CANVAS_SIZE, 2);
     const jointX = (p % 2 === 0) ? 170 : 85;
     ctx.fillRect(jointX, y, 2, plankH - 2);
@@ -142,37 +129,22 @@ function paintWoodFloor(ctx) {
 }
 
 function paintConcretePainted(ctx) {
-  paletteCache.set('concrete-painted', { tint: 0xffffff, roughness: 0.85, metalness: 0.05 });
+  paletteCache.set('concrete-painted', { tint: 0xffffff, roughness: 0.88, metalness: 0.02 });
   const rand = mulberry(2002);
-  // Warmer sand/beige concrete instead of flat gray — reads as a real
-  // painted surface at arena distance.
-  ctx.fillStyle = '#c8bfa8';
+  ctx.fillStyle = '#bfbcb4';
   ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-  // Larger, more pronounced staining patches
-  for (let i = 0; i < 10; i++) {
-    const cx = rand() * CANVAS_SIZE, cy = rand() * CANVAS_SIZE, r = 50 + rand() * 90;
+  for (let i = 0; i < 6; i++) {
+    const cx = rand() * CANVAS_SIZE, cy = rand() * CANVAS_SIZE, r = 40 + rand() * 80;
     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    const darkA = 0.15 + rand() * 0.15;
-    grad.addColorStop(0, `rgba(130, 120, 100, ${darkA})`);
-    grad.addColorStop(1, 'rgba(130, 120, 100, 0)');
+    grad.addColorStop(0, 'rgba(150, 148, 140, 0.10)');
+    grad.addColorStop(1, 'rgba(150, 148, 140, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(cx - r, cy - r, 2 * r, 2 * r);
   }
-  // Expansion joints — thin darker lines every ~1.2 m of the texture
-  ctx.strokeStyle = 'rgba(70, 62, 50, 0.55)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(0, CANVAS_SIZE / 2);
-  ctx.lineTo(CANVAS_SIZE, CANVAS_SIZE / 2);
-  ctx.moveTo(CANVAS_SIZE / 2, 0);
-  ctx.lineTo(CANVAS_SIZE / 2, CANVAS_SIZE);
-  ctx.stroke();
-  // Speckle (aggregate)
-  for (let i = 0; i < 1500; i++) {
+  for (let i = 0; i < 900; i++) {
     const x = rand() * CANVAS_SIZE, y = rand() * CANVAS_SIZE;
-    const s = 140 + Math.floor(rand() * 80);
-    const g = s - 8 - Math.floor(rand() * 15);
-    ctx.fillStyle = `rgba(${s}, ${g}, ${g - 10}, 0.4)`;
+    const s = 150 + Math.floor(rand() * 60);
+    ctx.fillStyle = `rgba(${s}, ${s}, ${s - 4}, 0.3)`;
     ctx.fillRect(x, y, 1, 1);
   }
 }
@@ -267,30 +239,14 @@ function paintAcousticTile(ctx) {
 }
 
 function paintGypsumBoard(ctx) {
-  paletteCache.set('gypsum-board', { tint: 0xffffff, roughness: 0.9, metalness: 0.0 });
+  paletteCache.set('gypsum-board', { tint: 0xffffff, roughness: 0.85, metalness: 0.0 });
   const rand = mulberry(6006);
-  // Warmer off-white base — reads as painted drywall, not "dead gray".
-  ctx.fillStyle = '#e6e0d2';
+  ctx.fillStyle = '#efebe3';
   ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-  // Visible board seams (standard 4×8 ft gypsum sheets → seams at ~1.2 m in
-  // the tile, shown as soft horizontal/vertical joint lines).
-  ctx.strokeStyle = 'rgba(180, 170, 150, 0.6)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(0, CANVAS_SIZE / 2);
-  ctx.lineTo(CANVAS_SIZE, CANVAS_SIZE / 2);
-  ctx.stroke();
-  // Fastener dimples (drywall screw heads) along the seam
-  ctx.fillStyle = 'rgba(160, 150, 130, 0.5)';
-  for (let i = 0; i < 12; i++) {
-    const sx = (i / 12) * CANVAS_SIZE + 8;
-    ctx.fillRect(sx, CANVAS_SIZE / 2 - 1, 2, 2);
-  }
-  // Paint-stippled noise
-  for (let i = 0; i < 2200; i++) {
+  for (let i = 0; i < 1800; i++) {
     const x = rand() * CANVAS_SIZE, y = rand() * CANVAS_SIZE;
-    const s = 210 + Math.floor(rand() * 40);
-    ctx.fillStyle = `rgba(${s}, ${s - 4}, ${s - 14}, 0.32)`;
+    const s = 215 + Math.floor(rand() * 30);
+    ctx.fillStyle = `rgba(${s}, ${s - 2}, ${s - 8}, 0.25)`;
     ctx.fillRect(x, y, 1, 1);
   }
 }
