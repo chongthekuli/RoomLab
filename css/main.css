@@ -103,6 +103,53 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
 }
 .walk-hint.hidden { display: none; }
 
+/* Walkthrough live SPL readout — top-right of the 3D canvas, updates every
+   frame with the avatar's ear position + current pose + total SPL. */
+.walk-spl {
+  position: absolute;
+  top: 16px; right: 16px;
+  background: rgba(20, 22, 28, 0.92);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-pop);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 6;
+  min-width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.walk-spl.hidden { display: none; }
+.walk-spl .walk-spl-big {
+  font-size: 1.9rem;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: var(--fg-strong);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.walk-spl .walk-spl-row {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+.walk-spl .walk-spl-label {
+  color: var(--muted-dim);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.walk-spl .walk-spl-val {
+  color: var(--fg);
+  font-size: 11px;
+}
+
 /* Probe tool hover readout — floats next to the mouse over the 3D canvas. */
 .probe-tooltip {
   position: absolute;

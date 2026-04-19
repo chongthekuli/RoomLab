@@ -36,13 +36,22 @@ let walkMode = false;
 let walkPhase = 0;            // stride phase for leg/arm swing animation
 // walkState.z tracks the terrain height beneath the avatar's feet — lerped
 // toward the target elevation each frame so steps animate smoothly instead
-// of snapping.
-const walkState = { x: 0, y: 0, z: 0, heading: 0 };
+// of snapping. jumpOffset + vz add projectile motion on top of terrain;
+// crouchF (0 standing → 1 crouched) scales body + eye height.
+const walkState = {
+  x: 0, y: 0, z: 0, heading: 0,
+  camZ: 0, vz: 0, jumpOffset: 0, crouchF: 0,
+};
+let walkSplOverlay = null;
 const walkKeys = new Set();
 let walkLastTs = 0;
 const WALK_SPEED_MS    = 2.8;
 const WALK_TURN_RADS   = 1.6;
 const AVATAR_EYE_HEIGHT = 1.68;
+const CROUCH_FACTOR = 0.28;       // crouched body is 1 − 0.28 = 72 % of standing
+const CROUCH_EAR_MIN = AVATAR_EYE_HEIGHT * (1 - CROUCH_FACTOR); // ≈1.21 m
+const JUMP_VELOCITY_MS = 3.6;     // initial upward velocity when jumping
+const GRAVITY_MS2 = 9.81;
 const CAM_BACK_M = 3.2;
 const CAM_UP_M   = 2.1;
 // Stair-climbing bounds. 0.5 m up matches Unity's default character controller
@@ -596,10 +605,23 @@ function initWalkthrough() {
     <strong>Walkthrough</strong>
     <span>W / A / S / D — walk</span>
     <span>Q / E — turn left / right</span>
-    <span>↑ ↓ ← → — same as W/A/S/D</span>
-    <span>Shift — run · R — reset position</span>
+    <span>Space — jump · C — crouch (hold)</span>
+    <span>Shift — run · R — reset</span>
   `;
   container.appendChild(walkHint);
+
+  // Live SPL readout that tracks the avatar's ear position. Updated every
+  // frame in tickWalkthrough when walk mode is active.
+  walkSplOverlay = document.createElement('div');
+  walkSplOverlay.className = 'walk-spl hidden';
+  walkSplOverlay.id = 'walk-spl';
+  walkSplOverlay.innerHTML = `
+    <div class="walk-spl-big">— dB</div>
+    <div class="walk-spl-row"><span class="walk-spl-label">ear</span><span class="walk-spl-val" data-f="ear">— m</span></div>
+    <div class="walk-spl-row"><span class="walk-spl-label">pose</span><span class="walk-spl-val" data-f="pose">standing</span></div>
+    <div class="walk-spl-row"><span class="walk-spl-label">xyz</span><span class="walk-spl-val" data-f="xyz">—</span></div>
+  `;
+  container.appendChild(walkSplOverlay);
 
   // Keyboard capture — only active in walk mode. Ignores input focus in
   // form fields so typing in the Sources panel doesn't drive the avatar.
@@ -608,8 +630,12 @@ function initWalkthrough() {
     if (!walkMode || isFormField(e.target)) return;
     walkKeys.add(e.code);
     if (e.code === 'KeyR') placeAvatarAtDefault();
-    // Prevent page scrolling while walking with arrows.
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ShiftLeft','ShiftRight'].includes(e.code)) {
+    // Edge-triggered jump: only initiate if the avatar is on the ground
+    // (no existing jump in progress) to prevent double-jumping / flying.
+    if (e.code === 'Space' && walkState.jumpOffset < 0.02 && walkState.vz <= 0.01) {
+      walkState.vz = JUMP_VELOCITY_MS;
+    }
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ShiftLeft','ShiftRight','Space','KeyC','ControlLeft','ControlRight'].includes(e.code)) {
       e.preventDefault();
     }
   });
@@ -635,16 +661,23 @@ export function setWalkthroughMode(on) {
   walkMode = !!on;
   if (walkMode) {
     placeAvatarAtDefault();
+    walkState.vz = 0;
+    walkState.jumpOffset = 0;
+    walkState.crouchF = 0;
     avatar.visible = true;
+    avatar.scale.set(1, 1, 1);
     controls.enabled = false;
     activeCamera = walkCamera;
     walkHint?.classList.remove('hidden');
+    walkSplOverlay?.classList.remove('hidden');
     walkLastTs = performance.now();
   } else {
     avatar.visible = false;
+    avatar.scale.set(1, 1, 1);
     controls.enabled = true;
     activeCamera = camera;
     walkHint?.classList.add('hidden');
+    walkSplOverlay?.classList.add('hidden');
     walkKeys.clear();
   }
   onResize();
@@ -722,28 +755,75 @@ function tickWalkthrough(now) {
   const bob = isMoving ? Math.abs(Math.cos(walkPhase)) * 0.025 : 0;
 
   // Stair climbing: sample terrain height at current (x,y) and ease the
-  // avatar's feet toward that target. Exponential lerp with tau ≈ 0.15 s
-  // reads as "body plants smoothly on the new tier" instead of snapping
-  // (per Unity CharacterController / Sebastian Lague kinematic controller
-  // conventions). The camera uses a SEPARATE slower lerp (tau ≈ 0.35 s) so
-  // multi-tier climbs don't jolt the view — this is the classic Cinemachine
-  // YDamping pattern and the biggest motion-sickness mitigation.
+  // avatar's feet toward that target. Body tau ≈ 0.15 s; camera tau ≈ 0.35 s
+  // (decoupled Cinemachine YDamping pattern to avoid motion sickness on
+  // multi-tier climbs).
   const targetZ = terrainHeightAt(walkState.x, walkState.y, state.room);
   const tauBody = 0.15;
   const tauCam  = 0.35;
   walkState.z   += (targetZ - walkState.z)   * (1 - Math.exp(-dt / tauBody));
   walkState.camZ += (walkState.z - walkState.camZ) * (1 - Math.exp(-dt / tauCam));
 
-  // Sync avatar transform (state → Three.js: x→x, z→y, y→z). Feet sit on
-  // walkState.z; bob adds the small per-footfall dip.
-  avatar.position.set(walkState.x, walkState.z + bob, walkState.y);
-  avatar.rotation.y = walkState.heading;
+  // Jump physics — projectile motion on top of the terrain height. Initial
+  // velocity set at keydown; gravity pulls back down each frame. Lands when
+  // jumpOffset falls to 0 and velocity is negative.
+  if (walkState.jumpOffset > 0 || walkState.vz > 0) {
+    walkState.vz -= GRAVITY_MS2 * dt;
+    walkState.jumpOffset += walkState.vz * dt;
+    if (walkState.jumpOffset < 0) {
+      walkState.jumpOffset = 0;
+      walkState.vz = 0;
+    }
+  }
 
-  // 3rd-person camera: behind avatar using the independently-smoothed camZ.
+  // Crouch — lerp toward target based on held key. C or Ctrl = crouching.
+  const crouchHeld = walkKeys.has('KeyC') || walkKeys.has('ControlLeft') || walkKeys.has('ControlRight');
+  const crouchTarget = crouchHeld ? 1 : 0;
+  walkState.crouchF += (crouchTarget - walkState.crouchF) * (1 - Math.exp(-dt / 0.12));
+  const bodyScale = 1 - walkState.crouchF * CROUCH_FACTOR;
+  const eyeHeight = AVATAR_EYE_HEIGHT * bodyScale;
+
+  // Sync avatar transform. Body Y scale squashes during crouch so the
+  // character visibly dips. Feet sit on walkState.z + jumpOffset.
+  avatar.position.set(walkState.x, walkState.z + walkState.jumpOffset + bob, walkState.y);
+  avatar.rotation.y = walkState.heading;
+  avatar.scale.y = bodyScale;
+
+  // 3rd-person camera — behind avatar using independently-smoothed camZ.
+  // Camera height scales with crouch so view drops when ducking.
   const camX = walkState.x - fx * CAM_BACK_M;
   const camZ = walkState.y - fy * CAM_BACK_M;
-  walkCamera.position.set(camX, walkState.camZ + CAM_UP_M, camZ);
-  walkCamera.lookAt(walkState.x, walkState.camZ + AVATAR_EYE_HEIGHT, walkState.y);
+  const camY = walkState.camZ + walkState.jumpOffset + CAM_UP_M * bodyScale;
+  walkCamera.position.set(camX, camY, camZ);
+  walkCamera.lookAt(walkState.x, walkState.camZ + walkState.jumpOffset + eyeHeight, walkState.y);
+
+  // Live SPL readout at the avatar's ear position. Uses current physics
+  // options so it respects the Reverb / coherent toggles.
+  if (walkSplOverlay) {
+    const earZ_state = walkState.z + walkState.jumpOffset + eyeHeight;
+    const listenerPos = { x: walkState.x, y: walkState.y, z: earZ_state };
+    const flat = expandSources(state.sources);
+    const spl = flat.length > 0
+      ? computeMultiSourceSPL({
+          sources: flat,
+          getSpeakerDef: url => getCachedLoudspeaker(url),
+          listenerPos, room: state.room,
+          ...currentPhysicsOpts(state.room),
+        })
+      : NaN;
+    walkSplOverlay.querySelector('.walk-spl-big').textContent = isFinite(spl) ? spl.toFixed(1) + ' dB' : '— dB';
+    const earVal = walkSplOverlay.querySelector('[data-f="ear"]');
+    const poseVal = walkSplOverlay.querySelector('[data-f="pose"]');
+    const xyzVal = walkSplOverlay.querySelector('[data-f="xyz"]');
+    if (earVal) earVal.textContent = earZ_state.toFixed(2) + ' m';
+    if (poseVal) {
+      poseVal.textContent = walkState.jumpOffset > 0.05
+        ? 'jumping'
+        : (walkState.crouchF > 0.5 ? 'crouching' : 'standing');
+    }
+    if (xyzVal) xyzVal.textContent =
+      walkState.x.toFixed(1) + '  ·  ' + walkState.y.toFixed(1) + '  ·  ' + earZ_state.toFixed(2);
+  }
 }
 
 function disposeGroup(g) {
