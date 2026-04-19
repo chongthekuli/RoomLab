@@ -26,12 +26,24 @@ function setupTabs() {
   });
 
   const heatBtn = document.getElementById('toggle-heatmaps');
+  // Isobars + Reverb field + STIPA mode are heatmap sub-options — when
+  // the heatmap layer is hidden, they can't contribute anything visible,
+  // so reflect that by greying them out. Priya called this out as HIGH
+  // priority for the viewport toolbar.
+  const heatmapDependents = () => ['toggle-isobars', 'toggle-reverb', 'toggle-stipa-mode']
+    .map(id => document.getElementById(id)).filter(Boolean);
+  const syncHeatmapDependents = () => {
+    const on = !!state.display.showHeatmaps;
+    for (const el of heatmapDependents()) el.disabled = !on;
+  };
   if (heatBtn) {
     heatBtn.addEventListener('click', () => {
       toggleHeatmaps();
       heatBtn.classList.toggle('active', state.display.showHeatmaps);
+      syncHeatmapDependents();
     });
   }
+  syncHeatmapDependents();
 
   const aimBtn = document.getElementById('toggle-aim-lines');
   if (aimBtn) {
@@ -72,6 +84,60 @@ function setupTabs() {
       reverbBtn.classList.toggle('active', state.physics.reverberantField);
     });
   }
+
+  // Help overlay — opens via ? key or the ? button in the viewport toolbar.
+  const helpOverlay = document.getElementById('help-overlay');
+  const openHelp = () => { if (helpOverlay) helpOverlay.hidden = false; };
+  const closeHelp = () => { if (helpOverlay) helpOverlay.hidden = true; };
+  document.getElementById('btn-show-help')?.addEventListener('click', openHelp);
+  document.getElementById('btn-close-help')?.addEventListener('click', closeHelp);
+  helpOverlay?.addEventListener('click', e => { if (e.target === helpOverlay) closeHelp(); });
+
+  // Derived helpers — also let Esc dismiss any transient state.
+  const closeTransient = () => {
+    closeHelp();
+    // Draw-zone / draw-polygon modes cancel on Esc; room-2d owns that logic
+    // and listens for the "draw:cancel" DOM event if the user emits one.
+    document.dispatchEvent(new CustomEvent('ui:cancel'));
+  };
+
+  // Global keyboard shortcuts. Skip while the user is typing in an input —
+  // modern pro-tool convention (Figma / Blender / DaVinci all do this).
+  const isTypingTarget = (el) => {
+    if (!el) return false;
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (el.isContentEditable) return true;
+    return false;
+  };
+
+  // Priority: view-tab switches use the *tab* .click(); toggles use the
+  // same .click() path so visual active state + logic stay in one place.
+  const click = (id) => document.getElementById(id)?.click();
+  const clickTab = (v) => document.querySelector(`.vp-tab[data-view="${v}"]`)?.click();
+
+  document.addEventListener('keydown', (e) => {
+    if (isTypingTarget(e.target)) return;
+    // Ignore modifier-combined keys (except plain Shift, which some shortcuts
+    // need to stay neutral on) so Ctrl/Cmd+L / browser shortcuts still work.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // While walkthrough mode owns WASD/Space/Shift/C/Z, the key handler in
+    // third-person-controller.js processes them FIRST on keydown. We only
+    // act on the keys that don't conflict: digits, toggle letters, ? / Esc.
+    switch (e.key) {
+      case '1': clickTab('2d'); e.preventDefault(); break;
+      case '2': clickTab('3d'); e.preventDefault(); break;
+      case '3': clickTab('walk'); e.preventDefault(); break;
+      case 'h': case 'H': click('toggle-heatmaps'); e.preventDefault(); break;
+      case 'i': case 'I': click('toggle-isobars'); e.preventDefault(); break;
+      case 'm': case 'M': click('toggle-stipa-mode'); e.preventDefault(); break;
+      case 'r': case 'R': click('toggle-reverb'); e.preventDefault(); break;
+      case 'a': case 'A': click('toggle-aim-lines'); e.preventDefault(); break;
+      case 'p': case 'P': click('toggle-probe'); e.preventDefault(); break;
+      case '?':           openHelp(); e.preventDefault(); break;
+      case 'Escape':      closeTransient(); break;
+    }
+  });
 }
 
 async function boot() {

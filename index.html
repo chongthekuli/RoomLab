@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RoomLAB</title>
-  <link rel="stylesheet" href="css/main.css?v=73" />
-  <link rel="stylesheet" href="css/theme.css?v=73" />
+  <link rel="stylesheet" href="css/main.css?v=74" />
+  <link rel="stylesheet" href="css/theme.css?v=74" />
   <script type="importmap">
   {
     "imports": {
@@ -30,15 +30,22 @@
     </aside>
     <section id="viewport">
       <div class="viewport-tabs">
-        <button class="vp-tab" data-view="2d">2D Floor plan</button>
-        <button class="vp-tab active" data-view="3d">3D View</button>
-        <button class="vp-tab" data-view="walk">Walkthrough</button>
-        <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer">Heatmap</button>
-        <button class="vp-toggle" id="toggle-stipa-mode" title="Switch heatmap metric: SPL (dB) ↔ STIPA (IEC 60268-16 speech intelligibility)">STIPA mode</button>
-        <button class="vp-toggle active" id="toggle-isobars" title="Show/hide contour lines (isobars)">Isobars</button>
-        <button class="vp-toggle" id="toggle-reverb" title="Include statistical reverberant field (Hopkins-Stryker) in heatmap">Reverb field</button>
-        <button class="vp-toggle" id="toggle-aim-lines" title="Show/hide speaker aim direction indicators">Aim lines</button>
-        <button class="vp-toggle" id="toggle-probe" title="Hover the 3D viewport for XYZ and SPL readout">Probe</button>
+        <div class="vp-group vp-group-views">
+          <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D Floor plan</button>
+          <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D View</button>
+          <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walkthrough</button>
+        </div>
+        <div class="vp-group vp-group-layers">
+          <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer — shortcut H">Heatmap</button>
+          <button class="vp-toggle" id="toggle-stipa-mode" title="Switch heatmap metric: SPL (dB) ↔ STIPA (IEC 60268-16 speech intelligibility) — shortcut M">STIPA</button>
+          <button class="vp-toggle active" id="toggle-isobars" title="Show/hide contour lines (isobars) — shortcut I">Isobars</button>
+          <button class="vp-toggle" id="toggle-reverb" title="Include statistical reverberant field (Hopkins-Stryker) in heatmap — shortcut R">Reverb field</button>
+        </div>
+        <div class="vp-group vp-group-tools">
+          <button class="vp-toggle" id="toggle-aim-lines" title="Show/hide speaker aim direction indicators — shortcut A">Aim lines</button>
+          <button class="vp-toggle" id="toggle-probe" title="Hover the 3D viewport for XYZ and SPL readout — shortcut P">Probe</button>
+          <button class="vp-toggle vp-help-btn" id="btn-show-help" title="Keyboard shortcuts — shortcut ?">?</button>
+        </div>
       </div>
       <div id="view-2d" class="viewport-view" hidden></div>
       <div id="view-3d" class="viewport-view">
@@ -49,6 +56,52 @@
       <section id="panel-results"><h2>Results</h2></section>
     </aside>
   </main>
-  <script type="module" src="js/main.js?v=73"></script>
+  <div id="help-overlay" hidden>
+    <div class="help-modal">
+      <div class="help-head">
+        <h2>Keyboard shortcuts</h2>
+        <button id="btn-close-help" class="btn-close" title="Close (Esc)">×</button>
+      </div>
+      <div class="help-body">
+        <div class="help-col">
+          <h3>Viewport</h3>
+          <dl class="help-keys">
+            <dt>1</dt><dd>2D floor plan</dd>
+            <dt>2</dt><dd>3D view</dd>
+            <dt>3</dt><dd>Walkthrough</dd>
+          </dl>
+          <h3>Walkthrough</h3>
+          <dl class="help-keys">
+            <dt>W A S D</dt><dd>Move forward / strafe / back</dd>
+            <dt>Space</dt><dd>Jump</dd>
+            <dt>Shift</dt><dd>Run</dd>
+            <dt>C</dt><dd>Crouch</dd>
+            <dt>Z</dt><dd>Sit / stand</dd>
+            <dt>Mouse drag</dt><dd>Orbit camera</dd>
+          </dl>
+        </div>
+        <div class="help-col">
+          <h3>Display layers</h3>
+          <dl class="help-keys">
+            <dt>H</dt><dd>Heatmap on/off</dd>
+            <dt>M</dt><dd>Toggle SPL ↔ STIPA metric</dd>
+            <dt>I</dt><dd>Isobars (contour lines)</dd>
+            <dt>R</dt><dd>Reverb field in heatmap</dd>
+          </dl>
+          <h3>Tools</h3>
+          <dl class="help-keys">
+            <dt>A</dt><dd>Aim lines on/off</dd>
+            <dt>P</dt><dd>Probe (hover XYZ + SPL)</dd>
+            <dt>Esc</dt><dd>Cancel / close / deselect</dd>
+            <dt>?</dt><dd>This help overlay</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="help-foot">
+        Shortcuts are disabled while typing in text fields. Click <strong>?</strong> in the viewport or press <strong>?</strong> anywhere to reopen.
+      </div>
+    </div>
+  </div>
+  <script type="module" src="js/main.js?v=74"></script>
 </body>
 </html>
