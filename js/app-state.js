@@ -357,7 +357,10 @@ export const state = {
   zones: [],
   selectedZoneId: null,
   results: { rt60: null, splGrid: null, zoneGrids: [] },
-  display: { showHeatmaps: true, showAimLines: false },
+  display: { showHeatmaps: true, showAimLines: false, showIsobars: true, isobarStep_db: 3 },
+  // Physics model toggles (see spl-calculator.js). Reverberant field is on by
+  // default — it's a critical part of "real room" SPL vs. direct-only.
+  physics: { reverberantField: true, coherent: false, airAbsorption: true, freq_hz: 1000 },
 };
 
 export const DEFAULT_PRESET_KEY = 'auditorium';

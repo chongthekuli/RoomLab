@@ -4,7 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
-import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL } from '../physics/spl-calculator.js';
+import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant } from '../physics/spl-calculator.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 
@@ -19,6 +19,16 @@ let materialsRef, container;
 // same Three.js scene as 3D View — only the camera swaps when the user
 // switches tabs, so speakers / heatmaps / bowl structure are all visible
 // from inside the room.
+// --- 3D probe tool (hover for XYZ + SPL) ---------------------------------
+// A single reusable sphere marker + HTML tooltip that follow the mouse
+// cursor. Raycasts against roomGroup each move; computes multi-source SPL
+// at the hit point using the current physics options.
+let probeMarker = null;
+let probeTooltip = null;
+let probeRaycaster = null;
+const _probeMouse = { x: 0, y: 0 };
+let probeActive = false;
+
 let walkCamera, avatar, walkHint;
 let avatarParts = null;       // { armL, armR, legL, legR, body }
 let activeCamera = null;
@@ -59,6 +69,24 @@ export function toggleAimLines(force) {
   const next = typeof force === 'boolean' ? force : !state.display.showAimLines;
   state.display.showAimLines = next;
   if (aimLinesGroup) aimLinesGroup.visible = next;
+}
+
+// Isobar toggle — show/hide the marching-squares contour lines. Triggers a
+// heatmap rebuild since the contour LineSegments are rebuilt each time.
+export function toggleIsobars(force) {
+  const next = typeof force === 'boolean' ? force : !state.display.showIsobars;
+  state.display.showIsobars = next;
+  // Rebuild zones so contours are freshly extracted (or removed).
+  rebuildZones();
+}
+
+// Probe tool toggle — enables hover SPL readout over the 3D viewport.
+export function toggleProbe(force) {
+  const next = typeof force === 'boolean' ? force : !probeActive;
+  probeActive = next;
+  if (probeMarker) probeMarker.visible = false;
+  if (probeTooltip) probeTooltip.classList.toggle('hidden', !next);
+  if (container) container.style.cursor = next ? 'crosshair' : '';
 }
 
 export async function mount3DViewport({ materials }) {
@@ -197,7 +225,88 @@ function initScene() {
   scene.add(grid);
 
   initWalkthrough();
+  initProbeTool();
   activeCamera = camera;
+}
+
+// Mouse-driven SPL probe: hover the 3D canvas to read XYZ + SPL at any
+// surface. Raycasts into roomGroup (structural geometry only — heatmap
+// overlay is filtered out so the probe reports on the real surface).
+function initProbeTool() {
+  probeRaycaster = new THREE.Raycaster();
+
+  // Small accent-colored sphere that follows the cursor on the surface.
+  const markerMat = new THREE.MeshBasicMaterial({
+    color: 0x4aa3ff, transparent: true, opacity: 0.95, depthTest: false,
+  });
+  probeMarker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), markerMat);
+  probeMarker.renderOrder = 999;
+  probeMarker.visible = false;
+  scene.add(probeMarker);
+
+  // Floating tooltip — positioned in screen-space next to the cursor.
+  probeTooltip = document.createElement('div');
+  probeTooltip.className = 'probe-tooltip hidden';
+  probeTooltip.id = 'probe-tooltip';
+  container.appendChild(probeTooltip);
+
+  renderer.domElement.addEventListener('mousemove', onProbeMouseMove);
+  renderer.domElement.addEventListener('mouseleave', () => {
+    if (probeMarker) probeMarker.visible = false;
+    if (probeTooltip) probeTooltip.classList.add('hidden');
+  });
+}
+
+function onProbeMouseMove(e) {
+  if (!probeActive || walkMode) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  _probeMouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  _probeMouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  probeRaycaster.setFromCamera(_probeMouse, activeCamera || camera);
+  const hits = probeRaycaster.intersectObject(roomGroup, true);
+  // Skip heatmap layers.
+  let hit = null;
+  for (const h of hits) {
+    const tag = h.object.userData?.tag ?? '';
+    if (tag.startsWith('heatmap_')) continue;
+    hit = h; break;
+  }
+  if (!hit) {
+    probeMarker.visible = false;
+    probeTooltip.classList.add('hidden');
+    return;
+  }
+  // Marker at hit point.
+  probeMarker.position.copy(hit.point);
+  probeMarker.visible = true;
+
+  // Compute SPL at the hit point, using current physics options.
+  // state-frame listener position: x→x, y→world-Z, z→world-Y (plus 1.2 m ear offset).
+  const listenerPos = {
+    x: hit.point.x,
+    y: hit.point.z,
+    z: hit.point.y + 1.2,
+  };
+  const flat = expandSources(state.sources);
+  const spl = flat.length > 0 ? computeMultiSourceSPL({
+    sources: flat,
+    getSpeakerDef: url => getCachedLoudspeaker(url),
+    listenerPos, room: state.room,
+    ...currentPhysicsOpts(state.room),
+  }) : NaN;
+
+  probeTooltip.classList.remove('hidden');
+  probeTooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+  probeTooltip.style.top  = (e.clientY - rect.top + 14) + 'px';
+  probeTooltip.innerHTML = `
+    <div class="probe-spl">${isFinite(spl) ? spl.toFixed(1) + ' dB' : '—'}</div>
+    <div class="probe-xyz">
+      <span>x ${listenerPos.x.toFixed(2)} m</span>
+      <span>y ${listenerPos.y.toFixed(2)} m</span>
+      <span>z ${(hit.point.y).toFixed(2)} m</span>
+    </div>
+    <div class="probe-note">ear @ 1.2 m</div>
+  `;
 }
 
 // Suited-man avatar built from primitives — ~1.78 m tall with realistic
@@ -1406,10 +1515,12 @@ function rebuildZones() { shadowsNeedRefresh = true;
       const bw = Math.max(...xs) - Math.min(...xs);
       const bd = Math.max(...ys) - Math.min(...ys);
       const adaptiveGrid = Math.max(24, Math.min(80, Math.ceil(Math.max(bw, bd) / 0.5)));
+      const zoneSplOpts = currentPhysicsOpts(state.room);
       splInfo = computeZoneSPLGrid({
         zone, sources: flatSources,
         getSpeakerDef: url => getCachedLoudspeaker(url),
-        room: state.room, gridSize: adaptiveGrid, freq_hz: 1000, earAbove_m: 1.2,
+        room: state.room, gridSize: adaptiveGrid, earAbove_m: 1.2,
+        ...zoneSplOpts,
       });
       if (splInfo && isFinite(splInfo.maxSPL_db)) {
         state.results.zoneGrids.push(splInfo);
@@ -1512,6 +1623,8 @@ function rakeZAtRadius(r, bowl) {
 // sector. zFn(r) gives the world-Y height at each radius. Returns the
 // BufferGeometry plus a parallel array of state-coord listener anchors so
 // callers can sample SPL at each vertex.
+// Grid dimensions are exposed on the returned geoPack so the isobar
+// contour builder can do 2D marching squares on the vertex SPL values.
 function buildRingSectorGeometry({ cx, cy, r_in, r_out, phiStart, phiLength, zFn, earAbove = 1.2, liftAbove = 0.05, cellTarget = 0.25, radialMin = 12, radialMax = 80, arcMin = 12, arcMax = 120 }) {
   const radialSpan = r_out - r_in;
   const arcLen = ((r_in + r_out) / 2) * phiLength;
@@ -1551,7 +1664,8 @@ function buildRingSectorGeometry({ cx, cy, r_in, r_out, phiStart, phiLength, zFn
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return { geo, listenerAnchors };
+  // Grid dimensions for marching-squares contour extraction: arc = X, radial = Y.
+  return { geo, listenerAnchors, gridW: arcCells + 1, gridH: radialCells + 1 };
 }
 
 // Axis-aligned rectangle grid (used for the court and for any future flat
@@ -1590,20 +1704,43 @@ function buildRectMappingGeometry({ minX, maxX, minY, maxY, elevation, earAbove 
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return { geo, listenerAnchors };
+  // Grid dimensions for contours: x = nx+1, z = nz+1.
+  return { geo, listenerAnchors, gridW: nz + 1, gridH: nx + 1 };
+}
+
+// Resolve the current physics flags from state.display.physics and compute
+// the Hopkins-Stryker room constant R for the active band. Called at the
+// top of each heatmap rebuild so R is computed ONCE per frame even though
+// thousands of vertex samples use it.
+function currentPhysicsOpts(room) {
+  const phys = state.physics ?? {};
+  const freq = phys.freq_hz ?? 1000;
+  return {
+    freq_hz: freq,
+    airAbsorption: phys.airAbsorption !== false,
+    coherent: !!phys.coherent,
+    roomConstantR: phys.reverberantField && materialsRef
+      ? computeRoomConstant(room, materialsRef, freq)
+      : 0,
+  };
 }
 
 // Fill the color BufferAttribute by sampling SPL at each vertex anchor.
-// Returns min/max/avg/uniformity stats for the legend + Results panel.
-function sampleSurfaceColors(geo, anchors, sources, room) {
+// Returns min/max/avg/uniformity stats plus a Float32Array of the per-vertex
+// SPL values so the isobar contour extractor can do marching-squares on the
+// raw field without re-sampling.
+function sampleSurfaceColors(geo, anchors, sources, room, splOpts = {}) {
   const colorAttr = geo.attributes.color;
   const getDef = url => getCachedLoudspeaker(url);
+  const splValues = new Float32Array(anchors.length);
   let minSPL = Infinity, maxSPL = -Infinity, sum = 0, count = 0;
   for (let i = 0; i < anchors.length; i++) {
     const spl = computeMultiSourceSPL({
       sources, getSpeakerDef: getDef,
-      listenerPos: anchors[i], freq_hz: 1000, room,
+      listenerPos: anchors[i], room,
+      ...splOpts,
     });
+    splValues[i] = spl;
     if (isFinite(spl)) {
       if (spl < minSPL) minSPL = spl;
       if (spl > maxSPL) maxSPL = spl;
@@ -1623,7 +1760,102 @@ function sampleSurfaceColors(geo, anchors, sources, room) {
     avgSPL_db: count > 0 ? sum / count : 0,
     uniformity_db: count > 0 ? maxSPL - minSPL : 0,
     count,
+    splValues,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Isobar contour lines via marching squares. Given a regular 2D vertex grid
+// (gridW × gridH) with per-vertex SPL values + world positions, extract
+// contour polyline segments at each dB level and build a THREE.LineSegments
+// mesh. Lines drape over the mapping surface (same underlying geometry), so
+// they track the rake/step profile automatically. Ambiguous 2x2 cases use
+// "connect majority" — rare enough at 0.25 m resolution to not matter.
+//
+// Pros use these to read -3 / -6 dB drop-off lines — the crucial feature
+// that sets a real acoustic-simulator output apart from a pretty gradient.
+// ---------------------------------------------------------------------------
+const CONTOUR_CASES = {
+  // code → pairs of edges to connect. Edges: 0=bottom 1=right 2=top 3=left.
+  1: [3, 0], 2: [0, 1], 3: [3, 1], 4: [1, 2],
+  5: [3, 0, 1, 2],   // saddle — draw both
+  6: [0, 2], 7: [3, 2], 8: [2, 3], 9: [0, 2],
+  10: [0, 1, 2, 3],  // saddle
+  11: [1, 2], 12: [1, 3], 13: [0, 1], 14: [0, 3],
+};
+
+function buildContourLines(splValues, positions, gridW, gridH, levels, color = 0xffffff, opacity = 0.55) {
+  const out = [];
+  const posAt = (idx, arr) => { arr[0] = positions[idx * 3]; arr[1] = positions[idx * 3 + 1]; arr[2] = positions[idx * 3 + 2]; };
+  const edge = new Array(4);
+  for (let k = 0; k < 4; k++) edge[k] = new Float32Array(3);
+
+  for (const level of levels) {
+    for (let j = 0; j < gridH - 1; j++) {
+      for (let i = 0; i < gridW - 1; i++) {
+        const iBL = j * gridW + i;
+        const iBR = iBL + 1;
+        const iTL = iBL + gridW;
+        const iTR = iTL + 1;
+        const vBL = splValues[iBL];
+        const vBR = splValues[iBR];
+        const vTL = splValues[iTL];
+        const vTR = splValues[iTR];
+        if (!isFinite(vBL) || !isFinite(vBR) || !isFinite(vTL) || !isFinite(vTR)) continue;
+
+        let code = 0;
+        if (vBL >= level) code |= 1;
+        if (vBR >= level) code |= 2;
+        if (vTR >= level) code |= 4;
+        if (vTL >= level) code |= 8;
+        if (code === 0 || code === 15) continue;
+
+        // Linearly interpolate edge crossings — share a small Float32Array
+        // per edge to avoid per-cell allocation.
+        const pBL = [0,0,0], pBR = [0,0,0], pTL = [0,0,0], pTR = [0,0,0];
+        posAt(iBL, pBL); posAt(iBR, pBR); posAt(iTL, pTL); posAt(iTR, pTR);
+        if ((vBL < level) !== (vBR < level)) {
+          const t = (level - vBL) / (vBR - vBL);
+          edge[0][0] = pBL[0] + (pBR[0] - pBL[0]) * t;
+          edge[0][1] = pBL[1] + (pBR[1] - pBL[1]) * t;
+          edge[0][2] = pBL[2] + (pBR[2] - pBL[2]) * t;
+        }
+        if ((vBR < level) !== (vTR < level)) {
+          const t = (level - vBR) / (vTR - vBR);
+          edge[1][0] = pBR[0] + (pTR[0] - pBR[0]) * t;
+          edge[1][1] = pBR[1] + (pTR[1] - pBR[1]) * t;
+          edge[1][2] = pBR[2] + (pTR[2] - pBR[2]) * t;
+        }
+        if ((vTL < level) !== (vTR < level)) {
+          const t = (level - vTL) / (vTR - vTL);
+          edge[2][0] = pTL[0] + (pTR[0] - pTL[0]) * t;
+          edge[2][1] = pTL[1] + (pTR[1] - pTL[1]) * t;
+          edge[2][2] = pTL[2] + (pTR[2] - pTL[2]) * t;
+        }
+        if ((vBL < level) !== (vTL < level)) {
+          const t = (level - vBL) / (vTL - vBL);
+          edge[3][0] = pBL[0] + (pTL[0] - pBL[0]) * t;
+          edge[3][1] = pBL[1] + (pTL[1] - pBL[1]) * t;
+          edge[3][2] = pBL[2] + (pTL[2] - pBL[2]) * t;
+        }
+
+        const pairs = CONTOUR_CASES[code] || [];
+        for (let p = 0; p < pairs.length; p += 2) {
+          const a = edge[pairs[p]], b = edge[pairs[p + 1]];
+          out.push(a[0], a[1] + 0.01, a[2], b[0], b[1] + 0.01, b[2]);
+        }
+      }
+    }
+  }
+
+  if (out.length === 0) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out), 3));
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  const mesh = new THREE.LineSegments(geo, mat);
+  mesh.renderOrder = 900;
+  mesh.userData.tag = 'heatmap_contour';
+  return mesh;
 }
 
 // One MeshBasicMaterial shared across every mapping surface — keeps GPU state
@@ -1649,10 +1881,9 @@ function rebuildStadiumHeatmap(room, sources) {
 
   const halfWidthRad = (vom.widthDeg / 2) * Math.PI / 180;
   const sorted = [...vom.centerAnglesDeg].sort((a, b) => a - b).map(a => a * Math.PI / 180);
-  // Match the sector labeling used in the preset (SE/SW/NW/NE for 4 sectors
-  // at ±45° diagonals). Fall back to numeric if the count differs.
   const fallbackLabels = sorted.length === 4 ? ['SE', 'SW', 'NW', 'NE'] : sorted.map((_, i) => `S${i+1}`);
   const material = makeMappingMaterial();
+  const splOpts = currentPhysicsOpts(room);
 
   for (let i = 0; i < sorted.length; i++) {
     const curCenter = sorted[i];
@@ -1664,11 +1895,24 @@ function rebuildStadiumHeatmap(room, sources) {
     const label = fallbackLabels[i];
 
     const addSurface = ({ geoPack, id, surfaceLabel, elev }) => {
-      const stats = sampleSurfaceColors(geoPack.geo, geoPack.listenerAnchors, sources, room);
+      const stats = sampleSurfaceColors(geoPack.geo, geoPack.listenerAnchors, sources, room, splOpts);
       const mesh = new THREE.Mesh(geoPack.geo, material);
       mesh.userData.tag = id;
       mesh.userData.acoustic_material = 'concrete';
       heatmapGroup.add(mesh);
+      // Isobars — extract contour lines at every isobarStep_db interval across
+      // the min..max SPL range of this surface. Lines live in heatmapGroup so
+      // they follow the surface toggle.
+      if (state.display.showIsobars && stats.count > 0) {
+        const step = state.display.isobarStep_db ?? 3;
+        const lo = Math.ceil(stats.minSPL_db / step) * step;
+        const hi = Math.floor(stats.maxSPL_db / step) * step;
+        const levels = [];
+        for (let L = lo; L <= hi; L += step) levels.push(L);
+        const positions = geoPack.geo.attributes.position.array;
+        const contours = buildContourLines(stats.splValues, positions, geoPack.gridW, geoPack.gridH, levels);
+        if (contours) heatmapGroup.add(contours);
+      }
       state.results.zoneGrids.push({
         id, label: surfaceLabel,
         elevation_m: elev, earZ_m: elev + 1.2,
@@ -1739,11 +1983,22 @@ function rebuildStadiumHeatmap(room, sources) {
       minY: Math.min(...ys), maxY: Math.max(...ys),
       elevation: courtZone.elevation_m ?? 0,
     });
-    const stats = sampleSurfaceColors(pack.geo, pack.listenerAnchors, sources, room);
+    const stats = sampleSurfaceColors(pack.geo, pack.listenerAnchors, sources, room, splOpts);
     const mesh = new THREE.Mesh(pack.geo, material);
     mesh.userData.tag = 'heatmap_court';
     mesh.userData.acoustic_material = courtZone.material_id ?? null;
     heatmapGroup.add(mesh);
+    // Court isobars too.
+    if (state.display.showIsobars && stats.count > 0) {
+      const step = state.display.isobarStep_db ?? 3;
+      const lo = Math.ceil(stats.minSPL_db / step) * step;
+      const hi = Math.floor(stats.maxSPL_db / step) * step;
+      const levels = [];
+      for (let L = lo; L <= hi; L += step) levels.push(L);
+      const positions = pack.geo.attributes.position.array;
+      const contours = buildContourLines(stats.splValues, positions, pack.gridW, pack.gridH, levels);
+      if (contours) heatmapGroup.add(contours);
+    }
     state.results.zoneGrids.push({
       id: courtZone.id, label: courtZone.label ?? 'Court',
       elevation_m: courtZone.elevation_m ?? 0,
@@ -2024,7 +2279,8 @@ function rebuildHeatmap() {
   const splResult = computeSPLGrid({
     sources: flat,
     getSpeakerDef: url => getCachedLoudspeaker(url),
-    room: state.room, gridSize: roomGrid, freq_hz: 1000, earHeight_m: ear,
+    room: state.room, gridSize: roomGrid, earHeight_m: ear,
+    ...currentPhysicsOpts(state.room),
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
   const { grid, cellsX, cellsY } = splResult;

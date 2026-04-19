@@ -102,6 +102,48 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   margin-bottom: 4px;
 }
 .walk-hint.hidden { display: none; }
+
+/* Probe tool hover readout — floats next to the mouse over the 3D canvas. */
+.probe-tooltip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 12;
+  background: rgba(16, 18, 24, 0.92);
+  border: 1px solid var(--accent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-lg);
+  padding: 7px 10px 8px;
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 130px;
+}
+.probe-tooltip.hidden { display: none; }
+.probe-tooltip .probe-spl {
+  font-size: 1.25rem;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: var(--fg-strong);
+  margin-bottom: 2px;
+}
+.probe-tooltip .probe-xyz {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.probe-tooltip .probe-note {
+  margin-top: 2px;
+  color: var(--muted-dim);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
 .viewport-view { position: relative; overflow: hidden; }
 .viewport-view[hidden] { display: none; }
 #view-3d { background: #0e1116; position: relative; }

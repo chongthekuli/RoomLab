@@ -1,4 +1,5 @@
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources } from '../app-state.js';
+import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
@@ -313,10 +314,16 @@ function renderNormal(vp) {
   let splResult = null;
   let splSvg = '';
   if (flatSources.length > 0) {
+    const phys = state.physics ?? {};
+    const freq = phys.freq_hz ?? 1000;
     splResult = computeSPLGrid({
       sources: flatSources,
       getSpeakerDef: url => getCachedLoudspeaker(url),
-      room: state.room, gridSize: 25, freq_hz: 1000, earHeight_m: ear,
+      room: state.room, gridSize: 25, freq_hz: freq, earHeight_m: ear,
+      airAbsorption: phys.airAbsorption !== false,
+      coherent: !!phys.coherent,
+      roomConstantR: phys.reverberantField && materialsRef
+        ? computeRoomConstant(state.room, materialsRef, freq) : 0,
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;

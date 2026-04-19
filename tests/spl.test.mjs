@@ -37,11 +37,13 @@ function assertClose(actual, expected, tol, label) {
 const t1 = computeDirectSPL({ speakerDef: speaker, speakerState: baseState, listenerPos: { x: 0, y: 1, z: 0 } });
 assertClose(t1.spl_db, 97, 0.01, 'On-axis 1m 1W = sensitivity (97 dB)');
 
+// Distance attenuation now includes ISO 9613-1 air absorption (~0.005 dB/m
+// at 1 kHz), so expected values include the α·r term.
 const t2 = computeDirectSPL({ speakerDef: speaker, speakerState: baseState, listenerPos: { x: 0, y: 2, z: 0 } });
-assertClose(t2.spl_db, 97 - 20 * Math.log10(2), 0.01, '2m: -6 dB from 1m');
+assertClose(t2.spl_db, 97 - 20 * Math.log10(2) - 0.00487 * 2, 0.02, '2m: -6 dB from 1m (+ air abs)');
 
 const t3 = computeDirectSPL({ speakerDef: speaker, speakerState: baseState, listenerPos: { x: 0, y: 4, z: 0 } });
-assertClose(t3.spl_db, 97 - 20 * Math.log10(4), 0.01, '4m: -12 dB from 1m');
+assertClose(t3.spl_db, 97 - 20 * Math.log10(4) - 0.00487 * 4, 0.02, '4m: -12 dB from 1m (+ air abs)');
 
 const s10 = { ...baseState, power_watts: 10 };
 const t4 = computeDirectSPL({ speakerDef: speaker, speakerState: s10, listenerPos: { x: 0, y: 1, z: 0 } });
@@ -161,9 +163,12 @@ if (!t_both_in_flag) failed++;
 // Speaker outside, listener inside: -30 dB applied
 const s_out = { position: { x: 10, y: 1, z: 1 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
 const t_out = computeDirectSPL({ speakerDef: speaker, speakerState: s_out, listenerPos: l_in, room: rectRoom });
-const expectedFree = 97 - 20 * Math.log10(Math.sqrt(7.5 * 7.5 + 1 * 1));
+const r_out = Math.sqrt(7.5 * 7.5 + 1 * 1);
+const expectedFree = 97 - 20 * Math.log10(r_out);
 const expectedAttn = -3 + (8 / 90) * 3;
-const expectedOut = expectedFree + expectedAttn - 30;
+// Air absorption at 1 kHz = 0.00487 dB/m (ISO 9613-1 @ 20 °C, 50 % RH).
+const expectedAirAbs = 0.00487 * r_out;
+const expectedOut = expectedFree + expectedAttn - expectedAirAbs - 30;
 assertClose(t_out.spl_db, expectedOut, 0.05, 'Speaker outside → -30 dB TL');
 const t_out_flag = t_out.through_wall === true;
 console.log(`${t_out_flag ? 'PASS' : 'FAIL'}  through_wall=true when speaker outside`);
@@ -171,7 +176,7 @@ if (!t_out_flag) failed++;
 
 // No room param: backward compat, no TL
 const t_no_room = computeDirectSPL({ speakerDef: speaker, speakerState: s_out, listenerPos: l_in });
-const t_no_tl_ok = Math.abs(t_no_room.spl_db - (expectedFree + expectedAttn)) < 0.05;
+const t_no_tl_ok = Math.abs(t_no_room.spl_db - (expectedFree + expectedAttn - expectedAirAbs)) < 0.05;
 console.log(`${t_no_tl_ok ? 'PASS' : 'FAIL'}  No room param: no TL (backward compat)  actual=${t_no_room.spl_db.toFixed(3)}`);
 if (!t_no_tl_ok) failed++;
 
@@ -318,6 +323,95 @@ import { expandLineArrayToElements, expandSources } from '../js/app-state.js';
   }
   console.log(`${ok ? 'PASS' : 'FAIL'}  Back-pivot: adjacent cabinets share their back edge (no overlap)`);
   if (!ok) failed++;
+}
+
+// --- ISO 9613-1 air absorption -------------------------------------------
+import { airAbsorptionAt, AIR_ABSORPTION_DB_PER_M, computeRoomConstant, speedOfSound, DEFAULT_TEMPERATURE_C } from '../js/physics/spl-calculator.js';
+{
+  const a1k = airAbsorptionAt(1000);
+  const a4k = airAbsorptionAt(4000);
+  const a_lerp = airAbsorptionAt(1500);  // between 1k and 2k
+  const okTable = Math.abs(a1k - AIR_ABSORPTION_DB_PER_M[1000]) < 1e-9
+    && Math.abs(a4k - AIR_ABSORPTION_DB_PER_M[4000]) < 1e-9
+    && a_lerp > a1k && a_lerp < AIR_ABSORPTION_DB_PER_M[2000];
+  console.log(`${okTable ? 'PASS' : 'FAIL'}  Air absorption table + log-interp monotonic (1k=${a1k}, 4k=${a4k}, 1.5k=${a_lerp.toFixed(5)})`);
+  if (!okTable) failed++;
+
+  // At 4 kHz over 30 m, ISO-9613 says ~1.13 dB. Sanity-check matches spec.
+  const dropAt30m4k = a4k * 30;
+  const ok30m = Math.abs(dropAt30m4k - 1.13) < 0.05;
+  console.log(`${ok30m ? 'PASS' : 'FAIL'}  4 kHz air absorption over 30 m ≈ 1.13 dB (got ${dropAt30m4k.toFixed(3)})`);
+  if (!ok30m) failed++;
+}
+
+// --- Speed of sound temperature dependence --------------------------------
+{
+  const c20 = speedOfSound(20);
+  const c30 = speedOfSound(30);
+  const ok = Math.abs(c20 - 343.2) < 0.2 && c30 > c20;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  Speed of sound: 20°C=${c20.toFixed(1)}m/s, 30°C=${c30.toFixed(1)}m/s (warmer → faster)`);
+  if (!ok) failed++;
+}
+
+// --- Reverberant field via Hopkins-Stryker --------------------------------
+{
+  // 10×10×5 m room, gypsum walls/ceiling, wood floor. Use provided mock
+  // materials so computeRoomConstant has something to read.
+  const materials = {
+    frequency_bands_hz: [125, 250, 500, 1000, 2000, 4000],
+    byId: {
+      'gypsum-board': { absorption: [0.1, 0.08, 0.05, 0.04, 0.07, 0.09] },
+      'wood-floor':   { absorption: [0.15, 0.11, 0.10, 0.07, 0.06, 0.07] },
+      'acoustic-tile':{ absorption: [0.20, 0.40, 0.55, 0.65, 0.70, 0.70] },
+    },
+  };
+  const room = {
+    shape: 'rectangular', width_m: 10, height_m: 5, depth_m: 10,
+    ceiling_type: 'flat',
+    surfaces: { floor: 'wood-floor', ceiling: 'acoustic-tile', walls: 'gypsum-board',
+                wall_north: 'gypsum-board', wall_south: 'gypsum-board',
+                wall_east: 'gypsum-board', wall_west: 'gypsum-board' },
+  };
+  const R = computeRoomConstant(room, materials, 1000);
+  // S = 4*(10*5) + 2*(10*10) = 200 + 200 = 400 m².
+  // α_bar ≈ (200*0.04 + 100*0.07 + 100*0.65)/400 = (8 + 7 + 65)/400 = 0.2
+  // R = 400*0.2/0.8 = 100 m².
+  const okR = Math.abs(R - 100) < 2;
+  console.log(`${okR ? 'PASS' : 'FAIL'}  computeRoomConstant(10×10×5, mixed materials, 1kHz) ≈ 100 m² (got ${R.toFixed(2)})`);
+  if (!okR) failed++;
+
+  // With reverberant field enabled, total SPL at any point should be higher
+  // than direct-only — and identical across positions (diffuse uniform).
+  const srcA = { modelUrl: 'x', position: { x: 2, y: 2, z: 2 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
+  const listenerNear = { x: 3, y: 3, z: 1.2 };
+  const listenerFar  = { x: 8, y: 8, z: 1.2 };
+  const dirNear = computeMultiSourceSPL({ sources: [srcA], getSpeakerDef: () => speaker, listenerPos: listenerNear, room });
+  const totNear = computeMultiSourceSPL({ sources: [srcA], getSpeakerDef: () => speaker, listenerPos: listenerNear, room, roomConstantR: 100 });
+  const totFar  = computeMultiSourceSPL({ sources: [srcA], getSpeakerDef: () => speaker, listenerPos: listenerFar,  room, roomConstantR: 100 });
+  console.log(`${totNear > dirNear ? 'PASS' : 'FAIL'}  Reverberant contribution raises SPL (dir=${dirNear.toFixed(1)}, dir+rev=${totNear.toFixed(1)} dB)`);
+  if (totNear <= dirNear) failed++;
+  // Diffuse part should make far-field lift relatively larger than near-field lift.
+  const nearLift = totNear - dirNear;
+  const dirFar = computeMultiSourceSPL({ sources: [srcA], getSpeakerDef: () => speaker, listenerPos: listenerFar, room });
+  const farLift = totFar - dirFar;
+  console.log(`${farLift > nearLift ? 'PASS' : 'FAIL'}  Reverb field more important at far field (near lift=${nearLift.toFixed(2)} dB < far lift=${farLift.toFixed(2)} dB)`);
+  if (farLift <= nearLift) failed++;
+}
+
+// --- Coherent summation: two co-located in-phase sources = +6 dB ----------
+{
+  const srcA = { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
+  const srcB = { modelUrl: 'x', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 };
+  const listener = { x: 0, y: 1, z: 0 };
+  const inc = computeMultiSourceSPL({ sources: [srcA, srcB], getSpeakerDef: () => speaker, listenerPos: listener, coherent: false });
+  const coh = computeMultiSourceSPL({ sources: [srcA, srcB], getSpeakerDef: () => speaker, listenerPos: listener, coherent: true });
+  // Same position → same distance → same phase → amplitudes add linearly → +6 dB vs single.
+  const single = computeMultiSourceSPL({ sources: [srcA], getSpeakerDef: () => speaker, listenerPos: listener });
+  const incLift = inc - single, cohLift = coh - single;
+  console.log(`${Math.abs(incLift - 3) < 0.1 ? 'PASS' : 'FAIL'}  Incoherent sum: 2 co-located identical = +3 dB (got +${incLift.toFixed(2)})`);
+  if (Math.abs(incLift - 3) >= 0.1) failed++;
+  console.log(`${Math.abs(cohLift - 6) < 0.1 ? 'PASS' : 'FAIL'}  Coherent sum: 2 co-located in-phase = +6 dB (got +${cohLift.toFixed(2)})`);
+  if (Math.abs(cohLift - 6) >= 0.1) failed++;
 }
 
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }

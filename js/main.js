@@ -7,7 +7,7 @@ import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mount2DViewport } from './graphics/room-2d.js';
-import { mount3DViewport, toggleHeatmaps, toggleAimLines, setWalkthroughMode } from './graphics/scene.js';
+import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, setWalkthroughMode } from './graphics/scene.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -38,6 +38,22 @@ function setupTabs() {
     aimBtn.addEventListener('click', () => {
       toggleAimLines();
       aimBtn.classList.toggle('active', state.display.showAimLines);
+    });
+  }
+
+  const isoBtn = document.getElementById('toggle-isobars');
+  if (isoBtn) {
+    isoBtn.addEventListener('click', () => {
+      toggleIsobars();
+      isoBtn.classList.toggle('active', state.display.showIsobars);
+    });
+  }
+
+  const probeBtn = document.getElementById('toggle-probe');
+  if (probeBtn) {
+    probeBtn.addEventListener('click', () => {
+      toggleProbe();
+      probeBtn.classList.toggle('active');
     });
   }
 }

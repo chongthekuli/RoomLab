@@ -1,7 +1,7 @@
 import { state, earHeightFor, getSelectedListener, POSTURE_LABELS, groupById, SPEAKER_GROUPS, expandSources } from '../app-state.js';
 import { on } from './events.js';
 import { computeAllBands } from '../physics/rt60.js';
-import { computeListenerBreakdown } from '../physics/spl-calculator.js';
+import { computeListenerBreakdown, computeRoomConstant } from '../physics/spl-calculator.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 
 let materialsRef;
@@ -90,12 +90,17 @@ function renderListenerSection() {
   // the breakdown row count can be much larger than state.sources.length
   // (e.g., 4 line arrays × 4 elements = 16 rows).
   const flatSources = expandSources(state.sources);
+  const phys = state.physics ?? {};
+  const freq = phys.freq_hz ?? 1000;
   const breakdown = computeListenerBreakdown({
     sources: flatSources,
     getSpeakerDef: url => getCachedLoudspeaker(url),
     listenerPos: pos,
-    freq_hz: 1000,
+    freq_hz: freq,
     room: state.room,
+    airAbsorption: phys.airAbsorption !== false,
+    roomConstantR: phys.reverberantField && materialsRef
+      ? computeRoomConstant(state.room, materialsRef, freq) : 0,
   });
 
   const postureLabel = POSTURE_LABELS[lst.posture] ?? lst.posture;
