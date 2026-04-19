@@ -5,6 +5,7 @@ import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, 
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant } from '../physics/spl-calculator.js';
+import { computeSTIPA } from '../physics/stipa.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
@@ -36,6 +37,7 @@ let probeActive = false;
 // (procedural Group) and drives the 6 procedural animation layers via
 // the controller's onAnimate hook.
 let walkCamera, avatar, walkHint, walkSplOverlay;
+let _stipaLast = null, _stipaLastTs = 0;   // cached STIPA result (4 Hz refresh)
 let avatarParts = null;       // { armL, armR, legL, legR, body }
 let activeCamera = null;
 let walkMode = false;
@@ -582,6 +584,7 @@ function initWalkthrough() {
   walkSplOverlay.id = 'walk-spl';
   walkSplOverlay.innerHTML = `
     <div class="walk-spl-big">— dB</div>
+    <div class="walk-spl-sti"><span class="walk-spl-label">STI</span><span class="walk-spl-val" data-f="sti">—</span></div>
     <div class="walk-spl-row"><span class="walk-spl-label">ear</span><span class="walk-spl-val" data-f="ear">— m</span></div>
     <div class="walk-spl-row"><span class="walk-spl-label">pose</span><span class="walk-spl-val" data-f="pose">standing</span></div>
     <div class="walk-spl-row"><span class="walk-spl-label">xyz</span><span class="walk-spl-val" data-f="xyz">—</span></div>
@@ -901,6 +904,29 @@ function updateWalkSplReadout(ctx, eyeHeight) {
       })
     : NaN;
   walkSplOverlay.querySelector('.walk-spl-big').textContent = isFinite(spl) ? spl.toFixed(1) + ' dB' : '— dB';
+
+  // STIPA — computed throttled (~4 Hz) since it's 7-band work; cheaper than
+  // the 1 kHz SPL sample but adds up if every frame.
+  const now = performance.now();
+  if (flat.length > 0 && materialsRef && (!_stipaLastTs || now - _stipaLastTs > 250)) {
+    _stipaLastTs = now;
+    const s = computeSTIPA({
+      sources: flat,
+      getSpeakerDef: url => getCachedLoudspeaker(url),
+      listenerPos, room: state.room, materials: materialsRef,
+    });
+    _stipaLast = s;
+  }
+  const stiEl = walkSplOverlay.querySelector('[data-f="sti"]');
+  if (stiEl) {
+    if (_stipaLast) {
+      stiEl.textContent = _stipaLast.sti.toFixed(2) + ' (' + _stipaLast.rating + ')';
+      stiEl.className = 'walk-spl-val sti-' + _stipaLast.rating;
+    } else {
+      stiEl.textContent = '—';
+    }
+  }
+
   const earVal = walkSplOverlay.querySelector('[data-f="ear"]');
   const poseVal = walkSplOverlay.querySelector('[data-f="pose"]');
   const xyzVal = walkSplOverlay.querySelector('[data-f="xyz"]');

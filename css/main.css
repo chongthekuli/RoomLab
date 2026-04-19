@@ -133,6 +133,26 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   line-height: 1;
   margin-bottom: 4px;
 }
+.walk-spl .walk-spl-sti {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0 5px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.walk-spl .walk-spl-sti .walk-spl-val {
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.walk-spl .sti-excellent { color: var(--data-green); }
+.walk-spl .sti-good      { color: var(--data-green); }
+.walk-spl .sti-fair      { color: var(--data-amber); }
+.walk-spl .sti-poor      { color: #ff8c3c; }
+.walk-spl .sti-bad       { color: var(--data-red); }
 .walk-spl .walk-spl-row {
   display: grid;
   grid-template-columns: 38px 1fr;
