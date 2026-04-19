@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, POSTURE_LABELS, groupById, SPEAKER_GROUPS } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, POSTURE_LABELS, groupById, SPEAKER_GROUPS, expandSources } from '../app-state.js';
 import { on } from './events.js';
 import { computeAllBands } from '../physics/rt60.js';
 import { computeListenerBreakdown } from '../physics/spl-calculator.js';
@@ -86,8 +86,12 @@ function renderListenerSection() {
 
   const ear = earHeightFor(lst);
   const pos = { x: lst.position.x, y: lst.position.y, z: ear };
+  // Physics sees each line-array element as its own directional source, so
+  // the breakdown row count can be much larger than state.sources.length
+  // (e.g., 4 line arrays × 4 elements = 16 rows).
+  const flatSources = expandSources(state.sources);
   const breakdown = computeListenerBreakdown({
-    sources: state.sources,
+    sources: flatSources,
     getSpeakerDef: url => getCachedLoudspeaker(url),
     listenerPos: pos,
     freq_hz: 1000,
@@ -100,13 +104,14 @@ function renderListenerSection() {
   const rows = breakdown.perSpeaker.map(p => {
     const splStr = isFinite(p.spl_db) ? `${p.spl_db.toFixed(1)} dB` : '—';
     const rStr = p.r != null ? `${p.r.toFixed(2)} m` : '—';
-    const src = state.sources[p.idx];
+    const src = flatSources[p.idx];
     const grp = src ? groupById(src.groupId) : null;
     const grpBadge = grp ? ` <span class="group-badge" style="background:${grp.color}">${grp.id}</span>` : '';
+    const arrayLabel = src?.arrayId ? ` <span class="sub">${src.arrayId}·e${src.elementIndex + 1}</span>` : '';
     const badge = p.outsideRoom
       ? ' <span class="badge-warn" title="Speaker is outside the room — SPL reduced by 30 dB for wall transmission loss">outside</span>'
       : (p.through_wall ? ' <span class="badge-warn" title="Path crosses a wall — SPL reduced by 30 dB">through wall</span>' : '');
-    return `<tr><td>Speaker ${p.idx + 1}${grpBadge}${badge}</td><td>${splStr}</td><td>${rStr}</td></tr>`;
+    return `<tr><td>Speaker ${p.idx + 1}${arrayLabel}${grpBadge}${badge}</td><td>${splStr}</td><td>${rStr}</td></tr>`;
   }).join('');
   const anyOutside = breakdown.perSpeaker.some(p => p.outsideRoom);
   const outsideNote = anyOutside
@@ -115,7 +120,7 @@ function renderListenerSection() {
   // Per-group totals
   const groupTotals = {};
   for (const p of breakdown.perSpeaker) {
-    const src = state.sources[p.idx];
+    const src = flatSources[p.idx];
     if (!src?.groupId || !isFinite(p.spl_db)) continue;
     groupTotals[src.groupId] = (groupTotals[src.groupId] || 0) + Math.pow(10, p.spl_db / 10);
   }

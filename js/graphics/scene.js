@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL } from '../physics/spl-calculator.js';
@@ -562,7 +562,35 @@ function rebuildSources() {
     disposeGroup(sourcesGroup);
   }
 
+  // Draw a subtle rigging line per line-array hang so the column of elements
+  // reads as one physical object rather than N disjoint boxes.
   for (const src of state.sources) {
+    if (src.kind !== 'line-array') continue;
+    const origin = src.origin ?? { x: 0, y: 0, z: 0 };
+    const elements = expandSources([src]);
+    const lastRig = elements[elements.length - 1]?.rigPoint ?? origin;
+    // Drop-line from the origin down to the last rig point, tracing the hang.
+    const pts = [];
+    pts.push(new THREE.Vector3(origin.x, origin.z + 0.4, origin.y)); // 0.4 m above for hang point motor
+    for (const el of elements) {
+      pts.push(new THREE.Vector3(el.rigPoint.x, el.rigPoint.z, el.rigPoint.y));
+    }
+    pts.push(new THREE.Vector3(lastRig.x, lastRig.z, lastRig.y));
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: 0x8a8d94 }),
+    );
+    sourcesGroup.add(line);
+    // Motor / hang bar block above origin
+    const motor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.35, 0.18, 0.25),
+      new THREE.MeshStandardMaterial({ color: 0x2a2d34, roughness: 0.7, metalness: 0.5 }),
+    );
+    motor.position.set(origin.x, origin.z + 0.5, origin.y);
+    sourcesGroup.add(motor);
+  }
+
+  for (const src of expandSources(state.sources)) {
     const outside = !isInsideRoom3D(src.position, state.room);
     const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
     const groupInt = groupHex ? parseInt(groupHex.slice(1), 16) : null;
@@ -589,10 +617,10 @@ function rebuildSources() {
     }
     sourcesGroup.add(encl);
 
-    // Group indicator ring on the floor below the speaker — keeps the visual
-    // cue from the cone era so users can track which color belongs to which
-    // speaker when looking straight down.
-    if (groupInt && !outside) {
+    // Group indicator ring on the floor below the speaker — helpful for
+    // ground-placed speakers. Skip for line-array elements (they all share
+    // one origin/hang, so N overlapping rings just make noise).
+    if (groupInt && !outside && !src.arrayId) {
       const ring = new THREE.Mesh(
         new THREE.TorusGeometry(0.35, 0.04, 8, 32),
         new THREE.MeshBasicMaterial({ color: groupInt }),
@@ -673,9 +701,13 @@ function rebuildZones() {
   // Arena presets with a stadiumStructure descriptor get the unified mapping
   // surfaces (continuous smooth gradients per bowl sector). Non-arena presets
   // fall through to the legacy per-zone CanvasTexture loop below.
+  // expandSources() unpacks any line-array compound entries into their
+  // constituent elements so SPL math sees each element as an independent
+  // directional source.
+  const flatSources = expandSources(state.sources);
   if (state.room.stadiumStructure) {
-    if (state.sources.length > 0) {
-      rebuildStadiumHeatmap(state.room, state.sources);
+    if (flatSources.length > 0) {
+      rebuildStadiumHeatmap(state.room, flatSources);
     }
     // With or without sources we skip the legacy per-tier loop here — the
     // concrete bowl lathe already shows the seating geometry, and rendering
@@ -709,14 +741,14 @@ function rebuildZones() {
     // zones don't explode into 10k+ samples per frame.
     let heatmapTex = null;
     let splInfo = null;
-    if (state.sources.length > 0) {
+    if (flatSources.length > 0) {
       const xs = zone.vertices.map(v => v.x);
       const ys = zone.vertices.map(v => v.y);
       const bw = Math.max(...xs) - Math.min(...xs);
       const bd = Math.max(...ys) - Math.min(...ys);
       const adaptiveGrid = Math.max(24, Math.min(80, Math.ceil(Math.max(bw, bd) / 0.5)));
       splInfo = computeZoneSPLGrid({
-        zone, sources: state.sources,
+        zone, sources: flatSources,
         getSpeakerDef: url => getCachedLoudspeaker(url),
         room: state.room, gridSize: adaptiveGrid, freq_hz: 1000, earAbove_m: 1.2,
       });
@@ -1311,13 +1343,16 @@ function rebuildHeatmap() {
   // to avoid a giant translucent disc covering the stacked zone visualization.
   if (state.zones && state.zones.length > 0) return;
 
+  const flat = expandSources(state.sources);
+  if (flat.length === 0) return;
+
   const ear = earHeightFor(getSelectedListener());
   // Adaptive grid so the room-level canvas stays near a 0.5 m cell target
   // (an 8 m studio → 16 cells; a 60 m arena → 80 cells, capped).
   const longestDim = Math.max(state.room.width_m ?? 0, state.room.depth_m ?? 0);
   const roomGrid = Math.max(40, Math.min(120, Math.ceil(longestDim / 0.5)));
   const splResult = computeSPLGrid({
-    sources: state.sources,
+    sources: flat,
     getSpeakerDef: url => getCachedLoudspeaker(url),
     room: state.room, gridSize: roomGrid, freq_hz: 1000, earHeight_m: ear,
   });

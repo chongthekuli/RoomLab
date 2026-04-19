@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources } from '../app-state.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
@@ -309,11 +309,12 @@ function renderNormal(vp) {
 
   const ear = earHeightFor(getSelectedListener());
 
+  const flatSources = expandSources(state.sources);
   let splResult = null;
   let splSvg = '';
-  if (state.sources.length > 0) {
+  if (flatSources.length > 0) {
     splResult = computeSPLGrid({
-      sources: state.sources,
+      sources: flatSources,
       getSpeakerDef: url => getCachedLoudspeaker(url),
       room: state.room, gridSize: 25, freq_hz: 1000, earHeight_m: ear,
     });
@@ -332,7 +333,7 @@ function renderNormal(vp) {
   const clipPathSvg = renderClipPath(state.room, x0, y0, pxW, pxD);
 
   const zonesSvg = renderZones(state.zones, state.selectedZoneId, x0, y0, pxW, pxD, state.room, false);
-  const speakerSvg = state.sources.length > 0 ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, state.room) : '';
+  const speakerSvg = flatSources.length > 0 ? renderSpeakersSVG(flatSources, x0, y0, pxW, pxD, state.room) : '';
   const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room) : '';
 
   const shapeLbl = shape === 'rectangular'

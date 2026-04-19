@@ -150,6 +150,54 @@ function generateTieredBowl({
   return zones;
 }
 
+// Factory for a center-hung line-array cluster: creates N line-array entries
+// (one per compass direction), each hanging from the catwalk ring and aimed
+// outward+down at its audience quadrant. Each "source" here is a compound
+// line-array descriptor — `expandSources` unpacks it to individual elements
+// at SPL-compute / render time.
+function generateCenterLineArrayCluster({ cx, cy, cz, ring_r, hangCount = 4, elementsPerArray = 4, modelUrl, power_watts_each = 500, topTilt_deg = -12, splayAnglesDeg = null, elementSpacing_m = 0.42 }) {
+  const arrays = [];
+  // Industry-standard progressive J-curve splays (K2/J8/SOUNDVISION style):
+  // upper boxes near 0° for long-throw line-source behavior, lower boxes
+  // open up to cover near-field. For elementsPerArray = 4 the default is
+  // [2, 5, 10] — per pro-audio reference (see feedback_line_array_physics).
+  const DEFAULT_SPLAYS_BY_COUNT = {
+    2: [5],
+    3: [2, 5],
+    4: [2, 5, 10],
+    5: [1, 2, 5, 10],
+    6: [1, 2, 3, 5, 8],
+    8: [0.5, 1, 2, 3, 4, 6, 8],
+  };
+  const splay = splayAnglesDeg
+    ?? DEFAULT_SPLAYS_BY_COUNT[elementsPerArray]
+    ?? new Array(Math.max(0, elementsPerArray - 1)).fill(3);
+  const step = 360 / hangCount;
+  for (let i = 0; i < hangCount; i++) {
+    const a_deg = i * step;
+    const a_rad = a_deg * Math.PI / 180;
+    const ox = cx + ring_r * Math.cos(a_rad);
+    const oy = cy + ring_r * Math.sin(a_rad);
+    // yaw convention: yaw=0 → aim +Y (state depth). baseYaw here so each hang
+    // points radially outward at its compass direction.
+    const baseYaw = ((90 - a_deg) % 360 + 360) % 360;
+    const baseYaw_signed = baseYaw > 180 ? baseYaw - 360 : baseYaw;
+    arrays.push({
+      kind: 'line-array',
+      id: `LA${i + 1}`,
+      modelUrl,
+      origin: { x: ox, y: oy, z: cz },
+      baseYaw_deg: baseYaw_signed,
+      topTilt_deg,
+      splayAnglesDeg: splay,
+      elementSpacing_m,
+      power_watts_each,
+      groupId: (i % 2 === 0) ? 'A' : 'B',
+    });
+  }
+  return arrays;
+}
+
 function generateCenterCluster({ cx, cy, cz, ring_r, count = 8, modelUrl, power_watts = 500, pitch = -25 }) {
   const sources = [];
   const step = 360 / count;
@@ -168,6 +216,92 @@ function generateCenterCluster({ cx, cy, cz, ring_r, count = 8, modelUrl, power_
     });
   }
   return sources;
+}
+
+// ---------------------------------------------------------------------------
+// Line-array expansion — one "compound" source entry expands to N element
+// sources, each with its own position and aim. Matches how EASE Focus /
+// EASE 5 handle line arrays: each element is an independent directional
+// point source whose SPL contribution sums at every listener.
+//
+// A line-array source entry has shape:
+//   {
+//     kind: 'line-array',
+//     modelUrl, groupId, id,
+//     origin: { x, y, z },           // top rigging pin location
+//     baseYaw_deg,                    // horizontal aim of whole hang
+//     topTilt_deg,                    // flown angle — pitch of the top element
+//     splayAnglesDeg: [2, 3, 4, ...], // cumulative splay between element i and i+1
+//     elementSpacing_m,               // vertical spacing (≈ cabinet height)
+//     power_watts_each,
+//   }
+// Element count = splayAnglesDeg.length + 1 (first element has no leading splay).
+// ---------------------------------------------------------------------------
+export function expandLineArrayToElements(src) {
+  const splays = src.splayAnglesDeg || [];
+  const n = (src.elementCount ?? (splays.length + 1));
+  const spacing = src.elementSpacing_m ?? 0.42;
+  const topTilt = src.topTilt_deg ?? 0;
+  const yaw = src.baseYaw_deg ?? 0;
+  const origin = src.origin || src.position || { x: 0, y: 0, z: 0 };
+  const power = src.power_watts_each ?? 500;
+  const yawRad = yaw * Math.PI / 180;
+
+  const elements = [];
+  let curPitch = topTilt;
+  let curRig = { x: origin.x, y: origin.y, z: origin.z };
+
+  for (let i = 0; i < n; i++) {
+    const pitchRad = curPitch * Math.PI / 180;
+    // State frame: x=width, y=depth, z=height. With yaw=0 aim=+y, pitch tilts
+    // aim toward +z. The "down along cabinet" direction (from rigging pin to
+    // bottom-back of cabinet) is -UP where UP = aim rotated 90° toward +z.
+    const downX =  Math.sin(yawRad) * Math.sin(pitchRad);
+    const downY =  Math.cos(yawRad) * Math.sin(pitchRad);
+    const downZ = -Math.cos(pitchRad);
+    // Acoustic center is half-spacing below the rig pin along the cabinet's
+    // down direction — good approximation of the driver position.
+    const center = {
+      x: curRig.x + (spacing / 2) * downX,
+      y: curRig.y + (spacing / 2) * downY,
+      z: curRig.z + (spacing / 2) * downZ,
+    };
+    elements.push({
+      modelUrl: src.modelUrl,
+      position: center,
+      aim: { yaw, pitch: curPitch, roll: 0 },
+      power_watts: power,
+      groupId: src.groupId,
+      arrayId: src.id ?? null,
+      elementIndex: i,
+      rigPoint: { ...curRig },
+    });
+    // Advance rig pin of next element = bottom-back of this element.
+    curRig = {
+      x: curRig.x + spacing * downX,
+      y: curRig.y + spacing * downY,
+      z: curRig.z + spacing * downZ,
+    };
+    // Apply splay so next element tilts further DOWN. Industry convention:
+    // positive splay = "this much more downward than the element above".
+    // Pitch is negative for downward aim, so a +2° splay subtracts 2 from pitch.
+    curPitch -= splays[i] ?? 0;
+  }
+  return elements;
+}
+
+// Flatten any mix of single sources + line-array compound entries into the
+// list of physical element sources used everywhere SPL math + rendering runs.
+export function expandSources(sources) {
+  const out = [];
+  for (const s of sources) {
+    if (s && s.kind === 'line-array') {
+      for (const el of expandLineArrayToElements(s)) out.push(el);
+    } else {
+      out.push(s);
+    }
+  }
+  return out;
 }
 
 export const state = {
@@ -283,7 +417,19 @@ export const PRESETS = {
           sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
         }),
       ],
-      sources: generateCenterCluster({ cx, cy, cz: 15, ring_r: 4, count: 8, modelUrl: SPKLA, power_watts: 500, pitch: -25 }),
+      // 4 line-array hangs (N/E/S/W), each 4 elements with 4° splay between
+      // adjacent elements — a classic small-arena center cluster pattern.
+      // Each "source" below is a COMPOUND line-array descriptor; the physics
+      // and renderer call expandSources() to unpack it into 4 elements.
+      // 4 line-array hangs (cardinal compass) × 4 elements each, default
+      // progressive J-splays [2, 5, 10]. Flown angle −12° puts top element
+      // near horizontal for long throw to upper bowl, lower elements tilt
+      // progressively down for near-field court/lower-bowl coverage.
+      sources: generateCenterLineArrayCluster({
+        cx, cy, cz: 14, ring_r: 5, hangCount: 4, elementsPerArray: 4,
+        modelUrl: SPKLA, power_watts_each: 500,
+        topTilt_deg: -12, elementSpacing_m: 0.42,
+      }),
       listeners: [
         // Positions land inside SE/SW/NW/NE quadrants (not in 10° vomitory gaps at cardinals).
         // SE = +x+y direction (state y grows "back" = south); NE = +x-y, etc.

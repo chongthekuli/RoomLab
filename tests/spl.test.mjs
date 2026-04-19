@@ -238,5 +238,53 @@ const zgok = zg && zg.id === 'Z1' && zg.grid.length === 5 && isFinite(zg.avgSPL_
 console.log(`${zgok ? 'PASS' : 'FAIL'}  Zone SPL grid computed (avg=${zg.avgSPL_db.toFixed(1)} dB)`);
 if (!zgok) failed++;
 
+// --- Line-array expansion tests ---
+import { expandLineArrayToElements, expandSources } from '../js/app-state.js';
+
+{
+  const la = {
+    kind: 'line-array',
+    modelUrl: 'x',
+    origin: { x: 10, y: 10, z: 5 },
+    baseYaw_deg: 0,
+    topTilt_deg: -10,
+    splayAnglesDeg: [2, 3, 5],
+    elementSpacing_m: 0.4,
+    power_watts_each: 500,
+  };
+  const elements = expandLineArrayToElements(la);
+  const pitchOk = elements.length === 4
+    && elements[0].aim.pitch === -10
+    && elements[1].aim.pitch === -12
+    && elements[2].aim.pitch === -15
+    && elements[3].aim.pitch === -20;
+  console.log(`${pitchOk ? 'PASS' : 'FAIL'}  Line-array cumulative pitch: [-10, -12, -15, -20]  actual=[${elements.map(e => e.aim.pitch).join(', ')}]`);
+  if (!pitchOk) failed++;
+
+  const positionsDescend = elements.every((e, i, arr) =>
+    i === 0 || e.position.z <= arr[i - 1].position.z);
+  console.log(`${positionsDescend ? 'PASS' : 'FAIL'}  Line-array element positions descend in z`);
+  if (!positionsDescend) failed++;
+
+  const powerOk = elements.every(e => e.power_watts === 500);
+  console.log(`${powerOk ? 'PASS' : 'FAIL'}  Each element gets full rated power (500W) — not divided across array`);
+  if (!powerOk) failed++;
+
+  const idxOk = elements.every((e, i) => e.elementIndex === i);
+  console.log(`${idxOk ? 'PASS' : 'FAIL'}  Element indices 0..N-1, element 0 is topmost`);
+  if (!idxOk) failed++;
+}
+
+{
+  const mixed = [
+    { modelUrl: 'a', position: { x: 0, y: 0, z: 0 }, aim: { yaw: 0, pitch: 0 }, power_watts: 100 },
+    { kind: 'line-array', modelUrl: 'b', origin: { x: 1, y: 1, z: 5 }, baseYaw_deg: 0, topTilt_deg: 0, splayAnglesDeg: [1], power_watts_each: 300 },
+  ];
+  const flat = expandSources(mixed);
+  const ok = flat.length === 3 && flat[0].modelUrl === 'a' && flat[1].modelUrl === 'b' && flat[2].modelUrl === 'b';
+  console.log(`${ok ? 'PASS' : 'FAIL'}  expandSources() mixes singles + arrays (expected 3, got ${flat.length})`);
+  if (!ok) failed++;
+}
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');

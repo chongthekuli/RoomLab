@@ -254,6 +254,12 @@ section h3 {
   justify-content: space-between;
   align-items: center;
 }
+.source-card.line-array-card { background: #f3f6fc; border-color: #c6d0e4; }
+.source-card .splay-label { display: block; font-size: 0.74rem; margin-top: 0.35rem; color: var(--fg); }
+.source-card .splay-label input { width: 100%; margin-top: 0.2rem; }
+.source-card .splay-preview { font-size: 0.72rem; color: #5a6372; margin: 0.25rem 0 0.35rem; line-height: 1.35; }
+.source-actions { display: flex; gap: 0.4rem; }
+.source-actions .btn-add { flex: 1; margin: 0; }
 .btn-add {
   display: block;
   width: 100%;
