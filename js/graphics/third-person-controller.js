@@ -45,6 +45,9 @@ export class ThirdPersonController {
     this.stepHeight = 0.55;           // max auto-climb
     this.groundOffset = 0.02;         // tiny float above the hit to avoid z-fighting
     this.gravity = 9.81;
+    // External hook: when true, WASD is ignored (character locked in place
+    // while still rendering / animating). Used for the sit posture.
+    this.blockMovement = false;
 
     // --- Camera orbit state (independent of character yaw) ----------------
     this.cameraYaw = 0;
@@ -139,7 +142,7 @@ export class ThirdPersonController {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     this.keys.add(e.code);
     if (e.code === 'Space' && this.grounded && this.onJump) this.onJump();
-    if (['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','Space','ShiftLeft','ShiftRight','KeyC','ControlLeft','ControlRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
+    if (['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','Space','ShiftLeft','ShiftRight','KeyC','KeyZ','ControlLeft','ControlRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
       e.preventDefault();
     }
   }
@@ -175,6 +178,7 @@ export class ThirdPersonController {
   // the character away from the camera (into the screen). Camera yaw=0
   // means camera is at +Z of character, so "away from camera" is -Z.
   _cameraRelativeMove() {
+    if (this.blockMovement) return { x: 0, z: 0, magnitude: 0 };
     const fx = -Math.sin(this.cameraYaw);
     const fz = -Math.cos(this.cameraYaw);
     // Strafe right (perpendicular to forward, rotated −90° in XZ).

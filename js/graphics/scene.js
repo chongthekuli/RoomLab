@@ -57,6 +57,12 @@ const animState = {
   turnLean: 0,
   runFactor: 0,
   crouchF: 0,
+  // Sit posture — edge-toggled on Z. sitF is a smoothly lerped 0→1 scalar
+  // that drives the pose; sitting is the discrete bool target. sitLatch
+  // prevents rapid toggle while Z is held.
+  sitting: false,
+  sitF: 0,
+  sitLatch: false,
 };
 const AVATAR_EYE_HEIGHT = 1.68;
 const CROUCH_FACTOR = 0.28;       // crouched body is 1 − 0.28 = 72 % of standing
@@ -566,7 +572,7 @@ function initWalkthrough() {
     <span>Mouse drag — orbit camera</span>
     <span>Mouse wheel — zoom</span>
     <span>Space — jump · C / Ctrl — crouch (hold)</span>
-    <span>Shift — run · R — reset</span>
+    <span>Z — sit / stand · Shift — run · R — reset</span>
   `;
   container.appendChild(walkHint);
 
@@ -645,6 +651,10 @@ function placeAvatarAtDefault() {
   animState.runFactor = 0;
   animState.yawRate = 0;
   animState.crouchF = 0;
+  animState.sitting = false;
+  animState.sitF = 0;
+  animState.sitLatch = false;
+  if (tpController) tpController.blockMovement = false;
   animState.prevYaw = tpController.yaw;
 }
 
@@ -756,6 +766,16 @@ function applyAvatarAnimation(ctx) {
   const crouchHeld = ctx.keys.has('KeyC') || ctx.keys.has('ControlLeft') || ctx.keys.has('ControlRight');
   animState.crouchF += ((crouchHeld ? 1 : 0) - animState.crouchF) * (1 - Math.exp(-dt / 0.12));
 
+  // --- Sit toggle (Z) — edge-triggered so holding Z doesn't thrash the state.
+  const zHeld = ctx.keys.has('KeyZ');
+  if (zHeld && !animState.sitLatch) {
+    animState.sitting = !animState.sitting;
+    animState.sitLatch = true;
+    if (tpController) tpController.blockMovement = animState.sitting;
+  }
+  if (!zHeld) animState.sitLatch = false;
+  animState.sitF += ((animState.sitting ? 1 : 0) - animState.sitF) * (1 - Math.exp(-dt / 0.20));
+
   // --- Pose accumulation ---
   let bodyScale = 1;
   let thighL_rot = legRotL, thighR_rot = legRotR;
@@ -771,6 +791,23 @@ function applyAvatarAnimation(ctx) {
   kneeL_rot  += cF * -0.55; kneeR_rot  += cF * -0.55;
   torsoTilt  += cF * 0.25;
   armL_rot   += cF * 0.30; armR_rot += cF * 0.30;
+
+  // Sit layer — deeper fold than crouch: thighs fold up 90°, shins roughly
+  // vertical, hips drop ~0.45 m. The blend is driven by sitF so standing up
+  // is smooth (0.20 s critically-damped spring).
+  const sF = animState.sitF;
+  if (sF > 0.001) {
+    // Scale the body modestly so the seated figure still reads as a person.
+    bodyScale *= (1 - sF * 0.12);
+    thighL_rot += sF * 1.00; thighR_rot += sF * 1.00;
+    kneeL_rot  += sF * -1.10; kneeR_rot  += sF * -1.10;
+    torsoTilt  += sF * 0.08;
+    // Arms relax forward onto the knees (or lap).
+    armL_rot   += sF * 0.45; armR_rot += sF * 0.45;
+    elbowL_rot += sF * -0.4; elbowR_rot += sF * -0.4;
+    // Hips drop so the feet stay on the floor with the thighs folded up.
+    yExtra += sF * -0.45;
+  }
 
   torsoTilt += animState.runFactor * 0.18;
 
@@ -871,7 +908,8 @@ function updateWalkSplReadout(ctx, eyeHeight) {
   if (poseVal) {
     poseVal.textContent = !ctx.grounded
       ? 'jumping'
-      : (animState.crouchF > 0.5 ? 'crouching' : 'standing');
+      : (animState.sitF > 0.5 ? 'sitting'
+         : (animState.crouchF > 0.5 ? 'crouching' : 'standing'));
   }
   if (xyzVal) xyzVal.textContent = px.toFixed(1) + ' · ' + py.toFixed(1) + ' · ' + pz.toFixed(2);
 }
