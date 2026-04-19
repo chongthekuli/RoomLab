@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
-import { computeSPLGrid, computeZoneSPLGrid } from '../physics/spl-calculator.js';
+import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL } from '../physics/spl-calculator.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 
 let scene, camera, renderer, controls;
@@ -513,6 +513,22 @@ function rebuildZones() {
     return;
   }
 
+  // Arena presets with a stadiumStructure descriptor get the unified mapping
+  // surfaces (continuous smooth gradients per bowl sector). Non-arena presets
+  // fall through to the legacy per-zone CanvasTexture loop below.
+  if (state.room.stadiumStructure) {
+    if (state.sources.length > 0) {
+      rebuildStadiumHeatmap(state.room, state.sources);
+    }
+    // With or without sources we skip the legacy per-tier loop here — the
+    // concrete bowl lathe already shows the seating geometry, and rendering
+    // 52 translucent tier patches on top of it looks wrong.
+    rebuildStadiumFurniture();
+    heatmapGroup.visible = state.display.showHeatmaps;
+    updateSPLLegend();
+    return;
+  }
+
   for (let zi = 0; zi < state.zones.length; zi++) {
     const zone = state.zones[zi];
     if (!zone.vertices || zone.vertices.length < 3) continue;
@@ -612,6 +628,279 @@ function rebuildZones() {
   rebuildStadiumFurniture();
   heatmapGroup.visible = state.display.showHeatmaps;
   updateSPLLegend();
+}
+
+// -----------------------------------------------------------------------------
+// Unified arena heatmap — EASE/Odeon-style continuous mapping surfaces.
+//
+// Instead of drawing one thin textured strip per seating tier (the stripe-
+// artifact problem reviewers flagged), we build ONE inclined surface per bowl
+// sector that follows the mean seating rake, sample SPL on a dense
+// per-vertex grid, and let Three.js interpolate colors across triangles.
+//
+// One surface per lower-bowl sector (4), per upper-bowl sector (4),
+// per concourse quadrant (4), plus one for the court. ~13 meshes total,
+// all in heatmapGroup so the toolbar toggle hides them in one flip.
+// -----------------------------------------------------------------------------
+
+// Linear rake z at radius r: interpolates between the first and last tier
+// elevations. The solid concrete lathe keeps the actual stepped geometry
+// underneath; the mapping surface traces the mean seating plane above it.
+function rakeZAtRadius(r, bowl) {
+  const tiers = bowl.tier_heights_m;
+  const z0 = tiers[0];
+  const z1 = tiers[tiers.length - 1];
+  if (bowl.r_out <= bowl.r_in) return z0;
+  const f = Math.max(0, Math.min(1, (r - bowl.r_in) / (bowl.r_out - bowl.r_in)));
+  return z0 + (z1 - z0) * f;
+}
+
+// Builds an (radialCells+1) × (arcCells+1) grid of vertices across a ring
+// sector. zFn(r) gives the world-Y height at each radius. Returns the
+// BufferGeometry plus a parallel array of state-coord listener anchors so
+// callers can sample SPL at each vertex.
+function buildRingSectorGeometry({ cx, cy, r_in, r_out, phiStart, phiLength, zFn, earAbove = 1.2, liftAbove = 0.05, cellTarget = 0.5, radialMin = 6, radialMax = 40, arcMin = 12, arcMax = 120 }) {
+  const radialSpan = r_out - r_in;
+  const arcLen = ((r_in + r_out) / 2) * phiLength;
+  const radialCells = Math.max(radialMin, Math.min(radialMax, Math.ceil(radialSpan / cellTarget)));
+  const arcCells = Math.max(arcMin, Math.min(arcMax, Math.ceil(arcLen / cellTarget)));
+  const vertCount = (radialCells + 1) * (arcCells + 1);
+  const positions = new Float32Array(vertCount * 3);
+  const colors = new Float32Array(vertCount * 3);
+  const indices = [];
+  const listenerAnchors = new Array(vertCount);
+
+  for (let i = 0; i <= radialCells; i++) {
+    const r = r_in + (i / radialCells) * radialSpan;
+    const z = zFn(r);
+    for (let j = 0; j <= arcCells; j++) {
+      const phi = phiStart + (j / arcCells) * phiLength;
+      const sx = cx + r * Math.cos(phi);
+      const sy = cy + r * Math.sin(phi);
+      const idx = i * (arcCells + 1) + j;
+      positions[idx * 3 + 0] = sx;
+      positions[idx * 3 + 1] = z + liftAbove;
+      positions[idx * 3 + 2] = sy;
+      listenerAnchors[idx] = { x: sx, y: sy, z: z + earAbove };
+    }
+  }
+  for (let i = 0; i < radialCells; i++) {
+    for (let j = 0; j < arcCells; j++) {
+      const a = i * (arcCells + 1) + j;
+      const b = a + 1;
+      const c = (i + 1) * (arcCells + 1) + j;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return { geo, listenerAnchors };
+}
+
+// Axis-aligned rectangle grid (used for the court and for any future flat
+// audience area). Same vertex-color convention as the ring-sector builder.
+function buildRectMappingGeometry({ minX, maxX, minY, maxY, elevation, earAbove = 1.2, liftAbove = 0.05, cellTarget = 0.5 }) {
+  const w = maxX - minX, d = maxY - minY;
+  const nx = Math.max(12, Math.min(80, Math.ceil(w / cellTarget)));
+  const nz = Math.max(12, Math.min(80, Math.ceil(d / cellTarget)));
+  const vertCount = (nx + 1) * (nz + 1);
+  const positions = new Float32Array(vertCount * 3);
+  const colors = new Float32Array(vertCount * 3);
+  const indices = [];
+  const listenerAnchors = new Array(vertCount);
+  for (let i = 0; i <= nx; i++) {
+    const sx = minX + (i / nx) * w;
+    for (let j = 0; j <= nz; j++) {
+      const sy = minY + (j / nz) * d;
+      const idx = i * (nz + 1) + j;
+      positions[idx * 3 + 0] = sx;
+      positions[idx * 3 + 1] = elevation + liftAbove;
+      positions[idx * 3 + 2] = sy;
+      listenerAnchors[idx] = { x: sx, y: sy, z: elevation + earAbove };
+    }
+  }
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < nz; j++) {
+      const a = i * (nz + 1) + j;
+      const b = a + 1;
+      const c = (i + 1) * (nz + 1) + j;
+      const d2 = c + 1;
+      indices.push(a, c, b, b, c, d2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return { geo, listenerAnchors };
+}
+
+// Fill the color BufferAttribute by sampling SPL at each vertex anchor.
+// Returns min/max/avg/uniformity stats for the legend + Results panel.
+function sampleSurfaceColors(geo, anchors, sources, room) {
+  const colorAttr = geo.attributes.color;
+  const getDef = url => getCachedLoudspeaker(url);
+  let minSPL = Infinity, maxSPL = -Infinity, sum = 0, count = 0;
+  for (let i = 0; i < anchors.length; i++) {
+    const spl = computeMultiSourceSPL({
+      sources, getSpeakerDef: getDef,
+      listenerPos: anchors[i], freq_hz: 1000, room,
+    });
+    if (isFinite(spl)) {
+      if (spl < minSPL) minSPL = spl;
+      if (spl > maxSPL) maxSPL = spl;
+      sum += spl; count++;
+      const [r, g, b] = splColorRGB(spl);
+      colorAttr.setXYZ(i, r / 255, g / 255, b / 255);
+    } else {
+      // No-signal cells (through too many walls etc.) draw dark gray so the
+      // surface still reads as a continuous region rather than vanishing.
+      colorAttr.setXYZ(i, 0.12, 0.12, 0.14);
+    }
+  }
+  colorAttr.needsUpdate = true;
+  return {
+    minSPL_db: count > 0 ? minSPL : 0,
+    maxSPL_db: count > 0 ? maxSPL : 0,
+    avgSPL_db: count > 0 ? sum / count : 0,
+    uniformity_db: count > 0 ? maxSPL - minSPL : 0,
+    count,
+  };
+}
+
+// One MeshBasicMaterial shared across every mapping surface — keeps GPU state
+// changes low and makes toggle visibility flip cheap.
+function makeMappingMaterial() {
+  return new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false,
+  });
+}
+
+// Orchestrator: builds the full set of arena mapping surfaces (bowls +
+// concourse + court), pushes meshes into heatmapGroup, and writes summary
+// rows into state.results.zoneGrids for the Results panel / legend.
+function rebuildStadiumHeatmap(room, sources) {
+  const s = room.stadiumStructure;
+  if (!s) return;
+  const vom = s.vomitories;
+  if (!vom || !vom.centerAnglesDeg?.length || !(vom.widthDeg > 0)) return;
+
+  const halfWidthRad = (vom.widthDeg / 2) * Math.PI / 180;
+  const sorted = [...vom.centerAnglesDeg].sort((a, b) => a - b).map(a => a * Math.PI / 180);
+  // Match the sector labeling used in the preset (SE/SW/NW/NE for 4 sectors
+  // at ±45° diagonals). Fall back to numeric if the count differs.
+  const fallbackLabels = sorted.length === 4 ? ['SE', 'SW', 'NW', 'NE'] : sorted.map((_, i) => `S${i+1}`);
+  const material = makeMappingMaterial();
+
+  for (let i = 0; i < sorted.length; i++) {
+    const curCenter = sorted[i];
+    const nextCenter = sorted[(i + 1) % sorted.length];
+    const sectorStart = curCenter + halfWidthRad;
+    let sectorEnd = nextCenter - halfWidthRad;
+    if (sectorEnd <= sectorStart) sectorEnd += Math.PI * 2;
+    const sectorLength = sectorEnd - sectorStart;
+    const label = fallbackLabels[i];
+
+    const addSurface = ({ geoPack, id, surfaceLabel, elev }) => {
+      const stats = sampleSurfaceColors(geoPack.geo, geoPack.listenerAnchors, sources, room);
+      const mesh = new THREE.Mesh(geoPack.geo, material);
+      mesh.userData.tag = id;
+      mesh.userData.acoustic_material = 'concrete';
+      heatmapGroup.add(mesh);
+      state.results.zoneGrids.push({
+        id, label: surfaceLabel,
+        elevation_m: elev, earZ_m: elev + 1.2,
+        grid: [], cellsX: 0, cellsY: 0, boundsX: [0,0], boundsY: [0,0],
+        cellW_m: 0, cellH_m: 0,
+        minSPL_db: stats.minSPL_db, maxSPL_db: stats.maxSPL_db,
+        avgSPL_db: stats.avgSPL_db, uniformity_db: stats.uniformity_db,
+      });
+    };
+
+    // Lower bowl: inclined ring sector at mean rake z.
+    const lb = s.lowerBowl;
+    if (lb) {
+      addSurface({
+        geoPack: buildRingSectorGeometry({
+          cx: s.cx, cy: s.cy,
+          r_in: lb.r_in, r_out: lb.r_out,
+          phiStart: sectorStart, phiLength: sectorLength,
+          zFn: r => rakeZAtRadius(r, lb),
+        }),
+        id: `MAP_LB_${label}`,
+        surfaceLabel: `Lower ${label}`,
+        elev: (lb.tier_heights_m[0] + lb.tier_heights_m[lb.tier_heights_m.length - 1]) / 2,
+      });
+    }
+    // Upper bowl.
+    const ub = s.upperBowl;
+    if (ub) {
+      addSurface({
+        geoPack: buildRingSectorGeometry({
+          cx: s.cx, cy: s.cy,
+          r_in: ub.r_in, r_out: ub.r_out,
+          phiStart: sectorStart, phiLength: sectorLength,
+          zFn: r => rakeZAtRadius(r, ub),
+        }),
+        id: `MAP_UB_${label}`,
+        surfaceLabel: `Upper ${label}`,
+        elev: (ub.tier_heights_m[0] + ub.tier_heights_m[ub.tier_heights_m.length - 1]) / 2,
+      });
+    }
+    // Concourse plateau (flat ring sector).
+    const co = s.concourse;
+    if (co) {
+      addSurface({
+        geoPack: buildRingSectorGeometry({
+          cx: s.cx, cy: s.cy,
+          r_in: co.r_in, r_out: co.r_out,
+          phiStart: sectorStart, phiLength: sectorLength,
+          zFn: () => co.elevation_m,
+          radialMin: 4, radialMax: 16,
+        }),
+        id: `MAP_CO_${label}`,
+        surfaceLabel: `Concourse ${label}`,
+        elev: co.elevation_m,
+      });
+    }
+  }
+
+  // Court (flat rectangle). Preset sets id === 'Z_court'; fall back to the
+  // first zone at elevation 0 if that id isn't present.
+  const courtZone = state.zones.find(z => z.id === 'Z_court')
+    ?? state.zones.find(z => (z.elevation_m ?? 0) === 0);
+  if (courtZone && courtZone.vertices?.length >= 3) {
+    const xs = courtZone.vertices.map(v => v.x);
+    const ys = courtZone.vertices.map(v => v.y);
+    const pack = buildRectMappingGeometry({
+      minX: Math.min(...xs), maxX: Math.max(...xs),
+      minY: Math.min(...ys), maxY: Math.max(...ys),
+      elevation: courtZone.elevation_m ?? 0,
+    });
+    const stats = sampleSurfaceColors(pack.geo, pack.listenerAnchors, sources, room);
+    const mesh = new THREE.Mesh(pack.geo, material);
+    mesh.userData.tag = 'heatmap_court';
+    mesh.userData.acoustic_material = courtZone.material_id ?? null;
+    heatmapGroup.add(mesh);
+    state.results.zoneGrids.push({
+      id: courtZone.id, label: courtZone.label ?? 'Court',
+      elevation_m: courtZone.elevation_m ?? 0,
+      earZ_m: (courtZone.elevation_m ?? 0) + 1.2,
+      grid: [], cellsX: 0, cellsY: 0, boundsX: [0,0], boundsY: [0,0],
+      cellW_m: 0, cellH_m: 0,
+      minSPL_db: stats.minSPL_db, maxSPL_db: stats.maxSPL_db,
+      avgSPL_db: stats.avgSPL_db, uniformity_db: stats.uniformity_db,
+    });
+  }
 }
 
 // Builds solid stadium structure (concrete) from room.stadiumStructure.
