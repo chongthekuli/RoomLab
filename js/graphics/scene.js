@@ -13,7 +13,8 @@ import { loadCharacterRig } from './character-loader.js';
 
 let scene, camera, renderer, controls;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
-let aimLinesGroup;
+let aimLinesGroup, audienceGroup;
+let audienceBodyGeo = null, audienceHeadGeo = null;
 let materialsRef, container;
 
 // --- Walkthrough (3rd-person) mode ---------------------------------------
@@ -966,6 +967,141 @@ function disposeGroup(g) {
   }
 }
 
+// Seated-audience crowd — occupancy_percent on a zone drives both acoustic
+// absorption (RT60 module) and visible people here. ~1.25 persons/m² at 100%
+// occupancy (0.8 m²/seat, typical arena row spacing). Random shirt color per
+// instance so the user can see the crowd as a visual cue.
+const AUDIENCE_SHIRT_COLORS = [
+  0xe63946, 0xf4a261, 0xe9c46a, 0x2a9d8f, 0x264653,
+  0x9b5de5, 0x00bbf9, 0xfee440, 0xf28482, 0x84a98c,
+  0x606c38, 0x8338ec, 0xff006e, 0x3a86ff, 0xfb5607,
+  0x06a77d, 0xd90429, 0xffb703, 0x6a4c93, 0x219ebc,
+];
+const AUDIENCE_SKIN_COLORS = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524];
+const AUDIENCE_DENSITY_PER_M2 = 1.25;
+const AUDIENCE_GLOBAL_CAP = 8000;
+
+function pointInZonePolygon(x, y, verts) {
+  let inside = false;
+  const n = verts.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const yi = verts[i].y, yj = verts[j].y;
+    if ((yi > y) !== (yj > y)) {
+      const xAtY = (verts[j].x - verts[i].x) * (y - yi) / (yj - yi) + verts[i].x;
+      if (x < xAtY) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function zonePolygonArea2D(verts) {
+  let a = 0;
+  const n = verts.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    a += verts[i].x * verts[j].y - verts[j].x * verts[i].y;
+  }
+  return Math.abs(a) / 2;
+}
+
+function rebuildAudience() {
+  if (!audienceGroup) {
+    audienceGroup = new THREE.Group();
+    scene.add(audienceGroup);
+  } else {
+    disposeGroup(audienceGroup);
+  }
+  if (!state.zones || state.zones.length === 0) return;
+
+  // Plan total count per zone; scale down if we'd exceed the global cap so
+  // huge stadium presets don't push 10k+ instances.
+  const plans = [];
+  let total = 0;
+  for (const zone of state.zones) {
+    const occFrac = Math.max(0, Math.min(1, (zone.occupancy_percent ?? 0) / 100));
+    if (occFrac <= 0.01) continue;
+    if (!zone.vertices || zone.vertices.length < 3) continue;
+    const area = zonePolygonArea2D(zone.vertices);
+    if (area <= 0) continue;
+    const count = Math.max(1, Math.round(area * occFrac * AUDIENCE_DENSITY_PER_M2));
+    plans.push({ zone, area, count });
+    total += count;
+  }
+  if (total === 0) return;
+  const scale = total > AUDIENCE_GLOBAL_CAP ? AUDIENCE_GLOBAL_CAP / total : 1;
+
+  // Geometry: body = short box (shirt), head = sphere (skin). Both translated
+  // so the feet sit at y=0 on the zone surface.
+  if (!audienceBodyGeo) {
+    audienceBodyGeo = new THREE.BoxGeometry(0.42, 0.62, 0.32);
+    audienceBodyGeo.translate(0, 0.31, 0);
+    audienceHeadGeo = new THREE.SphereGeometry(0.13, 8, 6);
+    audienceHeadGeo.translate(0, 0.78, 0);
+  }
+
+  const placements = [];
+  for (const plan of plans) {
+    const zone = plan.zone;
+    const n = Math.max(1, Math.round(plan.count * scale));
+    const xs = zone.vertices.map(v => v.x);
+    const ys = zone.vertices.map(v => v.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const baseY = (zone.elevation_m ?? 0) + 0.05;
+    let placed = 0, tries = 0;
+    const maxTries = n * 25;
+    while (placed < n && tries < maxTries) {
+      tries++;
+      const px = minX + Math.random() * (maxX - minX);
+      const py = minY + Math.random() * (maxY - minY);
+      if (!pointInZonePolygon(px, py, zone.vertices)) continue;
+      placements.push({
+        x: px, y: baseY, z: py,
+        shirt: AUDIENCE_SHIRT_COLORS[Math.floor(Math.random() * AUDIENCE_SHIRT_COLORS.length)],
+        skin:  AUDIENCE_SKIN_COLORS[Math.floor(Math.random() * AUDIENCE_SKIN_COLORS.length)],
+        yaw: Math.random() * Math.PI * 2,
+      });
+      placed++;
+    }
+  }
+  if (placements.length === 0) return;
+
+  const bodyMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 });
+  const headMat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0 });
+  const bodyMesh = new THREE.InstancedMesh(audienceBodyGeo, bodyMat, placements.length);
+  const headMesh = new THREE.InstancedMesh(audienceHeadGeo, headMat, placements.length);
+  bodyMesh.castShadow = false;
+  bodyMesh.receiveShadow = false;
+  headMesh.castShadow = false;
+  headMesh.receiveShadow = false;
+  bodyMesh.userData.tag = 'audience_body';
+  headMesh.userData.tag = 'audience_head';
+
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const s1 = new THREE.Vector3(1, 1, 1);
+  const up = new THREE.Vector3(0, 1, 0);
+  const pos = new THREE.Vector3();
+  const col = new THREE.Color();
+  for (let i = 0; i < placements.length; i++) {
+    const p = placements[i];
+    pos.set(p.x, p.y, p.z);
+    q.setFromAxisAngle(up, p.yaw);
+    m.compose(pos, q, s1);
+    bodyMesh.setMatrixAt(i, m);
+    headMesh.setMatrixAt(i, m);
+    col.setHex(p.shirt); bodyMesh.setColorAt(i, col);
+    col.setHex(p.skin);  headMesh.setColorAt(i, col);
+  }
+  bodyMesh.instanceMatrix.needsUpdate = true;
+  headMesh.instanceMatrix.needsUpdate = true;
+  if (bodyMesh.instanceColor) bodyMesh.instanceColor.needsUpdate = true;
+  if (headMesh.instanceColor) headMesh.instanceColor.needsUpdate = true;
+
+  audienceGroup.add(bodyMesh);
+  audienceGroup.add(headMesh);
+}
+
 function colorForAlpha(alpha) {
   if (alpha < 0.10) return 0xd93a3a;
   if (alpha < 0.25) return 0xe6a53a;
@@ -1702,6 +1838,7 @@ function rebuildZones() { shadowsNeedRefresh = true;
     // concrete bowl lathe already shows the seating geometry, and rendering
     // 52 translucent tier patches on top of it looks wrong.
     rebuildStadiumFurniture();
+    rebuildAudience();
     heatmapGroup.visible = state.display.showHeatmaps;
     updateSPLLegend();
     return;
@@ -1806,6 +1943,7 @@ function rebuildZones() { shadowsNeedRefresh = true;
   }
 
   rebuildStadiumFurniture();
+  rebuildAudience();
   heatmapGroup.visible = state.display.showHeatmaps;
   updateSPLLegend();
 }
