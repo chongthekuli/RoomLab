@@ -157,17 +157,21 @@ function generateTieredBowl({
 // at SPL-compute / render time.
 function generateCenterLineArrayCluster({ cx, cy, cz, ring_r, hangCount = 4, elementsPerArray = 4, modelUrl, power_watts_each = 500, topTilt_deg = -12, splayAnglesDeg = null, elementSpacing_m = 0.42, startAngleDeg = 0 }) {
   const arrays = [];
-  // Industry-standard progressive J-curve splays (K2/J8/SOUNDVISION style):
-  // upper boxes near 0° for long-throw line-source behavior, lower boxes
-  // open up to cover near-field. For elementsPerArray = 4 the default is
-  // [2, 5, 10] — per pro-audio reference (see feedback_line_array_physics).
+  // Industry-standard progressive J-curve splays (K2/J8/SOUNDVISION style).
+  // Upper boxes stay near 0° for long-throw line-source behavior, lower
+  // boxes open up dramatically to cover near-field. The sums below give
+  // ~36–44° total vertical coverage — enough to span a real arena bowl
+  // audience from the closest row (60-70° depression) up to the far upper
+  // tier (15-20° depression). Previous shallower splays (19° total) meant
+  // only the bottom 1–2 elements actually hit audience, cutting sector
+  // separation because the other 4 elements' energy went above the bowl.
   const DEFAULT_SPLAYS_BY_COUNT = {
-    2: [5],
-    3: [2, 5],
-    4: [2, 5, 10],
-    5: [1, 2, 5, 10],
-    6: [1, 2, 3, 5, 8],
-    8: [0.5, 1, 2, 3, 4, 6, 8],
+    2: [10],
+    3: [5, 10],
+    4: [4, 8, 14],
+    5: [2, 5, 10, 15],
+    6: [2, 4, 6, 10, 14],
+    8: [1, 2, 3, 4, 6, 10, 14],
   };
   const splay = splayAnglesDeg
     ?? DEFAULT_SPLAYS_BY_COUNT[elementsPerArray]

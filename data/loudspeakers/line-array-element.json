@@ -28,16 +28,16 @@
     "angular_resolution_deg": 30,
     "azimuth_deg":   [-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180],
     "elevation_deg": [-90, -60, -30, 0, 30, 60, 90],
-    "note": "Single line-array element. On-axis main beam ±55° horizontal, ±10° vertical. Off-axis falls 20+ dB; rear rejection ~-36 dB. Mimics K2/J8 patterns at 1 kHz.",
+    "note": "Single line-array element. On-axis ±55° H × ±10° V main beam. Off-beam falls 25+ dB; rear rejection ~-36 dB. Models the tight vertical directivity of a K2 / J8 class cabinet at 1 kHz so cross-sector contribution stays below the direct-field peak.",
     "attenuation_db": {
       "1000": [
-        [-40, -40, -40, -40, -40, -40, -40, -40, -40, -40, -40, -40, -40],
+        [-42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42],
+        [-40, -40, -38, -36, -34, -32, -32, -32, -34, -36, -38, -40, -40],
         [-38, -36, -34, -32, -30, -28, -28, -28, -30, -32, -34, -36, -38],
-        [-32, -28, -25, -22, -19, -18, -18, -18, -19, -22, -25, -28, -32],
         [-36, -33, -28, -20,  -8,  -1,   0,  -1,  -8, -20, -28, -33, -36],
-        [-32, -28, -25, -22, -19, -18, -18, -18, -19, -22, -25, -28, -32],
         [-38, -36, -34, -32, -30, -28, -28, -28, -30, -32, -34, -36, -38],
-        [-40, -40, -40, -40, -40, -40, -40, -40, -40, -40, -40, -40, -40]
+        [-40, -40, -38, -36, -34, -32, -32, -32, -34, -36, -38, -40, -40],
+        [-42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42]
       ]
     }
   }
