@@ -117,6 +117,7 @@ function generateTieredBowl({
   cx, cy, r_in, r_out, tier_heights_m, sectorCount = 4,
   gapDeg = 0, sectorLabelsOverride = null,
   material_id, idPrefix, labelPrefix, startAngleDeg,
+  occupancy_percent = 0,
 }) {
   const defaultLabels4 = ['E', 'S', 'W', 'N'];
   const defaultLabels8 = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
@@ -144,6 +145,7 @@ function generateTieredBowl({
         vertices: ringSectorVerts(cx, cy, ri, ro, ts, te, 4),
         elevation_m: tier_heights_m[t],
         material_id,
+        occupancy_percent,
       });
     }
   }
@@ -447,6 +449,7 @@ export const PRESETS = {
           idPrefix: 'Z_lb', labelPrefix: 'Lower',
           gapDeg: 10, startAngleDeg: 45,
           sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
+          occupancy_percent: 30,
         }),
         ...generateTieredBowl({
           cx, cy, r_in: 26, r_out: 29,
@@ -455,6 +458,7 @@ export const PRESETS = {
           idPrefix: 'Z_ub', labelPrefix: 'Upper',
           gapDeg: 10, startAngleDeg: 45,
           sectorLabelsOverride: ['SE', 'SW', 'NW', 'NE'],
+          occupancy_percent: 30,
         }),
       ],
       // 4 line-array hangs (N/E/S/W), each 4 elements with 4° splay between
