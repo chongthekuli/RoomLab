@@ -506,42 +506,49 @@ function drawWaterfall(canvas, def, onAxis) {
   const tMaxMs = 6;
   const nF = 180;                    // frequency samples per slice
 
-  // Back-to-front — later slices drawn first so earlier (higher-energy)
-  // slices occlude them, exactly like the classic 3D CSD mesh.
-  for (let s = nSlices - 1; s >= 0; s--) {
+  // Pre-compute every slice as a sorted list of {x, y} so we can draw in
+  // two passes: back-to-front for a thin dark outline (visual depth cue),
+  // then the coloured strokes on top. Avoids the filled-polygon pitfall
+  // where the FRONT slice's fill hides every rear slice that sits inside
+  // its shape — the symptom in the earlier screenshot.
+  const slicePaths = new Array(nSlices);
+  for (let s = 0; s < nSlices; s++) {
     const tms = (s / (nSlices - 1)) * tMaxMs;
     const ox = s * skewX;
     const oy = s * skewY;
-    const baseY = padT + plotH + oy;
-
-    ctx.beginPath();
-    let minDb = peakDb;
+    const pts = new Array(nF + 1);
     for (let i = 0; i <= nF; i++) {
       const u = i / nF;
       const hz = fMin * Math.pow(fMax / fMin, u);
       const fr = frAt(hz);
       const decayMs = Math.max(0.4, decayAt(hz));
       const lvl = Math.max(floorDb, sens + fr - (20 / decayMs) * tms);
-      if (lvl < minDb) minDb = lvl;
-      const x = xOfHz(hz) + ox;
-      const y = yOfDb(lvl) + oy;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      pts[i] = { x: xOfHz(hz) + ox, y: yOfDb(lvl) + oy };
     }
-    // Close to baseline for fill (no artefacts at chart edges).
-    ctx.lineTo(xOfHz(fMax) + ox, baseY);
-    ctx.lineTo(xOfHz(fMin) + ox, baseY);
-    ctx.closePath();
+    slicePaths[s] = pts;
+  }
 
-    // Fill — dark but semi-transparent so later slices show through
-    // slightly when no earlier slice is in front (at chart edges).
-    ctx.fillStyle = `rgba(12, 15, 22, ${0.88 - s * 0.004})`;
-    ctx.fill();
+  // Pass 1 — thin dark under-stroke behind each coloured trace, so slices
+  // read as individual 3D-ish ribbons even when they overlap.
+  ctx.lineWidth = 2.6;
+  ctx.strokeStyle = 'rgba(5, 8, 14, 0.9)';
+  for (let s = nSlices - 1; s >= 0; s--) {
+    const pts = slicePaths[s];
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
 
-    // Stroke — time-coded colour, warmer at t=0, cooler at t=max.
+  // Pass 2 — coloured strokes, time-coded (hot = t0, cool = tMax).
+  for (let s = nSlices - 1; s >= 0; s--) {
+    const pts = slicePaths[s];
     const tFrac = 1 - (s / (nSlices - 1));
+    ctx.lineWidth = s === 0 ? 1.8 : 1.0;
     ctx.strokeStyle = waterfallColor(tFrac, 0.95);
-    ctx.lineWidth = s === 0 ? 1.6 : 1.0;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
 
