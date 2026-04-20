@@ -211,8 +211,8 @@ async function render() {
 
     <section class="sv-section">
       <h4>Waterfall (cumulative spectral decay)</h4>
-      <canvas id="sv-waterfall" width="720" height="260"></canvas>
-      <div class="sub sv-caption">Per-band decay envelope from the on-axis impulse response. X = frequency (log), Y = time (ms), colour = relative SPL. A clean cabinet shows a steep decay with no ringing tails; long streaks indicate resonances or port ringing.</div>
+      <canvas id="sv-waterfall" width="720" height="340"></canvas>
+      <div class="sub sv-caption">On-axis magnitude response sliced in time. Front slice is the FR at t=0; each slice behind it is the FR decayed by the per-band ring-down time. Short decay = slices drop steeply into the noise floor; long streaks = resonances that ring on.</div>
     </section>
 
     <section class="sv-section">
@@ -451,116 +451,153 @@ function drawPolarCanvas(canvas, def, bandKey, plane) {
 // curve as initial levels at t=0 and per-band exponential decay rates
 // from csd_ms (20 dB decay time). Interpolation between octave band
 // centres along the frequency axis so the display reads continuous.
+// CSD waterfall rendered as stacked offset line traces — the REW / LspCAD /
+// Klippel convention. Each slice is a snapshot of the on-axis magnitude
+// response at t = tms, decayed from its t=0 FR by an exponential with
+// per-band decay time. Later slices are pushed right+down in isometric
+// projection with semi-opaque fills so they occlude earlier slices like
+// a real 3D mesh. Colour encodes time (hot = early, cold = late).
 function drawWaterfall(canvas, def, onAxis) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  const padL = 46, padR = 12, padT = 14, padB = 28;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
   ctx.clearRect(0, 0, W, H);
 
-  // Frequency grid — log-spaced, 140 bins for smooth display.
-  const fMin = 60, fMax = 20000;
-  const nF = 140;
-  const freqBins = new Array(nF);
-  for (let i = 0; i < nF; i++) {
-    const t = i / (nF - 1);
-    freqBins[i] = fMin * Math.pow(fMax / fMin, t);
-  }
-
-  // Time axis — 0 to 40 ms, 100 rows.
-  const tMax = 40;
-  const nT = 100;
-
   const csd = csdPerBand(def);
-  // Sensitivity baseline so the X-t=0 row matches the FR curve.
   const sens = def.acoustic?.sensitivity_db_1w_1m ?? 90;
 
-  const levelAt = (hz, tms) => {
-    // Log-linear interpolation between octave band centres for both
-    // the initial level (dB below sensitivity) and decay time.
-    const lhz = Math.log2(hz);
-    // Find surrounding band centres
-    const bands = onAxis;
-    let lo = bands[0], hi = bands[bands.length - 1];
-    for (let i = 0; i < bands.length - 1; i++) {
-      if (hz >= bands[i].hz && hz <= bands[i + 1].hz) { lo = bands[i]; hi = bands[i + 1]; break; }
+  // Smooth log-space linear interpolation — no tBlend reuse across the
+  // two independent curves, and endpoints are clamped so sub-125 Hz and
+  // super-8 kHz regions don't flip to garbage values.
+  const interpLog = (table, hz, key) => {
+    if (hz <= table[0].hz) return table[0][key];
+    if (hz >= table[table.length - 1].hz) return table[table.length - 1][key];
+    for (let i = 0; i < table.length - 1; i++) {
+      const lo = table[i], hi = table[i + 1];
+      if (hz >= lo.hz && hz <= hi.hz) {
+        const t = (Math.log2(hz) - Math.log2(lo.hz)) / (Math.log2(hi.hz) - Math.log2(lo.hz));
+        return lo[key] + t * (hi[key] - lo[key]);
+      }
     }
-    const r = Math.log2(hz) - Math.log2(lo.hz);
-    const span = Math.log2(hi.hz) - Math.log2(lo.hz);
-    const tBlend = span > 0 ? r / span : 0;
-    const fr_db = lo.db * (1 - tBlend) + hi.db * tBlend;
-    // Decay time blend
-    let decayLo = csd[0].decay_ms, decayHi = csd[csd.length - 1].decay_ms;
-    for (let i = 0; i < csd.length - 1; i++) {
-      if (hz >= csd[i].hz && hz <= csd[i + 1].hz) { decayLo = csd[i].decay_ms; decayHi = csd[i + 1].decay_ms; break; }
-    }
-    const decayMs = decayLo * (1 - tBlend) + decayHi * tBlend;
-    // Exponential decay: level(t) = fr_db − (20 / decay_ms) · t
-    const rate = 20 / Math.max(0.1, decayMs);
-    const level = sens + fr_db - rate * tms;
-    return level;
+    return 0;
   };
+  const csdTable = csd.map(c => ({ hz: c.hz, decay_ms: c.decay_ms }));
+  const frAt = (hz) => interpLog(onAxis, hz, 'db');
+  const decayAt = (hz) => interpLog(csdTable, hz, 'decay_ms');
 
-  // Paint a pixel per bin (nF × nT heatmap scaled into plot area).
-  const cellW = plotW / nF;
-  const cellH = plotH / nT;
-  const peak = sens;  // top of colour scale
-  const bottom = sens - 40;
-  for (let j = 0; j < nT; j++) {
-    const tms = (j / (nT - 1)) * tMax;
-    for (let i = 0; i < nF; i++) {
-      const lvl = levelAt(freqBins[i], tms);
-      const t = (lvl - bottom) / (peak - bottom);
-      const clamped = Math.max(0, Math.min(1, t));
-      ctx.fillStyle = waterfallColor(clamped);
-      const x = padL + i * cellW;
-      const y = padT + j * cellH;
-      ctx.fillRect(x, y, cellW + 0.5, cellH + 0.5);
+  // Layout — isometric projection: later slices shift right + down.
+  const padL = 54, padR = 20, padT = 18, padB = 34;
+  const nSlices = 32;
+  const skewX = 1.1;                 // per slice, horizontal pixels
+  const skewY = 3.4;                 // per slice, vertical pixels
+  const plotW = W - padL - padR - skewX * (nSlices - 1);
+  const plotH = H - padT - padB - skewY * (nSlices - 1);
+
+  // Axes: log frequency × dB SPL.
+  const fMin = 50, fMax = 20000;
+  const peakDb = sens + 3;
+  const floorDb = sens - 35;
+  const xOfHz = (hz) => padL + ((Math.log2(hz) - Math.log2(fMin)) / (Math.log2(fMax) - Math.log2(fMin))) * plotW;
+  const yOfDb = (db) => padT + plotH - ((db - floorDb) / (peakDb - floorDb)) * plotH;
+
+  const tMaxMs = 40;
+  const nF = 180;                    // frequency samples per slice
+
+  // Back-to-front — later slices drawn first so earlier (higher-energy)
+  // slices occlude them, exactly like the classic 3D CSD mesh.
+  for (let s = nSlices - 1; s >= 0; s--) {
+    const tms = (s / (nSlices - 1)) * tMaxMs;
+    const ox = s * skewX;
+    const oy = s * skewY;
+    const baseY = padT + plotH + oy;
+
+    ctx.beginPath();
+    let minDb = peakDb;
+    for (let i = 0; i <= nF; i++) {
+      const u = i / nF;
+      const hz = fMin * Math.pow(fMax / fMin, u);
+      const fr = frAt(hz);
+      const decayMs = Math.max(0.4, decayAt(hz));
+      const lvl = Math.max(floorDb, sens + fr - (20 / decayMs) * tms);
+      if (lvl < minDb) minDb = lvl;
+      const x = xOfHz(hz) + ox;
+      const y = yOfDb(lvl) + oy;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
     }
+    // Close to baseline for fill (no artefacts at chart edges).
+    ctx.lineTo(xOfHz(fMax) + ox, baseY);
+    ctx.lineTo(xOfHz(fMin) + ox, baseY);
+    ctx.closePath();
+
+    // Fill — dark but semi-transparent so later slices show through
+    // slightly when no earlier slice is in front (at chart edges).
+    ctx.fillStyle = `rgba(12, 15, 22, ${0.88 - s * 0.004})`;
+    ctx.fill();
+
+    // Stroke — time-coded colour, warmer at t=0, cooler at t=max.
+    const tFrac = 1 - (s / (nSlices - 1));
+    ctx.strokeStyle = waterfallColor(tFrac, 0.95);
+    ctx.lineWidth = s === 0 ? 1.6 : 1.0;
+    ctx.stroke();
   }
 
-  // Frequency tick labels (log)
+  // Back-plane grid behind every slice (drawn AFTER so the faint grid
+  // overlays on top without hiding the trace data).
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
   ctx.fillStyle = 'rgba(200, 210, 220, 0.7)';
   ctx.font = '10px sans-serif';
-  for (const tick of [100, 250, 500, 1000, 2000, 5000, 10000]) {
-    const x = padL + ((Math.log2(tick) - Math.log2(fMin)) / (Math.log2(fMax) - Math.log2(fMin))) * plotW;
-    ctx.fillText(tick >= 1000 ? `${tick / 1000}k` : `${tick}`, x - 8, H - 10);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+  ctx.lineWidth = 1;
+  for (const tick of [63, 125, 250, 500, 1000, 2000, 5000, 10000]) {
+    if (tick < fMin || tick > fMax) continue;
+    const xT = xOfHz(tick);
+    const xB = xT + (nSlices - 1) * skewX;
+    const yT = padT;
+    const yB = padT + plotH + (nSlices - 1) * skewY;
+    ctx.beginPath();
+    ctx.moveTo(xT, yT); ctx.lineTo(xB, yB); ctx.stroke();
+    ctx.fillText(tick >= 1000 ? `${tick / 1000}k` : `${tick}`, xB - 8, H - 12);
   }
+  for (const db of [sens, sens - 10, sens - 20, sens - 30]) {
+    const y = yOfDb(db);
+    ctx.beginPath();
+    ctx.moveTo(padL, y); ctx.lineTo(xOfHz(fMax), y); ctx.stroke();
+    ctx.fillText(`${Math.round(db)}`, 6, y + 3);
+  }
+  ctx.fillText('dB', 6, padT - 4);
+  ctx.fillText('Hz', W - 24, H - 12);
 
-  // Time tick labels
-  for (const tms of [0, 5, 10, 20, 30, 40]) {
-    const y = padT + (tms / tMax) * plotH;
-    ctx.fillStyle = 'rgba(200, 210, 220, 0.7)';
-    ctx.fillText(`${tms}`, 8, y + 4);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+  // Time-axis on the right edge — the "into the page" scale.
+  const labelTimes = [0, 5, 10, 20, 30, 40];
+  ctx.fillStyle = 'rgba(200, 210, 220, 0.8)';
+  for (const tms of labelTimes) {
+    const s = (tms / tMaxMs) * (nSlices - 1);
+    const x = xOfHz(fMax) + s * skewX + 4;
+    const y = padT + plotH + s * skewY + 3;
+    ctx.fillText(`${tms}`, x, y);
   }
-  ctx.fillText('ms', 8, padT);
-  ctx.fillText('Hz', W - 22, H - 10);
+  ctx.fillText('ms', xOfHz(fMax) + (nSlices - 1) * skewX + 4, padT + plotH - 6 + (nSlices - 1) * skewY - 14);
 }
 
-// Viridis-ish gradient for waterfall — dark purple (cold / low energy)
-// through green / yellow (hot / high energy).
-function waterfallColor(t) {
+// Viridis-ish gradient for waterfall — dark purple (cold / late decay)
+// through green / yellow (hot / initial energy).
+function waterfallColor(t, alpha = 1) {
   // Breakpoints: [r, g, b] at t = 0.00, 0.25, 0.50, 0.75, 1.00
   const stops = [
-    [  5,   7,  35],
-    [ 55,  25, 110],
-    [ 65, 150, 130],
-    [230, 220,  55],
-    [255, 240, 210],
+    [ 60,  40, 120],
+    [ 70,  90, 180],
+    [ 80, 200, 200],
+    [230, 220,  70],
+    [255, 230, 150],
   ];
-  const seg = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)));
-  const localT = (t * (stops.length - 1)) - seg;
+  const clamped = Math.max(0, Math.min(1, t));
+  const seg = Math.min(stops.length - 2, Math.floor(clamped * (stops.length - 1)));
+  const localT = (clamped * (stops.length - 1)) - seg;
   const a = stops[seg], b = stops[seg + 1];
   const r = Math.round(a[0] + (b[0] - a[0]) * localT);
   const g = Math.round(a[1] + (b[1] - a[1]) * localT);
   const bl = Math.round(a[2] + (b[2] - a[2]) * localT);
-  return `rgb(${r},${g},${bl})`;
+  return `rgba(${r},${g},${bl},${alpha})`;
 }
 
 function specRow(label, value) {
