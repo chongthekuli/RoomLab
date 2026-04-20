@@ -506,11 +506,77 @@ function drawWaterfall(canvas, def, onAxis) {
   const tMaxMs = 6;
   const nF = 180;                    // frequency samples per slice
 
-  // Pre-compute every slice as a sorted list of {x, y} so we can draw in
-  // two passes: back-to-front for a thin dark outline (visual depth cue),
-  // then the coloured strokes on top. Avoids the filled-polygon pitfall
-  // where the FRONT slice's fill hides every rear slice that sits inside
-  // its shape — the symptom in the earlier screenshot.
+  const bkX = (nSlices - 1) * skewX;     // back-plane X offset
+  const bkY = (nSlices - 1) * skewY;     // back-plane Y offset
+  const rightX = padL + plotW;           // front-right edge
+  const bottomY = padT + plotH;          // front-bottom edge
+  const tickFreqs = [63, 125, 250, 500, 1000, 2000, 5000, 10000];
+  const tickDbs = [sens, sens - 10, sens - 20];
+
+  // ---------- Grid (isometric box) — drawn BEFORE slices ----------
+  // Depth / back-plane lines are fainter than front-plane lines so the
+  // eye picks the front frame as the primary reference.
+  const faint = 'rgba(255, 255, 255, 0.05)';
+  const medium = 'rgba(255, 255, 255, 0.10)';
+  ctx.lineWidth = 1;
+
+  // --- Back wall: vertical (freq) + horizontal (dB) grid ---
+  ctx.strokeStyle = faint;
+  for (const tick of tickFreqs) {
+    if (tick < fMin || tick > fMax) continue;
+    const x = xOfHz(tick) + bkX;
+    ctx.beginPath();
+    ctx.moveTo(x, padT + bkY);
+    ctx.lineTo(x, bottomY + bkY);
+    ctx.stroke();
+  }
+  for (const db of tickDbs) {
+    const y = yOfDb(db) + bkY;
+    ctx.beginPath();
+    ctx.moveTo(padL + bkX, y);
+    ctx.lineTo(rightX + bkX, y);
+    ctx.stroke();
+  }
+
+  // --- Floor: depth lines at each freq tick (front-bottom → back-bottom) ---
+  for (const tick of tickFreqs) {
+    if (tick < fMin || tick > fMax) continue;
+    const xF = xOfHz(tick);
+    ctx.beginPath();
+    ctx.moveTo(xF, bottomY);
+    ctx.lineTo(xF + bkX, bottomY + bkY);
+    ctx.stroke();
+  }
+
+  // --- Side walls (4 depth edges framing the box) ---
+  ctx.strokeStyle = medium;
+  ctx.beginPath();
+  // top-left depth
+  ctx.moveTo(padL, padT);            ctx.lineTo(padL + bkX, padT + bkY);
+  // bottom-left depth
+  ctx.moveTo(padL, bottomY);         ctx.lineTo(padL + bkX, bottomY + bkY);
+  // top-right depth
+  ctx.moveTo(rightX, padT);          ctx.lineTo(rightX + bkX, padT + bkY);
+  // bottom-right depth
+  ctx.moveTo(rightX, bottomY);       ctx.lineTo(rightX + bkX, bottomY + bkY);
+  ctx.stroke();
+
+  // --- Back frame outline ---
+  ctx.strokeStyle = medium;
+  ctx.strokeRect(padL + bkX, padT + bkY, plotW, plotH);
+
+  // --- Front plane: dB grid + frame ---
+  ctx.strokeStyle = medium;
+  for (const db of tickDbs) {
+    const y = yOfDb(db);
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(rightX, y);
+    ctx.stroke();
+  }
+  ctx.strokeRect(padL, padT, plotW, plotH);
+
+  // ---------- Pre-compute slice paths ----------
   const slicePaths = new Array(nSlices);
   for (let s = 0; s < nSlices; s++) {
     const tms = (s / (nSlices - 1)) * tMaxMs;
@@ -528,10 +594,9 @@ function drawWaterfall(canvas, def, onAxis) {
     slicePaths[s] = pts;
   }
 
-  // Pass 1 — thin dark under-stroke behind each coloured trace, so slices
-  // read as individual 3D-ish ribbons even when they overlap.
+  // ---------- Slices (two passes: under-stroke, then colour) ----------
   ctx.lineWidth = 2.6;
-  ctx.strokeStyle = 'rgba(5, 8, 14, 0.9)';
+  ctx.strokeStyle = 'rgba(5, 8, 14, 0.92)';
   for (let s = nSlices - 1; s >= 0; s--) {
     const pts = slicePaths[s];
     ctx.beginPath();
@@ -539,8 +604,6 @@ function drawWaterfall(canvas, def, onAxis) {
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
-
-  // Pass 2 — coloured strokes, time-coded (hot = t0, cool = tMax).
   for (let s = nSlices - 1; s >= 0; s--) {
     const pts = slicePaths[s];
     const tFrac = 1 - (s / (nSlices - 1));
@@ -552,42 +615,49 @@ function drawWaterfall(canvas, def, onAxis) {
     ctx.stroke();
   }
 
-  // Back-plane grid behind every slice (drawn AFTER so the faint grid
-  // overlays on top without hiding the trace data).
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
-  ctx.fillStyle = 'rgba(200, 210, 220, 0.7)';
+  // ---------- Labels ----------
+  ctx.fillStyle = 'rgba(200, 210, 220, 0.75)';
   ctx.font = '10px sans-serif';
-  ctx.lineWidth = 1;
-  for (const tick of [63, 125, 250, 500, 1000, 2000, 5000, 10000]) {
-    if (tick < fMin || tick > fMax) continue;
-    const xT = xOfHz(tick);
-    const xB = xT + (nSlices - 1) * skewX;
-    const yT = padT;
-    const yB = padT + plotH + (nSlices - 1) * skewY;
-    ctx.beginPath();
-    ctx.moveTo(xT, yT); ctx.lineTo(xB, yB); ctx.stroke();
-    ctx.fillText(tick >= 1000 ? `${tick / 1000}k` : `${tick}`, xB - 8, H - 12);
-  }
-  for (const db of [sens, sens - 10, sens - 20, sens - 30]) {
+
+  // dB axis (left, front plane)
+  for (const db of [peakDb, sens, sens - 10, sens - 20]) {
     const y = yOfDb(db);
-    ctx.beginPath();
-    ctx.moveTo(padL, y); ctx.lineTo(xOfHz(fMax), y); ctx.stroke();
     ctx.fillText(`${Math.round(db)}`, 6, y + 3);
   }
   ctx.fillText('dB', 6, padT - 4);
-  ctx.fillText('Hz', W - 24, H - 12);
 
-  // Time-axis on the right edge — the "into the page" scale.
-  const labelTimes = [0, 1, 2, 3, 4, 5, 6];
-  ctx.fillStyle = 'rgba(200, 210, 220, 0.8)';
-  for (const tms of labelTimes) {
+  // Frequency axis (bottom — labels sit under the BACK-bottom edge so
+  // they align with the isometric "floor" and don't clash with the
+  // slices that project beyond the front baseline).
+  for (const tick of tickFreqs) {
+    if (tick < fMin || tick > fMax) continue;
+    const x = xOfHz(tick) + bkX;
+    const label = tick >= 1000 ? `${tick / 1000}k` : `${tick}`;
+    ctx.fillText(label, x - (label.length * 3), H - 10);
+  }
+  ctx.fillText('Hz', W - 18, H - 10);
+
+  // Time axis (right edge — runs along the right-bottom depth line from
+  // front-right-bottom to back-right-bottom). Ticks every 1 ms with a
+  // short perpendicular mark.
+  ctx.strokeStyle = 'rgba(200, 210, 220, 0.55)';
+  ctx.lineWidth = 1;
+  for (const tms of [0, 1, 2, 3, 4, 5, 6]) {
     if (tms > tMaxMs) continue;
     const s = (tms / tMaxMs) * (nSlices - 1);
-    const x = xOfHz(fMax) + s * skewX + 4;
-    const y = padT + plotH + s * skewY + 3;
-    ctx.fillText(`${tms}`, x, y);
+    const x = rightX + s * skewX;
+    const y = bottomY + s * skewY;
+    // Short outward tick
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 5, y + 2);
+    ctx.stroke();
+    ctx.fillText(`${tms}`, x + 8, y + 4);
   }
-  ctx.fillText('ms', xOfHz(fMax) + (nSlices - 1) * skewX + 18, padT + plotH + (nSlices - 1) * skewY + 3);
+  // Unit label past the last tick (sits clearly below the "6 ms" tick).
+  const lastX = rightX + bkX;
+  const lastY = bottomY + bkY;
+  ctx.fillText('ms', lastX + 14, lastY + 16);
 }
 
 // Viridis-ish gradient for waterfall — dark purple (cold / late decay)

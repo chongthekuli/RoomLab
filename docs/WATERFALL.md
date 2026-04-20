@@ -42,12 +42,40 @@ plotH = canvasH − padT − padB − skewY × (nSlices − 1)
 - Y: dB SPL mapped linearly to `[padT + plotH, padT]`. Range is `sens + 3` at top to `sens − 25` at bottom (28 dB vertical).
 - Time axis is implicit in the skew — labels are drawn at `xOfHz(fMax) + s × skewX + 4, padT + plotH + s × skewY + 3` for `tms = 0, 1, 2, 3, 4, 5, 6`.
 
-## Rendering (current — commit after this doc)
+## Rendering
 
-Switched from filled polygons to **strokes only** with a two-pass scheme:
+Three stages, in order:
+
+### 1. Grid (isometric box, drawn first so slices sit on top)
+
+Eight anchor points define the box:
 
 ```
-// Pass 1 — back-to-front, dark under-stroke (lineWidth 2.6, black @ 0.9).
+                back_top_L (padL + bkX, padT + bkY) ─── back_top_R
+                    │                                    │
+front_top_L (padL, padT) ──────────────── front_top_R (padL + plotW, padT)
+    │                                    │                                │
+front_bottom_L (padL, padT + plotH) ── front_bottom_R
+                    │                                    │
+                back_bottom_L ────────── back_bottom_R (rightX + bkX, bottomY + bkY)
+```
+
+Where `bkX = (nSlices − 1) × skewX`, `bkY = (nSlices − 1) × skewY`.
+
+Grid lines drawn, in order:
+
+- **Back wall**: vertical freq ticks (`63, 125, 250, 500, 1k, 2k, 5k, 10k`), horizontal dB ticks (`sens, sens−10, sens−20`). Colour: `rgba(255, 255, 255, 0.05)`.
+- **Floor**: one diagonal line per freq tick, front-bottom → back-bottom (gives the "depth" illusion).
+- **Side walls**: four depth edges (top-left, bottom-left, top-right, bottom-right) connecting front to back corners. Colour: `rgba(255, 255, 255, 0.10)`.
+- **Back frame**: `strokeRect(padL + bkX, padT + bkY, plotW, plotH)` — the back panel outline.
+- **Front plane**: dB grid + `strokeRect(padL, padT, plotW, plotH)`.
+
+Earlier draft drew "vertical" lines from `(xOfHz(tick), padT)` to `(xOfHz(tick) + bkX, bottomY + bkY)` — that's a diagonal from top-front to bottom-back, not a proper isometric edge. Replaced with the eight-corner model above.
+
+### 2. Slices (strokes only, two passes)
+
+```
+// Pass 1 — back-to-front, dark under-stroke (lineWidth 2.6, black @ 0.92).
 for (s = nSlices − 1 … 0):
     stroke the slice's polyline
 
@@ -59,6 +87,12 @@ for (s = nSlices − 1 … 0):
 ```
 
 Each slice's polyline is 181 vertices (180 sample intervals) computed once up-front and stored in `slicePaths[s]`.
+
+### 3. Labels
+
+- **dB** labels: left-edge, at `padL − 48, yOfDb(db)`. Values: `peakDb, sens, sens − 10, sens − 20`.
+- **Frequency** labels: at `xOfHz(tick) + bkX, H − 10` — aligned under the **back-bottom** edge so they don't clash with slice traces that project past the front baseline.
+- **Time** labels + ticks: along the right-depth edge from `(rightX, bottomY)` (t=0) to `(rightX + bkX, bottomY + bkY)` (t=tMaxMs). Each integer millisecond gets a short outward tick + numeric label. "ms" unit sits past the last tick.
 
 Colour ramp (`waterfallColor(t)`, `t ∈ [0, 1]`, where 1 = initial / hot and 0 = late / cold):
 
