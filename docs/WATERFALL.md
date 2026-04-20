@@ -1,35 +1,44 @@
-# Waterfall (Cumulative Spectral Decay) — render algorithm
+# Directivity Waterfall — render algorithm
 
 File: `js/ui/speaker-detail.js` → `drawWaterfall(canvas, def, onAxis)`.
+
+3D surface of SPL as a function of **horizontal angle and frequency simultaneously**. The convention matches the reference screenshot (a typical REW / ARTA / Klippel directivity waterfall):
+
+- **X**: azimuth angle, −110° to +110°
+- **depth**: frequency, log-spaced (20 kHz at front → 125 Hz at back)
+- **Z**: SPL (dB)
+
+An earlier draft of this chart plotted Cumulative Spectral Decay (SPL vs freq vs time). That showed time-domain ringing and was swapped out after the user requested the angle-vs-frequency view.
 
 ## Input data
 
 Three inputs per speaker:
 
-1. `onAxis` — array of `{ hz, db }` pairs, 27 log-spaced points from 40 Hz to 20 kHz. This is the **on-axis frequency response**: deviation in dB from the sensitivity value at 1 kHz. Comes from `acoustic.fr_fine_db` in the loudspeaker JSON (falls back to per-octave `on_axis_response_db`).
-2. `csd` — array of `{ hz, decay_ms }`, seven points at the STIPA octave-band centres (125, 250, 500, 1k, 2k, 4k, 8k). `decay_ms` is the **time for the on-axis magnitude at that frequency to decay by 20 dB** after the stimulus ends. Derived from `acoustic.csd_ms` in the JSON.
-3. `sens` — sensitivity in dB @ 1 W / 1 m from `acoustic.sensitivity_db_1w_1m`.
+1. `onAxis` — array of `{ hz, db }` pairs, up to 27 log-spaced points from 40 Hz to 20 kHz. The **on-axis frequency response**: deviation in dB from the sensitivity value at 1 kHz. Comes from `acoustic.fr_fine_db` in the loudspeaker JSON (falls back to per-octave `on_axis_response_db`).
+2. `def.directivity` — the full 7-band × 13-azimuth × 7-elevation attenuation grid. Off-axis attenuation at `(angle, hz)` is read via `interpolateAttenuation(dir, angle, 0, hz)` — bilinear over the grid, with elevation fixed at 0° (horizontal plane).
+3. `sens` — sensitivity in dB @ 1 W / 1 m.
+
+Per-band directivity missing from the JSON is back-filled by `loudspeaker.js` using class-based multipliers (standard / horn / line-element) so that every loaded speaker has realistic freq-dependent patterns even if only 1 kHz data was authored.
 
 ## Physics model
 
-For any `(hz, tms)`:
+For any `(angle_deg, hz)`:
 
 ```
-fr(hz)       = log-space linear interp of onAxis[i].db across onAxis[]
-decay_ms(hz) = log-space linear interp of csd[i].decay_ms across csd[]
-
-level(hz, tms) = max(floorDb,  sens + fr(hz) − (20 / decay_ms(hz)) × tms)
+fr(hz)      = log-space linear interp of onAxis[i].db
+att(a, hz)  = bilinear over dir.attenuation_db[hz][el][az], el=0
+spl(a, hz)  = max(floorDb,  sens + fr(hz) + att(a, hz))
 ```
 
-Both interpolations **clamp at the endpoints**: frequencies below the lowest table entry receive the lowest entry's value, frequencies above the highest receive the highest. Earlier drafts re-used a single `tBlend` from the FR lookup for the CSD lookup — that was the source of the sub-125 Hz and super-8 kHz stripes in the first waterfall screenshot.
+Both interpolations **clamp at the endpoints** so sub-125 Hz and super-8 kHz regions stay finite.
 
-## Layout — tilted-down 3D view (like the reference REW / ARTA / Klippel examples)
+## Layout — tilted-down 3D view
 
 - Canvas: 720 × 400 px
-- Padding: left 60, right 26, top 22, bottom 42
-- 26 time slices from `tms = 0` (front) to `tms = tMaxMs` (back). `tMaxMs = 6` — matches the REW default.
-- Oblique projection: each successive slice shifts `skewX = +1.1 px` right and `skewY = −6.0 px` **up**. `skewY < 0` is the key change from the first draft: back slices now appear HIGHER on the canvas, as if the viewer is looking down at the mesh.
-- `bkX = skewX × (nSlices − 1) = +27.5 px`, `bkY = skewY × (nSlices − 1) = −150 px`.
+- Padding: left 60, right 32, top 22, bottom 44
+- 24 frequency slices. Slice `s=0` is the FRONT slice (= `fMax = 20 kHz`); `s = nSlices − 1` is the BACK slice (= `fMin = 125 Hz`). Slicing is log-spaced via `freqAt(s) = fMax × (fMin/fMax)^(s/(nSlices−1))`.
+- Oblique projection: each successive slice shifts `skewX = +0.7 px` right and `skewY = −5.5 px` **up** (`skewY < 0` puts the viewer above the mesh).
+- `bkX = skewX × (nSlices − 1) = +16 px`, `bkY = skewY × (nSlices − 1) = −127 px`.
 - Plot dimensions leave room for the depth offsets:
   ```
   plotW = canvasW − padL − padR − bkX
@@ -38,10 +47,10 @@ Both interpolations **clamp at the endpoints**: frequencies below the lowest tab
 
 ### Axes
 
-- **X**: `log2(hz)` → `[padL, padL + plotW]`, 50 Hz → 20 kHz.
-- **Y**: dB SPL → `[frontBase, frontBase − plotH]`. Range is `sens + 3` (top) to `sens − 50` (bottom). Wider 53 dB range gives the jet colormap room to breathe and keeps decayed back slices above the floor.
+- **X**: angle → `[padL, padL + plotW]`, linear, `angleMin = −110°` to `angleMax = +110°`.
+- **Y**: dB SPL → `[frontBase, frontBase − plotH]`. Range is `sens + 5` (top) to `sens − 45` (bottom).
 - `frontBase = padT + plotH − bkY` — because `bkY < 0`, this is the largest Y in the plot (= the front baseline, at the bottom of the canvas).
-- Time axis is implicit in the skew — labels are drawn at `(rightX + s·skewX, frontBase + s·skewY)` for `tms = 0, 1, 2, 3, 4, 5, 6`. `skewY < 0` means later-time labels sit HIGHER on the canvas.
+- **Depth axis** (frequency) is implicit in the skew. Labels go at `(rightX + s·skewX, frontBase + s·skewY)` for `s = sOfFreq(tick)`.
 
 ## Rendering
 
