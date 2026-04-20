@@ -6,6 +6,7 @@ import { mountSourcesPanel } from './ui/panel-sources.js';
 import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountResultsPanel } from './ui/panel-results.js';
+import { mountPrecisionPanel } from './ui/panel-precision.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, setWalkthroughMode } from './graphics/scene.js';
 
@@ -155,6 +156,7 @@ async function boot() {
   mountListenersPanel();
   mountZonesPanel({ materials });
   mountResultsPanel({ materials });
+  mountPrecisionPanel({ materials });
   mount2DViewport({ materials });
 
   try {

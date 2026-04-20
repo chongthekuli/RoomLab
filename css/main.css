@@ -1131,3 +1131,252 @@ section h3 {
 }
 .vp-legend.spl-legend .legend-range { font-size: 0.7rem; color: #99a; }
 .vp-legend.spl-legend .legend-label { font-size: 0.72rem; color: #c0c4d0; font-weight: 500; }
+
+/* ------------------------------------------------------------------ */
+/* Phase E — Precision Render panel                                   */
+/* ------------------------------------------------------------------ */
+#panel-precision {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+#panel-precision h2 {
+  color: var(--fg-strong);
+  font-size: 0.88rem;
+  letter-spacing: 0.05em;
+  margin: 0 0 var(--space-2);
+}
+.precision-intro {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.45;
+  margin-bottom: var(--space-2);
+}
+.precision-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  margin-bottom: var(--space-2);
+}
+.precision-controls .rays-label {
+  flex: 1;
+  font-size: 0.7rem;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.precision-controls input[type=number] {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.btn-render, .btn-cancel {
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+}
+.btn-render {
+  background: #3a5a8a;
+  color: #fff;
+  border-color: #5a7ab0;
+}
+.btn-render:hover { background: #4a6a9a; }
+.btn-cancel {
+  background: transparent;
+  color: #ff8080;
+  border-color: #aa4040;
+}
+.btn-cancel:hover { background: rgba(200, 64, 64, 0.15); }
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.btn-link:hover { color: #7ab9ff; }
+
+.precision-progress {
+  margin: var(--space-2) 0;
+}
+.precision-progress .progress-bar {
+  height: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.precision-progress .progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3a5a8a 0%, #5a7ab0 100%);
+  transition: width 120ms ease-out;
+}
+.precision-progress .progress-text {
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.precision-stale {
+  margin: var(--space-2) 0;
+  padding: 0.55rem 0.7rem;
+  background: rgba(230, 120, 40, 0.08);
+  border: 1px solid rgba(230, 120, 40, 0.30);
+  border-radius: var(--radius);
+  font-size: 0.72rem;
+  color: #e67828;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.precision-results {
+  margin-top: var(--space-2);
+}
+.precision-listener-line {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+.precision-listener-line strong { color: var(--fg); }
+
+.precision-big-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+.big-metric {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.55rem 0.7rem;
+  text-align: center;
+}
+.big-metric .big-val {
+  font-size: 1.8rem;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: var(--fg-strong);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+}
+.big-metric .big-sub {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: 2px;
+  letter-spacing: 0.04em;
+}
+.sti-excellent { color: var(--data-green) !important; }
+.sti-good      { color: var(--data-green) !important; }
+.sti-fair      { color: var(--data-amber) !important; }
+.sti-poor      { color: #ff8c3c !important; }
+.sti-bad       { color: var(--data-red) !important; }
+
+.precision-table {
+  width: 100%;
+  font-size: 0.74rem;
+  margin-bottom: 0.6rem;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.precision-table th {
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+  padding: 3px 6px 3px 0;
+  width: 18%;
+}
+.precision-table td {
+  color: var(--fg);
+  padding: 3px 12px 3px 0;
+  text-align: right;
+  width: 32%;
+}
+
+.precision-per-band {
+  margin: 0.5rem 0;
+  font-size: 0.7rem;
+}
+.precision-per-band summary {
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px 0;
+  list-style: revert;
+}
+.precision-per-band summary:hover { color: var(--fg); }
+.precision-per-band .band-table {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+  border-collapse: collapse;
+}
+.precision-per-band .band-table th,
+.precision-per-band .band-table td {
+  padding: 2px 4px;
+  text-align: right;
+  font-size: 0.68rem;
+}
+.precision-per-band .band-table thead th {
+  color: var(--muted-dim);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+.precision-per-band .band-table tbody th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+}
+.precision-per-band .band-table tbody td { color: var(--fg); }
+
+.precision-meta {
+  font-size: 0.66rem;
+  color: var(--muted-dim);
+  font-variant-numeric: tabular-nums;
+  margin-top: 0.5rem;
+}
+
+.precision-echogram {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  height: 140px;
+  margin-top: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #0a0d12;
+}
+
+.precision-error {
+  margin-top: var(--space-2);
+  padding: 0.5rem 0.7rem;
+  background: rgba(255, 80, 80, 0.08);
+  border: 1px solid rgba(255, 80, 80, 0.30);
+  color: #ff8080;
+  font-size: 0.72rem;
+  border-radius: var(--radius);
+}
+
+.precision-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: var(--space-2);
+  font-style: italic;
+}
