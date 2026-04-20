@@ -435,9 +435,17 @@ This means the MVP ray tracer can ship with much higher default ray count than p
 
 ### Phase B — BVH + worker scaffolding (2-3 weeks)
 
-**B1.** Integrate `three-mesh-bvh` (or hand-rolled). Build per-material-group BVH at snapshot time.
-**B2.** Serialize BVH to ArrayBuffer + transfer to workers.
-**B3.** Worker pool (`js/physics/precision/worker-pool.js`) — 4-8 workers, job queue, cancellation.
+**B1.** Phase B1 split into three smaller sessions:
+  - **B1a — Triangulator** ✅ landed `HEAD`. [js/physics/precision/triangulate-scene.js](../js/physics/precision/triangulate-scene.js) produces a flat triangle soup (Float32 positions, face normals, material indices, surface tags, source keys) from a `PhysicsScene`. Covers **rectangular rooms + flat zones + scoreboard box** — enough for 5 of 9 presets (classroom, studio, livevenue, hifi, chamber). Polygon / round / dome / stadium bowl are Phase B2.
+  - **B1b — Hand-rolled SAH BVH** ✅ landed `HEAD`. [js/physics/precision/bvh.js](../js/physics/precision/bvh.js) — ~250 lines pure JS, Node-testable without dragging `three` into test deps. Build via recursive surface-area-heuristic splits along the longest centroid-axis. Query via iterative stack-based traversal with ray-AABB slab test + Möller-Trumbore ray-triangle. Output is a flat Float32Array of nodes + Uint32Array of triangle indices (worker-transferable by design). Also exports `intersectRayBrute` for tests to verify correctness.
+  - **B1c — Tests** ✅ landed `HEAD`. [tests/precision-bvh.test.mjs](../tests/precision-bvh.test.mjs) — 500/500 random rays agree between BVH and brute-force (correctness), 678 rays/ms on a 26-triangle shoebox (perf above the 500 rays/ms budget).
+
+  **Decision change from the original blueprint:** using a hand-rolled BVH instead of `three-mesh-bvh`. Reasoning: (a) keeps physics tests pure Node without pulling three into dev deps; (b) 250 lines of reviewable, self-contained code beats an opaque npm dep we can't easily patch; (c) perf is well within budget — our scenes are 100–10,000 triangles, not movie-scale. If perf ever becomes the bottleneck the swap to `three-mesh-bvh` is a single-file change.
+
+**B2.** Extend triangulator to polygon / round / dome rooms; triangulate the stadium bowl lathe geometry (extract from the 3D scene's lathe meshes). Arena preset becomes ray-traceable.
+
+**B3.** Worker pool (`js/physics/precision/worker-pool.js`) — 4-8 workers, job queue, cancellation. Scene + BVH transferred once to each worker via `postMessage` + transferable list.
+
 **B4.** Progress UI — spinner, rays-done/total counter, cancel button.
 
 ### Phase C — Minimum-viable precision engine (3-4 weeks)
