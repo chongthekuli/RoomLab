@@ -171,3 +171,16 @@ boot().catch(err => {
   const vp = document.getElementById('view-2d') || document.getElementById('view-3d');
   if (vp) vp.innerHTML = `<div class="viewport-2d"><div class="vp-header">Startup error: ${err.message}</div></div>`;
 });
+
+// Dev hook — Phase A5 worker-plumbing smoke test.
+// Run in DevTools console on the live deploy:
+//   await window.__roomlabWorkerSmoke()
+// The driver is lazy-loaded so the smoke test adds zero bytes to the
+// default page load. Numbers go to the console + are returned for
+// scripting. See docs/DUAL-ENGINE-BLUEPRINT.md §6 Phase A5.
+if (typeof window !== 'undefined') {
+  window.__roomlabWorkerSmoke = async (opts) => {
+    const mod = await import('./physics/precision/worker-smoke-driver.js');
+    return mod.runWorkerSmokeTest(opts);
+  };
+}

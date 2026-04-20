@@ -404,7 +404,13 @@ Recommend (1) for MVP, (2) as first precision-engine refinement.
 **A2.** ⏳ Refactor `computeRT60Band`, `computeMultiSourceSPL`, `computeSTIPA` to accept `PhysicsScene` instead of raw `state`. Tests drive the change. **Pending next session — large blast radius, deserves focused pass.**
 **A3.** ✅ `scattering` array added to every entry in `materials.json` (schema v1.3). Values per Cox & D'Antonio *Acoustic Absorbers and Diffusers* 2nd ed. / ISO 17497-1 references. Draft engine ignores scattering (backward compatible); precision ray tracer (Phase B+) uses it for Lambertian vs specular bounce decisions.
 **A4.** ✅ `state.results.precision = null` scaffolded; `state.results.engines` metadata tracks `inProgress`, `staleAt`, `cancellable`. Existing draft fields (`rt60`, `splGrid`, `zoneGrids`) preserved for backward compat.
-**A5.** ⏳ Worker smoke test — spawn a trivial worker, measure postMessage round-trip, confirm the deploy works on GitHub Pages. Will need COOP/COEP headers for SharedArrayBuffer; `postMessage` fallback works everywhere.
+**A5.** ✅ Worker smoke test landed. Run on the live deploy from DevTools:
+```js
+await window.__roomlabWorkerSmoke()
+```
+Driver: [js/physics/precision/worker-smoke-driver.js](../js/physics/precision/worker-smoke-driver.js). Worker: [js/physics/precision/worker-smoke.js](../js/physics/precision/worker-smoke.js). Lazy-loaded — zero bytes on default page load. Reports: `env.crossOriginIsolated`, `env.sharedArrayBufferAvailable`, echo round-trip latency (budget < 5 ms), N-way parallel speedup (budget > 0.7 × N), 1 MB transferable round-trip (budget < 10 ms), and human-readable recommendations for Phase B architecture decisions.
+
+**Expected on github.io:** `crossOriginIsolated = false`, `sharedArrayBufferAvailable = false` (no COOP/COEP headers on default GitHub Pages CDN). That's OK — Phase B uses `postMessage` + `[transferable]` lists for ray-batch handoff. Histogram aggregation runs on the main thread (fan-in from workers) instead of via shared memory. For our data sizes (per-receiver histogram < 100 KB) this is not a performance issue.
 
 ### Phase B — BVH + worker scaffolding (2-3 weeks)
 
