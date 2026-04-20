@@ -42,6 +42,7 @@ export function mountResultsPanel({ materials }) {
   // Precision engine completed / invalidated / cleared — re-render so
   // the Precision column tracks the latest state.
   on('precision:changed', render);
+  on('ambient:changed', render);
 }
 
 function render() {
@@ -181,7 +182,9 @@ function renderRT60() {
   if (pResult && selListener) {
     const selIdx = state.listeners.findIndex(l => l.id === selListener.id);
     if (selIdx >= 0) {
-      const metrics = deriveMetrics(pResult);
+      const metrics = deriveMetrics(pResult, {
+        ambientNoise_per_band: state.physics.ambientNoise?.per_band,
+      });
       const m = metrics[selIdx];
       if (m) {
         // Align per-band precision T30 to the draft-engine band order

@@ -197,6 +197,11 @@ export async function mount3DViewport({ materials }) {
   // both. Zone/listener panels don't need re-render (state.zones is
   // unchanged) so we skip them.
   on('physics:eq_changed', () => queueRebuild(REBUILD_HEATMAP | REBUILD_AIM));
+  // Ambient noise affects STIPA heatmap values (N in the STI denominator).
+  // SPL heatmap is unchanged — the per-vertex loop reads `useSTI` and only
+  // the STIPA branch reads ambient, so rebuilding when SPL is active is a
+  // no-op cost. Accept that for simplicity.
+  on('ambient:changed', () => queueRebuild(REBUILD_HEATMAP));
 
   // Initial paint: fire the rebuilds synchronously (no user-drag coalescing
   // needed on boot; they run once and we want the viewport ready).
@@ -1124,6 +1129,7 @@ function updateWalkSplReadout(ctx, eyeHeight) {
       getSpeakerDef: url => getCachedLoudspeaker(url),
       listenerPos, room: state.room, materials: materialsRef,
       zones: state.zones,
+      ambientNoise_per_band: state.physics.ambientNoise?.per_band,
     });
     _stipaLast = s;
   }
@@ -2320,10 +2326,11 @@ function sampleSurfaceColors(geo, anchors, sources, room, splOpts = {}) {
     airAbsorption: splOpts.airAbsorption,
   };
 
+  const ambient_per_band = useSTI ? state.physics.ambientNoise?.per_band : null;
   for (let i = 0; i < anchors.length; i++) {
     let value;            // SPL in dB, or STI in [0,1]
     if (useSTI) {
-      value = computeSTIPAAt(stipaCtx, anchors[i]);
+      value = computeSTIPAAt(stipaCtx, anchors[i], ambient_per_band);
     } else {
       value = computeMultiSourceSPLFromContext(splCtx, anchors[i], splAtOpts);
     }

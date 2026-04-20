@@ -5,6 +5,7 @@ import { mountRoomPanel } from './ui/panel-room.js';
 import { mountSourcesPanel } from './ui/panel-sources.js';
 import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
+import { mountAmbientPanel } from './ui/panel-ambient.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mountPrecisionPanel } from './ui/panel-precision.js';
 import { mount2DViewport } from './graphics/room-2d.js';
@@ -155,6 +156,7 @@ async function boot() {
   mountSourcesPanel({ speakerCatalog: SPEAKER_CATALOG });
   mountListenersPanel();
   mountZonesPanel({ materials });
+  mountAmbientPanel();
   mountResultsPanel({ materials });
   mountPrecisionPanel({ materials });
   mount2DViewport({ materials });

@@ -395,6 +395,15 @@ export const state = {
   // Users can enable it via the "Reverb field" toolbar toggle.
   physics: {
     reverberantField: false, coherent: false, airAbsorption: true, freq_hz: 1000,
+    // Ambient noise floor at the listener — drives the N term in the
+    // STI denominator. Per-band values at 125/250/500/1k/2k/4k/8k Hz.
+    // Defaults to NC-35 ("typical office"). Users pick real-world
+    // profiles from `data/ambient-presets.js` (mosque, bus station,
+    // pasar pagi, etc.) or edit per-band values manually.
+    ambientNoise: {
+      preset: 'nc-35',
+      per_band: [60, 52, 45, 40, 36, 34, 33],
+    },
     // Master source-side graphic EQ — one per-scene, applies to every speaker
     // before physical propagation. 10 bands at ISO preferred centres 31.5 Hz
     // → 16 kHz. gain_db per band is added to the SOURCE signal; physics then

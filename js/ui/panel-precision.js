@@ -64,6 +64,10 @@ export function mountPrecisionPanel({ materials }) {
   on('source:model_changed', markStale);
   on('listener:changed', markStale);
   on('physics:eq_changed', markStale);
+  // Ambient noise only changes derived STI, not the impulse response —
+  // so the raw histogram stays valid, but the displayed metrics need to
+  // re-derive. Re-render without marking stale.
+  on('ambient:changed', () => { if (state.results.precision) renderResults(); });
   on('scene:reset', () => {
     state.results.precision = null;
     state.results.engines.precision.lastRun = null;
@@ -166,7 +170,9 @@ function renderResults() {
     return;
   }
 
-  const allMetrics = deriveMetrics(result);
+  const allMetrics = deriveMetrics(result, {
+    ambientNoise_per_band: state.physics.ambientNoise?.per_band,
+  });
   const m = allMetrics[selectedIdx];
   if (!m) {
     container.innerHTML = `<div class="precision-hint">No metrics available — render has ${result.receivers?.count ?? state.listeners.length} receivers.</div>`;

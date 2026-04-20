@@ -547,6 +547,63 @@ section h3 {
 }
 .precision-cmp em { font-style: italic; color: var(--data-amber); }
 
+.ambient-summary {
+  margin: 0.5rem 0;
+  padding: 0.55rem 0.7rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 2px;
+}
+.ambient-dba {
+  font-size: 1.45rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.ambient-dba .unit { font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+.ambient-desc {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.45;
+  font-style: italic;
+}
+#panel-ambient details { margin-top: 0.35rem; }
+#panel-ambient summary {
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: var(--muted);
+  padding: 0.25rem 0;
+  user-select: none;
+}
+.ambient-bands {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.35rem 0.5rem;
+  margin-top: 0.4rem;
+  padding: 0.45rem;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 4px;
+}
+.ambient-band {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.76rem;
+}
+.ambient-band-hz {
+  min-width: 2.3rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.ambient-band input {
+  width: 3.2rem;
+  padding: 0.18rem 0.25rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .hint {
   margin-top: 1rem;
   font-size: 0.72rem;
