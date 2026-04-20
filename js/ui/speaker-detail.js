@@ -212,7 +212,7 @@ async function render() {
     <section class="sv-section">
       <h4>Waterfall (cumulative spectral decay)</h4>
       <canvas id="sv-waterfall" width="720" height="340"></canvas>
-      <div class="sub sv-caption">On-axis magnitude response sliced in time. Front slice is the FR at t=0; each slice behind it is the FR decayed by the per-band ring-down time. Short decay = slices drop steeply into the noise floor; long streaks = resonances that ring on.</div>
+      <div class="sub sv-caption">On-axis magnitude response sliced in time (0–6 ms, the standard CSD window for speakers). Front slice is the FR at t=0; each slice behind is the FR decayed by the per-band ring-down time. Long streaks = resonances that ring on; clean cabinets show a steady cascade down to the floor.</div>
     </section>
 
     <section class="sv-section">
@@ -487,20 +487,23 @@ function drawWaterfall(canvas, def, onAxis) {
 
   // Layout — isometric projection: later slices shift right + down.
   const padL = 54, padR = 20, padT = 18, padB = 34;
-  const nSlices = 32;
-  const skewX = 1.1;                 // per slice, horizontal pixels
-  const skewY = 3.4;                 // per slice, vertical pixels
+  const nSlices = 24;
+  const skewX = 1.3;                 // per slice, horizontal pixels
+  const skewY = 4.4;                 // per slice, vertical pixels
   const plotW = W - padL - padR - skewX * (nSlices - 1);
   const plotH = H - padT - padB - skewY * (nSlices - 1);
 
-  // Axes: log frequency × dB SPL.
+  // Axes: log frequency × dB SPL. 6 ms window matches REW / LspCAD
+  // default — a speaker's cabinet character (cone breakup, port ringing,
+  // tweeter damping, diffraction) all shows in the first ~5-6 ms. Past
+  // that, everything is below the noise floor and the display collapses.
   const fMin = 50, fMax = 20000;
   const peakDb = sens + 3;
-  const floorDb = sens - 35;
+  const floorDb = sens - 25;          // 28 dB vertical range
   const xOfHz = (hz) => padL + ((Math.log2(hz) - Math.log2(fMin)) / (Math.log2(fMax) - Math.log2(fMin))) * plotW;
   const yOfDb = (db) => padT + plotH - ((db - floorDb) / (peakDb - floorDb)) * plotH;
 
-  const tMaxMs = 40;
+  const tMaxMs = 6;
   const nF = 180;                    // frequency samples per slice
 
   // Back-to-front — later slices drawn first so earlier (higher-energy)
@@ -568,15 +571,16 @@ function drawWaterfall(canvas, def, onAxis) {
   ctx.fillText('Hz', W - 24, H - 12);
 
   // Time-axis on the right edge — the "into the page" scale.
-  const labelTimes = [0, 5, 10, 20, 30, 40];
+  const labelTimes = [0, 1, 2, 3, 4, 5, 6];
   ctx.fillStyle = 'rgba(200, 210, 220, 0.8)';
   for (const tms of labelTimes) {
+    if (tms > tMaxMs) continue;
     const s = (tms / tMaxMs) * (nSlices - 1);
     const x = xOfHz(fMax) + s * skewX + 4;
     const y = padT + plotH + s * skewY + 3;
     ctx.fillText(`${tms}`, x, y);
   }
-  ctx.fillText('ms', xOfHz(fMax) + (nSlices - 1) * skewX + 4, padT + plotH - 6 + (nSlices - 1) * skewY - 14);
+  ctx.fillText('ms', xOfHz(fMax) + (nSlices - 1) * skewX + 18, padT + plotH + (nSlices - 1) * skewY + 3);
 }
 
 // Viridis-ish gradient for waterfall — dark purple (cold / late decay)
