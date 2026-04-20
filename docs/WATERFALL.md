@@ -23,24 +23,25 @@ level(hz, tms) = max(floorDb,  sens + fr(hz) − (20 / decay_ms(hz)) × tms)
 
 Both interpolations **clamp at the endpoints**: frequencies below the lowest table entry receive the lowest entry's value, frequencies above the highest receive the highest. Earlier drafts re-used a single `tBlend` from the FR lookup for the CSD lookup — that was the source of the sub-125 Hz and super-8 kHz stripes in the first waterfall screenshot.
 
-## Layout
+## Layout — tilted-down 3D view (like the reference REW / ARTA / Klippel examples)
 
-- Canvas: 720 × 340 px
-- Padding: left 54, right 20, top 18, bottom 34
-- 24 time slices from `tms = 0` (front) to `tms = tMaxMs` (back). `tMaxMs = 6` — matches the REW / LspCAD default for speakers.
-- Isometric skew: each successive slice shifts `skewX = 1.3 px` right and `skewY = 4.4 px` down. Total back-slice offset ≈ 30 px right, 101 px down.
-- Plot area width/height are reduced by the skew so the rear slice still fits inside the canvas:
-
-```
-plotW = canvasW − padL − padR − skewX × (nSlices − 1)
-plotH = canvasH − padT − padB − skewY × (nSlices − 1)
-```
+- Canvas: 720 × 400 px
+- Padding: left 60, right 26, top 22, bottom 42
+- 26 time slices from `tms = 0` (front) to `tms = tMaxMs` (back). `tMaxMs = 6` — matches the REW default.
+- Oblique projection: each successive slice shifts `skewX = +1.1 px` right and `skewY = −6.0 px` **up**. `skewY < 0` is the key change from the first draft: back slices now appear HIGHER on the canvas, as if the viewer is looking down at the mesh.
+- `bkX = skewX × (nSlices − 1) = +27.5 px`, `bkY = skewY × (nSlices − 1) = −150 px`.
+- Plot dimensions leave room for the depth offsets:
+  ```
+  plotW = canvasW − padL − padR − bkX
+  plotH = canvasH − padT − padB − |bkY|
+  ```
 
 ### Axes
 
-- X: `log2(hz)` mapped linearly to `[padL, padL + plotW]`, 50 Hz → 20 kHz.
-- Y: dB SPL mapped linearly to `[padT + plotH, padT]`. Range is `sens + 3` at top to `sens − 25` at bottom (28 dB vertical).
-- Time axis is implicit in the skew — labels are drawn at `xOfHz(fMax) + s × skewX + 4, padT + plotH + s × skewY + 3` for `tms = 0, 1, 2, 3, 4, 5, 6`.
+- **X**: `log2(hz)` → `[padL, padL + plotW]`, 50 Hz → 20 kHz.
+- **Y**: dB SPL → `[frontBase, frontBase − plotH]`. Range is `sens + 3` (top) to `sens − 50` (bottom). Wider 53 dB range gives the jet colormap room to breathe and keeps decayed back slices above the floor.
+- `frontBase = padT + plotH − bkY` — because `bkY < 0`, this is the largest Y in the plot (= the front baseline, at the bottom of the canvas).
+- Time axis is implicit in the skew — labels are drawn at `(rightX + s·skewX, frontBase + s·skewY)` for `tms = 0, 1, 2, 3, 4, 5, 6`. `skewY < 0` means later-time labels sit HIGHER on the canvas.
 
 ## Rendering
 
@@ -72,21 +73,43 @@ Grid lines drawn, in order:
 
 Earlier draft drew "vertical" lines from `(xOfHz(tick), padT)` to `(xOfHz(tick) + bkX, bottomY + bkY)` — that's a diagonal from top-front to bottom-back, not a proper isometric edge. Replaced with the eight-corner model above.
 
-### 2. Slices (strokes only, two passes)
+### 2. Filled surface (jet colormap, back-to-front quads)
+
+Between every pair of adjacent slices `(s, s+1)` and every pair of adjacent frequency samples `(i, i+1)` we draw **one small quadrilateral** coloured by the average amplitude of its four corners. Drawn back-to-front so the near face correctly occludes the rear.
 
 ```
-// Pass 1 — back-to-front, dark under-stroke (lineWidth 2.6, black @ 0.92).
-for (s = nSlices − 1 … 0):
-    stroke the slice's polyline
-
-// Pass 2 — back-to-front, coloured stroke on top.
-for (s = nSlices − 1 … 0):
-    colour = waterfallColor(timeFrac = 1 − s / (nSlices − 1))
-    lineWidth = (s == 0 ? 1.8 : 1.0)
-    stroke the slice's polyline
+for s = nSlices − 2 … 0:
+    front = slicePaths[s]
+    back  = slicePaths[s + 1]
+    for i = 0 … nF − 1:
+        a = front[i],   b = front[i + 1]
+        c = back[i + 1], d = back[i]
+        avgDb = mean(a.db, b.db, c.db, d.db)
+        t = (avgDb − floorDb) / (peakDb − floorDb)
+        fillStyle = jetColor(clamp(t, 0, 1))
+        fillPath(a → b → c → d → a)
 ```
 
-Each slice's polyline is 181 vertices (180 sample intervals) computed once up-front and stored in `slicePaths[s]`.
+Quad count = `(nSlices − 1) × nF = 25 × 180 = 4500`. Drawn once per render, no animation overhead.
+
+After the surface is filled, a thin black under-stroke and a white-accent stroke on the front slice trace the FR contour so it reads clearly against the rainbow fill.
+
+### 3. Jet colormap
+
+Classic MATLAB 'jet':
+
+```
+t = 0.00 → (  0,   0, 128)   dark blue
+t = 0.14 → (  0,   0, 255)   blue
+t = 0.28 → (  0, 128, 255)   azure
+t = 0.42 → (  0, 255, 255)   cyan
+t = 0.57 → (128, 255, 128)   green
+t = 0.71 → (255, 255,   0)   yellow
+t = 0.85 → (255, 128,   0)   orange
+t = 1.00 → (200,   0,   0)   dark red
+```
+
+Piecewise-linear interpolation between adjacent stops. Same convention as REW, ARTA, Klippel, LspCAD. The reference image in this file (the "attached great waterfall example") uses the same colormap.
 
 ### 3. Labels
 

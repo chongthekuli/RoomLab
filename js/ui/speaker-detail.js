@@ -211,7 +211,7 @@ async function render() {
 
     <section class="sv-section">
       <h4>Waterfall (cumulative spectral decay)</h4>
-      <canvas id="sv-waterfall" width="720" height="340"></canvas>
+      <canvas id="sv-waterfall" width="720" height="400"></canvas>
       <div class="sub sv-caption">On-axis magnitude response sliced in time (0–6 ms, the standard CSD window for speakers). Front slice is the FR at t=0; each slice behind is the FR decayed by the per-band ring-down time. Long streaks = resonances that ring on; clean cabinets show a steady cascade down to the floor.</div>
     </section>
 
@@ -485,49 +485,56 @@ function drawWaterfall(canvas, def, onAxis) {
   const frAt = (hz) => interpLog(onAxis, hz, 'db');
   const decayAt = (hz) => interpLog(csdTable, hz, 'decay_ms');
 
-  // Layout — isometric projection: later slices shift right + down.
-  const padL = 54, padR = 20, padT = 18, padB = 34;
-  const nSlices = 24;
-  const skewX = 1.3;                 // per slice, horizontal pixels
-  const skewY = 4.4;                 // per slice, vertical pixels
-  const plotW = W - padL - padR - skewX * (nSlices - 1);
-  const plotH = H - padT - padB - skewY * (nSlices - 1);
+  // Oblique projection — viewer looks DOWN at the mesh. Back slices
+  // shift slightly right AND UP on the canvas (skewY < 0), matching the
+  // classic tilted-3D view used by REW, ARTA, Klippel and the reference
+  // in docs/WATERFALL.md. Combined with a jet-colormap filled surface
+  // this reads as a proper 3D surface plot rather than a line chart.
+  const padL = 60, padR = 26, padT = 22, padB = 42;
+  const nSlices = 26;
+  const skewX = 1.1;                 // per slice, horizontal pixels (+right)
+  const skewY = -6.0;                // per slice, vertical pixels (−up)
+  const bkY = skewY * (nSlices - 1); // back-plane Y offset (negative = up)
+  const bkX = skewX * (nSlices - 1); // back-plane X offset
+  const plotW = W - padL - padR - bkX;
+  const plotH = H - padT - padB - Math.abs(bkY);   // room for slices + depth
 
-  // Axes: log frequency × dB SPL. 6 ms window matches REW / LspCAD
-  // default — a speaker's cabinet character (cone breakup, port ringing,
-  // tweeter damping, diffraction) all shows in the first ~5-6 ms. Past
-  // that, everything is below the noise floor and the display collapses.
+  // Axes: log frequency × dB SPL. Wider 50 dB dynamic range (vs. earlier
+  // 28 dB) so the jet-colormap gradient has room to show cabinet detail.
   const fMin = 50, fMax = 20000;
   const peakDb = sens + 3;
-  const floorDb = sens - 25;          // 28 dB vertical range
+  const floorDb = sens - 50;
   const xOfHz = (hz) => padL + ((Math.log2(hz) - Math.log2(fMin)) / (Math.log2(fMax) - Math.log2(fMin))) * plotW;
-  const yOfDb = (db) => padT + plotH - ((db - floorDb) / (peakDb - floorDb)) * plotH;
+  // Front slice's 0-amp baseline is at y = padT + plotH − bkY
+  // (pushed DOWN by the magnitude of bkY since bkY is negative, so the
+  // front sits at padT + plotH + |bkY|). Back slice sits at padT + plotH.
+  const frontBase = padT + plotH - bkY;    // bkY<0 → frontBase > padT+plotH
+  const yOfDb = (db) => frontBase - ((db - floorDb) / (peakDb - floorDb)) * plotH;
 
   const tMaxMs = 6;
   const nF = 180;                    // frequency samples per slice
 
-  const bkX = (nSlices - 1) * skewX;     // back-plane X offset
-  const bkY = (nSlices - 1) * skewY;     // back-plane Y offset
-  const rightX = padL + plotW;           // front-right edge
-  const bottomY = padT + plotH;          // front-bottom edge
+  // Front / back plane coordinates. Because bkY < 0, "back" is UP on canvas.
+  //   front_TL = (padL, padT − bkY)                 "down" on canvas
+  //   front_BL = (padL, frontBase)                  front baseline
+  //   back_TL  = (padL + bkX, padT)                 plot top, back plane
+  //   back_BL  = (padL + bkX, frontBase + bkY)      bottom of back plane
+  const rightX = padL + plotW;
+  const frontTopY = padT - bkY;             // bkY < 0 ⇒ > padT (down)
+  const backTopY = padT;
+  const backBotY = frontBase + bkY;         // bkY < 0 ⇒ < frontBase (up)
   const tickFreqs = [63, 125, 250, 500, 1000, 2000, 5000, 10000];
-  const tickDbs = [sens, sens - 10, sens - 20];
+  const tickDbs = [sens, sens - 10, sens - 20, sens - 30, sens - 40];
 
-  // ---------- Grid (isometric box) — drawn BEFORE slices ----------
-  // Depth / back-plane lines are fainter than front-plane lines so the
-  // eye picks the front frame as the primary reference.
-  const faint = 'rgba(255, 255, 255, 0.05)';
-  const medium = 'rgba(255, 255, 255, 0.10)';
+  // ---------- Back-plane grid (painted first, behind everything) ----
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
   ctx.lineWidth = 1;
-
-  // --- Back wall: vertical (freq) + horizontal (dB) grid ---
-  ctx.strokeStyle = faint;
   for (const tick of tickFreqs) {
     if (tick < fMin || tick > fMax) continue;
     const x = xOfHz(tick) + bkX;
     ctx.beginPath();
-    ctx.moveTo(x, padT + bkY);
-    ctx.lineTo(x, bottomY + bkY);
+    ctx.moveTo(x, backTopY);
+    ctx.lineTo(x, backBotY);
     ctx.stroke();
   }
   for (const db of tickDbs) {
@@ -537,46 +544,9 @@ function drawWaterfall(canvas, def, onAxis) {
     ctx.lineTo(rightX + bkX, y);
     ctx.stroke();
   }
+  ctx.strokeRect(padL + bkX, backTopY, plotW, backBotY - backTopY);
 
-  // --- Floor: depth lines at each freq tick (front-bottom → back-bottom) ---
-  for (const tick of tickFreqs) {
-    if (tick < fMin || tick > fMax) continue;
-    const xF = xOfHz(tick);
-    ctx.beginPath();
-    ctx.moveTo(xF, bottomY);
-    ctx.lineTo(xF + bkX, bottomY + bkY);
-    ctx.stroke();
-  }
-
-  // --- Side walls (4 depth edges framing the box) ---
-  ctx.strokeStyle = medium;
-  ctx.beginPath();
-  // top-left depth
-  ctx.moveTo(padL, padT);            ctx.lineTo(padL + bkX, padT + bkY);
-  // bottom-left depth
-  ctx.moveTo(padL, bottomY);         ctx.lineTo(padL + bkX, bottomY + bkY);
-  // top-right depth
-  ctx.moveTo(rightX, padT);          ctx.lineTo(rightX + bkX, padT + bkY);
-  // bottom-right depth
-  ctx.moveTo(rightX, bottomY);       ctx.lineTo(rightX + bkX, bottomY + bkY);
-  ctx.stroke();
-
-  // --- Back frame outline ---
-  ctx.strokeStyle = medium;
-  ctx.strokeRect(padL + bkX, padT + bkY, plotW, plotH);
-
-  // --- Front plane: dB grid + frame ---
-  ctx.strokeStyle = medium;
-  for (const db of tickDbs) {
-    const y = yOfDb(db);
-    ctx.beginPath();
-    ctx.moveTo(padL, y);
-    ctx.lineTo(rightX, y);
-    ctx.stroke();
-  }
-  ctx.strokeRect(padL, padT, plotW, plotH);
-
-  // ---------- Pre-compute slice paths ----------
+  // ---------- Pre-compute slice path geometry + amplitude ----------
   const slicePaths = new Array(nSlices);
   for (let s = 0; s < nSlices; s++) {
     const tms = (s / (nSlices - 1)) * tMaxMs;
@@ -589,14 +559,37 @@ function drawWaterfall(canvas, def, onAxis) {
       const fr = frAt(hz);
       const decayMs = Math.max(0.4, decayAt(hz));
       const lvl = Math.max(floorDb, sens + fr - (20 / decayMs) * tms);
-      pts[i] = { x: xOfHz(hz) + ox, y: yOfDb(lvl) + oy };
+      pts[i] = { x: xOfHz(hz) + ox, y: yOfDb(lvl) + oy, db: lvl };
     }
     slicePaths[s] = pts;
   }
 
-  // ---------- Slices (two passes: under-stroke, then colour) ----------
-  ctx.lineWidth = 2.6;
-  ctx.strokeStyle = 'rgba(5, 8, 14, 0.92)';
+  // ---------- Filled surface (jet colormap, back-to-front quads) ----
+  // Between every pair of adjacent slices and adjacent freq samples we
+  // draw a quad coloured by the average amplitude of its four corners.
+  // Back-to-front so the near face occludes rear pixels naturally.
+  for (let s = nSlices - 2; s >= 0; s--) {
+    const front = slicePaths[s];
+    const back = slicePaths[s + 1];
+    for (let i = 0; i < nF; i++) {
+      const a = front[i], b = front[i + 1];
+      const c = back[i + 1], d = back[i];
+      const avgDb = (a.db + b.db + c.db + d.db) * 0.25;
+      const t = (avgDb - floorDb) / (peakDb - floorDb);
+      ctx.fillStyle = jetColor(Math.max(0, Math.min(1, t)));
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.lineTo(d.x, d.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // ---------- Slice outlines on top of the surface ----
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.38)';
+  ctx.lineWidth = 1;
   for (let s = nSlices - 1; s >= 0; s--) {
     const pts = slicePaths[s];
     ctx.beginPath();
@@ -604,60 +597,102 @@ function drawWaterfall(canvas, def, onAxis) {
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
-  for (let s = nSlices - 1; s >= 0; s--) {
-    const pts = slicePaths[s];
-    const tFrac = 1 - (s / (nSlices - 1));
-    ctx.lineWidth = s === 0 ? 1.8 : 1.0;
-    ctx.strokeStyle = waterfallColor(tFrac, 0.95);
+  // Front slice accent — white so the FR curve reads clearly against
+  // the rainbow-coloured surface.
+  const front0 = slicePaths[0];
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(front0[0].x, front0[0].y);
+  for (let i = 1; i < front0.length; i++) ctx.lineTo(front0[i].x, front0[i].y);
+  ctx.stroke();
+
+  // ---------- Front-plane grid + frame (overlays the surface faintly) ----
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+  ctx.lineWidth = 1;
+  for (const db of tickDbs) {
+    const y = yOfDb(db);
+    if (y < frontTopY || y > frontBase) continue;
     ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.moveTo(padL, y);
+    ctx.lineTo(rightX, y);
     ctx.stroke();
   }
+  // Depth edges connecting the four corners of the front frame to the
+  // back frame.
+  ctx.beginPath();
+  ctx.moveTo(padL, frontTopY);     ctx.lineTo(padL + bkX, backTopY);
+  ctx.moveTo(padL, frontBase);     ctx.lineTo(padL + bkX, backBotY);
+  ctx.moveTo(rightX, frontTopY);   ctx.lineTo(rightX + bkX, backTopY);
+  ctx.moveTo(rightX, frontBase);   ctx.lineTo(rightX + bkX, backBotY);
+  ctx.stroke();
+  ctx.strokeRect(padL, frontTopY, plotW, frontBase - frontTopY);
 
   // ---------- Labels ----------
-  ctx.fillStyle = 'rgba(200, 210, 220, 0.75)';
+  ctx.fillStyle = 'rgba(220, 226, 232, 0.85)';
   ctx.font = '10px sans-serif';
 
-  // dB axis (left, front plane)
-  for (const db of [peakDb, sens, sens - 10, sens - 20]) {
+  // dB axis (left of front plane).
+  ctx.textAlign = 'right';
+  for (const db of [peakDb, sens, sens - 10, sens - 20, sens - 30, sens - 40]) {
     const y = yOfDb(db);
-    ctx.fillText(`${Math.round(db)}`, 6, y + 3);
+    if (y < frontTopY - 2 || y > frontBase + 2) continue;
+    ctx.fillText(`${Math.round(db)}`, padL - 6, y + 3);
   }
-  ctx.fillText('dB', 6, padT - 4);
+  ctx.textAlign = 'start';
+  ctx.fillText('dB', 4, frontTopY + 10);
 
-  // Frequency axis (bottom — labels sit under the BACK-bottom edge so
-  // they align with the isometric "floor" and don't clash with the
-  // slices that project beyond the front baseline).
+  // Frequency axis (under the front baseline).
+  ctx.textAlign = 'center';
   for (const tick of tickFreqs) {
     if (tick < fMin || tick > fMax) continue;
-    const x = xOfHz(tick) + bkX;
+    const x = xOfHz(tick);
     const label = tick >= 1000 ? `${tick / 1000}k` : `${tick}`;
-    ctx.fillText(label, x - (label.length * 3), H - 10);
+    ctx.fillText(label, x, frontBase + 16);
   }
-  ctx.fillText('Hz', W - 18, H - 10);
+  ctx.textAlign = 'start';
+  ctx.fillText('Hz', rightX + 6, frontBase + 16);
 
-  // Time axis (right edge — runs along the right-bottom depth line from
-  // front-right-bottom to back-right-bottom). Ticks every 1 ms with a
-  // short perpendicular mark.
-  ctx.strokeStyle = 'rgba(200, 210, 220, 0.55)';
+  // Time axis — right-depth edge from (rightX, frontBase) to
+  // (rightX + bkX, backBotY). bkY < 0, so the axis goes UP and right.
+  ctx.strokeStyle = 'rgba(220, 226, 232, 0.55)';
   ctx.lineWidth = 1;
   for (const tms of [0, 1, 2, 3, 4, 5, 6]) {
     if (tms > tMaxMs) continue;
     const s = (tms / tMaxMs) * (nSlices - 1);
     const x = rightX + s * skewX;
-    const y = bottomY + s * skewY;
-    // Short outward tick
+    const y = frontBase + s * skewY;
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x + 5, y + 2);
+    ctx.lineTo(x + 5, y);
     ctx.stroke();
-    ctx.fillText(`${tms}`, x + 8, y + 4);
+    ctx.fillText(`${tms}`, x + 8, y + 3);
   }
-  // Unit label past the last tick (sits clearly below the "6 ms" tick).
-  const lastX = rightX + bkX;
-  const lastY = bottomY + bkY;
-  ctx.fillText('ms', lastX + 14, lastY + 16);
+  ctx.fillText('ms', rightX + bkX + 16, backBotY + 3);
+}
+
+// Classic MATLAB 'jet' colormap — dark blue (low) → cyan → green → yellow
+// → red (high). The convention used by REW, ARTA, Klippel, and the
+// reference image in docs/WATERFALL.md.
+function jetColor(t) {
+  const clamped = Math.max(0, Math.min(1, t));
+  const stops = [
+    [  0,   0, 128],
+    [  0,   0, 255],
+    [  0, 128, 255],
+    [  0, 255, 255],
+    [128, 255, 128],
+    [255, 255,   0],
+    [255, 128,   0],
+    [200,   0,   0],
+  ];
+  const seg = Math.min(stops.length - 2, Math.floor(clamped * (stops.length - 1)));
+  const localT = (clamped * (stops.length - 1)) - seg;
+  const a = stops[seg], b = stops[seg + 1];
+  const r = Math.round(a[0] + (b[0] - a[0]) * localT);
+  const g = Math.round(a[1] + (b[1] - a[1]) * localT);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * localT);
+  return `rgb(${r},${g},${bl})`;
 }
 
 // Viridis-ish gradient for waterfall — dark purple (cold / late decay)
