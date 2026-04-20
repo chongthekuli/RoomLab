@@ -7,6 +7,7 @@ import { on, emit } from './events.js';
 import { getCachedLoudspeaker, loadLoudspeaker, interpolateAttenuation, registerLoudspeaker } from '../physics/loudspeaker.js';
 import { analyseSpeaker, estimateNominalDispersion, onAxisResponseDb, csdPerBand } from '../physics/speaker-expert.js';
 import { importSpeakerFile, GLL_GUIDE } from '../physics/speaker-import.js';
+import { mountSpeaker3DPreview, disposePreview } from './speaker-3d-preview.js';
 
 // Imported speakers live here. URL of each imported file is a synthetic
 // `imported:<id>` token; the in-memory cache of loudspeaker.js stores the
@@ -65,6 +66,14 @@ export function mountSpeakerView() {
   on('source:changed', render);   // in case the user changes the selected cabinet's model
   on('room:changed', render);     // expert flags depend on room
   on('scene:reset', render);
+
+  // When the viewport tab changes away from speaker, dispose the WebGL
+  // context so it doesn't hog a GPU surface in the background. It'll be
+  // rebuilt on next render() when the user comes back.
+  document.addEventListener('viewport:tab-changed', (e) => {
+    if (e.detail?.view !== 'speaker') disposePreview();
+    else render();
+  });
 
   render();
 }
@@ -165,6 +174,11 @@ async function render() {
       </section>
     </div>
 
+    <section class="sv-3d-stage">
+      <canvas id="sv-3d-canvas" width="640" height="360"></canvas>
+      <div class="sv-3d-caption">Animated cabinet preview — drivers pulse at representative speed for their passband.</div>
+    </section>
+
     ${def.note ? `<div class="sv-designer-note">${escapeHtml(def.note)}</div>` : ''}
 
     <section class="sv-section">
@@ -221,6 +235,12 @@ async function render() {
   drawPolarCanvas(body.querySelector('#sv-polar-h'), def, BAND_KEYS[currentFreqIdx], 'h');
   drawPolarCanvas(body.querySelector('#sv-polar-v'), def, BAND_KEYS[currentFreqIdx], 'v');
   drawWaterfall(body.querySelector('#sv-waterfall'), def, onAxis);
+
+  // Animated 3D preview — mounts after the HTML is committed so the
+  // canvas has its layout-resolved dimensions. We don't remount on
+  // freq-selector clicks (same def), only when the speaker changes.
+  const stageCanvas = body.querySelector('#sv-3d-canvas');
+  if (stageCanvas) mountSpeaker3DPreview(stageCanvas, def);
 }
 
 async function handleImport(file) {

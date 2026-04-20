@@ -1,0 +1,271 @@
+// Small animated 3D preview of the currently-selected loudspeaker.
+// Mounts a dedicated Three.js scene into the provided <canvas>. Shows
+// the cabinet at scale with approximate driver placement on the front
+// baffle; drivers visibly pulse to hint that the box is producing sound.
+// The whole model orbits slowly so the user sees all sides without
+// dragging.
+//
+// Similar intent to the SurroundLab "material breathing" animation —
+// a visual affordance that the loaded model is what the user expects,
+// before they commit to it in the scene.
+
+import * as THREE from 'three';
+
+let renderer = null;
+let scene = null;
+let camera = null;
+let cabinetGroup = null;
+let drivers = [];           // { mesh, cone, baseZ, type, pulseSpeed, pulseAmp }
+let animId = null;
+let lastDef = null;
+
+export function mountSpeaker3DPreview(canvas, def) {
+  if (!canvas || !def) return;
+  if (lastDef === def && renderer && renderer.domElement === canvas) return;
+  disposePreview();
+
+  const width = canvas.clientWidth || canvas.width;
+  const height = canvas.clientHeight || canvas.height;
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(width, height, false);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+
+  scene = new THREE.Scene();
+  scene.background = null;  // transparent so the parent CSS can tint
+
+  const aspect = width / height;
+  camera = new THREE.PerspectiveCamera(28, aspect, 0.1, 20);
+  camera.position.set(1.3, 0.45, 1.9);
+  camera.lookAt(0, 0, 0);
+
+  // Lighting — soft key + blueish fill + rim from behind for silhouette.
+  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+  const key = new THREE.DirectionalLight(0xffffff, 1.0);
+  key.position.set(2.5, 3.5, 2.5);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0x6aa0ff, 0.35);
+  fill.position.set(-2, 0.8, 1.2);
+  scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xffcc88, 0.45);
+  rim.position.set(-1.5, 1.6, -2.2);
+  scene.add(rim);
+
+  // Turntable under the speaker — subtle disk.
+  const turntable = new THREE.Mesh(
+    new THREE.CircleGeometry(0.7, 64),
+    new THREE.MeshStandardMaterial({ color: 0x0c0f13, roughness: 0.9, metalness: 0.05 }),
+  );
+  turntable.rotation.x = -Math.PI / 2;
+  turntable.position.y = -0.6;
+  scene.add(turntable);
+
+  cabinetGroup = buildCabinet(def);
+  scene.add(cabinetGroup);
+
+  // Frame model in the camera — compute bounding box, move camera out so it
+  // fits nicely with some padding.
+  fitCameraToModel(cabinetGroup, camera);
+
+  lastDef = def;
+  if (animId) cancelAnimationFrame(animId);
+  animate();
+}
+
+export function disposePreview() {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+  drivers = [];
+  if (scene) {
+    scene.traverse(obj => {
+      if (obj.geometry) obj.geometry.dispose?.();
+      if (obj.material) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) m.dispose?.();
+      }
+    });
+  }
+  if (renderer) {
+    renderer.dispose();
+    renderer = null;
+  }
+  scene = null;
+  camera = null;
+  cabinetGroup = null;
+  lastDef = null;
+}
+
+// Build the cabinet + drivers from the speaker definition.
+function buildCabinet(def) {
+  const group = new THREE.Group();
+  const dim = def.physical?.dimensions_m || { w: 0.4, h: 0.6, d: 0.35 };
+  const w = dim.w ?? 0.4;
+  const h = dim.h ?? 0.6;
+  const d = dim.d ?? 0.35;
+
+  const isLineArray = /line-array/i.test(def.model ?? '') || /line-array/i.test(def.id ?? '');
+
+  // Cabinet body — dark, subtly metallic (matches the scene.js speaker enclosure look).
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1d22, roughness: 0.55, metalness: 0.35,
+  });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
+  group.add(body);
+
+  // Slight edge bevel — faked with a larger dark frame around the front face.
+  const frameMat = new THREE.MeshStandardMaterial({
+    color: 0x0a0b0e, roughness: 0.7, metalness: 0.2,
+  });
+  const frameGeo = new THREE.BoxGeometry(w + 0.005, h + 0.005, 0.008);
+  const frame = new THREE.Mesh(frameGeo, frameMat);
+  frame.position.z = d / 2 + 0.005;
+  group.add(frame);
+
+  // Front baffle (slightly recessed).
+  const baffleMat = new THREE.MeshStandardMaterial({
+    color: 0x14171c, roughness: 0.8, metalness: 0.15,
+  });
+  const baffle = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.95, h * 0.97, 0.004),
+    baffleMat,
+  );
+  baffle.position.z = d / 2 + 0.002;
+  group.add(baffle);
+
+  const frontZ = d / 2 + 0.01;
+
+  if (isLineArray) {
+    // Horizontal cabinet — line-array element geometry. Two LF cones
+    // flanking a central HF waveguide slot.
+    const coneR = Math.min(h * 0.42, w * 0.18);
+    addDriver(group, -w * 0.28, 0, frontZ, coneR, 'lf');
+    addDriver(group,  w * 0.28, 0, frontZ, coneR, 'lf');
+    addWaveguide(group, 0, 0, frontZ, w * 0.18, h * 0.32);
+  } else {
+    // Vertical 2-way — LF woofer low, HF tweeter high.
+    const wooferR = Math.min(w * 0.38, h * 0.28);
+    addDriver(group, 0, -h * 0.18, frontZ, wooferR, 'lf');
+    addDriver(group, 0,  h * 0.32, frontZ, Math.min(w * 0.12, 0.04), 'hf');
+  }
+
+  // Subtle RoomLAB badge on bottom-right of the baffle.
+  const badgeMat = new THREE.MeshStandardMaterial({
+    color: 0x74d0ff, roughness: 0.3, metalness: 0.8, emissive: 0x103040, emissiveIntensity: 0.3,
+  });
+  const badge = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.1, h * 0.018, 0.002),
+    badgeMat,
+  );
+  badge.position.set(w * 0.36, -h * 0.45, frontZ);
+  group.add(badge);
+
+  // Centre the group on origin.
+  group.position.set(0, 0, 0);
+
+  return group;
+}
+
+function addDriver(group, x, y, z, radius, type) {
+  // Surround ring (outer black rubber surround).
+  const surroundMat = new THREE.MeshStandardMaterial({
+    color: 0x0e1014, roughness: 0.9, metalness: 0.1,
+  });
+  const surround = new THREE.Mesh(
+    new THREE.RingGeometry(radius * 0.85, radius, 48),
+    surroundMat,
+  );
+  surround.position.set(x, y, z);
+  group.add(surround);
+
+  // Cone — concave disc with subtle depth. We give it a cone geometry so the
+  // visible pulse reads clearly when it moves in and out.
+  const coneMat = new THREE.MeshStandardMaterial({
+    color: type === 'hf' ? 0x22252a : 0x16191f,
+    roughness: type === 'hf' ? 0.35 : 0.7,
+    metalness: type === 'hf' ? 0.6 : 0.2,
+  });
+  const coneGeo = new THREE.ConeGeometry(radius * 0.9, radius * 0.55, 48, 1, true);
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  cone.position.set(x, y, z);
+  cone.rotation.x = -Math.PI / 2;  // point +Z (outward)
+  group.add(cone);
+
+  // Dust cap at cone apex.
+  const cap = new THREE.Mesh(
+    new THREE.SphereGeometry(radius * 0.28, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: 0x2a2d34, roughness: 0.5, metalness: 0.3 }),
+  );
+  cap.position.set(x, y, z + radius * 0.35);
+  group.add(cap);
+
+  drivers.push({
+    mesh: cone,
+    cap,
+    surround,
+    baseZ: z,
+    type,
+    pulseSpeed: type === 'hf' ? 12.5 : 3.4,
+    pulseAmp:   type === 'hf' ? 0.0025 : 0.012,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function addWaveguide(group, x, y, z, w, h) {
+  // Rectangular HF waveguide with a central slot — typical line-array HF
+  // output. Ribbon driver or compression driver behind it.
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x191d22, roughness: 0.3, metalness: 0.7,
+  });
+  const guide = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.02), mat);
+  guide.position.set(x, y, z);
+  group.add(guide);
+
+  const slot = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.4, h * 0.85, 0.006),
+    new THREE.MeshStandardMaterial({ color: 0x050608, roughness: 0.95, metalness: 0 }),
+  );
+  slot.position.set(x, y, z + 0.011);
+  group.add(slot);
+
+  drivers.push({
+    mesh: guide,
+    baseZ: z,
+    type: 'hf',
+    pulseSpeed: 15,
+    pulseAmp: 0.0015,
+    phase: 0,
+  });
+}
+
+function fitCameraToModel(group, cam) {
+  const box = new THREE.Box3().setFromObject(group);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const dist = maxDim * 2.6;
+  const dir = new THREE.Vector3(0.7, 0.35, 1.0).normalize();
+  cam.position.copy(dir.multiplyScalar(dist));
+  cam.lookAt(0, 0, 0);
+}
+
+function animate() {
+  if (!renderer || !scene || !camera) return;
+  const t = performance.now() / 1000;
+
+  // Gentle auto-orbit of the cabinet so the user sees all sides without
+  // interacting. Rate ~9 RPM.
+  if (cabinetGroup) cabinetGroup.rotation.y = t * 0.22;
+
+  // Driver pulse — each driver oscillates along its local +Z with a speed
+  // and amplitude that reflects its bandwidth (HF fast/small, LF slow/big).
+  for (const drv of drivers) {
+    const z = drv.baseZ + Math.sin(t * drv.pulseSpeed + drv.phase) * drv.pulseAmp;
+    drv.mesh.position.z = z;
+    if (drv.cap) drv.cap.position.z = z + (drv.mesh.geometry?.parameters?.radius ?? 0.05) * 0.35;
+  }
+
+  renderer.render(scene, camera);
+  animId = requestAnimationFrame(animate);
+}

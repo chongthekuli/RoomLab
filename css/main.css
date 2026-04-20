@@ -313,6 +313,31 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   border-radius: 2px;
   font-style: italic;
 }
+
+/* Animated 3D cabinet preview — sits between the spec-card grid and
+   the FR plot in the Speaker workbench. */
+.sv-3d-stage {
+  margin: 0 0 1.4rem;
+  padding: 0.5rem 0.5rem 0.6rem;
+  background: radial-gradient(ellipse at 50% 30%, rgba(90, 130, 180, 0.12) 0%, rgba(10, 12, 16, 0.8) 70%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+.sv-3d-stage canvas {
+  display: block;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+.sv-3d-caption {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  font-style: italic;
+}
 .sv-head {
   display: flex;
   justify-content: space-between;

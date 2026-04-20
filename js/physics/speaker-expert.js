@@ -150,11 +150,16 @@ function estimateRoomVolume(room) {
   return (room.width_m ?? 10) * (room.depth_m ?? 10) * h;
 }
 
-// Broadband frequency response on-axis — for the FR plot. Prefers the
-// explicit `acoustic.on_axis_response_db` map (real cabinet deviation
-// from the on-axis reference at 1 kHz, signed dB) and falls back to the
-// directivity-grid reading at (0°, 0°) when that's all the file carries.
+// Broadband frequency response on-axis — for the FR plot. Resolution
+// priority:
+//   1. `acoustic.fr_fine_db` — 20+ point measured-style curve (best)
+//   2. `acoustic.on_axis_response_db` — per-octave reference points
+//   3. Directivity grid on-axis reading (last resort, typically flat)
 export function onAxisResponseDb(def) {
+  const fine = def?.acoustic?.fr_fine_db;
+  if (Array.isArray(fine) && fine.length >= 3) {
+    return fine.map(([hz, db]) => ({ hz, db }));
+  }
   const dir = def?.directivity;
   if (!dir) return [];
   const freqs = Object.keys(dir.attenuation_db).map(Number).sort((a, b) => a - b);
