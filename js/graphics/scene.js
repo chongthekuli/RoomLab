@@ -2864,61 +2864,9 @@ function rebuildStadiumFurniture() {
 let _amperesLogoTex = null;
 function getAmperesLogoTexture() {
   if (_amperesLogoTex) return _amperesLogoTex;
-  const W = 1024, H = 640;
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, W, H);
-
-  const BLUE = '#0053B6';
-  const RED = '#E30613';
-
-  // Blue ring ("O" of Amperes) — offset left of center. Draw top and
-  // bottom half-rings separately, leaving a horizontal white slit that
-  // the red text passes through, matching the real brand mark.
-  const cx = W * 0.40;
-  const cy = H * 0.50;
-  const outerR = H * 0.38;
-  const innerR = outerR * 0.68;
-  const slitHalf = outerR * 0.18;
-
-  ctx.fillStyle = BLUE;
-  // top half-ring
-  ctx.beginPath();
-  ctx.arc(cx, cy, outerR, Math.PI, 2 * Math.PI, false);
-  ctx.arc(cx, cy, innerR, 2 * Math.PI, Math.PI, true);
-  ctx.closePath();
-  ctx.fill();
-  // bottom half-ring
-  ctx.beginPath();
-  ctx.arc(cx, cy, outerR, 0, Math.PI, false);
-  ctx.arc(cx, cy, innerR, Math.PI, 0, true);
-  ctx.closePath();
-  ctx.fill();
-  // slit across the middle (clears any residual antialiased pixels)
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(cx - outerR - 2, cy - slitHalf, (outerR + 2) * 2, slitHalf * 2);
-
-  // Red "amperes" wordmark across the middle, overlapping the ring.
-  ctx.fillStyle = RED;
-  ctx.font = `900 ${Math.round(H * 0.34)}px Arial Black, Arial, sans-serif`;
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  ctx.fillText('amperes', cx - outerR * 0.55, cy);
-
-  // ® mark at top-right of the blue ring
-  ctx.fillStyle = BLUE;
-  ctx.font = `bold ${Math.round(H * 0.07)}px Arial, sans-serif`;
-  ctx.textBaseline = 'top';
-  ctx.textAlign = 'left';
-  ctx.fillText('®', cx + outerR * 0.85, cy - outerR * 0.95);
-
-  const tex = new THREE.CanvasTexture(canvas);
+  const tex = new THREE.TextureLoader().load('assets/amperes-logo.png');
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  tex.needsUpdate = true;
+  tex.anisotropy = 8;
   _amperesLogoTex = tex;
   return tex;
 }
