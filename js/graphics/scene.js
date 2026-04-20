@@ -2823,13 +2823,17 @@ function rebuildStadiumFurniture() {
     const bodyMat = new THREE.MeshStandardMaterial({
       color: 0x0a0a0a, metalness: 0.4, roughness: 0.55,
     });
-    // Pushed above the bloom threshold (≥1.0) so the LED faces actually
-    // glow into the dark dome under the UnrealBloomPass. Albedo held to
-    // black so the emissive does all the work — otherwise the surface
-    // "muddies" in the composite pass. Viktor audit item #2.
+    // LED faces show the Amperes logo (branding). Canvas-drawn so no
+    // external asset round-trip; same texture is mapped to all 4 sides.
+    // map = albedo so the logo reads under any lighting; emissiveMap =
+    // same canvas so the lit pixels also glow under the bloom pass.
+    const logoTex = getAmperesLogoTexture();
     const ledMat = new THREE.MeshStandardMaterial({
-      color: 0x000000, metalness: 0.2, roughness: 0.35,
-      emissive: 0x4aa0e0, emissiveIntensity: 2.2,
+      map: logoTex,
+      emissiveMap: logoTex,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.9,
+      metalness: 0.2, roughness: 0.35,
     });
     const scoreboard = new THREE.Group();
     // Core box (top + bottom show as body, sides show as LED faces — use
@@ -2855,6 +2859,68 @@ function rebuildStadiumFurniture() {
     scoreboard.position.set(sb.cx, sb.center_z_m, sb.cy);
     zonesGroup.add(scoreboard);
   }
+}
+
+let _amperesLogoTex = null;
+function getAmperesLogoTexture() {
+  if (_amperesLogoTex) return _amperesLogoTex;
+  const W = 1024, H = 640;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+
+  const BLUE = '#0053B6';
+  const RED = '#E30613';
+
+  // Blue ring ("O" of Amperes) — offset left of center. Draw top and
+  // bottom half-rings separately, leaving a horizontal white slit that
+  // the red text passes through, matching the real brand mark.
+  const cx = W * 0.40;
+  const cy = H * 0.50;
+  const outerR = H * 0.38;
+  const innerR = outerR * 0.68;
+  const slitHalf = outerR * 0.18;
+
+  ctx.fillStyle = BLUE;
+  // top half-ring
+  ctx.beginPath();
+  ctx.arc(cx, cy, outerR, Math.PI, 2 * Math.PI, false);
+  ctx.arc(cx, cy, innerR, 2 * Math.PI, Math.PI, true);
+  ctx.closePath();
+  ctx.fill();
+  // bottom half-ring
+  ctx.beginPath();
+  ctx.arc(cx, cy, outerR, 0, Math.PI, false);
+  ctx.arc(cx, cy, innerR, Math.PI, 0, true);
+  ctx.closePath();
+  ctx.fill();
+  // slit across the middle (clears any residual antialiased pixels)
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(cx - outerR - 2, cy - slitHalf, (outerR + 2) * 2, slitHalf * 2);
+
+  // Red "amperes" wordmark across the middle, overlapping the ring.
+  ctx.fillStyle = RED;
+  ctx.font = `900 ${Math.round(H * 0.34)}px Arial Black, Arial, sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText('amperes', cx - outerR * 0.55, cy);
+
+  // ® mark at top-right of the blue ring
+  ctx.fillStyle = BLUE;
+  ctx.font = `bold ${Math.round(H * 0.07)}px Arial, sans-serif`;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.fillText('®', cx + outerR * 0.85, cy - outerR * 0.95);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  _amperesLogoTex = tex;
+  return tex;
 }
 
 function zoneHeatmapTexture(splInfo) {
