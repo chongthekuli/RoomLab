@@ -446,7 +446,15 @@ This means the MVP ray tracer can ship with much higher default ray count than p
 
 **B2.5.** ⏳ Stadium bowl structural triangulation — risers, retaining walls, back walls, concourse ring — deferred. Zones (tread tops) are already triangulated via the zones path, which covers the acoustically-significant audience-facing surfaces. Adding risers requires either (a) reconstructing scene.js's LatheGeometry bowl in the physics layer, or (b) extracting triangles from the already-built Three.js meshes. Both are doable; neither is blocking a first precision-render demo.
 
-**B3.** Worker pool (`js/physics/precision/worker-pool.js`) — 4-8 workers, job queue, cancellation. Scene + BVH transferred once to each worker via `postMessage` + transferable list.
+**B3.** Split into B3a + B3b:
+
+  - **B3a — Tracer kernel** ✅ landed `HEAD`. [js/physics/precision/tracer-core.js](../js/physics/precision/tracer-core.js) — pure-function stochastic specular ray tracer. Takes `(scene, soup, bvh, opts)`, returns `{ histogram: Float32Array[R × B × T], hitCount, raysTraced, terminations }`. Algorithm: uniform sphere sampling (mulberry32 deterministic RNG), per-bounce BVH hit + ray-sphere receiver crossings, specular reflection off hit normal, per-band energy attenuation by `(1 − α_surface)`, energy-cutoff termination at −60 dB. No per-ray allocations after scratch buffers. Main-thread AND worker-runnable identically; Phase B3b wraps this file in a worker shell.
+
+    Regression tests verified (8 scenarios): bit-exact determinism for same seed, direct-path timing matches analytical 3 m → 8.7 ms arrival, first-segment hit count matches solid-angle prediction `r²/(4d²)`, early-vs-late energy decay, hard-vs-soft material tail ratio (2 trillion × between concrete-all vs acoustic-tile-all), HF-decays-faster-than-LF per-band physics, arena preset end-to-end produces non-trivial histogram.
+
+    Perf spot-check: arena preset with 2000 rays/source × 24 sources × 50 max bounces = 48,000 ray-paths in 8.8 s single-threaded on a typical dev machine. With Phase A5's measured 92 % parallel efficiency over 8 workers, that projects to ~1.2 s wall-clock once B3b ships.
+
+  - **B3b — Worker pool** ⏳ next session. [js/physics/precision/precision-worker.js](../js/physics/precision/) (to be written) imports `tracer-core.js` and wraps it in a message-driven shell. [js/physics/precision/worker-pool.js](../js/physics/precision/) orchestrates N workers, fans out ray batches, aggregates partial histograms on the main thread (simple element-wise sum). Cancellation via shared flag.
 
 **B4.** Progress UI — spinner, rays-done/total counter, cancel button.
 
