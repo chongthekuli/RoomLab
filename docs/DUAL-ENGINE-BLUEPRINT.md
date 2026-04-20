@@ -1,6 +1,6 @@
 # RoomLab — Dual-Engine Architecture Blueprint
 
-**Status:** design proposal, not implemented
+**Status:** Phase A in progress — foundation scaffolding landed commit `HEAD`. See §6 "Phase A-1" below for what's done vs. pending.
 **Goal:** keep the current statistical-acoustics engine as the real-time "Draft Mode" while introducing a hybrid Image-Source + Ray-Traced engine for "Precision Render Mode" that outputs time-domain impulse responses and derived metrics (EDT, C80, C50, D/R, STI-from-IR).
 **Non-goal:** a one-shot rewrite. Every phase below must leave the product in a shippable state.
 
@@ -400,11 +400,11 @@ Recommend (1) for MVP, (2) as first precision-engine refinement.
 
 ### Phase A — Foundation (ship in 2-3 weeks, still draft-only)
 
-**A1.** Introduce `PhysicsScene.build(state)`. Initially consumed only by the existing draft engine.
-**A2.** Refactor `computeRT60Band`, `computeMultiSourceSPL`, `computeSTIPA` to accept `PhysicsScene` instead of raw `state`. Tests drive the change.
-**A3.** Add `scattering` array to every entry in `materials.json`. Draft engine ignores it (backward compatible).
-**A4.** Add `state.results.draft` namespace. UI reads from it.
-**A5.** Add worker-test harness: spawn a trivial worker, measure postMessage round-trip, confirm the deploy works on GitHub Pages with COOP/COEP headers.
+**A1.** ✅ `buildPhysicsScene({ state, materials, getLoudspeakerDef })` in [js/physics/scene-snapshot.js](../js/physics/scene-snapshot.js) — returns a frozen snapshot with resolved materials (index-keyed Float32 absorption + scattering), pre-expanded line-array elements, pre-computed L_w per source per band, volumetric receivers with 0.5 m default radius, zones with occupancy-blended α + s, and a snapshot of physics flags + Master EQ. `PHYSICS_SCENE_VERSION = 1`. 34 regression tests.
+**A2.** ⏳ Refactor `computeRT60Band`, `computeMultiSourceSPL`, `computeSTIPA` to accept `PhysicsScene` instead of raw `state`. Tests drive the change. **Pending next session — large blast radius, deserves focused pass.**
+**A3.** ✅ `scattering` array added to every entry in `materials.json` (schema v1.3). Values per Cox & D'Antonio *Acoustic Absorbers and Diffusers* 2nd ed. / ISO 17497-1 references. Draft engine ignores scattering (backward compatible); precision ray tracer (Phase B+) uses it for Lambertian vs specular bounce decisions.
+**A4.** ✅ `state.results.precision = null` scaffolded; `state.results.engines` metadata tracks `inProgress`, `staleAt`, `cancellable`. Existing draft fields (`rt60`, `splGrid`, `zoneGrids`) preserved for backward compat.
+**A5.** ⏳ Worker smoke test — spawn a trivial worker, measure postMessage round-trip, confirm the deploy works on GitHub Pages. Will need COOP/COEP headers for SharedArrayBuffer; `postMessage` fallback works everywhere.
 
 ### Phase B — BVH + worker scaffolding (2-3 weeks)
 

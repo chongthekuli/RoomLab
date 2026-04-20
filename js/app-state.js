@@ -362,7 +362,24 @@ export const state = {
   selectedListenerId: null,
   zones: [],
   selectedZoneId: null,
-  results: { rt60: null, splGrid: null, zoneGrids: [] },
+  results: {
+    // Draft-engine outputs (current Sabine / Hopkins-Stryker / STIPA) —
+    // re-used names for backward compat; the entire block is conceptually
+    // "state.results.draft" from the dual-engine blueprint's perspective.
+    rt60: null, splGrid: null, zoneGrids: [],
+    // Precision-engine outputs (ISM + stochastic ray tracer, Phase B+).
+    // Stays null until the user manually triggers a Render; once populated
+    // the UI treats it as authoritative over the draft numbers for the
+    // same room/source/receiver configuration (per Phase 1 decision).
+    precision: null,
+    // Metadata the UI reads to know whether precision is in flight, stale,
+    // or fresh. `staleAt` ms-timestamp marks the first mutation AFTER the
+    // render completed — result stays visible but flagged as stale.
+    engines: {
+      draft:     { lastRun: null },
+      precision: { lastRun: null, inProgress: false, staleAt: null, cancellable: false },
+    },
+  },
   display: {
     showHeatmaps: true, showAimLines: false, showIsobars: true, isobarStep_db: 3,
     // Heatmap metric — 'spl' paints SPL dB vertex colors + the 60–110 dB

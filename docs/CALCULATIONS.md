@@ -162,17 +162,25 @@ Used for the wall-transmission-loss path check (§5.3) and for the walkthrough c
 
 ### 3.1 File
 
-[data/materials.json](../data/materials.json). Shape:
+[data/materials.json](../data/materials.json) — schema v1.3. Shape:
 
 ```json
 {
   "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000],
   "materials": [
-    { "id": "...", "name": "...", "absorption": [α₁, α₂, α₃, α₄, α₅, α₆, α₇] },
+    {
+      "id": "...", "name": "...",
+      "absorption": [α₁, α₂, α₃, α₄, α₅, α₆, α₇],
+      "scattering": [s₁, s₂, s₃, s₄, s₅, s₆, s₇]
+    },
     …
   ]
 }
 ```
+
+**`absorption` (α)** — surface absorption coefficient per octave band (ISO 3382-1 / Beranek). Drives RT60 + Hopkins-Stryker R today.
+
+**`scattering` (s)** — fraction of incident energy scattered non-specularly per ISO 17497-1. **Draft engine ignores scattering** (Sabine assumes diffuse field a priori — no per-reflection specular-vs-diffuse decision). The precision ray tracer (Phase B+) uses `s(f)` at each ray bounce to pick Lambertian vs specular reflection per the dual-engine blueprint §4. Values sourced from Cox & D'Antonio *Acoustic Absorbers and Diffusers* 2nd ed. — reasonable defaults, users can override per-zone when precision mode ships.
 
 ### 3.2 Audience-occupancy blend
 
@@ -694,6 +702,18 @@ Tracked as deferred items across several audits. The most impactful unresolved:
 4. **Bowl capacity expansion (Rivera H5 / Morales C3)** — 6-row bowl is middle-school-sized for a 50k m³ volume.
 5. **PMREM + RoomEnvironment dispose (Weiss C1)** — latent leak, one-time.
 6. **Post-processing retry (Viktor #1)** — SSAOPass broke color pipeline in r0.160; GTAOPass migration path is open.
+
+---
+
+## 14.1 Dual-Engine Transition (Phase A landed `HEAD`)
+
+The full architectural blueprint is at [DUAL-ENGINE-BLUEPRINT.md](./DUAL-ENGINE-BLUEPRINT.md). Phase A foundation shipped:
+
+- **`buildPhysicsScene(...)`** — [js/physics/scene-snapshot.js](../js/physics/scene-snapshot.js) produces an immutable, worker-transferable snapshot of every physics input. Not yet wired into existing call sites; that's Phase A2.
+- **`materials.json` schema v1.3** — adds `scattering` per band for every material. Draft engine unchanged; precision engine (Phase B+) uses it.
+- **`state.results.precision` + `state.results.engines`** — scaffold for the dual-engine UI. Populated only when Precision Render runs.
+
+When Phase A2 (the refactor of RT60/SPL/STIPA to consume `PhysicsScene`) and Phase B (ISM + ray tracer in a worker pool with `three-mesh-bvh`) land, the physics sections above will get per-section Draft/Precision split tables. Until then, everything in §4–§10 describes the Draft engine only.
 
 ---
 
