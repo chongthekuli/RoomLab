@@ -3,6 +3,7 @@ import { on } from './events.js';
 import { computeAllBands } from '../physics/rt60.js';
 import { computeListenerBreakdown, computeRoomConstant } from '../physics/spl-calculator.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
+import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 
 let materialsRef;
 
@@ -38,6 +39,9 @@ export function mountResultsPanel({ materials }) {
   on('listener:changed', render);
   on('listener:selected', render);
   on('scene:reset', render);
+  // Precision engine completed / invalidated / cleared — re-render so
+  // the Precision column tracks the latest state.
+  on('precision:changed', render);
 }
 
 function render() {
@@ -164,20 +168,74 @@ function renderRT60() {
   const midAlpha = ((f500?.meanAbsorption ?? 0) + (f1k?.meanAbsorption ?? 0)) / 2;
   const geom = bands[0]; // Volume + totalArea are band-invariant
 
+  // Precision ray-traced metrics for the currently-selected listener, if
+  // a render exists. Derived from the cached histogram (no re-trace when
+  // a different listener is selected — listener:selected triggers a
+  // render() here and the metrics for the new receiver come straight
+  // out of deriveMetrics(cachedResult)).
+  const pResult = state.results.precision;
+  const pStale = !!state.results.engines?.precision?.staleAt;
+  const selListener = getSelectedListener();
+  let pPerBand = null;
+  let pMidT30 = null;
+  if (pResult && selListener) {
+    const selIdx = state.listeners.findIndex(l => l.id === selListener.id);
+    if (selIdx >= 0) {
+      const metrics = deriveMetrics(pResult);
+      const m = metrics[selIdx];
+      if (m) {
+        // Align per-band precision T30 to the draft-engine band order
+        // (materials.frequency_bands_hz). Precision uses the same order
+        // (scene.bands_hz = materials.frequency_bands_hz at snapshot
+        // time) so straight index mapping is safe.
+        pPerBand = m.perBand.map(b => b.t30_s);
+        pMidT30 = m.broadband.t30_s;
+      }
+    }
+  }
+
   document.getElementById('rt60-summary').innerHTML = `
     <div class="big ${rating.klass}">${isFinite(mid) ? mid.toFixed(2) : '∞'}<span class="unit"> s</span></div>
     <div class="sub">Mid-band average RT60 (500 Hz + 1 kHz, Sabine)</div>
     <div class="rating ${rating.klass}">${rating.label}</div>
     <div class="sub meta">Volume ${geom.volume_m3.toFixed(1)} m³ · Surface ${geom.totalArea_m2.toFixed(1)} m² · Mean α ${midAlpha.toFixed(2)} (500 Hz+1 kHz)</div>
+    ${pMidT30 != null && isFinite(pMidT30) ? `
+      <div class="precision-cmp${pStale ? ' stale' : ''}">
+        Precision T30 (ray-traced @ ${escapeHtml(selListener.label)}):
+        <strong>${pMidT30.toFixed(2)} s</strong>${pStale ? ' · <em>stale</em>' : ''}
+      </div>
+    ` : ''}
   `;
 
-  document.querySelector('#rt60-table tbody').innerHTML = bands.map(b => `
-    <tr>
-      <td>${b.frequency_hz}</td>
-      <td>${fmtRT(b.sabine_s)}</td>
-      <td>${fmtRT(b.eyring_s)}</td>
-    </tr>
-  `).join('');
+  // Rebuild the table — optionally adding the Precision column when a
+  // render is available. Listener-position-dependent T30 is precision's
+  // signature feature so it's worth the extra visual space even if
+  // Sabine/Eyring stay identical across listeners.
+  const table = document.getElementById('rt60-table');
+  if (table) {
+    const hasPrec = pPerBand != null;
+    const precHeaderTooltip = hasPrec
+      ? `Per-band T30 ray-traced at ${selListener.label}. Listener-position-dependent — switch listeners to see local variation.`
+      : '';
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>Hz</th><th>Sabine</th><th>Eyring</th>
+          ${hasPrec ? `<th title="${escapeAttr(precHeaderTooltip)}" class="${pStale ? 'stale' : ''}">Precision${pStale ? ' *' : ''}</th>` : ''}
+        </tr>
+      </thead>
+      <tbody>
+        ${bands.map((b, i) => `
+          <tr>
+            <td>${b.frequency_hz}</td>
+            <td>${fmtRT(b.sabine_s)}</td>
+            <td>${fmtRT(b.eyring_s)}</td>
+            ${hasPrec ? `<td class="precision-cell${pStale ? ' stale' : ''}">${fmtRT(pPerBand[i])}</td>` : ''}
+          </tr>
+        `).join('')}
+      </tbody>
+    `;
+  }
 }
 
 function renderSPLStats() {
@@ -216,5 +274,9 @@ function ratingFor(t) {
 }
 
 function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function escapeAttr(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }

@@ -14,7 +14,7 @@
 //     without re-running the trace
 
 import { state, getSelectedListener } from '../app-state.js';
-import { on } from './events.js';
+import { on, emit } from './events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { runPrecisionRender } from '../physics/precision/precision-engine.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
@@ -69,6 +69,7 @@ export function mountPrecisionPanel({ materials }) {
     state.results.engines.precision.lastRun = null;
     state.results.engines.precision.staleAt = null;
     updateUI();
+    emit('precision:changed');
   });
   // Listener selection changes only the displayed receiver, not the trace.
   on('listener:selected', () => {
@@ -113,6 +114,7 @@ async function runRender() {
     state.results.engines.precision.lastRun = result.generatedAt;
     state.results.engines.precision.staleAt = null;
     renderResults();
+    emit('precision:changed');
   } catch (err) {
     const msg = err?.message ?? String(err);
     if (!/cancel/i.test(msg)) {
@@ -133,6 +135,7 @@ function markStale() {
   if (!state.results.precision) return;
   state.results.engines.precision.staleAt = Date.now();
   updateUI();
+  emit('precision:changed');
 }
 
 function updateProgressBar(progressMap, startedAt) {

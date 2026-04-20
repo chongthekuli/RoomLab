@@ -525,6 +525,28 @@ section h3 {
 #spl-table tr:hover td,
 #zones-table tr:hover td { background: rgba(255, 255, 255, 0.03); }
 
+.precision-cell {
+  color: var(--data-cyan, #74d0ff);
+  font-weight: 500;
+}
+.precision-cell.stale,
+#rt60-table th.stale { color: var(--muted); opacity: 0.6; }
+.precision-cmp {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
+  color: var(--data-cyan, #74d0ff);
+  background: rgba(116, 208, 255, 0.08);
+  border-left: 2px solid var(--data-cyan, #74d0ff);
+  border-radius: 2px;
+}
+.precision-cmp.stale {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-left-color: var(--muted);
+}
+.precision-cmp em { font-style: italic; color: var(--data-amber); }
+
 .hint {
   margin-top: 1rem;
   font-size: 0.72rem;
