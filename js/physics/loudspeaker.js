@@ -2,37 +2,42 @@ const cache = new Map();
 
 // Frequency-dependent pattern-widening multipliers for cabinets where
 // only a single reference band is measured. Real cabinets narrow with
-// frequency (beaming) and widen at LF (omni-like). Different classes
-// behave differently — a horn keeps its pattern far better than a
-// cone-only box, so we pick factors based on `directivity.class_hint`
-// in the JSON (defaults to 'standard').
+// frequency (beaming) and widen at LF. Different classes behave
+// differently — a horn keeps its pattern far better than a cone-only
+// box; we pick factors based on `directivity.class_hint` in the JSON
+// (defaults to 'standard'). These factors multiply the 1 kHz
+// attenuation grid, so at factor = 2.5 a −10 dB 1 kHz point becomes
+// a −25 dB point at the HF band. To stay physically realistic the
+// 1 kHz base pattern in the JSON must already be deep (on the order
+// of −20 to −30 dB in the rear) — otherwise even 3× scaling can't
+// produce believable HF beaming.
 const PATTERN_CLASS_FACTORS = {
-  standard: {
-    125:  0.30,
+  standard: {   // cone direct-radiator — dramatic HF beaming
+    125:  0.35,
     250:  0.60,
-    500:  0.82,
+    500:  0.85,
     1000: 1.00,
-    2000: 1.12,
-    4000: 1.32,
-    8000: 1.60,
+    2000: 1.30,
+    4000: 1.80,
+    8000: 2.50,
   },
-  horn: {  // waveguide-loaded — pattern well-controlled across the band
+  horn: {       // waveguide-controlled — pattern still narrows at HF, just less
+    125:  0.55,
+    250:  0.80,
+    500:  0.95,
+    1000: 1.00,
+    2000: 1.15,
+    4000: 1.40,
+    8000: 1.80,
+  },
+  'line-element': {   // tight V always; H shaped by the waveguide
     125:  0.45,
     250:  0.75,
     500:  0.92,
     1000: 1.00,
-    2000: 1.05,
-    4000: 1.12,
-    8000: 1.25,
-  },
-  'line-element': {  // narrow V always, some H shaping with frequency
-    125:  0.35,
-    250:  0.65,
-    500:  0.88,
-    1000: 1.00,
-    2000: 1.08,
-    4000: 1.22,
-    8000: 1.45,
+    2000: 1.10,
+    4000: 1.25,
+    8000: 1.50,
   },
 };
 
