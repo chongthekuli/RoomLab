@@ -473,9 +473,19 @@ This means the MVP ray tracer can ship with much higher default ray count than p
 
 ### Phase C — Minimum-viable precision engine (3-4 weeks)
 
-**C1.** Ray tracer in worker. Specular-only, no ISM, no scattering. Just: emit rays from each source, bounce until energy cutoff, log receiver hits.
-**C2.** Energy-time histograms per receiver per band.
-**C3.** Derive RT60 (T30) from histograms. Compare to draft's Sabine RT60 in the Results panel side-by-side. This becomes our first real cross-engine validation.
+**C1.** ✅ Ray tracer (delivered in B3a). Specular-only, no ISM / scattering yet.
+**C2.** ✅ Energy-time histograms (delivered in B3a).
+**C3.** ✅ Time-domain metric derivation landed `HEAD`. [js/physics/precision/derive-metrics.js](../js/physics/precision/derive-metrics.js):
+
+  - **Schroeder backward integration** — `schroederDecay(h)` + `decayDb(h)` convert per-bucket energy to the standard dB decay curve `L(t) = 10·log10(E(t)/E(0))`.
+  - **Reverberation times** — `calcEDT` (0 → −10 dB regression × 6), `calcT20` (−5 → −25 dB × 3), `calcT30` (−5 → −35 dB × 2). Per ISO 3382-1. All extrapolate to T60 via the regression slope.
+  - **Clarity** — `calcC80` (music clarity, 80 ms split), `calcC50` (speech clarity, 50 ms split), `calcDR` (direct-to-reverb, 10 ms default). Ratio of early/late energy in dB.
+  - **STI from IR** — `calcSTIFromIR(bandHistograms, bucketDtMs, opts)`. Full 14-modulation-frequency IEC 60268-16 Annex A implementation, more accurate than the simplified STIPA on irregular rooms. MTF computed directly from the FFT-style `|∫ h²(t)·exp(-j2πf_m·t) dt| / ∫ h²(t) dt`. Noise correction is optional (caller-supplied per-band signal + ambient SPL); noise-free default models a loud-PA scenario.
+  - **`deriveMetrics(precisionResult, opts)`** — wraps all of the above. Returns per-receiver, per-band + broadband stats, STI per receiver.
+
+  **Regression tests (30 assertions):** synthetic exponential IR with known T60 → EDT, T20, T30 recover T60 to ±0.02 s across three targets (0.8, 1.5, 3.0 s). Direct-heavy IR → C80 > +3 dB; reverb-only IR → C80 < 0 dB. Loud-direct IR → D/R > +10 dB. `computeMTF` matches the Schroeder analytical `1/√(1+(2π·f_m·T/13.8)²)` to ±0.05 across three test frequencies. STI monotone in T60: dry (0.3 s) → 0.76, fair (1.2 s) → 0.53, wet (4.0 s) → 0.35 — aligns with IEC rating tiers.
+
+**C4.** ⏳ Validation: compare precision T30 vs draft Sabine T30 for each preset. Disagreements > 20 % flag geometry or material issues. Phase E UI.
 
 ### Phase D — ISM + scattering (3-4 weeks)
 

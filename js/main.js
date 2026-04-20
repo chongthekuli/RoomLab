@@ -265,19 +265,13 @@ if (typeof window !== 'undefined') {
         });
         const closeBtn = '<button style="position:absolute;top:8px;right:12px;background:#2a2f38;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;" onclick="this.parentElement.remove()">×</button>';
         const { shape, bucketDtMs, maxTimeMs, hitCount, raysTraced, terminations, workerCount, elapsedMs } = render;
-        // Summarise energy distribution per band for receiver 0.
-        const histogram = render.histogram;
-        const bandSummaries = [];
-        for (let b = 0; b < shape.bands; b++) {
-          let sum = 0, peakBucket = -1, peakVal = 0;
-          const base = 0 * shape.bands * shape.buckets + b * shape.buckets;
-          for (let t = 0; t < shape.buckets; t++) {
-            const v = histogram[base + t];
-            sum += v;
-            if (v > peakVal) { peakVal = v; peakBucket = t; }
-          }
-          bandSummaries.push({ band: b, totalEnergy: sum, peakBucket, peakValue: peakVal });
-        }
+        // Phase C: derive time-domain metrics from the histogram.
+        const { deriveMetrics } = await import('./physics/precision/derive-metrics.js');
+        const allMetrics = deriveMetrics(render);
+        const m0 = allMetrics[0];
+        const fmt = (v, decimals = 2, unit = '') =>
+          Number.isFinite(v) ? `${v.toFixed(decimals)}${unit}` : '—';
+
         const summaryLines = [
           `<strong style="color:#4aa3ff;font-size:14px;">RoomLab precision render — ${render.generatedAt}</strong>`,
           closeBtn,
@@ -297,12 +291,20 @@ if (typeof window !== 'undefined') {
           `  bounce limit:  ${terminations.bounce.toLocaleString()}`,
           `  time out:      ${terminations.timeOut.toLocaleString()}`,
           '',
-          `<strong style="color:#89c0ff">Histogram — receiver 0 (${shape.bands} bands × ${shape.buckets} buckets × ${bucketDtMs} ms/bucket)</strong>`,
-          ...bandSummaries.map(b =>
-            `  band ${b.band}: Σenergy=${b.totalEnergy.toExponential(2)}  peak bucket=${b.peakBucket} (${(b.peakBucket * bucketDtMs)} ms)`,
-          ),
+          `<strong style="color:#89c0ff">Metrics — receiver 0 (broadband)</strong>`,
+          `  EDT:           ${fmt(m0.broadband.edt_s, 2, ' s')}   <span style="color:#89929d">(early decay time, 0 to −10 dB)</span>`,
+          `  T20:           ${fmt(m0.broadband.t20_s, 2, ' s')}   <span style="color:#89929d">(reverb time, −5 to −25 dB × 3)</span>`,
+          `  T30:           ${fmt(m0.broadband.t30_s, 2, ' s')}   <span style="color:#89929d">(reverb time, −5 to −35 dB × 2)</span>`,
+          `  C80:           ${fmt(m0.broadband.c80_db, 1, ' dB')}  <span style="color:#89929d">(music clarity; 0 is neutral)</span>`,
+          `  C50:           ${fmt(m0.broadband.c50_db, 1, ' dB')}  <span style="color:#89929d">(speech clarity; +0 dB good)</span>`,
+          `  D/R:           ${fmt(m0.broadband.dr_db, 1, ' dB')}  <span style="color:#89929d">(direct-to-reverb, 10 ms window)</span>`,
+          `  STI:           ${fmt(m0.sti.sti, 3)}    <span style="color:#89929d">(full IR, 14 × 7 MTF; ≥0.60 good)</span>`,
           '',
-          '<span style="color:#89929d">First real precision render. Phase C will derive EDT / T30 / C80 / C50 / STI from this histogram.</span>',
+          `<strong style="color:#89c0ff">T30 per band</strong>`,
+          `  125 Hz: ${fmt(m0.perBand[0].t30_s, 2, ' s')}   250 Hz: ${fmt(m0.perBand[1].t30_s, 2, ' s')}   500 Hz: ${fmt(m0.perBand[2].t30_s, 2, ' s')}   1 kHz: ${fmt(m0.perBand[3].t30_s, 2, ' s')}`,
+          `  2 kHz: ${fmt(m0.perBand[4].t30_s, 2, ' s')}   4 kHz: ${fmt(m0.perBand[5].t30_s, 2, ' s')}   8 kHz: ${fmt(m0.perBand[6].t30_s, 2, ' s')}`,
+          '',
+          `<span style="color:#89929d">Note: low ray counts (${raysTraced.toLocaleString()}) give noisy late-tail metrics. Production UI (Phase E) defaults to 50k-500k rays.</span>`,
         ];
         banner.innerHTML = summaryLines.map(l => `<div>${l}</div>`).join('');
       } catch (err) {
