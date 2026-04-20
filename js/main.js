@@ -173,14 +173,53 @@ boot().catch(err => {
 });
 
 // Dev hook — Phase A5 worker-plumbing smoke test.
-// Run in DevTools console on the live deploy:
-//   await window.__roomlabWorkerSmoke()
-// The driver is lazy-loaded so the smoke test adds zero bytes to the
-// default page load. Numbers go to the console + are returned for
-// scripting. See docs/DUAL-ENGINE-BLUEPRINT.md §6 Phase A5.
+// Two ways to run:
+//   (1) URL param:  …/RoomLab/?smoketest       (results shown in banner)
+//   (2) Console:    await window.__roomlabWorkerSmoke()
+// Driver lazy-loaded — zero bytes on default page load. See
+// docs/DUAL-ENGINE-BLUEPRINT.md §6 Phase A5.
 if (typeof window !== 'undefined') {
   window.__roomlabWorkerSmoke = async (opts) => {
     const mod = await import('./physics/precision/worker-smoke-driver.js');
     return mod.runWorkerSmokeTest(opts);
   };
+  // Auto-run + visible banner when ?smoketest is present.
+  if (new URLSearchParams(window.location.search).has('smoketest')) {
+    window.addEventListener('load', async () => {
+      const banner = document.createElement('div');
+      banner.id = 'smoketest-banner';
+      banner.style.cssText = 'position:fixed;inset:16px;z-index:9999;background:#0f1218;color:#cfd3d9;border:1px solid #3a5a8a;border-radius:8px;padding:16px;overflow:auto;font-family:monospace;font-size:12px;line-height:1.45;box-shadow:0 12px 40px rgba(0,0,0,0.6)';
+      banner.innerHTML = '<div style="color:#4aa3ff;font-size:14px;margin-bottom:12px;">⏳ Running worker smoke test — ~3 seconds…</div>';
+      document.body.appendChild(banner);
+      try {
+        const result = await window.__roomlabWorkerSmoke({ log: true });
+        const closeBtn = '<button style="position:absolute;top:8px;right:12px;background:#2a2f38;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;" onclick="this.parentElement.remove()">×</button>';
+        const summaryLines = [
+          `<strong style="color:#4aa3ff;font-size:14px;">RoomLab worker smoke test — ${result.startedAt}</strong>`,
+          closeBtn,
+          '',
+          '<strong style="color:#89c0ff">Environment</strong>',
+          `  hardwareConcurrency: ${result.env.hardwareConcurrency}`,
+          `  crossOriginIsolated: ${result.env.crossOriginIsolated}`,
+          `  sharedArrayBufferAvailable: ${result.env.sharedArrayBufferAvailable}`,
+          `  atomicsAvailable: ${result.env.atomicsAvailable}`,
+          '',
+          '<strong style="color:#89c0ff">Tests</strong>',
+          `  echo:      spawn ${fmt(result.tests.echo?.spawnMs)} ms,  roundTrip median ${fmt(result.tests.echo?.roundTripMs_median)} ms  (min ${fmt(result.tests.echo?.roundTripMs_min)} / max ${fmt(result.tests.echo?.roundTripMs_max)})`,
+          `  parallel:  ${result.tests.parallel?.workerCount} workers × ${(result.tests.parallel?.iterations ?? 0).toLocaleString()} ops  →  parallelMs ${fmt(result.tests.parallel?.parallelMs)},  medianWorkerMs ${fmt(result.tests.parallel?.medianWorkerMs)},  speedup ${fmt(result.tests.parallel?.achievedSpeedup)} × (ideal ${result.tests.parallel?.ideal})`,
+          `  transfer:  ${fmt(result.tests.transfer?.MB)} MB round-trip ${fmt(result.tests.transfer?.roundTripMs)} ms  (pure-transfer est ${fmt(result.tests.transfer?.pureTransferMs_est)} ms)`,
+          '',
+          '<strong style="color:#89c0ff">Recommendations</strong>',
+          ...result.recommendations.map(r => '  • ' + r),
+          '',
+          '<span style="color:#89929d">Paste THIS whole block back into the chat. Close with × top-right.</span>',
+        ];
+        banner.innerHTML = summaryLines.map(l => `<div>${l}</div>`).join('');
+      } catch (err) {
+        banner.innerHTML = `<div style="color:#ff6565;">Smoke test failed: ${err?.message ?? err}</div>`;
+        console.error('Smoke test failed:', err);
+      }
+    });
+  }
 }
+function fmt(v) { return v == null || !isFinite(v) ? '—' : (Math.round(v * 100) / 100).toString(); }
