@@ -1902,7 +1902,16 @@ function rebuildAimLines() {
     disposeGroup(aimLinesGroup);
   }
   if (!roomGroup) return;
-  const MAX_AIM_LEN = 120;
+  const MAX_AIM_LEN = 200;
+  const FALLBACK_LEN = 30;  // used when nothing is hit within MAX_AIM_LEN
+
+  // Cast against room geometry AND zone geometry — with a vomitory-gapped
+  // bowl (4 sectors + end caps), a ray aimed exactly through a sector
+  // boundary can numerically miss every triangle if we only test roomGroup.
+  // zonesGroup carries the audience-zone planes which cover those gaps
+  // at seating height, so they act as a natural fallback target.
+  const targets = [roomGroup];
+  if (zonesGroup) targets.push(zonesGroup);
 
   for (const src of expandSources(state.sources)) {
     const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
@@ -1920,14 +1929,27 @@ function rebuildAimLines() {
 
     _aimRaycaster.set(originWorld, dirWorld);
     _aimRaycaster.far = MAX_AIM_LEN;
-    const hits = _aimRaycaster.intersectObject(roomGroup, true);
-    // First valid hit (skip heatmap layers inside roomGroup if any).
-    let dist = MAX_AIM_LEN;
+    const hits = _aimRaycaster.intersectObjects(targets, true);
+    // First valid hit (skip heatmap layers and audience-zone heatmap
+    // overlays that sit just above the floor).
+    let dist = -1;
     for (const h of hits) {
       const tag = h.object.userData?.tag ?? '';
       if (tag.startsWith('heatmap_')) continue;
       dist = h.distance;
       break;
+    }
+
+    // Fallback when nothing was hit — cast the ray to the ground plane
+    // (y=0). If it's horizontal or rising, clamp at FALLBACK_LEN so the
+    // line still has a clear terminus instead of drifting to infinity.
+    if (dist <= 0) {
+      if (dirWorld.y < -1e-3) {
+        const t = -originWorld.y / dirWorld.y;
+        dist = Math.min(t, MAX_AIM_LEN);
+      } else {
+        dist = FALLBACK_LEN;
+      }
     }
 
     const end = originWorld.clone().addScaledVector(dirWorld, dist);
