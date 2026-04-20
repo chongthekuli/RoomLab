@@ -277,5 +277,63 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
   void noFlag;
 }
 
+// ---- Phase D: Lambertian scattering -----------------------------------
+//
+// With uniform absorption on every surface, scattering reshapes the
+// direction distribution but barely affects RT60 (the energy budget per
+// bounce is the same). With NON-uniform absorption — one very
+// absorbent surface + reflective others — specular-only tends to trap
+// rays between the reflective surfaces, while diffuse scattering sends
+// rays to the absorbent surface more often. So scattering should
+// SHORTEN the late tail in asymmetric rooms.
+//
+// This test builds a 20×20×10 m room with a super-absorbent ceiling
+// (acoustic-tile, α ≈ 0.55 at 1 kHz, s = 0.10 → specular-dominant) and
+// near-zero-absorption concrete on the other five surfaces. The
+// default `scattering: true` path should absorb energy faster than
+// `scattering: false` at the reverberant tail — demonstrating that the
+// scatter physics is wired into the attenuation budget.
+
+{
+  function asymRoom(scatteringEnabled) {
+    const state = {
+      room: {
+        shape: 'rectangular', width_m: 20, depth_m: 20, height_m: 10,
+        surfaces: {
+          floor: 'concrete-painted',
+          ceiling: 'acoustic-tile',       // the absorbent one
+          wall_north: 'concrete-painted', wall_south: 'concrete-painted',
+          wall_east: 'concrete-painted',  wall_west: 'concrete-painted',
+        },
+      },
+      zones: [],
+      sources: [{ modelUrl: 'stub', position: { x: 10, y: 10, z: 5 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 }],
+      listeners: [{ id: 'L1', label: 'Rec', position: { x: 15, y: 10 }, elevation_m: 3.8 }],
+      physics: {},
+    };
+    const scene = buildPhysicsScene({ state, materials, getLoudspeakerDef: getDef });
+    const soup = triangulateScene(scene);
+    const bvh = buildBVH(soup);
+    return traceRays(scene, bvh, {
+      raysPerSource: 5000, maxBounces: 150, bucketDtMs: 5, maxTimeMs: 1500,
+      seed: 91, airAbsorption: true,
+      scattering: scatteringEnabled,
+    });
+  }
+  const specular = asymRoom(false);
+  const diffuse  = asymRoom(true);
+  const lateStart = Math.floor(specular.shape.buckets * 2 / 3);
+  const lateSpec = histogramWindowSum(specular, 0, 3, lateStart, specular.shape.buckets);
+  const lateDiff = histogramWindowSum(diffuse,  0, 3, lateStart, diffuse.shape.buckets);
+  console.log(`    specular-only late tail @1kHz: ${lateSpec.toExponential(2)}`);
+  console.log(`    scattering-on late tail @1kHz: ${lateDiff.toExponential(2)}`);
+  const ratio = lateDiff / Math.max(lateSpec, 1e-30);
+  ok(ratio < 0.8, `Lambertian scattering reduces late tail in asymmetric-absorption room (ratio ${ratio.toFixed(2)}, expect < 0.8)`);
+  // Hit counts: scattering should raise the hit rate (diffuse bounces
+  // distribute geographically, reaching receivers missed by specular).
+  ok(diffuse.hitCount >= specular.hitCount * 0.8,
+    `Scattering hit count within 80% of specular (spec=${specular.hitCount}, diff=${diffuse.hitCount})`);
+}
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll precision tracer tests passed.');

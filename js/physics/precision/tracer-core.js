@@ -70,6 +70,35 @@ function sampleUnitSphere(rng, out) {
   out[2] = z;
 }
 
+// Cosine-weighted hemisphere sample around an arbitrary normal, for
+// Lambertian scatter. Uses Frisvad's 2012 branch-minimal orthonormal-
+// basis construction to avoid the sqrt + divide in the classical
+// "pick-an-up-vector" approach. Writes dir into out[0..2].
+function sampleCosineHemisphere(nx, ny, nz, rng, out) {
+  const u1 = rng();
+  const u2 = rng();
+  const r = Math.sqrt(u1);
+  const theta = 2 * Math.PI * u2;
+  const lx = r * Math.cos(theta);
+  const ly = r * Math.sin(theta);
+  const lz = Math.sqrt(Math.max(0, 1 - u1));   // cos-weighted in +z
+
+  // Frisvad 2012 — special case near the south pole to avoid blowup.
+  let tx, ty, tz, bx, by, bz;
+  if (nz < -0.9999) {
+    tx = 0;  ty = -1; tz = 0;
+    bx = -1; by = 0;  bz = 0;
+  } else {
+    const a = 1 / (1 + nz);
+    const cross = -nx * ny * a;
+    tx = 1 - nx * nx * a;  ty = cross;           tz = -nx;
+    bx = cross;            by = 1 - ny * ny * a; bz = -ny;
+  }
+  out[0] = lx * tx + ly * bx + lz * nx;
+  out[1] = lx * ty + ly * by + lz * ny;
+  out[2] = lx * tz + ly * bz + lz * nz;
+}
+
 // Ray-sphere intersection on the segment [0, tMax]. Ray is assumed unit-
 // direction. Returns the entry-parameter t (in world-distance units, same
 // as tMax), clamped to ≥ EPS so a ray starting inside the sphere still
@@ -123,6 +152,19 @@ function raySphereEntry(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, tMax) {
  *                                              Matches the draft engine's
  *                                              behaviour — essential above
  *                                              2 kHz in large venues.
+ * @param {boolean} [opts.scattering=true]      per-bounce Lambertian diffuse
+ *                                              scatter decision based on each
+ *                                              material's `scattering[band]`
+ *                                              coefficient (ISO 17497-1). Per
+ *                                              ray the choice is binary —
+ *                                              specular OR Lambertian — with
+ *                                              probability s_eff (the
+ *                                              energy-weighted average scatter
+ *                                              coef across bands). Over many
+ *                                              rays this recovers the correct
+ *                                              mixed BRDF. Improves cross-
+ *                                              engine agreement in
+ *                                              asymmetric rooms.
  * @param {Function} [opts.progress]            (raysDone, raysTotal) => void (optional)
  *
  * @returns {{
@@ -144,6 +186,7 @@ export function traceRays(scene, bvh, opts = {}) {
   const c_mps = opts.c_mps ?? SPEED_OF_SOUND_M_PER_S;
   const seed = opts.seed ?? 1;
   const airAbsorption = opts.airAbsorption !== false;
+  const scattering = opts.scattering !== false;
   const progress = opts.progress ?? null;
 
   const bands = scene.bands_hz;
@@ -258,13 +301,40 @@ export function traceRays(scene, bvh, opts = {}) {
           for (let k = 0; k < B; k++) energy[k] *= Math.exp(-airCoef[k] * hit.t);
         }
 
-        // Specular reflection: d_new = d − 2·(d·n)·n.
         const nx = hit.normal[0], ny = hit.normal[1], nz = hit.normal[2];
-        const dDotN = dx * nx + dy * ny + dz * nz;
-        dx -= 2 * dDotN * nx;
-        dy -= 2 * dDotN * ny;
-        dz -= 2 * dDotN * nz;
-        // Numerical drift — renormalize to keep |d|=1.
+        const matIdx = hit.materialIdx;
+
+        // Material-aware scatter vs specular decision, BEFORE energy update.
+        // Probability of a Lambertian scatter at this bounce is s_eff,
+        // the energy-weighted average of the per-band scattering
+        // coefficients. Over many rays the ensemble matches the mixed
+        // specular/diffuse BRDF that scattering = s implies.
+        let useScatter = false;
+        if (scattering && matIdx >= 0 && matIdx < scene.materials.length) {
+          const scaArr = scene.materials[matIdx].scattering;
+          let sWeighted = 0, eSum = 0;
+          for (let k = 0; k < B; k++) {
+            const e = energy[k];
+            sWeighted += scaArr[k] * e;
+            eSum += e;
+          }
+          const sEff = eSum > 0 ? sWeighted / eSum : 0;
+          if (sEff > 0 && rng() < sEff) useScatter = true;
+        }
+
+        if (useScatter) {
+          // Lambertian cosine-weighted hemisphere around the normal.
+          sampleCosineHemisphere(nx, ny, nz, rng, dir);
+          dx = dir[0]; dy = dir[1]; dz = dir[2];
+        } else {
+          // Specular: d_new = d − 2·(d·n)·n
+          const dDotN = dx * nx + dy * ny + dz * nz;
+          dx -= 2 * dDotN * nx;
+          dy -= 2 * dDotN * ny;
+          dz -= 2 * dDotN * nz;
+        }
+        // Numerical drift — renormalize to keep |d|=1. (Lambertian sample
+        // is unit by construction; specular is too, up to FP jitter.)
         const dLen = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (dLen > EPS) { dx /= dLen; dy /= dLen; dz /= dLen; }
 
@@ -274,9 +344,11 @@ export function traceRays(scene, bvh, opts = {}) {
         oy += dy * EPS;
         oz += dz * EPS;
 
-        // Energy attenuation. If the triangle has no material tag, use a
-        // default absorption so rays terminate instead of bouncing forever.
-        const matIdx = hit.materialIdx;
+        // Energy attenuation. Both specular and Lambertian paths lose the
+        // same fraction to absorption — scattering reshapes the direction
+        // distribution, absorption removes energy. If the triangle has no
+        // material tag, use a default absorption so rays terminate rather
+        // than bouncing forever.
         if (matIdx >= 0 && matIdx < scene.materials.length) {
           const absArr = scene.materials[matIdx].absorption;
           for (let k = 0; k < B; k++) energy[k] *= (1 - absArr[k]);
