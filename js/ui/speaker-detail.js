@@ -24,25 +24,28 @@ export function mountSpeakerView() {
   if (!root) return;
   root.innerHTML = `
     <div class="speaker-view">
-      <div class="sv-head">
-        <div class="sv-title" id="sv-title"></div>
-        <div class="sv-actions">
-          <button id="sv-import" class="btn-import-spec" title="Import a CLF / JSON / EASE XML speaker file">⇪ Import speaker file…</button>
-          <input type="file" id="sv-file" accept=".json,.clf,.xhn,.xml,.gll" hidden />
+      <aside class="sv-catalog" id="sv-catalog"></aside>
+      <div class="sv-main">
+        <div class="sv-head">
+          <div class="sv-title" id="sv-title"></div>
+          <div class="sv-actions">
+            <button id="sv-import" class="btn-import-spec" title="Import a CLF / JSON / EASE XML speaker file">⇪ Import speaker file…</button>
+            <input type="file" id="sv-file" accept=".json,.clf,.xhn,.xml,.gll" hidden />
+          </div>
         </div>
-      </div>
-      <div id="sv-import-status" class="sv-import-status" hidden></div>
-      <div id="sv-body" class="sv-body">
-        <div class="sv-empty">
-          <h3>Loudspeaker workbench</h3>
-          <p>Pick a speaker from the <strong>Sources</strong> panel to see its full spec sheet, on-axis frequency response, and polar patterns here.</p>
-          <p>Or <strong>import a file</strong> (top-right) to add a new model to the catalogue:</p>
-          <ul>
-            <li><strong>.json</strong> — RoomLAB / EASE-JSON</li>
-            <li><strong>.clf</strong> — Common Loudspeaker Format (AES CLF TC)</li>
-            <li><strong>.xhn</strong> / <strong>.xml</strong> — EASE SpeakerLab text export</li>
-            <li><strong>.gll</strong> — not browser-parseable; see the prompt on import.</li>
-          </ul>
+        <div id="sv-import-status" class="sv-import-status" hidden></div>
+        <div id="sv-body" class="sv-body">
+          <div class="sv-empty">
+            <h3>Loudspeaker workbench</h3>
+            <p>Pick a speaker from the catalogue on the left, or click a speaker in the 3D view to see its full spec sheet, on-axis frequency response, and polar patterns here.</p>
+            <p>Or <strong>import a file</strong> (top-right) to add a new model to the catalogue:</p>
+            <ul>
+              <li><strong>.json</strong> — RoomLAB / EASE-JSON</li>
+              <li><strong>.clf</strong> — Common Loudspeaker Format (AES CLF TC)</li>
+              <li><strong>.xhn</strong> / <strong>.xml</strong> — EASE SpeakerLab text export</li>
+              <li><strong>.gll</strong> — not browser-parseable; see the prompt on import.</li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
@@ -72,6 +75,8 @@ async function render() {
   const body = root.querySelector('#sv-body');
   const title = root.querySelector('#sv-title');
 
+  renderCatalog();
+
   const url = state.selectedSpeakerUrl;
   if (!url) {
     title.textContent = 'No speaker selected';
@@ -100,31 +105,67 @@ async function render() {
   const dispersion = estimateNominalDispersion(def);
   const onAxis = onAxisResponseDb(def);
 
+  const dim = def.physical?.dimensions_m || {};
+  const dimVol = (dim.w && dim.h && dim.d) ? (dim.w * dim.h * dim.d * 1000) : null;
+  const bandsMeasured = def.directivity?.attenuation_db ? Object.keys(def.directivity.attenuation_db).map(Number).sort((a,b)=>a-b) : [];
+  const azs = def.directivity?.azimuth_deg || [];
+  const els = def.directivity?.elevation_deg || [];
+  const sampleCount = bandsMeasured.length * azs.length * els.length;
+
   body.innerHTML = `
     <div class="sv-grid">
       <section class="sv-card">
+        <h4>Metadata</h4>
+        ${specRow('Model ID', def.id ?? '—')}
+        ${specRow('Manufacturer', def.manufacturer ?? '—')}
+        ${specRow('Model', def.model ?? '—')}
+        ${specRow('Schema', def.schema_version ? `v${def.schema_version}` : '—')}
+        ${specRow('License', def.license ?? '—')}
+        ${def.importedFrom ? specRow('Imported from', def.importedFrom) : ''}
+      </section>
+      <section class="sv-card">
         <h4>Physical</h4>
-        ${specRow('Dimensions',
-          def.physical?.dimensions_m
-            ? `${numFmt(def.physical.dimensions_m.w, 2)} × ${numFmt(def.physical.dimensions_m.h, 2)} × ${numFmt(def.physical.dimensions_m.d, 2)} m`
-            : '—')}
-        ${specRow('Weight', def.physical?.weight_kg != null ? `${def.physical.weight_kg.toFixed(1)} kg` : '—')}
+        ${specRow('Width', dim.w != null ? `${numFmt(dim.w, 3)} m` : '—')}
+        ${specRow('Height', dim.h != null ? `${numFmt(dim.h, 3)} m` : '—')}
+        ${specRow('Depth', dim.d != null ? `${numFmt(dim.d, 3)} m` : '—')}
+        ${specRow('Volume', dimVol != null ? `${numFmt(dimVol, 1)} L` : '—')}
+        ${specRow('Weight', def.physical?.weight_kg != null ? `${numFmt(def.physical.weight_kg, 1)} kg` : '—')}
       </section>
       <section class="sv-card">
         <h4>Electrical</h4>
-        ${specRow('Impedance', def.electrical?.nominal_impedance_ohm != null ? `${def.electrical.nominal_impedance_ohm} Ω` : '—')}
-        ${specRow('Max input', def.electrical?.max_input_watts != null ? `${def.electrical.max_input_watts} W` : '—')}
+        ${specRow('Nominal Z', def.electrical?.nominal_impedance_ohm != null ? `${def.electrical.nominal_impedance_ohm} Ω` : '—')}
+        ${specRow('Max input (RMS)', def.electrical?.max_input_watts != null ? `${def.electrical.max_input_watts} W` : '—')}
         ${specRow('Max SPL @ 1 m', def.electrical?.max_spl_db != null ? `${def.electrical.max_spl_db.toFixed(0)} dB` : '—')}
+        ${specRow('Headroom vs 1 W', def.acoustic?.sensitivity_db_1w_1m != null && def.electrical?.max_spl_db != null
+          ? `${(def.electrical.max_spl_db - def.acoustic.sensitivity_db_1w_1m).toFixed(1)} dB` : '—')}
       </section>
       <section class="sv-card">
         <h4>Acoustic</h4>
         ${specRow('Sensitivity', def.acoustic?.sensitivity_db_1w_1m != null ? `${def.acoustic.sensitivity_db_1w_1m.toFixed(1)} dB @ 1 W / 1 m` : '—')}
         ${specRow('Directivity Index', def.acoustic?.directivity_index_db != null ? `${def.acoustic.directivity_index_db.toFixed(1)} dB` : '—')}
-        ${specRow('Frequency range', def.acoustic?.frequency_range_hz ? `${def.acoustic.frequency_range_hz[0]} – ${def.acoustic.frequency_range_hz[1]} Hz` : '—')}
-        ${specRow('Nominal dispersion',
-          dispersion ? `${dispersion.h.toFixed(0)}° H × ${dispersion.v.toFixed(0)}° V (−6 dB @ 1 kHz)` : '—')}
+        ${specRow('LF limit', def.acoustic?.frequency_range_hz ? `${def.acoustic.frequency_range_hz[0]} Hz` : '—')}
+        ${specRow('HF limit', def.acoustic?.frequency_range_hz ? `${def.acoustic.frequency_range_hz[1]} Hz` : '—')}
+        ${specRow('H dispersion', dispersion ? `${dispersion.h.toFixed(0)}° (−6 dB @ 1 kHz)` : '—')}
+        ${specRow('V dispersion', dispersion ? `${dispersion.v.toFixed(0)}° (−6 dB @ 1 kHz)` : '—')}
+      </section>
+      <section class="sv-card">
+        <h4>Directivity data</h4>
+        ${specRow('Bands measured', bandsMeasured.length ? bandsMeasured.map(f => f >= 1000 ? `${f/1000}k` : `${f}`).join(' · ') : '—')}
+        ${specRow('Azimuth grid', azs.length ? `${azs.length} pts (${azs[0]}° → ${azs[azs.length-1]}°)` : '—')}
+        ${specRow('Elevation grid', els.length ? `${els.length} pts (${els[0]}° → ${els[els.length-1]}°)` : '—')}
+        ${specRow('Angular resolution', def.directivity?.angular_resolution_deg != null ? `${def.directivity.angular_resolution_deg}°` : '—')}
+        ${specRow('Total samples', sampleCount > 0 ? sampleCount.toLocaleString() : '—')}
+      </section>
+      <section class="sv-card">
+        <h4>Default placement</h4>
+        ${specRow('Position', def.placement?.position_m
+          ? `(${numFmt(def.placement.position_m.x, 2)}, ${numFmt(def.placement.position_m.y, 2)}, ${numFmt(def.placement.position_m.z, 2)}) m` : '—')}
+        ${specRow('Aim', def.placement?.aim_deg
+          ? `yaw ${def.placement.aim_deg.yaw}° · pitch ${def.placement.aim_deg.pitch}° · roll ${def.placement.aim_deg.roll}°` : '—')}
       </section>
     </div>
+
+    ${def.note ? `<div class="sv-designer-note">${escapeHtml(def.note)}</div>` : ''}
 
     <section class="sv-section">
       <h4>On-axis frequency response</h4>
@@ -201,6 +242,47 @@ async function handleImport(file) {
     status.classList.add(err.kind === 'gll' ? 'info' : 'err');
     // Preserve whitespace so the GLL guide reads well.
     status.innerHTML = `<pre class="sv-err-pre">${escapeHtml(err.message)}</pre>`;
+  }
+}
+
+// Render the left-side catalogue listing every available model. Clicking
+// an entry swaps state.selectedSpeakerUrl; we rerender, which paints
+// the workbench body and highlights the active card in the catalogue.
+function renderCatalog() {
+  const host = document.getElementById('sv-catalog');
+  if (!host) return;
+  const active = state.selectedSpeakerUrl;
+
+  // Synchronous summary — read from the already-loaded cache; anything
+  // not yet loaded shows a "—" until its card is clicked and resolved.
+  const cards = SPEAKER_CATALOG.map(entry => {
+    const def = getCachedLoudspeaker(entry.url);
+    const summary = def ? [
+      def.acoustic?.sensitivity_db_1w_1m != null ? `${def.acoustic.sensitivity_db_1w_1m.toFixed(0)} dB/W` : null,
+      def.electrical?.max_spl_db != null ? `${def.electrical.max_spl_db.toFixed(0)} dB max` : null,
+      def.acoustic?.directivity_index_db != null ? `DI ${def.acoustic.directivity_index_db.toFixed(1)}` : null,
+    ].filter(Boolean).join(' · ') : 'loading…';
+    const label = def?.model ?? entry.label ?? entry.url;
+    const brand = def?.manufacturer ?? '';
+    const isActive = entry.url === active;
+    return `
+      <div class="sv-cat-card${isActive ? ' active' : ''}" data-cat-url="${escapeHtml(entry.url)}" tabindex="0">
+        <div class="sv-cat-brand">${escapeHtml(brand)}</div>
+        <div class="sv-cat-model">${escapeHtml(label)}</div>
+        <div class="sv-cat-summary">${escapeHtml(summary)}</div>
+      </div>
+    `;
+  }).join('');
+
+  host.innerHTML = `
+    <div class="sv-cat-head">Catalogue <span class="sv-cat-count">${SPEAKER_CATALOG.length}</span></div>
+    ${cards || '<div class="sv-cat-empty">No speakers yet — import one above.</div>'}
+  `;
+  for (const card of host.querySelectorAll('.sv-cat-card')) {
+    card.addEventListener('click', () => {
+      state.selectedSpeakerUrl = card.dataset.catUrl;
+      emit('speaker:selected');
+    });
   }
 }
 

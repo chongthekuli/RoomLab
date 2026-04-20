@@ -8,7 +8,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, eqGainAt } from '../app-state.js';
-import { on } from '../ui/events.js';
+import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
@@ -356,6 +356,28 @@ function initProbeTool() {
     if (probeMarker) probeMarker.visible = false;
     if (probeTooltip) probeTooltip.classList.add('hidden');
   });
+  // Click-to-inspect: tapping a loudspeaker cabinet in 3D opens the
+  // Speaker workbench focused on that model.
+  renderer.domElement.addEventListener('click', onSpeakerClick);
+}
+
+const _speakerClickRay = new THREE.Raycaster();
+const _speakerClickNdc = { x: 0, y: 0 };
+function onSpeakerClick(e) {
+  if (walkMode || !sourcesGroup) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  _speakerClickNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  _speakerClickNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  _speakerClickRay.setFromCamera(_speakerClickNdc, activeCamera || camera);
+  const hits = _speakerClickRay.intersectObject(sourcesGroup, true);
+  for (const h of hits) {
+    const url = h.object.userData?.speakerModelUrl;
+    if (!url) continue;
+    state.selectedSpeakerUrl = url;
+    emit('speaker:selected');
+    document.dispatchEvent(new CustomEvent('viewport:show-speaker'));
+    return;
+  }
 }
 
 function onProbeMouseMove(e) {
@@ -1848,6 +1870,10 @@ function rebuildSources() { shadowsNeedRefresh = true;
 
     const encl = buildSpeakerEnclosure(src, groupInt, outside);
     encl.position.set(src.position.x, src.position.z, src.position.y);
+    // Tag the enclosure + every child mesh so a raycast hit can recover the
+    // model URL (needed by the Speaker-workbench click-to-open handler).
+    encl.userData.speakerModelUrl = src.modelUrl;
+    encl.traverse(child => { child.userData.speakerModelUrl = src.modelUrl; });
 
     // Orient via lookAt so line-array boxes stay horizontally level even at
     // non-zero pitch (unlike setFromUnitVectors which can roll the box).
