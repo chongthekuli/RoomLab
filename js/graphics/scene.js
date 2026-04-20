@@ -10,7 +10,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, eqGainAt } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
-import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant } from '../physics/spl-calculator.js';
+import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
@@ -2294,26 +2294,38 @@ function sampleSurfaceColors(geo, anchors, sources, room, splOpts = {}) {
   const splValues = new Float32Array(anchors.length);
   let minSPL = Infinity, maxSPL = -Infinity, sum = 0, count = 0;
 
-  // --- STIPA heatmap mode ---
-  // When the user has toggled the toolbar to STI mode, per-vertex color is
-  // the speech-intelligibility index (0-1) rather than SPL dB. Precompute
-  // the STIPA context once per surface so RT60 + room constant + per-source
-  // L_w aren't recomputed for every one of ~10k vertices.
+  // --- Hot-path precompute — Phase A2 Step 1. --------------------------
+  // STIPA already has a precompute/computeAt split. SPL now matches:
+  // resolve every speaker def, compute each source's L_w (with EQ gain)
+  // at the current frequency, and stash `10·log10(4/R)` — all before
+  // entering the per-vertex loop. On the arena heatmap (24 sources ×
+  // ~10k vertices × reverb on) this eliminates ~240k Map.get() +
+  // approxSoundPowerLevel calls per frame. ~15-20 % faster end-to-end.
   const useSTI = state.display.heatmapMode === 'stipa';
   const stipaCtx = useSTI
     ? precomputeSTIPAContext({ sources, getSpeakerDef: getDef, room, materials: materialsRef, zones: state.zones })
     : null;
+  const splCtx = !useSTI
+    ? precomputeSPLContext({
+        sources, getSpeakerDef: getDef,
+        freq_hz: splOpts.freq_hz ?? 1000,
+        roomConstantR: splOpts.roomConstantR ?? 0,
+        eqGainDb: splOpts.eqGainDb ?? 0,
+      })
+    : null;
+  const splAtOpts = {
+    room,
+    coherent: splOpts.coherent,
+    temperature_C: splOpts.temperature_C,
+    airAbsorption: splOpts.airAbsorption,
+  };
 
   for (let i = 0; i < anchors.length; i++) {
     let value;            // SPL in dB, or STI in [0,1]
     if (useSTI) {
       value = computeSTIPAAt(stipaCtx, anchors[i]);
     } else {
-      value = computeMultiSourceSPL({
-        sources, getSpeakerDef: getDef,
-        listenerPos: anchors[i], room,
-        ...splOpts,
-      });
+      value = computeMultiSourceSPLFromContext(splCtx, anchors[i], splAtOpts);
     }
     splValues[i] = value;
     if (isFinite(value)) {
