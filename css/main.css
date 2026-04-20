@@ -195,6 +195,23 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   line-height: 1.55;
 }
 .help-foot strong { color: #cfd3d9; font-weight: 500; }
+.btn-show-welcome {
+  display: inline-block;
+  margin-right: 12px;
+  padding: 5px 11px;
+  background: rgba(116, 208, 255, 0.12);
+  border: 1px solid rgba(116, 208, 255, 0.4);
+  border-radius: 4px;
+  color: #74d0ff;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+.btn-show-welcome:hover {
+  background: rgba(116, 208, 255, 0.22);
+  border-color: #74d0ff;
+}
 
 /* Walkthrough mode — control-hints overlay on top-left of the 3D canvas. */
 .walk-hint {

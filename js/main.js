@@ -94,6 +94,10 @@ function setupTabs() {
   const closeHelp = () => { if (helpOverlay) helpOverlay.hidden = true; };
   document.getElementById('btn-show-help')?.addEventListener('click', openHelp);
   document.getElementById('btn-close-help')?.addEventListener('click', closeHelp);
+  document.getElementById('btn-show-welcome')?.addEventListener('click', () => {
+    closeHelp();
+    mountWelcomeCard({ force: true });
+  });
   helpOverlay?.addEventListener('click', e => { if (e.target === helpOverlay) closeHelp(); });
 
   // Derived helpers — also let Esc dismiss any transient state.

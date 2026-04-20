@@ -2,10 +2,13 @@
 // so new users don't face a blank simulator with no guidance. Dismissal is
 // sticky (localStorage), so returning users never see it again.
 
-const DISMISS_KEY = 'roomlab.welcome.dismissed.v1';
+const DISMISS_KEY = 'roomlab.welcome.dismissed.v2';
 
-export function mountWelcomeCard() {
-  if (localStorage.getItem(DISMISS_KEY) === '1') return;
+export function mountWelcomeCard({ force = false } = {}) {
+  if (!force && localStorage.getItem(DISMISS_KEY) === '1') return;
+  // Don't stack duplicates if the user clicks "Show welcome" twice.
+  const existing = document.getElementById('welcome-card');
+  if (existing) existing.remove();
   const viewport = document.getElementById('viewport');
   if (!viewport) return;
 
