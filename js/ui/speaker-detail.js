@@ -5,7 +5,7 @@
 import { state, SPEAKER_CATALOG } from '../app-state.js';
 import { on, emit } from './events.js';
 import { getCachedLoudspeaker, loadLoudspeaker, interpolateAttenuation, registerLoudspeaker } from '../physics/loudspeaker.js';
-import { analyseSpeaker, estimateNominalDispersion, onAxisResponseDb } from '../physics/speaker-expert.js';
+import { analyseSpeaker, estimateNominalDispersion, onAxisResponseDb, csdPerBand } from '../physics/speaker-expert.js';
 import { importSpeakerFile, GLL_GUIDE } from '../physics/speaker-import.js';
 
 // Imported speakers live here. URL of each imported file is a synthetic
@@ -196,6 +196,12 @@ async function render() {
     </section>
 
     <section class="sv-section">
+      <h4>Waterfall (cumulative spectral decay)</h4>
+      <canvas id="sv-waterfall" width="720" height="260"></canvas>
+      <div class="sub sv-caption">Per-band decay envelope from the on-axis impulse response. X = frequency (log), Y = time (ms), colour = relative SPL. A clean cabinet shows a steep decay with no ringing tails; long streaks indicate resonances or port ringing.</div>
+    </section>
+
+    <section class="sv-section">
       <h4>Expert review</h4>
       <div class="sv-flags">
         ${flags.map(f => `<div class="sv-flag sv-flag-${f.kind}">${escapeHtml(f.text)}</div>`).join('')}
@@ -214,6 +220,7 @@ async function render() {
   drawFrCanvas(body.querySelector('#sv-fr'), onAxis, def);
   drawPolarCanvas(body.querySelector('#sv-polar-h'), def, BAND_KEYS[currentFreqIdx], 'h');
   drawPolarCanvas(body.querySelector('#sv-polar-v'), def, BAND_KEYS[currentFreqIdx], 'v');
+  drawWaterfall(body.querySelector('#sv-waterfall'), def, onAxis);
 }
 
 async function handleImport(file) {
@@ -417,6 +424,123 @@ function drawPolarCanvas(canvas, def, bandKey, plane) {
   ctx.font = 'bold 12px sans-serif';
   const label = bandKey >= 1000 ? `${bandKey / 1000} kHz` : `${bandKey} Hz`;
   ctx.fillText(label, 8, h - 8);
+}
+
+// Waterfall (cumulative spectral decay) — heatmap with frequency on X
+// (log), time on Y (ms down), colour = energy in dB. Built from the FR
+// curve as initial levels at t=0 and per-band exponential decay rates
+// from csd_ms (20 dB decay time). Interpolation between octave band
+// centres along the frequency axis so the display reads continuous.
+function drawWaterfall(canvas, def, onAxis) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const padL = 46, padR = 12, padT = 14, padB = 28;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  ctx.clearRect(0, 0, W, H);
+
+  // Frequency grid — log-spaced, 140 bins for smooth display.
+  const fMin = 60, fMax = 20000;
+  const nF = 140;
+  const freqBins = new Array(nF);
+  for (let i = 0; i < nF; i++) {
+    const t = i / (nF - 1);
+    freqBins[i] = fMin * Math.pow(fMax / fMin, t);
+  }
+
+  // Time axis — 0 to 40 ms, 100 rows.
+  const tMax = 40;
+  const nT = 100;
+
+  const csd = csdPerBand(def);
+  // Sensitivity baseline so the X-t=0 row matches the FR curve.
+  const sens = def.acoustic?.sensitivity_db_1w_1m ?? 90;
+
+  const levelAt = (hz, tms) => {
+    // Log-linear interpolation between octave band centres for both
+    // the initial level (dB below sensitivity) and decay time.
+    const lhz = Math.log2(hz);
+    // Find surrounding band centres
+    const bands = onAxis;
+    let lo = bands[0], hi = bands[bands.length - 1];
+    for (let i = 0; i < bands.length - 1; i++) {
+      if (hz >= bands[i].hz && hz <= bands[i + 1].hz) { lo = bands[i]; hi = bands[i + 1]; break; }
+    }
+    const r = Math.log2(hz) - Math.log2(lo.hz);
+    const span = Math.log2(hi.hz) - Math.log2(lo.hz);
+    const tBlend = span > 0 ? r / span : 0;
+    const fr_db = lo.db * (1 - tBlend) + hi.db * tBlend;
+    // Decay time blend
+    let decayLo = csd[0].decay_ms, decayHi = csd[csd.length - 1].decay_ms;
+    for (let i = 0; i < csd.length - 1; i++) {
+      if (hz >= csd[i].hz && hz <= csd[i + 1].hz) { decayLo = csd[i].decay_ms; decayHi = csd[i + 1].decay_ms; break; }
+    }
+    const decayMs = decayLo * (1 - tBlend) + decayHi * tBlend;
+    // Exponential decay: level(t) = fr_db − (20 / decay_ms) · t
+    const rate = 20 / Math.max(0.1, decayMs);
+    const level = sens + fr_db - rate * tms;
+    return level;
+  };
+
+  // Paint a pixel per bin (nF × nT heatmap scaled into plot area).
+  const cellW = plotW / nF;
+  const cellH = plotH / nT;
+  const peak = sens;  // top of colour scale
+  const bottom = sens - 40;
+  for (let j = 0; j < nT; j++) {
+    const tms = (j / (nT - 1)) * tMax;
+    for (let i = 0; i < nF; i++) {
+      const lvl = levelAt(freqBins[i], tms);
+      const t = (lvl - bottom) / (peak - bottom);
+      const clamped = Math.max(0, Math.min(1, t));
+      ctx.fillStyle = waterfallColor(clamped);
+      const x = padL + i * cellW;
+      const y = padT + j * cellH;
+      ctx.fillRect(x, y, cellW + 0.5, cellH + 0.5);
+    }
+  }
+
+  // Frequency tick labels (log)
+  ctx.fillStyle = 'rgba(200, 210, 220, 0.7)';
+  ctx.font = '10px sans-serif';
+  for (const tick of [100, 250, 500, 1000, 2000, 5000, 10000]) {
+    const x = padL + ((Math.log2(tick) - Math.log2(fMin)) / (Math.log2(fMax) - Math.log2(fMin))) * plotW;
+    ctx.fillText(tick >= 1000 ? `${tick / 1000}k` : `${tick}`, x - 8, H - 10);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+  }
+
+  // Time tick labels
+  for (const tms of [0, 5, 10, 20, 30, 40]) {
+    const y = padT + (tms / tMax) * plotH;
+    ctx.fillStyle = 'rgba(200, 210, 220, 0.7)';
+    ctx.fillText(`${tms}`, 8, y + 4);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+  }
+  ctx.fillText('ms', 8, padT);
+  ctx.fillText('Hz', W - 22, H - 10);
+}
+
+// Viridis-ish gradient for waterfall — dark purple (cold / low energy)
+// through green / yellow (hot / high energy).
+function waterfallColor(t) {
+  // Breakpoints: [r, g, b] at t = 0.00, 0.25, 0.50, 0.75, 1.00
+  const stops = [
+    [  5,   7,  35],
+    [ 55,  25, 110],
+    [ 65, 150, 130],
+    [230, 220,  55],
+    [255, 240, 210],
+  ];
+  const seg = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)));
+  const localT = (t * (stops.length - 1)) - seg;
+  const a = stops[seg], b = stops[seg + 1];
+  const r = Math.round(a[0] + (b[0] - a[0]) * localT);
+  const g = Math.round(a[1] + (b[1] - a[1]) * localT);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * localT);
+  return `rgb(${r},${g},${bl})`;
 }
 
 function specRow(label, value) {

@@ -150,16 +150,40 @@ function estimateRoomVolume(room) {
   return (room.width_m ?? 10) * (room.depth_m ?? 10) * h;
 }
 
-// Broadband frequency response on-axis — for the FR plot. Returns the
-// directivity-grid attenuation at (0°, 0°) for every available band
-// frequency; a fully-on-axis reading is usually 0 dB (reference), so
-// this curve mostly reports sensitivity flatness across bands.
+// Broadband frequency response on-axis — for the FR plot. Prefers the
+// explicit `acoustic.on_axis_response_db` map (real cabinet deviation
+// from the on-axis reference at 1 kHz, signed dB) and falls back to the
+// directivity-grid reading at (0°, 0°) when that's all the file carries.
 export function onAxisResponseDb(def) {
   const dir = def?.directivity;
   if (!dir) return [];
   const freqs = Object.keys(dir.attenuation_db).map(Number).sort((a, b) => a - b);
+  const explicit = def?.acoustic?.on_axis_response_db ?? null;
   return freqs.map(f => ({
     hz: f,
-    db: interpolateAttenuation(dir, 0, 0, f),
+    db: explicit && explicit[String(f)] != null
+      ? explicit[String(f)]
+      : interpolateAttenuation(dir, 0, 0, f),
   }));
+}
+
+// Per-band cumulative spectral decay — time to decay 20 dB at each
+// octave band. When the file doesn't carry csd_ms, synthesize a
+// plausible curve from sensitivity flatness and cabinet size (small
+// sealed cabinets decay faster than big ported boxes).
+export function csdPerBand(def) {
+  const explicit = def?.acoustic?.csd_ms;
+  const freqs = def?.acoustic?.frequency_bands_hz
+    ?? [125, 250, 500, 1000, 2000, 4000, 8000];
+  if (explicit) {
+    return freqs.map(f => ({ hz: f, decay_ms: explicit[String(f)] ?? 5 }));
+  }
+  // Heuristic fallback — LF rings longer, HF quickly damps. Small
+  // cabinets (low max SPL) decay faster than large ones.
+  const cabinetScale = Math.max(0.6, Math.min(1.8,
+    (def?.electrical?.max_spl_db ?? 110) / 110));
+  return freqs.map(f => {
+    const base = 3 + 15 * Math.exp(-f / 400);  // 18 ms at DC, 3 ms at HF
+    return { hz: f, decay_ms: base * cabinetScale };
+  });
 }

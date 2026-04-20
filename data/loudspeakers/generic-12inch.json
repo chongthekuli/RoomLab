@@ -1,10 +1,10 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "id": "generic-12inch-v1",
   "manufacturer": "RoomLAB Open",
   "model": "Generic 12\" 2-way",
   "license": "CC-BY-4.0",
-  "note": "Stub loudspeaker. Directivity values are illustrative only and will be replaced with measured/simulated data in Phase 2+.",
+  "note": "12\" woofer + waveguide-loaded 1.4\" compression driver, bass-reflex cabinet tuned ~55 Hz. Waveguide keeps HF dispersion controlled. Typical small-venue PA box.",
   "physical": {
     "weight_kg": 18.5,
     "dimensions_m": { "w": 0.40, "h": 0.60, "d": 0.38 }
@@ -18,7 +18,25 @@
     "sensitivity_db_1w_1m": 97.0,
     "frequency_range_hz": [55, 18000],
     "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000],
-    "directivity_index_db": 6.0
+    "directivity_index_db": 6.0,
+    "on_axis_response_db": {
+      "125":  -2.0,
+      "250":  -0.5,
+      "500":   0.0,
+      "1000":  0.0,
+      "2000":  0.0,
+      "4000": -0.5,
+      "8000": -2.5
+    },
+    "csd_ms": {
+      "125":  15.0,
+      "250":   9.5,
+      "500":   6.5,
+      "1000":  5.0,
+      "2000":  4.2,
+      "4000":  3.5,
+      "8000":  3.0
+    }
   },
   "placement": {
     "position_m": { "x": 0.0, "y": 2.5, "z": 0.0 },
@@ -26,6 +44,7 @@
   },
   "directivity": {
     "angular_resolution_deg": 30,
+    "class_hint": "horn",
     "azimuth_deg":   [-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180],
     "elevation_deg": [-90, -60, -30, 0, 30, 60, 90],
     "attenuation_db": {

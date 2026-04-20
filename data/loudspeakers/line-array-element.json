@@ -1,10 +1,10 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "id": "line-array-element-v1",
   "manufacturer": "RoomLAB Open",
   "model": "Line-array element (single box)",
   "license": "CC-BY-4.0",
-  "note": "Narrow vertical × shaped horizontal dispersion, typical of a mid-size line-array element (K2 / J8 / STM class).",
+  "note": "Single cabinet of a K2 / J8 / STM class line array. Inherently narrow vertical (±10°) from two flanking LF cones, plus shaped horizontal via waveguide. A single element is LF-limited — full range only when 4+ elements are flown together (coherent summation below ~500 Hz).",
   "physical": {
     "weight_kg": 18.0,
     "dimensions_m": { "w": 1.20, "h": 0.42, "d": 0.45 }
@@ -18,7 +18,25 @@
     "sensitivity_db_1w_1m": 100.0,
     "frequency_range_hz": [60, 18000],
     "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000],
-    "directivity_index_db": 12.0
+    "directivity_index_db": 12.0,
+    "on_axis_response_db": {
+      "125": -11.0,
+      "250":  -6.0,
+      "500":  -1.5,
+      "1000":  0.0,
+      "2000":  0.5,
+      "4000": -0.5,
+      "8000": -2.0
+    },
+    "csd_ms": {
+      "125":  18.0,
+      "250":  11.0,
+      "500":   6.5,
+      "1000":  4.8,
+      "2000":  3.8,
+      "4000":  3.0,
+      "8000":  2.5
+    }
   },
   "placement": {
     "position_m": { "x": 0.0, "y": 4.0, "z": 0.0 },
@@ -26,9 +44,10 @@
   },
   "directivity": {
     "angular_resolution_deg": 30,
+    "class_hint": "line-element",
     "azimuth_deg":   [-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180],
     "elevation_deg": [-90, -60, -30, 0, 30, 60, 90],
-    "note": "Single line-array element. On-axis ±55° H × ±10° V main beam. Off-beam falls 25+ dB; rear rejection ~-36 dB. Models the tight vertical directivity of a K2 / J8 class cabinet at 1 kHz so cross-sector contribution stays below the direct-field peak.",
+    "note": "Single line-array element. On-axis ±55° H × ±10° V main beam at 1 kHz. Off-beam falls 25+ dB; rear rejection ~−36 dB.",
     "attenuation_db": {
       "1000": [
         [-42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42, -42],

@@ -1,10 +1,10 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "id": "compact-6inch-v1",
   "manufacturer": "RoomLAB Open",
   "model": "Compact 6\" 2-way monitor",
   "license": "CC-BY-4.0",
-  "note": "Stub. Wider, more diffuse pattern than 12\" — smaller driver is less beamy at 1 kHz.",
+  "note": "Small 2-way: 6\" paper-cone mid-woofer + 1\" dome tweeter. Sealed cabinet, ~90 Hz -3 dB. Broader dispersion than the 12\", limited max SPL.",
   "physical": {
     "weight_kg": 5.5,
     "dimensions_m": { "w": 0.22, "h": 0.32, "d": 0.25 }
@@ -18,7 +18,25 @@
     "sensitivity_db_1w_1m": 85.0,
     "frequency_range_hz": [90, 20000],
     "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000],
-    "directivity_index_db": 5.0
+    "directivity_index_db": 5.0,
+    "on_axis_response_db": {
+      "125":  -7.5,
+      "250":  -2.5,
+      "500":  -0.8,
+      "1000":  0.0,
+      "2000":  0.4,
+      "4000": -1.2,
+      "8000": -3.5
+    },
+    "csd_ms": {
+      "125":   9.5,
+      "250":   7.0,
+      "500":   5.5,
+      "1000":  4.5,
+      "2000":  3.8,
+      "4000":  3.0,
+      "8000":  2.5
+    }
   },
   "placement": {
     "position_m": { "x": 0.0, "y": 2.0, "z": 0.0 },
@@ -26,6 +44,7 @@
   },
   "directivity": {
     "angular_resolution_deg": 30,
+    "class_hint": "standard",
     "azimuth_deg":   [-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180],
     "elevation_deg": [-90, -60, -30, 0, 30, 60, 90],
     "attenuation_db": {
