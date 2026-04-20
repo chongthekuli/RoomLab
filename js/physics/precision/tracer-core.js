@@ -32,6 +32,7 @@
 // scale correction.
 
 import { intersectRay } from './bvh.js';
+import { airAbsorptionCoefficient_m } from '../air-absorption.js';
 
 const SPEED_OF_SOUND_M_PER_S = 343.2;      // 20 °C dry air
 const DEFAULT_RAYS_PER_SOURCE = 10_000;
@@ -117,6 +118,11 @@ function raySphereEntry(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, tMax) {
  * @param {number} [opts.energyCutoffDb=-60]
  * @param {number} [opts.seed=1]                deterministic RNG seed
  * @param {number} [opts.c_mps=343.2]           speed of sound
+ * @param {boolean} [opts.airAbsorption=true]   apply ISO 9613-1 volumetric air
+ *                                              absorption to each ray segment.
+ *                                              Matches the draft engine's
+ *                                              behaviour — essential above
+ *                                              2 kHz in large venues.
  * @param {Function} [opts.progress]            (raysDone, raysTotal) => void (optional)
  *
  * @returns {{
@@ -137,10 +143,23 @@ export function traceRays(scene, bvh, opts = {}) {
   const energyCutoffDb = opts.energyCutoffDb ?? DEFAULT_ENERGY_CUTOFF_DB;
   const c_mps = opts.c_mps ?? SPEED_OF_SOUND_M_PER_S;
   const seed = opts.seed ?? 1;
+  const airAbsorption = opts.airAbsorption !== false;
   const progress = opts.progress ?? null;
 
   const bands = scene.bands_hz;
   const B = bands.length;
+
+  // Pre-compute per-band energy-attenuation coefficient m_e (Nepers/m).
+  // When airAbsorption is true, per-segment energy loss along a ray
+  // travelling distance d is factor = exp(-m_e × d). At 8 kHz / 1 s of
+  // reverb path (343 m) this is exp(-0.023 × 343) ≈ 5·10⁻⁴ = -33 dB —
+  // the single biggest factor shortening HF RT60 in large venues.
+  // Draft engine includes this as the 4mV Sabine term; before this fix
+  // the precision engine's 8 kHz T30 read ~60 % longer than draft.
+  const airCoef = new Float32Array(B);
+  if (airAbsorption) {
+    for (let k = 0; k < B; k++) airCoef[k] = airAbsorptionCoefficient_m(bands[k]);
+  }
   const R = scene.receivers.count;
   const S = scene.sources.count;
   const T = Math.max(1, Math.ceil(maxTimeMs / bucketDtMs));
@@ -201,7 +220,11 @@ export function traceRays(scene, bvh, opts = {}) {
         const segmentEnd_m = Math.min(hit.t, (maxTime_s * c_mps) - totalPath);
         if (segmentEnd_m <= 0) { terminations.timeOut++; terminated = true; break; }
 
-        // Log receiver crossings on this segment.
+        // Log receiver crossings on this segment. When air absorption is
+        // enabled the logged energy must be attenuated by the PARTIAL
+        // path length from segment-start to the sphere-entry point tRec —
+        // the ray hasn't yet travelled the full segment when it crosses
+        // the receiver.
         for (let recIdx = 0; recIdx < R; recIdx++) {
           const tRec = raySphereEntry(
             ox, oy, oz, dx, dy, dz,
@@ -213,17 +236,27 @@ export function traceRays(scene, bvh, opts = {}) {
           const bucket = Math.floor((arrival_s * 1000) / bucketDtMs);
           if (bucket < 0 || bucket >= T) continue;
           const base = recIdx * B * T + bucket;
-          for (let k = 0; k < B; k++) histogram[base + k * T] += energy[k];
+          if (airAbsorption) {
+            for (let k = 0; k < B; k++) {
+              histogram[base + k * T] += energy[k] * Math.exp(-airCoef[k] * tRec);
+            }
+          } else {
+            for (let k = 0; k < B; k++) histogram[base + k * T] += energy[k];
+          }
           hitCount++;
         }
 
         if (segmentEnd_m < hit.t) { terminations.timeOut++; terminated = true; break; }
 
-        // Advance to hit point.
+        // Advance to hit point + apply FULL-segment air absorption to
+        // the ray's carried energy before material reflection.
         totalPath += hit.t;
         ox += dx * hit.t;
         oy += dy * hit.t;
         oz += dz * hit.t;
+        if (airAbsorption) {
+          for (let k = 0; k < B; k++) energy[k] *= Math.exp(-airCoef[k] * hit.t);
+        }
 
         // Specular reflection: d_new = d − 2·(d·n)·n.
         const nx = hit.normal[0], ny = hit.normal[1], nz = hit.normal[2];

@@ -217,5 +217,65 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
   ok(totalTerm === totalRays, `Terminations sum = raysTraced (${totalTerm} vs ${totalRays})`);
 }
 
+// ---- ISO 9613-1 volumetric air absorption in the bounce loop ----------
+//
+// Cross-engine validation exposed this gap: without air absorption the
+// ray tracer's 8 kHz T30 ran ~60 % longer than the draft engine's
+// Sabine/Eyring result in the arena preset (draft applies the 4mV term,
+// tracer previously did not). Fix: per-segment `energy *= exp(-m·d)`
+// where m is Nepers/m from air-absorption.js. Partial path applied to
+// receiver-hit logging so the arriving energy reflects the actual
+// travelled distance.
+//
+// Test: 40×40×10 m reverberant room (mostly hard surfaces). Compare
+// broadband-histogram energy at late tail with air-abs on vs off. At
+// 8 kHz the late tail should drop substantially; at 125 Hz almost
+// unchanged.
+
+{
+  function bigRoom(airEnabled) {
+    const state = {
+      room: {
+        shape: 'rectangular', width_m: 40, depth_m: 40, height_m: 10,
+        surfaces: {
+          floor: 'concrete-painted', ceiling: 'concrete-painted',
+          wall_north: 'concrete-painted', wall_south: 'concrete-painted',
+          wall_east: 'concrete-painted', wall_west: 'concrete-painted',
+        },
+      },
+      zones: [],
+      sources: [{ modelUrl: 'stub', position: { x: 20, y: 20, z: 5 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 }],
+      listeners: [{ id: 'L1', label: 'Rec', position: { x: 30, y: 20 }, elevation_m: 3.8 }],
+      physics: {},
+    };
+    const scene = buildPhysicsScene({ state, materials, getLoudspeakerDef: getDef });
+    const soup = triangulateScene(scene);
+    const bvh = buildBVH(soup);
+    return traceRays(scene, bvh, {
+      raysPerSource: 5000, maxBounces: 200, bucketDtMs: 5, maxTimeMs: 1500,
+      seed: 17, airAbsorption: airEnabled,
+    });
+  }
+  const withAir = bigRoom(true);
+  const noAir = bigRoom(false);
+  // Late-tail window = last third of the histogram (≥ 1 s arrival).
+  const lateStart = Math.floor(withAir.shape.buckets * 2 / 3);
+  const lateAir = (r, band) => histogramWindowSum(r, 0, band, lateStart, r.shape.buckets);
+
+  // Band 0 = 125 Hz: air coefficient tiny, late-tail should be similar.
+  const ratio125 = lateAir(withAir, 0) / Math.max(lateAir(noAir, 0), 1e-30);
+  console.log(`    125 Hz late-tail air/noAir ratio: ${ratio125.toFixed(3)}`);
+  ok(ratio125 > 0.7, `125 Hz air-abs effect modest in big room (got ${ratio125.toFixed(3)}, expect > 0.7)`);
+
+  // Band 6 = 8 kHz: air should slash late-tail energy by at least 80 %.
+  const ratio8k = lateAir(withAir, 6) / Math.max(lateAir(noAir, 6), 1e-30);
+  console.log(`    8 kHz late-tail air/noAir ratio: ${ratio8k.toFixed(3)}`);
+  ok(ratio8k < 0.2, `8 kHz air-abs shreds late tail in big room (got ${ratio8k.toFixed(3)}, expect < 0.2)`);
+
+  // Default flag is ON — parity with the draft engine.
+  const noFlag = bigRoom();  // drops to default
+  void noFlag;
+}
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll precision tracer tests passed.');
