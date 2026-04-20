@@ -194,7 +194,7 @@ function renderResults() {
         <tr><th>C80</th><td>${fmt(m.broadband.c80_db, 1, ' dB')}</td>
             <th>C50</th><td>${fmt(m.broadband.c50_db, 1, ' dB')}</td></tr>
         <tr><th>D/R</th><td>${fmt(m.broadband.dr_db, 1, ' dB')}</td>
-            <th>&nbsp;</th><td>&nbsp;</td></tr>
+            <th title="Expected direct-path arrival at this listener (closest source / c). C50 is ISO-defined on the [0, 50 ms] window — if direct > 50 ms, the metric is undefined by standard.">Direct</th><td>${fmt(m.broadband.directArrivalMs, 1, ' ms')}</td></tr>
       </table>
       <details class="precision-per-band">
         <summary>T30 per band · STI per band</summary>

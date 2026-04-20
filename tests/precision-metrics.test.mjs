@@ -110,6 +110,20 @@ function synthExponentialIR({ bucketDtMs, T60_s, length_ms, amplitude = 1 }) {
   const dr2 = calcDR(loudDirect, bucketDtMs, 10);
   ok(dr2 > dr1, `Loud-direct D/R (${dr2.toFixed(1)} dB) > reverb-only D/R (${dr1.toFixed(1)} dB)`);
   ok(dr2 > 10, `Loud-direct D/R > +10 dB (got ${dr2.toFixed(1)})`);
+
+  // Dynamic-anchor: move the "direct" spike to bucket 36 (72 ms @ 2 ms/
+  // bucket — matches Concourse walker scenario user flagged). Fixed-
+  // window D/R would read NaN; dynamic-anchor D/R must capture the
+  // spike at 72 ms and return a positive number.
+  const farDirect = new Float32Array(500);
+  farDirect[36] = 100;
+  for (let i = 40; i < 500; i++) farDirect[i] = 0.002 * Math.exp(-(i-40) / 25);
+  const drFixed = calcDR(farDirect, bucketDtMs, 10);
+  const drAnchored = calcDR(farDirect, bucketDtMs, { directArrivalMs: 72, windowMs: 10 });
+  ok(!Number.isFinite(drFixed),
+    `Fixed-window D/R on far-direct IR returns NaN (got ${drFixed}) — ISO-strict behaviour`);
+  ok(Number.isFinite(drAnchored) && drAnchored > 10,
+    `Direct-anchored D/R on 72-ms-arrival IR captures spike (got ${drAnchored.toFixed(1)} dB, expect > +10)`);
 }
 
 // ---- computeMTF sanity: flat DC energy → MTF(fm) ≈ expected ------------

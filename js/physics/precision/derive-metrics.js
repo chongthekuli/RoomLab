@@ -158,13 +158,33 @@ export function calcC50(h, bucketDtMs) { return calcClarity(h, bucketDtMs, 50); 
 
 // ---- Direct-to-reverberant ratio ----------------------------------------
 //
-// "Direct" is the first `directMs` (default 10 ms) of the IR — the
-// straight-line arrival plus any reflections whose path difference is
-// ≤ 3.4 m. "Reverb" is everything after. D/R in dB is a strong
-// predictor of speech intelligibility at the receiver's location.
-
-export function calcDR(h, bucketDtMs, directMs = 10) {
-  return calcClarity(h, bucketDtMs, directMs);
+// "Direct" is a narrow window AROUND the direct-path arrival (path-
+// length difference ≤ ~3.4 m = 10 ms at 343 m/s). "Reverb" is
+// everything after that window. D/R in dB is a strong predictor of
+// speech intelligibility at the receiver's location.
+//
+// There is no ISO-strict D/R formula — different papers use different
+// conventions. We anchor the direct window to the expected arrival time
+// (computed from geometry by the caller) rather than fixing it to
+// [0, 10 ms]. A listener 25 m from any source has direct arrival at
+// ~73 ms, and a fixed-window D/R would incorrectly read zero direct
+// energy — as the user originally saw.
+//
+// If the caller doesn't supply a direct-arrival time, fall back to the
+// absolute [0, windowMs] window.
+export function calcDR(h, bucketDtMs, opts = {}) {
+  const { directArrivalMs = 0, windowMs = 10 } = typeof opts === 'number'
+    ? { directArrivalMs: 0, windowMs: opts }   // backwards-compat (legacy positional)
+    : opts;
+  const earlyStart = Math.max(0, Math.floor(directArrivalMs / bucketDtMs) - 1);   // 1 bucket before direct for anti-aliasing
+  const earlyEnd   = Math.floor((directArrivalMs + windowMs) / bucketDtMs);
+  let early = 0, late = 0;
+  for (let i = 0; i < h.length; i++) {
+    if (i >= earlyStart && i < earlyEnd) early += h[i];
+    else if (i >= earlyEnd) late += h[i];
+  }
+  if (!(early > 0) || !(late > 0)) return NaN;
+  return 10 * Math.log10(early / late);
 }
 
 // ---- STI from impulse response (IEC 60268-16 Annex A, full STI) ---------
@@ -275,16 +295,53 @@ export function histogramForReceiverBand(result, receiverIdx, bandIdx) {
   return histogram.subarray(start, start + T);
 }
 
+/**
+ * Compute the expected direct-path arrival time at a receiver as the
+ * minimum distance from any source, divided by speed of sound. Used to
+ * anchor the D/R window and to contextualise C50/C80 when the direct
+ * path itself arrives after the classical window boundary.
+ *
+ * Returns milliseconds, or NaN if the scene has no sources/receivers.
+ */
+export function directArrivalMs(scene, receiverIdx, c_mps = 343.2) {
+  if (!scene?.sources || scene.sources.count === 0) return NaN;
+  if (!scene?.receivers || receiverIdx >= scene.receivers.count) return NaN;
+  const recX = scene.receivers.positions[receiverIdx * 3 + 0];
+  const recY = scene.receivers.positions[receiverIdx * 3 + 1];
+  const recZ = scene.receivers.positions[receiverIdx * 3 + 2];
+  let minDist = Infinity;
+  for (let i = 0; i < scene.sources.count; i++) {
+    const dx = scene.sources.positions[i * 3 + 0] - recX;
+    const dy = scene.sources.positions[i * 3 + 1] - recY;
+    const dz = scene.sources.positions[i * 3 + 2] - recZ;
+    const d = Math.hypot(dx, dy, dz);
+    if (d < minDist) minDist = d;
+  }
+  if (!isFinite(minDist)) return NaN;
+  return (minDist / c_mps) * 1000;
+}
+
 export function deriveMetrics(result, opts = {}) {
   const { shape, bucketDtMs } = result;
   const { receivers: R, bands: B, buckets: T } = shape;
   const directWindowMs = opts.directWindowMs ?? 10;
+  const c_mps = opts.c_mps ?? 343.2;
   const out = [];
 
   for (let r = 0; r < R; r++) {
     const broadband = new Float32Array(T);
     const perBand = [];
     const bandHistograms = [];
+
+    // Expected direct-path arrival at this receiver — anchors D/R and
+    // contextualises C50/C80 when direct > 50 ms.
+    const dirMs = result.scene
+      ? directArrivalMs(result.scene, r, c_mps)
+      : NaN;
+    const drOpts = {
+      directArrivalMs: isFinite(dirMs) ? dirMs : 0,
+      windowMs: directWindowMs,
+    };
 
     for (let b = 0; b < B; b++) {
       const bH = histogramForReceiverBand(result, r, b);
@@ -297,7 +354,7 @@ export function deriveMetrics(result, opts = {}) {
         t30_s: calcT30(L, bucketDtMs),
         c80_db: calcC80(bH, bucketDtMs),
         c50_db: calcC50(bH, bucketDtMs),
-        dr_db: calcDR(bH, bucketDtMs, directWindowMs),
+        dr_db: calcDR(bH, bucketDtMs, drOpts),
       });
     }
     const L_bb = decayDb(broadband);
@@ -307,7 +364,8 @@ export function deriveMetrics(result, opts = {}) {
       t30_s: calcT30(L_bb, bucketDtMs),
       c80_db: calcC80(broadband, bucketDtMs),
       c50_db: calcC50(broadband, bucketDtMs),
-      dr_db: calcDR(broadband, bucketDtMs, directWindowMs),
+      dr_db: calcDR(broadband, bucketDtMs, drOpts),
+      directArrivalMs: dirMs,
     };
     const sti = calcSTIFromIR(bandHistograms, bucketDtMs, {
       signalSPL_per_band: opts.signalSPL_per_band,
