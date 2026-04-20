@@ -442,7 +442,9 @@ This means the MVP ray tracer can ship with much higher default ray count than p
 
   **Decision change from the original blueprint:** using a hand-rolled BVH instead of `three-mesh-bvh`. Reasoning: (a) keeps physics tests pure Node without pulling three into dev deps; (b) 250 lines of reviewable, self-contained code beats an opaque npm dep we can't easily patch; (c) perf is well within budget — our scenes are 100–10,000 triangles, not movie-scale. If perf ever becomes the bottleneck the swap to `three-mesh-bvh` is a single-file change.
 
-**B2.** Extend triangulator to polygon / round / dome rooms; triangulate the stadium bowl lathe geometry (extract from the 3D scene's lathe meshes). Arena preset becomes ray-traceable.
+**B2.** ✅ landed `HEAD`. Extended triangulator covers polygon rooms (hexagonal / 36-sided arena / octagon / etc.), round rooms (approximated as 32-sided polygon), dome ceilings (spherical-cap tessellation, 8 latitudes × 24 longitudes), and custom-vertex rooms. Arena preset now produces **898 triangles**; court-centre ray-up correctly hits the scoreboard_bottom face. Perf on arena scene: **324 rays/ms** (BVH with 599 nodes) — well above the ≥100 rays/ms budget for arena-class scenes.
+
+**B2.5.** ⏳ Stadium bowl structural triangulation — risers, retaining walls, back walls, concourse ring — deferred. Zones (tread tops) are already triangulated via the zones path, which covers the acoustically-significant audience-facing surfaces. Adding risers requires either (a) reconstructing scene.js's LatheGeometry bowl in the physics layer, or (b) extracting triangles from the already-built Three.js meshes. Both are doable; neither is blocking a first precision-render demo.
 
 **B3.** Worker pool (`js/physics/precision/worker-pool.js`) — 4-8 workers, job queue, cancellation. Scene + BVH transferred once to each worker via `postMessage` + transferable list.
 

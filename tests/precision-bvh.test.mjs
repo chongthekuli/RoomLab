@@ -190,6 +190,170 @@ function makeShoebox({ withZone = false, withScoreboard = false } = {}) {
   ok(raysPerMs > 500, `perf budget: > 500 rays/ms on small scene`);
 }
 
+// ---- Phase B2 — polygon rooms ----------------------------------------
+
+{
+  const state = {
+    room: {
+      shape: 'polygon', polygon_sides: 6, polygon_radius_m: 10,
+      width_m: 20, depth_m: 20, height_m: 5,
+      ceiling_type: 'flat',
+      surfaces: { floor: 'wood-floor', ceiling: 'acoustic-tile', walls: 'gypsum-board' },
+    },
+    zones: [], sources: [], listeners: [],
+    physics: { reverberantField: false, airAbsorption: true, freq_hz: 1000 },
+  };
+  const scene = buildPhysicsScene({ state, materials, getLoudspeakerDef: () => null });
+  const soup = triangulateScene(scene);
+  // Hexagon: floor = 6 tris (fan from centroid), ceiling = 6 tris, 6 walls × 2 = 12.
+  ok(soup.count === 6 + 6 + 12, `Hexagonal flat room → 24 tris (got ${soup.count})`);
+  // Ray from centroid straight up must hit the flat ceiling.
+  const bvh = buildBVH(soup);
+  const hit = intersectRay(bvh, 10, 10, 2.5, 0, 0, 1);
+  ok(hit !== null && hit.sourceKey === 'ceiling' && Math.abs(hit.t - 2.5) < 1e-5,
+    `Hex flat ceiling hit from centroid (got ${hit?.sourceKey} at t=${hit?.t.toFixed(3)})`);
+  // Ray along +x from centroid hits hex VERTEX 0 at (20,10) exactly —
+  // t = polygon_radius_m = 10. Pick a non-axis-aligned direction
+  // (30° off-axis) so the ray strikes a wall midpoint instead:
+  // expected distance = apothem = R·cos(π/6) ≈ 8.66 m.
+  const dir = [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6), 0];
+  const side = intersectRay(bvh, 10, 10, 2.5, dir[0], dir[1], dir[2]);
+  ok(side !== null && side.sourceKey.startsWith('wall_'), `Hex 30°-off-axis ray hits a wall_N (got ${side?.sourceKey})`);
+  const expectedApothem = 10 * Math.cos(Math.PI / 6);
+  ok(side && Math.abs(side.t - expectedApothem) < 0.05,
+    `Hex wall midpoint distance ≈ apothem ${expectedApothem.toFixed(2)} m (got ${side?.t.toFixed(3)})`);
+}
+
+// ---- Phase B2 — round room -------------------------------------------
+
+{
+  const state = {
+    room: {
+      shape: 'round', round_radius_m: 8,
+      width_m: 16, depth_m: 16, height_m: 4,
+      ceiling_type: 'flat',
+      surfaces: { floor: 'wood-floor', ceiling: 'gypsum-board', walls: 'concrete-painted' },
+    },
+    zones: [], sources: [], listeners: [],
+    physics: { reverberantField: false, airAbsorption: true, freq_hz: 1000 },
+  };
+  const scene = buildPhysicsScene({ state, materials, getLoudspeakerDef: () => null });
+  const soup = triangulateScene(scene);
+  // Round approximated as 32-sided polygon: 32 floor + 32 ceiling + 64 wall = 128.
+  ok(soup.count === 32 + 32 + 64, `Round flat room → 128 tris (got ${soup.count})`);
+  // Ray sideways from centre should hit a wall at ~round_radius_m. Exact
+  // value depends on whether the ray hits vertex or midpoint of a wall
+  // segment — 32 sides gives min r ≈ 8 × cos(π/32) = 7.96, max = 8.
+  const bvh = buildBVH(soup);
+  const hit = intersectRay(bvh, 8, 8, 2, 1, 0, 0);
+  ok(hit !== null && hit.sourceKey.startsWith('wall_'), `Round side ray hits a wall`);
+  ok(hit && hit.t > 7.5 && hit.t < 8.1,
+    `Round side distance ≈ radius 8 (got ${hit?.t.toFixed(3)})`);
+}
+
+// ---- Phase B2 — dome ceiling -----------------------------------------
+
+{
+  // Small test dome: polygon base radius 10, rise 4, so sphere radius R = (100+16)/8 = 14.5.
+  // Cap apex is at z = baseZ + 4 = 4 (baseZ=0).
+  const state = {
+    room: {
+      shape: 'polygon', polygon_sides: 12, polygon_radius_m: 10,
+      width_m: 20, depth_m: 20, height_m: 0,       // wall height 0 → domed roof sits directly on floor
+      ceiling_type: 'dome', ceiling_dome_rise_m: 4,
+      surfaces: { floor: 'wood-floor', ceiling: 'acoustic-tile', walls: 'gypsum-board' },
+    },
+    zones: [], sources: [], listeners: [],
+    physics: {},
+  };
+  const scene = buildPhysicsScene({ state, materials, getLoudspeakerDef: () => null });
+  const soup = triangulateScene(scene);
+  // 12-sided floor fan = 12 tris. Walls at h=0 collapse to zero-area quads
+  // (2 tris each, 12 walls = 24 degenerate tris). Dome: 24 lon × 8 lat:
+  //   apex ring = 24 tris, remaining 7 rings × 24 lon × 2 = 336 tris.
+  //   Total dome = 24 + 336 = 360 tris.
+  const expectedFloor = 12;
+  const expectedWalls = 24;              // degenerate but still emitted
+  const expectedDome  = 24 + 7 * 24 * 2;  // = 360
+  const expectedTotal = expectedFloor + expectedWalls + expectedDome;
+  ok(soup.count === expectedTotal,
+    `Dome polygon room → ${expectedTotal} tris (got ${soup.count}; floor=${expectedFloor}, walls=${expectedWalls}, dome=${expectedDome})`);
+
+  const bvh = buildBVH(soup);
+  // Ray straight up from the centroid must hit the dome apex.
+  // apex is at z = 4 (baseZ=0, rise=4). Origin at z=2 → t=2.
+  const apexHit = intersectRay(bvh, 10, 10, 2, 0, 0, 1);
+  ok(apexHit !== null && apexHit.surfaceTag === SURFACE_TAGS.CEILING,
+    `Dome apex ray hits CEILING tag (got tag=${apexHit?.surfaceTag})`);
+  ok(apexHit && Math.abs(apexHit.t - 2) < 0.01,
+    `Dome apex hit at t=2 (got ${apexHit?.t.toFixed(3)})`);
+
+  // Ray at 45° from centroid must hit the dome somewhere above the base
+  // rim — hit elevation z > 0 expected.
+  const diagHit = intersectRay(bvh, 10, 10, 0.1, 1, 0, 1);
+  ok(diagHit !== null && diagHit.point[2] > 0.1,
+    `Dome diagonal ray hits above the floor plane (got z=${diagHit?.point[2].toFixed(3)})`);
+}
+
+// ---- Phase B2 — custom polygon room ---------------------------------
+
+{
+  // L-shaped custom polygon would be concave; fan triangulation would
+  // fail. For now custom rooms must be convex. Use a pentagon.
+  const state = {
+    room: {
+      shape: 'custom', height_m: 3,
+      width_m: 10, depth_m: 10,
+      ceiling_type: 'flat',
+      custom_vertices: [
+        { x: 0, y: 0 }, { x: 8, y: 0 }, { x: 10, y: 4 }, { x: 6, y: 8 }, { x: 0, y: 6 },
+      ],
+      surfaces: { floor: 'wood-floor', ceiling: 'gypsum-board', walls: 'concrete-painted' },
+    },
+    zones: [], sources: [], listeners: [],
+    physics: {},
+  };
+  const scene = buildPhysicsScene({ state, materials, getLoudspeakerDef: () => null });
+  const soup = triangulateScene(scene);
+  // Pentagon: floor = 3 tris (fan from v0), ceiling = 3, walls = 5×2 = 10. Total 16.
+  ok(soup.count === 3 + 3 + 10, `Custom pentagon room → 16 tris (got ${soup.count})`);
+}
+
+// ---- Phase B2 — arena preset end-to-end ------------------------------
+
+{
+  // This is the real-world stress case. Uses the live app-state.js to
+  // apply the auditorium preset, then triangulates.
+  const { state: appState, applyPresetToState } = await import('../js/app-state.js');
+  applyPresetToState('auditorium');
+  const scene = buildPhysicsScene({ state: appState, materials, getLoudspeakerDef: () => null });
+  const soup = triangulateScene(scene);
+  // Sanity: must have lots of triangles, BVH must build, rays must hit things.
+  ok(soup.count > 500, `Arena preset → > 500 tris (got ${soup.count})`);
+  const bvh = buildBVH(soup);
+  // Ray upward from court centre must hit either scoreboard or dome.
+  const hit = intersectRay(bvh, 30, 30, 1.5, 0, 0, 1);
+  ok(hit !== null, `Arena court-centre ray-up hits something (sourceKey=${hit?.sourceKey})`);
+  ok(hit && (hit.sourceKey?.startsWith('scoreboard_') || hit.sourceKey?.startsWith('dome_')),
+    `Court-centre ray-up hits scoreboard or dome (got ${hit?.sourceKey})`);
+  // Perf spot-check: 1000 rays on this larger BVH.
+  const N = 1000;
+  const rng = mulberry32(7);
+  const t0 = performance.now();
+  for (let i = 0; i < N; i++) {
+    const theta = rng() * 2 * Math.PI;
+    const phi = (rng() - 0.5) * Math.PI;
+    intersectRay(bvh, 30, 30, 2,
+      Math.cos(phi) * Math.cos(theta),
+      Math.cos(phi) * Math.sin(theta),
+      Math.sin(phi));
+  }
+  const ms = performance.now() - t0;
+  const raysPerMs = N / ms;
+  console.log(`PERF  ${N} rays vs arena BVH (${soup.count} tris, ${bvh.nodeCount} nodes): ${ms.toFixed(1)} ms → ${raysPerMs.toFixed(0)} rays/ms`);
+  ok(raysPerMs > 100, `perf budget on arena-scale scene: > 100 rays/ms`);
+}
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll precision BVH tests passed.');
 
