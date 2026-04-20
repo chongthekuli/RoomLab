@@ -490,13 +490,21 @@ import { airAbsorptionAt, AIR_ABSORPTION_DB_PER_M, computeRoomConstant, speedOfS
                 wall_north: 'gypsum-board', wall_south: 'gypsum-board',
                 wall_east: 'gypsum-board', wall_west: 'gypsum-board' },
   };
-  const R = computeRoomConstant(room, materials, 1000);
   // S = 4*(10*5) + 2*(10*10) = 200 + 200 = 400 m².
   // α_bar ≈ (200*0.04 + 100*0.07 + 100*0.65)/400 = (8 + 7 + 65)/400 = 0.2
-  // R = 400*0.2/0.8 = 100 m².
-  const okR = Math.abs(R - 100) < 2;
-  console.log(`${okR ? 'PASS' : 'FAIL'}  computeRoomConstant(10×10×5, mixed materials, 1kHz) ≈ 100 m² (got ${R.toFixed(2)})`);
-  if (!okR) failed++;
+  // Classical R = 400*0.2/0.8 = 100 m² (no air absorption).
+  const R_noair = computeRoomConstant(room, materials, 1000, [], { airAbsorption: false });
+  const okR_noair = Math.abs(R_noair - 100) < 2;
+  console.log(`${okR_noair ? 'PASS' : 'FAIL'}  computeRoomConstant classical (10×10×5, 1kHz, no air) ≈ 100 m² (got ${R_noair.toFixed(2)})`);
+  if (!okR_noair) failed++;
+  // With air: 4mV at 1 kHz for V=500 m³ adds 4·(0.00487/4.343)·500 ≈ 2.24
+  // Sabins, raising A_total to 82.24, α_eff=0.206, R=82.24/0.794 ≈ 103.5.
+  const R_air = computeRoomConstant(room, materials, 1000);
+  const okR_air = Math.abs(R_air - 103.5) < 1;
+  console.log(`${okR_air ? 'PASS' : 'FAIL'}  computeRoomConstant with 4mV (same room, 1kHz) ≈ 103.5 m² (got ${R_air.toFixed(2)})`);
+  if (!okR_air) failed++;
+  // Keep a single-R binding for later assertions in this block.
+  const R = R_air;
 
   // With reverberant field enabled, total SPL at any point should be higher
   // than direct-only — and identical across positions (diffuse uniform).

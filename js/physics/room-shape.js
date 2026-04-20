@@ -56,9 +56,55 @@ export function wallPerimeter(room) {
   }
 }
 
+// Spherical-cap dome math assumes a radially-symmetric base. We approximate
+// a polygonal or rectangular base with its equivalent-area circle
+// (a = √(A_base/π)). For 36-sided (arena) or round bases this is <1 %
+// error; for elongated bases (e.g. 10 × 100 m rectangle) the formula loses
+// meaning. Reviewer audit: refuse-to-silently-lie when aspect > 2:1.
+// We log a one-time warning per session rather than throw, because the
+// preset may still be useful for a rough acoustic estimate even when the
+// ceiling geometry is unrealistic.
+function roomBaseAspectRatio(room) {
+  const shape = room.shape;
+  if (shape === 'round') return 1;
+  if (shape === 'polygon') {
+    const sides = room.polygon_sides ?? 6;
+    // Very low-sided polygons (triangle, square on-edge) can be anisotropic
+    // depending on the rotation convention; for sides ≥ 6 aspect ≈ 1.
+    return sides >= 6 ? 1 : 1.2;
+  }
+  if (shape === 'custom' && Array.isArray(room.custom_vertices) && room.custom_vertices.length >= 3) {
+    const xs = room.custom_vertices.map(v => v.x);
+    const ys = room.custom_vertices.map(v => v.y);
+    const w = Math.max(...xs) - Math.min(...xs);
+    const h = Math.max(...ys) - Math.min(...ys);
+    return Math.max(w, h) / Math.max(1e-6, Math.min(w, h));
+  }
+  // rectangular
+  const w = room.width_m ?? 1;
+  const d = room.depth_m ?? 1;
+  return Math.max(w, d) / Math.max(1e-6, Math.min(w, d));
+}
+let _domeAspectWarned = false;
+function checkDomeAspect(room) {
+  if (_domeAspectWarned) return;
+  const r = roomBaseAspectRatio(room);
+  if (r > 2) {
+    _domeAspectWarned = true;
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn(
+        `[roomlab] Dome ceiling geometry assumes radial symmetry; current room has aspect ratio ${r.toFixed(1)}:1. ` +
+        `Spherical-cap volume/area will be incorrect for elongated bases — switch to ceiling_type='flat' or choose ` +
+        `a more symmetric room shape for reliable RT60 numbers.`
+      );
+    }
+  }
+}
+
 export function ceilingArea(room) {
   const b = baseArea(room);
   if (room.ceiling_type === 'dome' && (room.ceiling_dome_rise_m ?? 0) > 0) {
+    checkDomeAspect(room);
     const a = Math.sqrt(b / Math.PI);
     const d = room.ceiling_dome_rise_m;
     return Math.PI * (a * a + d * d);
@@ -68,6 +114,7 @@ export function ceilingArea(room) {
 
 export function domeVolume(room) {
   if (room.ceiling_type !== 'dome' || !((room.ceiling_dome_rise_m ?? 0) > 0)) return 0;
+  checkDomeAspect(room);
   const a = Math.sqrt(baseArea(room) / Math.PI);
   const d = room.ceiling_dome_rise_m;
   return Math.PI * d / 6 * (3 * a * a + d * d);

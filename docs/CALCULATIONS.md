@@ -112,6 +112,8 @@ V_dome = (π · d / 6) · (3a² + d²)
 
 **Known simplification:** `a = √(A_base / π)` treats a polygon base as its equivalent-area circle. Error is <1 % for 36-sided (arena preset) and ~10 % for low-side (octagon). Flagged in Chen audit H1.
 
+**Defensive check (reviewer challenge, commit `HEAD`):** the formula assumes radial symmetry. For a highly elongated base (e.g. rectangular 10 × 100 m shoebox with a "dome" ceiling), the spherical-cap formulas produce physically meaningless volume/area. `domeVolume()` and `ceilingArea()` now log a one-time `console.warn` when the base bounding-box aspect ratio exceeds **2:1**, asking the user to switch to `ceiling_type: 'flat'` for reliable RT60. We warn rather than throw so a preset with a slightly elongated shape can still render for rough sanity-checking. File: [room-shape.js:checkDomeAspect](../js/physics/room-shape.js).
+
 ### 2.5 Room volume
 
 ```
@@ -191,25 +193,31 @@ File: [rt60.js:17](../js/physics/rt60.js#L17).
 
 ## 4. RT60
 
-### 4.1 Sabine
+### 4.1 Sabine (with volumetric air absorption)
 
 ```
-T60_Sabine(k) = 0.161 · V / A(k)
+T60_Sabine(k) = 0.161 · V / (A_surfaces(k) + 4·m(k)·V)
 ```
 
 Where:
 - `0.161` is the Sabine constant in metric units (20 °C air). Dimensional analysis: `m · s / (m)` = s.
 - `V = V_air` from §2.5.
-- `A(k) = Σ_surfaces (area × α_eff(k))` in m² Sabins.
+- `A_surfaces(k) = Σ_surfaces (area × α_eff(k))` in m² Sabins.
+- `m(k)` is the **energy attenuation coefficient** in Nepers/m, obtained from the ISO 9613-1 dB/m table (§5.3) via `m = α_dB/m / (10 · log10 e) = α_dB/m / 4.343`. See [air-absorption.js](../js/physics/air-absorption.js).
+- `4·m·V` is the **volumetric air sink** — air itself dissipates acoustic energy; the factor 4 comes from the mean-free-path derivation (Kuttruff §5.3).
 
-### 4.2 Eyring
+**Why this matters (reviewer challenge, addressed commit `HEAD`):** in small rooms `4mV` is a fraction of a percent of `A_surfaces` and can be safely ignored. In a 48,000 m³ arena at 8 kHz, `4mV ≈ 4,100 Sabins` vs surface absorption of ~3,000 Sabins — so omitting it made our predicted 8 kHz RT60 double-counted reverb energy and came in ~2.4× too long. Arena 8 kHz RT60 now reports 1.00 s (was 2.40 s with the omission).
+
+Air absorption can be disabled per-calculation with `airAbsorption: false` (used by tests that verify classical textbook α=0.1 results). The RT60 and `computeRoomConstant` both honour the same flag so a reviewer can compare pre/post-fix numbers cleanly.
+
+### 4.2 Eyring (with volumetric air absorption)
 
 ```
-α_bar(k) = A(k) / S_total
-T60_Eyring(k) = 0.161 · V / (−S_total · ln(1 − α_bar(k)))
+α̅_surface(k) = A_surfaces(k) / S_total
+T60_Eyring(k) = 0.161 · V / (−S_total · ln(1 − α̅_surface(k)) + 4·m(k)·V)
 ```
 
-Used when `α_bar > 0.2` (the transition point where Sabine overestimates; noted in UI as "Eyring more accurate in dead rooms").
+Kuttruff §5.3: the Eyring form keeps the logarithm on **surface** absorption only (the logarithm comes from the geometric reflection-count decay which doesn't apply to air), then adds the air term linearly as in Sabine. Used when `α̅_surface > ~0.2` (transition point where Sabine overestimates; noted in UI as "Eyring more accurate in dead rooms").
 
 ### 4.3 Mean absorption (for UI display)
 
@@ -335,18 +343,32 @@ Regression-tested: two co-located in-phase sources sum to **+6 dB** — measured
 
 ## 6. Reverberant Field (Hopkins-Stryker)
 
-### 6.1 Room constant
+### 6.1 Room constant (with volumetric air absorption)
+
+Classical form:
 
 ```
-α_bar(f) = Σ(S · α_eff) / Σ(S)
-R(f) = S_total · α_bar(f) / (1 − α_bar(f))
+α̅(f) = A_surfaces(f) / S_total
+R(f) = S_total · α̅ / (1 − α̅)
 ```
 
-Dimensions of R: m². Interpretation: "equivalent open-window absorption area plus an extra-air term."
+**Extended form used in the code** (Kuttruff §5.3 with air absorption):
 
-**Edge case:** if `α_bar ≥ 0.995`, we return `R = 1e9` to avoid division blow-up. The reverb term (§6.3) then effectively vanishes.
+```
+A_total(f) = A_surfaces(f) + 4·m(f)·V      (m from §4.1 / air-absorption.js)
+α̅_eff(f)  = A_total(f) / S_total
+R(f)      = A_total(f) / (1 − α̅_eff(f))
+```
 
-File: [spl-calculator.js:56](../js/physics/spl-calculator.js#L56).
+Dimensions of R: m². Interpretation: "equivalent open-window absorption area, accounting for both wall surface absorption and volumetric air dissipation."
+
+Without the `4mV` term, `R` at 8 kHz in the arena came out ~3× too small (the air sink dominates surface absorption by 40 %), which put the Hopkins-Stryker reverberant level ~4–5 dB too loud at HF in big venues. Fixed commit `HEAD`.
+
+**Edge case:** if `α̅_eff ≥ 0.995`, we return `R = 1e9` to avoid division blow-up.
+
+`computeRoomConstant(..., { airAbsorption: true })` is the default; pass `false` to get the classical form for comparison. The RT60 module reports `totalAbsorption_sabins` which already includes `4mV` when air is enabled, so Hopkins-Stryker R reuses that number directly rather than recomputing.
+
+File: [spl-calculator.js:60](../js/physics/spl-calculator.js#L60).
 
 ### 6.2 Sound power per source
 
@@ -606,7 +628,7 @@ From the Chen and cross-cutting audits, in order of decreasing impact:
 | P5 | Single wall-crossing TL | Rarely triggers | Multi-segment path check |
 | P6 | Flat-across-bands sensitivity / L_w | ±0.05 STI | Per-band sensitivity in loudspeaker JSON |
 | P7 | Coherent sum has no 1/4-λ decorrelation limit | Wrong above 500 Hz if enabled | Auto-disable coherent > 500 Hz |
-| P8 | Dome area uses equivalent-circle radius for polygon | <1 % @ 36-sided, ~10 % @ octagon | Accept or restrict dome to round |
+| P8 | Dome area uses equivalent-circle radius for polygon | <1 % @ 36-sided, ~10 % @ octagon; aspect > 2 logs a one-time warning (reviewer `HEAD`) | Accept, or disable dome for elongated bases in the UI |
 | P9 | Audience blend is material-swap (not seat-type aware) | Small; dominates only at occ ≥ 50 % | `audience-seating-empty` material + between-material blend |
 | P10 | Bowl risers / retaining walls not enumerated in Sabine budget | Small (concrete α ≈ 0.02) | Extract lathe-mesh area by material tag |
 
@@ -618,14 +640,19 @@ All of these are intentional starting points, not bugs. The top of this list is 
 
 | Scenario | Our result | Real-world reference | Delta |
 |---|---|---|---|
-| Arena preset, 30 % occupancy, mid-band RT60 | 1.96 s | Staples Center ~2.0 s, Pepsi Center ~1.9 s | Within range |
-| Full arena occupancy, mid-band RT60 | ~1.6 s | MSG post-2013 renovation ~2.5 s (different material palette) | −0.9 s (material-palette-dependent) |
+| Arena preset, 30 % occupancy, mid-band RT60 | 1.89 s (with 4mV) | Staples Center ~2.0 s, Pepsi Center ~1.9 s | Within range |
+| Arena 30 %, 8 kHz RT60 | 1.00 s (with 4mV) | Real occupied arenas 0.8–1.2 s at 8 kHz | Within range |
+| Arena 30 %, 8 kHz RT60 — OMITTING 4mV | 2.40 s (pre-fix) | Real target 0.8–1.2 s | **2.4× too long** — physically wrong, reviewer challenge fixed commit `HEAD` |
 | 10×10×4 m concrete shoebox w/ 36 m² absorber zone, 1 kHz RT60 | 1.63 s (w/ zone) vs 8.94 s (w/o zone) | Hand Sabine calc matches | Exact |
 | 2 co-located sources, incoherent sum | +3.01 dB | +3.00 dB exact | Good |
 | 2 co-located sources, coherent in-phase | +6.02 dB | +6.00 dB exact | Good |
 | Arena walkthrough, under line-array cluster, STI | 0.88 (excellent) | EASE prediction of similar config 0.80–0.90 | Plausible |
 | Arena diagonal upper-back corner, STI | 0.58 (fair) | EASE prediction 0.55–0.65 | Plausible |
-| 4 kHz air absorption over 30 m | 1.13 dB | ISO 9613-1 table | Exact |
+| 4 kHz air absorption over 30 m direct-field | 1.13 dB | ISO 9613-1 table | Exact |
+| Air-absorption coefficient m @ 4 kHz | 0.00864 Np/m | α_dB/m / 4.343 | Exact |
+| Air-absorption coefficient m @ 8 kHz | 0.02349 Np/m | α_dB/m / 4.343 | Exact |
+| 4mV sabins for V=1000 m³ @ 8 kHz | 93.95 Sabins | `4 · 0.02349 · 1000` | Exact |
+| 48k m³ room α=0.1 surfaces, 8 kHz RT60 drop from 4mV | 84 % | Kuttruff worked example | Consistent |
 | Critical distance for DI=10 box in R=2590 m² | r_c ≈ 14 m | Hand Sabine-R calc | Exact |
 
 ---

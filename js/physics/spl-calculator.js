@@ -1,6 +1,14 @@
 import { interpolateAttenuation } from './loudspeaker.js';
 import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea } from './room-shape.js';
 import { computeRT60Band } from './rt60.js';
+import {
+  AIR_ABSORPTION_DB_PER_M as AIR_ABS_TABLE,
+  airAbsorptionDbPerM, airSabins,
+} from './air-absorption.js';
+
+// Re-exports for backward compatibility with existing callers (tests, scene.js).
+export const AIR_ABSORPTION_DB_PER_M = AIR_ABS_TABLE;
+export function airAbsorptionAt(freq_hz) { return airAbsorptionDbPerM(freq_hz); }
 
 export const WALL_TRANSMISSION_LOSS_DB = 30;
 
@@ -13,56 +21,35 @@ export function speedOfSound(T_C = DEFAULT_TEMPERATURE_C) {
   return 331.3 * Math.sqrt(1 + T_C / 273.15);
 }
 
-// ISO 9613-1:1993 Annex A Table 1 — atmospheric absorption α (dB / m) at
-// 20 °C, 50 % RH, 101.325 kPa, at standard octave bands. These are the
-// reference-condition values; for non-standard T/RH/pressure the full
-// ISO formula (O2 + N2 relaxation + classical term) can be plugged in
-// later. 8 kHz extrapolated log-linearly from the 4 kHz value.
-export const AIR_ABSORPTION_DB_PER_M = {
-  125:  0.00038,
-  250:  0.00108,
-  500:  0.00244,
-  1000: 0.00487,
-  2000: 0.01154,
-  4000: 0.03751,
-  8000: 0.10200,
-};
-
-// Log-linear interpolation between known bands for any frequency in range.
-export function airAbsorptionAt(freq_hz) {
-  const v = AIR_ABSORPTION_DB_PER_M[freq_hz];
-  if (v != null) return v;
-  const bands = [125, 250, 500, 1000, 2000, 4000, 8000];
-  if (freq_hz <= bands[0]) return AIR_ABSORPTION_DB_PER_M[bands[0]];
-  if (freq_hz >= bands[bands.length - 1]) return AIR_ABSORPTION_DB_PER_M[bands[bands.length - 1]];
-  for (let i = 0; i < bands.length - 1; i++) {
-    const f0 = bands[i], f1 = bands[i + 1];
-    if (freq_hz >= f0 && freq_hz <= f1) {
-      const t = Math.log(freq_hz / f0) / Math.log(f1 / f0);
-      const a0 = AIR_ABSORPTION_DB_PER_M[f0];
-      const a1 = AIR_ABSORPTION_DB_PER_M[f1];
-      return a0 + t * (a1 - a0);
-    }
-  }
-  return 0;
-}
-
-// Hopkins-Stryker room constant R = S · α̅ / (1 − α̅) at the given octave
-// band. Used to combine direct SPL with the diffuse reverberant field.
-// Delegates to the RT60 module's surface enumeration (roomSurfaces) so the
-// absorption budget matches what the Results panel shows for RT60. Non-
-// standard bands (e.g. 1000 Hz halfway between 500 and 2000 in the
-// materials JSON) interpolate linearly to the nearest band.
-export function computeRoomConstant(room, materials, freq_hz, zones = []) {
+// Hopkins-Stryker room constant at the given octave band.
+//
+// Basic form:  R = S · α̅ / (1 − α̅)
+// Extended (Kuttruff §5 with air absorption):
+//    R = (S·α̅ + 4mV) / (1 − α̅_eff)     where α̅_eff = (S·α̅ + 4mV) / S
+//    = A_total / (1 − A_total/S)
+//
+// The 4mV air-sink is the same term that goes into Sabine T60 = 0.161·V/
+// (S·α̅ + 4mV). Ignoring it overstates the reverberant level at HF in
+// large rooms — at 8 kHz in a 48k-m³ arena, 4mV is ~140 % of the
+// surface-absorption total, so omitting it leaves R ~3 × too small and
+// the reverberant level ~4–5 dB too loud.
+//
+// `airAbsorption` defaults to `true` and must only be set false by a
+// deliberate caller (physics-toggle UI) that also disabled 4mV in RT60.
+export function computeRoomConstant(room, materials, freq_hz, zones = [], { airAbsorption = true } = {}) {
   if (!materials?.frequency_bands_hz) return 0;
   const bandIdx = materials.frequency_bands_hz.indexOf(freq_hz);
   if (bandIdx < 0) return 0;
-  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones });
+  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, airAbsorption });
   const S = rt.totalArea_m2;
-  const alpha_bar = rt.meanAbsorption;
   if (S <= 0) return 0;
-  if (alpha_bar >= 0.995) return 1e9;
-  return S * alpha_bar / (1 - alpha_bar);
+  // rt.totalAbsorption_sabins already includes 4mV when airAbsorption is
+  // true (see rt60.js). Use the effective α_bar for the Hopkins-Stryker
+  // form.
+  const A_total = rt.totalAbsorption_sabins;
+  const alpha_eff = A_total / S;
+  if (alpha_eff >= 0.995) return 1e9;
+  return A_total / (1 - alpha_eff);
 }
 
 function pathCrossesBoundary(speakerState, listenerPos, room) {
