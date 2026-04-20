@@ -638,10 +638,15 @@ section h3 {
   min-height: 11px;
   line-height: 1;
 }
+/* Vertical-oriented range slider. `appearance: slider-vertical` is
+   non-standard and Chrome deprecated it; the standard replacement is
+   `writing-mode: vertical-lr; direction: rtl` which flips the track to
+   go bottom-up (Chrome 124+ honours this; Firefox + Safari have always
+   done so). Matches the EQ widget's graphic-EQ gesture of "push up
+   for boost". */
 .eq-slider {
-  appearance: slider-vertical;
-  -webkit-appearance: slider-vertical;
-  writing-mode: bt-lr;
+  writing-mode: vertical-lr;
+  direction: rtl;
   width: 16px;
   height: 100px;
   padding: 0;
