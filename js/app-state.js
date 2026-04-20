@@ -358,6 +358,9 @@ export const state = {
     },
   },
   sources: [],
+  // Speaker being examined in the Speaker viewport tab. Holds the modelUrl
+  // of the selected catalogue entry; null when no speaker is under review.
+  selectedSpeakerUrl: null,
   listeners: [],
   selectedListenerId: null,
   zones: [],

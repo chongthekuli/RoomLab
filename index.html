@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RoomLAB</title>
-  <link rel="stylesheet" href="css/main.css?v=103" />
-  <link rel="stylesheet" href="css/theme.css?v=103" />
+  <link rel="stylesheet" href="css/main.css?v=104" />
+  <link rel="stylesheet" href="css/theme.css?v=104" />
   <script type="importmap">
   {
     "imports": {
@@ -35,6 +35,7 @@
           <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D Floor plan</button>
           <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D View</button>
           <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walkthrough</button>
+          <button class="vp-tab" data-view="speaker" title="Selected loudspeaker: full specs + polar patterns — shortcut 4">Speaker</button>
         </div>
         <div class="vp-group vp-group-layers">
           <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer — shortcut H">Heatmap</button>
@@ -52,6 +53,7 @@
       <div id="view-3d" class="viewport-view">
         <div class="viewport-loading">Loading 3D view…</div>
       </div>
+      <div id="view-speaker" class="viewport-view" hidden></div>
     </section>
     <aside id="panel-right">
       <section id="panel-results"><h2>Results</h2></section>
@@ -105,6 +107,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=103"></script>
+  <script type="module" src="js/main.js?v=104"></script>
 </body>
 </html>

@@ -213,6 +213,212 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   border-color: #74d0ff;
 }
 
+/* ====================================================================
+   Speaker detail view — full workbench replaces the 3D viewport when
+   the user opens a loudspeaker's spec card.
+   ==================================================================== */
+#view-speaker {
+  overflow: auto;
+  background: var(--bg-app);
+}
+.speaker-view {
+  padding: 1rem 1.25rem 2rem;
+  color: var(--fg);
+  max-width: 960px;
+}
+.sv-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+.sv-title { flex: 1; }
+.sv-brand {
+  font-size: 0.75rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sv-model {
+  font-size: 1.35rem;
+  font-weight: 500;
+  color: var(--fg-strong);
+  letter-spacing: 0.01em;
+  margin-top: 0.15rem;
+}
+.sv-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  font-style: italic;
+}
+.sv-actions { display: flex; gap: 0.4rem; }
+.btn-import-spec {
+  padding: 0.4rem 0.75rem;
+  background: rgba(116, 208, 255, 0.1);
+  border: 1px dashed rgba(116, 208, 255, 0.45);
+  color: #74d0ff;
+  border-radius: var(--radius);
+  font-size: 0.76rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-import-spec:hover {
+  background: rgba(116, 208, 255, 0.2);
+  border-color: #74d0ff;
+}
+.sv-import-status {
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  border-left: 2px solid var(--border);
+}
+.sv-import-status.ok  { color: var(--data-green); border-left-color: var(--data-green); background: rgba(163, 217, 119, 0.08); }
+.sv-import-status.err { color: var(--data-red);   border-left-color: var(--data-red);   background: rgba(255, 107, 107, 0.08); }
+.sv-import-status.info{ color: #74d0ff;          border-left-color: #74d0ff;          background: rgba(116, 208, 255, 0.06); }
+.sv-err-pre {
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.74rem;
+  white-space: pre-wrap;
+  color: inherit;
+}
+
+.sv-empty {
+  padding: 2rem 1.5rem;
+  text-align: left;
+  color: var(--muted);
+  max-width: 560px;
+  line-height: 1.55;
+}
+.sv-empty h3 { color: var(--fg-strong); font-weight: 500; margin: 0 0 0.5rem; }
+.sv-empty ul { padding-left: 1.2rem; margin: 0.5rem 0 0; }
+.sv-empty li { margin: 0.25rem 0; font-size: 0.78rem; }
+
+.sv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 1.4rem;
+}
+.sv-card {
+  padding: 0.8rem 0.9rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.sv-card h4 {
+  margin: 0 0 0.55rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.sv-spec-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.22rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.78rem;
+}
+.sv-spec-row:last-child { border-bottom: 0; }
+.sv-spec-label { color: var(--muted); }
+.sv-spec-val { color: var(--fg-strong); font-variant-numeric: tabular-nums; }
+
+.sv-section {
+  margin-bottom: 1.4rem;
+  padding: 0.9rem 1rem 1rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.sv-section h4 {
+  margin: 0 0 0.65rem;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--fg-strong);
+}
+.sv-section canvas { display: block; max-width: 100%; }
+#sv-fr { background: rgba(0, 0, 0, 0.22); border-radius: 4px; width: 100%; }
+.sv-caption { font-size: 0.7rem; margin-top: 0.3rem; color: var(--muted); }
+
+.sv-polar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+.sv-polar-freqs { display: flex; gap: 0.2rem; flex-wrap: wrap; }
+.sv-freq-btn {
+  padding: 0.2rem 0.55rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.sv-freq-btn:hover { color: var(--fg-strong); border-color: var(--border-strong); }
+.sv-freq-btn.active {
+  background: rgba(255, 204, 90, 0.12);
+  border-color: #ffcc5a;
+  color: #ffcc5a;
+}
+.sv-polar-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+}
+.sv-polar-col { text-align: center; }
+.sv-polar-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+  letter-spacing: 0.04em;
+}
+.sv-polar-col canvas { background: rgba(0, 0, 0, 0.28); border-radius: 50%; }
+
+.sv-flags { display: grid; gap: 0.4rem; }
+.sv-flag {
+  padding: 0.5rem 0.65rem;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  border-radius: 3px;
+  border-left: 2px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg);
+}
+.sv-flag-good { border-left-color: var(--data-green); color: var(--data-green); background: rgba(163, 217, 119, 0.07); }
+.sv-flag-info { border-left-color: #74d0ff; color: #74d0ff; background: rgba(116, 208, 255, 0.06); }
+.sv-flag-warn { border-left-color: var(--data-amber); color: var(--data-amber); background: rgba(255, 180, 84, 0.07); }
+.sv-flag-bad  { border-left-color: var(--data-red); color: var(--data-red); background: rgba(255, 107, 107, 0.07); }
+
+.src-head-actions { display: flex; gap: 0.2rem; align-items: center; }
+.btn-spec {
+  width: 1.6rem; height: 1.6rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  background: rgba(116, 208, 255, 0.12);
+  border: 1px solid rgba(116, 208, 255, 0.4);
+  color: #74d0ff;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.btn-spec:hover { background: rgba(116, 208, 255, 0.22); border-color: #74d0ff; }
+
 /* Walkthrough mode — control-hints overlay on top-left of the 3D canvas. */
 .walk-hint {
   position: absolute;

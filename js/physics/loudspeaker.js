@@ -13,6 +13,14 @@ export function getCachedLoudspeaker(url) {
   return cache.get(url);
 }
 
+// Register an in-memory loudspeaker definition under a synthetic URL so
+// the rest of the app (heatmap + STIPA + precision) can resolve it with
+// the same getCachedLoudspeaker call path as disk-loaded files. Used for
+// user-imported CLF / JSON / XML speaker files.
+export function registerLoudspeaker(url, def) {
+  cache.set(url, def);
+}
+
 export function interpolateAttenuation(directivity, azimuth_deg, elevation_deg, freq_hz) {
   const grid = directivity.attenuation_db[String(freq_hz)];
   if (!grid) return 0;

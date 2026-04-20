@@ -20,6 +20,9 @@ export function mountSourcesPanel({ speakerCatalog }) {
   renderMasterEQ();
   render();
   on('scene:reset', () => { renderMasterEQ(); render(); });
+  // Imported speaker added to the catalogue → re-render cards so the
+  // Model dropdowns pick up the new entry.
+  on('source:model_changed', render);
 }
 
 // ---- Master EQ — 10-band graphic EQ applied to the source signal before
@@ -146,6 +149,18 @@ function render() {
     btn.addEventListener('click', () => removeSource(parseInt(btn.dataset.removeIdx, 10)));
   });
 
+  // 📊 button — open the Speaker viewport tab focused on this source's model.
+  listRoot.querySelectorAll('.btn-spec').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.specIdx, 10);
+      const src = state.sources[idx];
+      if (!src) return;
+      state.selectedSpeakerUrl = src.modelUrl;
+      emit('speaker:selected');
+      document.dispatchEvent(new CustomEvent('viewport:show-speaker'));
+    });
+  });
+
   listRoot.querySelectorAll('.source-card').forEach(card => {
     const idx = parseInt(card.dataset.sourceIdx, 10);
     card.querySelectorAll('[data-f]').forEach(input => {
@@ -172,7 +187,10 @@ function renderSpeakerCard(src, i) {
     <div class="source-card" data-source-idx="${i}" ${grpBorder}>
       <div class="source-header">
         <span>Speaker ${i + 1} ${groupBadge}</span>
-        <button class="btn-remove" data-remove-idx="${i}" title="Remove this speaker" aria-label="Remove speaker ${i + 1}">×</button>
+        <div class="src-head-actions">
+          <button class="btn-spec" data-spec-idx="${i}" title="View specs, polar patterns, and expert review for this speaker model">📊</button>
+          <button class="btn-remove" data-remove-idx="${i}" title="Remove this speaker" aria-label="Remove speaker ${i + 1}">×</button>
+        </div>
       </div>
       <div class="field-group">
         <label>Model

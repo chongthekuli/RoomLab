@@ -9,6 +9,7 @@ import { mountAmbientPanel } from './ui/panel-ambient.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mountPrecisionPanel } from './ui/panel-precision.js';
 import { mountWelcomeCard } from './ui/welcome-card.js';
+import { mountSpeakerView } from './ui/speaker-detail.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, setWalkthroughMode } from './graphics/scene.js';
 
@@ -164,6 +165,13 @@ async function boot() {
   mountAmbientPanel();
   mountResultsPanel({ materials });
   mountPrecisionPanel({ materials });
+  mountSpeakerView();
+
+  // "View specs" buttons on Source cards dispatch this synthetic event —
+  // switch to the Speaker viewport tab so the user sees the detail view.
+  document.addEventListener('viewport:show-speaker', () => {
+    document.querySelector('.vp-tab[data-view="speaker"]')?.click();
+  });
   mount2DViewport({ materials });
 
   try {
