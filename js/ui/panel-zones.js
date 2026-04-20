@@ -53,7 +53,7 @@ function render() {
   if (!listRoot) return;
 
   if (state.zones.length === 0) {
-    listRoot.innerHTML = '<div class="phase-placeholder">No audience zones yet — click "+ Add audience zone" and draw a polygon inside the room.</div>';
+    listRoot.innerHTML = '<div class="phase-placeholder"><strong>Audience zones</strong> are seating areas used for coverage statistics. Draw a polygon where people will be sitting or standing; the app reports max/avg/min SPL and uniformity over that patch. Optional — skip if you only care about single-point listeners.</div>';
     return;
   }
 

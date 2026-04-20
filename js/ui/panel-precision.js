@@ -18,6 +18,7 @@ import { on, emit } from './events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { runPrecisionRender } from '../physics/precision/precision-engine.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
+import { applyGlossary } from './glossary.js';
 
 let materialsRef;
 let currentAbort = null;
@@ -190,19 +191,19 @@ function renderResults() {
       <div class="precision-big-row">
         <div class="big-metric">
           <div class="big-val">${fmt(m.broadband.t30_s, 2)}</div>
-          <div class="big-sub">s · T30</div>
+          <div class="big-sub">s · <span data-gloss="t30">T30</span></div>
         </div>
         <div class="big-metric">
-          <div class="big-val sti-${stiRating.klass}">${fmt(m.sti.sti, 2)}</div>
-          <div class="big-sub">STI · <span class="sti-${stiRating.klass}">${stiRating.label}</span></div>
+          <div class="big-val sti-${stiRating.klass}" data-gloss="sti">${fmt(m.sti.sti, 2)}</div>
+          <div class="big-sub"><span data-gloss="sti">STI</span> · <span class="sti-${stiRating.klass}">${stiRating.label}</span></div>
         </div>
       </div>
       <table class="precision-table">
-        <tr><th>EDT</th><td>${fmt(m.broadband.edt_s, 2, ' s')}</td>
-            <th>T20</th><td>${fmt(m.broadband.t20_s, 2, ' s')}</td></tr>
-        <tr><th>C80</th><td>${fmt(m.broadband.c80_db, 1, ' dB')}</td>
-            <th>C50</th><td>${fmt(m.broadband.c50_db, 1, ' dB')}</td></tr>
-        <tr><th>D/R</th><td>${fmt(m.broadband.dr_db, 1, ' dB')}</td>
+        <tr><th data-gloss="edt">EDT</th><td>${fmt(m.broadband.edt_s, 2, ' s')}</td>
+            <th data-gloss="t20">T20</th><td>${fmt(m.broadband.t20_s, 2, ' s')}</td></tr>
+        <tr><th data-gloss="c80">C80</th><td>${fmt(m.broadband.c80_db, 1, ' dB')}</td>
+            <th data-gloss="c50">C50</th><td>${fmt(m.broadband.c50_db, 1, ' dB')}</td></tr>
+        <tr><th data-gloss="dr">D/R</th><td>${fmt(m.broadband.dr_db, 1, ' dB')}</td>
             <th title="Expected direct-path arrival at this listener (closest source / c). C50 is ISO-defined on the [0, 50 ms] window — if direct > 50 ms, the metric is undefined by standard.">Direct</th><td>${fmt(m.broadband.directArrivalMs, 1, ' ms')}</td></tr>
       </table>
       <details class="precision-per-band">
@@ -210,9 +211,9 @@ function renderResults() {
         <table class="band-table">
           <thead><tr><th>Hz</th>${m.perBand.map((_, i) => `<th>${BAND_LABELS[i] ?? i}</th>`).join('')}</tr></thead>
           <tbody>
-            <tr><th>T30</th>${m.perBand.map(b => `<td>${fmt(b.t30_s, 2)}</td>`).join('')}</tr>
-            <tr><th>C80</th>${m.perBand.map(b => `<td>${fmt(b.c80_db, 1)}</td>`).join('')}</tr>
-            <tr><th>TI</th>${m.sti.tiPerBand.map(v => `<td>${fmt(v, 2)}</td>`).join('')}</tr>
+            <tr><th data-gloss="t30">T30</th>${m.perBand.map(b => `<td>${fmt(b.t30_s, 2)}</td>`).join('')}</tr>
+            <tr><th data-gloss="c80">C80</th>${m.perBand.map(b => `<td>${fmt(b.c80_db, 1)}</td>`).join('')}</tr>
+            <tr><th title="TI — per-band transmission index, weighted sum → STI">TI</th>${m.sti.tiPerBand.map(v => `<td>${fmt(v, 2)}</td>`).join('')}</tr>
           </tbody>
         </table>
       </details>
@@ -222,6 +223,7 @@ function renderResults() {
     </div>
   `;
   drawEchogram(result, selectedIdx);
+  applyGlossary(container);
 }
 
 function drawEchogram(result, receiverIdx) {

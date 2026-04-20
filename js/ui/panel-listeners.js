@@ -59,7 +59,7 @@ function render() {
   if (!listRoot) return;
 
   if (state.listeners.length === 0) {
-    listRoot.innerHTML = '<div class="phase-placeholder">No listeners yet — click "+ Add listener" below.</div>';
+    listRoot.innerHTML = '<div class="phase-placeholder"><strong>Listeners</strong> are measurement points — like a mic placed at a specific seat. Drop one anywhere to get SPL and STIPA readings at that exact spot. Click <em>+ Add listener</em> below.</div>';
     return;
   }
 

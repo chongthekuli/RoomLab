@@ -8,6 +8,7 @@ import { mountZonesPanel } from './ui/panel-zones.js';
 import { mountAmbientPanel } from './ui/panel-ambient.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mountPrecisionPanel } from './ui/panel-precision.js';
+import { mountWelcomeCard } from './ui/welcome-card.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, setWalkthroughMode } from './graphics/scene.js';
 
@@ -168,6 +169,10 @@ async function boot() {
     const v3 = document.getElementById('view-3d');
     if (v3) v3.innerHTML = `<div class="viewport-2d"><div class="vp-header">3D view unavailable: ${err.message}</div></div>`;
   }
+
+  // First-run onboarding — sticky-dismissed via localStorage so it appears
+  // once and never again for returning users.
+  mountWelcomeCard();
 }
 
 boot().catch(err => {

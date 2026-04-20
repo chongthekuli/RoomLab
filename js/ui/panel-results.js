@@ -4,6 +4,7 @@ import { computeAllBands } from '../physics/rt60.js';
 import { computeListenerBreakdown, computeRoomConstant } from '../physics/spl-calculator.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
+import { applyGlossary } from './glossary.js';
 
 let materialsRef;
 
@@ -14,9 +15,14 @@ export function mountResultsPanel({ materials }) {
     <h2>Results</h2>
     <div id="listener-section"></div>
     <div id="rt60-summary" class="summary"></div>
-    <h3>RT60 per band</h3>
+    <h3 data-gloss="rt60">Reverberation (RT60) per band</h3>
+    <div id="rt60-rec" class="rt60-rec" hidden></div>
     <table id="rt60-table">
-      <thead><tr><th>Hz</th><th>Sabine</th><th>Eyring</th></tr></thead>
+      <thead><tr>
+        <th>Hz</th>
+        <th data-gloss="sabine">Sabine</th>
+        <th data-gloss="eyring">Eyring</th>
+      </tr></thead>
       <tbody></tbody>
     </table>
     <div id="spl-section"></div>
@@ -26,10 +32,7 @@ export function mountResultsPanel({ materials }) {
       Speech / meetings: 0.4–0.8 s<br>
       Classrooms: 0.5–0.7 s<br>
       Live music: 1.2–2.0 s<br>
-      Concert halls: 1.8–2.4 s<br>
-      <br>
-      <em>Sabine</em> assumes a reverberant room. <em>Eyring</em> is more
-      accurate when average absorption exceeds ~0.2 (dead rooms, studios).
+      Concert halls: 1.8–2.4 s
     </div>
   `;
   render();
@@ -50,6 +53,7 @@ function render() {
   renderRT60();
   renderSPLStats();
   renderZoneStats();
+  applyGlossary(document.getElementById('panel-results'));
 }
 
 function renderZoneStats() {
@@ -198,10 +202,10 @@ function renderRT60() {
   }
 
   document.getElementById('rt60-summary').innerHTML = `
-    <div class="big ${rating.klass}">${isFinite(mid) ? mid.toFixed(2) : '∞'}<span class="unit"> s</span></div>
+    <div class="big ${rating.klass}" data-gloss="rt60">${isFinite(mid) ? mid.toFixed(2) : '∞'}<span class="unit"> s</span></div>
     <div class="sub">Mid-band average RT60 (500 Hz + 1 kHz, Sabine)</div>
     <div class="rating ${rating.klass}">${rating.label}</div>
-    <div class="sub meta">Volume ${geom.volume_m3.toFixed(1)} m³ · Surface ${geom.totalArea_m2.toFixed(1)} m² · Mean α ${midAlpha.toFixed(2)} (500 Hz+1 kHz)</div>
+    <div class="sub meta">Volume ${geom.volume_m3.toFixed(1)} m³ · Surface ${geom.totalArea_m2.toFixed(1)} m² · Mean <span data-gloss="absorption_alpha">α</span> ${midAlpha.toFixed(2)} (500 Hz+1 kHz)</div>
     ${pMidT30 != null && isFinite(pMidT30) ? `
       <div class="precision-cmp${pStale ? ' stale' : ''}">
         Precision T30 (ray-traced @ ${escapeHtml(selListener.label)}):
@@ -209,6 +213,28 @@ function renderRT60() {
       </div>
     ` : ''}
   `;
+
+  // Smart hint: tell the user whether to trust Sabine or Eyring based on
+  // the computed mean α. ISO / Beranek convention — Eyring diverges from
+  // Sabine once α > 0.2 and becomes the authority above 0.3.
+  const recEl = document.getElementById('rt60-rec');
+  if (recEl) {
+    if (!isFinite(midAlpha)) {
+      recEl.hidden = true;
+    } else if (midAlpha >= 0.3) {
+      recEl.hidden = false;
+      recEl.className = 'rt60-rec rec-eyring';
+      recEl.innerHTML = `Mid-band <span data-gloss="absorption_alpha">α</span> = ${midAlpha.toFixed(2)} — trust the <strong data-gloss="eyring">Eyring</strong> column. Sabine overestimates RT60 above α ≈ 0.3.`;
+    } else if (midAlpha <= 0.2) {
+      recEl.hidden = false;
+      recEl.className = 'rt60-rec rec-sabine';
+      recEl.innerHTML = `Mid-band <span data-gloss="absorption_alpha">α</span> = ${midAlpha.toFixed(2)} — <strong data-gloss="sabine">Sabine</strong> and <strong data-gloss="eyring">Eyring</strong> agree. Use Sabine (industry convention).`;
+    } else {
+      recEl.hidden = false;
+      recEl.className = 'rt60-rec rec-mid';
+      recEl.innerHTML = `Mid-band <span data-gloss="absorption_alpha">α</span> = ${midAlpha.toFixed(2)} — between regimes; Sabine and Eyring will differ slightly. Prefer <strong data-gloss="eyring">Eyring</strong> for conservative estimates.`;
+    }
+  }
 
   // Rebuild the table — optionally adding the Precision column when a
   // render is available. Listener-position-dependent T30 is precision's
@@ -224,7 +250,7 @@ function renderRT60() {
       <thead>
         <tr>
           <th>Hz</th><th>Sabine</th><th>Eyring</th>
-          ${hasPrec ? `<th title="${escapeAttr(precHeaderTooltip)}" class="${pStale ? 'stale' : ''}">Precision${pStale ? ' *' : ''}</th>` : ''}
+          ${hasPrec ? `<th title="${escapeAttr(precHeaderTooltip)}" class="${pStale ? 'stale' : ''}" data-gloss="precision">Precision${pStale ? ' *' : ''}</th>` : ''}
         </tr>
       </thead>
       <tbody>

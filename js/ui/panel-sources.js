@@ -134,7 +134,7 @@ function render() {
   if (!listRoot) return;
 
   if (state.sources.length === 0) {
-    listRoot.innerHTML = '<div class="phase-placeholder">No loudspeakers yet — click "+ Add speaker" or "+ Add line array" below.</div>';
+    listRoot.innerHTML = '<div class="phase-placeholder"><strong>Sources</strong> are the loudspeakers in your venue. Pick a model from the catalogue and place it in the room; aim, tilt, and power are editable afterwards. Use <em>+ Add line array</em> for column PA systems. Heatmaps only render once at least one source exists.</div>';
     return;
   }
 

@@ -681,13 +681,127 @@ section h3 {
 .vp-note { text-align: center; font-size: 0.72rem; color: #667; }
 
 .phase-placeholder {
-  padding: 0.55rem 0.7rem;
+  padding: 0.6rem 0.75rem;
   font-size: 0.74rem;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.02);
   border: 1px dashed var(--border);
   border-radius: var(--radius-lg);
+  line-height: 1.55;
+}
+.phase-placeholder strong { color: var(--fg-strong); font-weight: 600; }
+.phase-placeholder em { color: var(--data-cyan, #74d0ff); font-style: normal; }
+
+/* Glossary hover terms — dotted underline tells users hover will show a
+   definition. Built-in `title` attribute is used so it works without JS
+   on the tooltip side. */
+.gloss-term {
+  text-decoration: underline dotted rgba(255, 255, 255, 0.35);
+  text-underline-offset: 2px;
+  cursor: help;
+}
+.gloss-term:hover { text-decoration-color: var(--data-cyan, #74d0ff); }
+
+/* Sabine / Eyring / mid α decision hint in Results panel */
+.rt60-rec {
+  margin: 0.3rem 0 0.5rem;
+  padding: 0.42rem 0.6rem;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  border-radius: 3px;
+  border-left: 2px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+}
+.rt60-rec strong { color: var(--fg-strong); font-weight: 600; }
+.rt60-rec.rec-eyring { border-left-color: var(--data-amber); }
+.rt60-rec.rec-sabine { border-left-color: var(--data-green); }
+.rt60-rec.rec-mid    { border-left-color: var(--data-cyan, #74d0ff); }
+
+/* Welcome / onboarding card — overlays the viewport on first load only.
+   Positioned top-right so it doesn't block the primary 3D scene, and
+   dismisses sticky via localStorage. */
+#welcome-card {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  padding: 1rem 1.1rem 0.85rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 90;
+  color: var(--fg);
+  font-size: 0.8rem;
   line-height: 1.5;
+}
+#welcome-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg-strong);
+  letter-spacing: 0.01em;
+}
+#welcome-card .welcome-sub {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+#welcome-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  width: 1.5rem; height: 1.5rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+}
+#welcome-close:hover { background: rgba(255, 255, 255, 0.08); color: var(--fg-strong); }
+.welcome-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.5rem;
+  display: grid;
+  gap: 0.45rem;
+}
+.welcome-steps li {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  gap: 0.55rem;
+  align-items: start;
+}
+.welcome-step-num {
+  width: 1.4rem; height: 1.4rem;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--data-cyan, #74d0ff);
+  color: #051018;
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+.welcome-steps strong { color: var(--fg-strong); font-weight: 600; font-size: 0.82rem; }
+.welcome-hint { color: var(--muted); font-size: 0.73rem; }
+.welcome-foot {
+  margin-top: 0.25rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.welcome-foot kbd {
+  background: var(--border);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  color: var(--fg-strong);
 }
 
 /* Master EQ — 10-band graphic EQ at top of Sources panel. Vertical sliders,
