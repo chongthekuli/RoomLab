@@ -376,8 +376,51 @@ export const state = {
   // direct-field coverage differences. EASE / Odeon keep the main heatmap
   // as direct-field and report reverberant/total SPL as statistical numbers.
   // Users can enable it via the "Reverb field" toolbar toggle.
-  physics: { reverberantField: false, coherent: false, airAbsorption: true, freq_hz: 1000 },
+  physics: {
+    reverberantField: false, coherent: false, airAbsorption: true, freq_hz: 1000,
+    // Master source-side graphic EQ — one per-scene, applies to every speaker
+    // before physical propagation. 10 bands at ISO preferred centres 31.5 Hz
+    // → 16 kHz. gain_db per band is added to the SOURCE signal; physics then
+    // computes direct + reverb as normal with the boosted/cut level. When
+    // `enabled: false`, the EQ is bypassed (no gain applied regardless of
+    // band values). Probe tool surfaces a live frequency-response curve at
+    // the hovered point only when enabled.
+    eq: {
+      enabled: false,
+      bands: [
+        { freq_hz: 31.5,  gain_db: 0 },
+        { freq_hz: 63,    gain_db: 0 },
+        { freq_hz: 125,   gain_db: 0 },
+        { freq_hz: 250,   gain_db: 0 },
+        { freq_hz: 500,   gain_db: 0 },
+        { freq_hz: 1000,  gain_db: 0 },
+        { freq_hz: 2000,  gain_db: 0 },
+        { freq_hz: 4000,  gain_db: 0 },
+        { freq_hz: 8000,  gain_db: 0 },
+        { freq_hz: 16000, gain_db: 0 },
+      ],
+    },
+  },
 };
+
+// Interpolate the EQ gain (in dB) at an arbitrary frequency from the band
+// values. Returns 0 when EQ is bypassed. Log-frequency linear-dB interp
+// between adjacent band centres; clamps to the edge band below/above the
+// range.
+export function eqGainAt(eq, freq_hz) {
+  if (!eq || !eq.enabled || !Array.isArray(eq.bands) || eq.bands.length === 0) return 0;
+  const bs = eq.bands;
+  if (freq_hz <= bs[0].freq_hz) return bs[0].gain_db;
+  if (freq_hz >= bs[bs.length - 1].freq_hz) return bs[bs.length - 1].gain_db;
+  for (let i = 0; i < bs.length - 1; i++) {
+    const a = bs[i], b = bs[i + 1];
+    if (freq_hz >= a.freq_hz && freq_hz <= b.freq_hz) {
+      const t = Math.log(freq_hz / a.freq_hz) / Math.log(b.freq_hz / a.freq_hz);
+      return a.gain_db + t * (b.gain_db - a.gain_db);
+    }
+  }
+  return 0;
+}
 
 export const DEFAULT_PRESET_KEY = 'auditorium';
 

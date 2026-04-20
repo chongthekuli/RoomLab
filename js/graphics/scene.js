@@ -7,7 +7,7 @@ import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, eqGainAt } from '../app-state.js';
 import { on } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant } from '../physics/spl-calculator.js';
@@ -193,6 +193,10 @@ export async function mount3DViewport({ materials }) {
   on('scene:reset', () => queueRebuild(
     REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP
   ));
+  // Master EQ change: heatmap + aim lines depend on per-band SPL; refresh
+  // both. Zone/listener panels don't need re-render (state.zones is
+  // unchanged) so we skip them.
+  on('physics:eq_changed', () => queueRebuild(REBUILD_HEATMAP | REBUILD_AIM));
 
   // Initial paint: fire the rebuilds synchronously (no user-drag coalescing
   // needed on boot; they run once and we want the viewport ready).
@@ -390,6 +394,7 @@ function onProbeMouseMove(e) {
   probeTooltip.classList.remove('hidden');
   probeTooltip.style.left = (e.clientX - rect.left + 14) + 'px';
   probeTooltip.style.top  = (e.clientY - rect.top + 14) + 'px';
+  const eqOn = !!state.physics?.eq?.enabled;
   probeTooltip.innerHTML = `
     <div class="probe-spl">${isFinite(spl) ? spl.toFixed(1) + ' dB' : '—'}</div>
     <div class="probe-xyz">
@@ -398,7 +403,134 @@ function onProbeMouseMove(e) {
       <span>z ${(hit.point.y).toFixed(2)} m</span>
     </div>
     <div class="probe-note">ear @ 1.2 m</div>
+    ${eqOn ? '<div class="probe-fr-wrap"><canvas class="probe-fr-chart" width="200" height="90"></canvas><div class="probe-fr-label">Frequency response · 20 Hz – 20 kHz</div></div>' : ''}
   `;
+  if (eqOn && flat.length > 0) {
+    const canvas = probeTooltip.querySelector('.probe-fr-chart');
+    if (canvas) drawFrequencyResponse(canvas, flat, listenerPos);
+  }
+}
+
+// Compute + render a frequency-response curve at the probed point. Samples
+// 48 log-spaced frequencies from 20 Hz to 20 kHz, evaluating the current
+// multi-source SPL with the current master EQ applied per-frequency. Room
+// constant R at each sample frequency is interpolated from the 7 physics
+// bands (125–8k) so we don't walk the surface list 48× per mousemove.
+const FR_SAMPLE_COUNT = 48;
+const FR_MIN_HZ = 20;
+const FR_MAX_HZ = 20000;
+const _frSampleCache = { freqs: null };
+function getFRSampleFreqs() {
+  if (_frSampleCache.freqs) return _frSampleCache.freqs;
+  const arr = new Float64Array(FR_SAMPLE_COUNT);
+  const ln = Math.log(FR_MAX_HZ / FR_MIN_HZ);
+  for (let i = 0; i < FR_SAMPLE_COUNT; i++) {
+    const t = i / (FR_SAMPLE_COUNT - 1);
+    arr[i] = FR_MIN_HZ * Math.exp(t * ln);
+  }
+  _frSampleCache.freqs = arr;
+  return arr;
+}
+function interpR(freq_hz, Rbands) {
+  // Rbands is an array of {f, R}. Log-freq interp.
+  if (freq_hz <= Rbands[0].f) return Rbands[0].R;
+  if (freq_hz >= Rbands[Rbands.length - 1].f) return Rbands[Rbands.length - 1].R;
+  for (let i = 0; i < Rbands.length - 1; i++) {
+    const a = Rbands[i], b = Rbands[i + 1];
+    if (freq_hz >= a.f && freq_hz <= b.f) {
+      const t = Math.log(freq_hz / a.f) / Math.log(b.f / a.f);
+      return a.R + t * (b.R - a.R);
+    }
+  }
+  return 0;
+}
+function drawFrequencyResponse(canvas, sources, listenerPos) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const freqs = getFRSampleFreqs();
+  const phys = state.physics ?? {};
+  const reverbOn = phys.reverberantField && materialsRef;
+  // Pre-compute room constant R at the 7 physics bands once, interpolate for
+  // the 48 sample frequencies. Avoids walking the surface list 48 times.
+  const Rbands = reverbOn
+    ? [125, 250, 500, 1000, 2000, 4000, 8000].map(f => ({
+        f, R: computeRoomConstant(state.room, materialsRef, f, state.zones),
+      }))
+    : null;
+
+  const getDef = url => getCachedLoudspeaker(url);
+  const spls = new Float32Array(FR_SAMPLE_COUNT);
+  let minSPL = Infinity, maxSPL = -Infinity;
+  for (let i = 0; i < FR_SAMPLE_COUNT; i++) {
+    const f = freqs[i];
+    const R = Rbands ? interpR(f, Rbands) : 0;
+    const spl = computeMultiSourceSPL({
+      sources, getSpeakerDef: getDef, listenerPos,
+      freq_hz: f, room: state.room,
+      airAbsorption: phys.airAbsorption !== false,
+      coherent: !!phys.coherent,
+      roomConstantR: R,
+      eqGainDb: eqGainAt(phys.eq, f),
+    });
+    spls[i] = spl;
+    if (isFinite(spl)) {
+      if (spl < minSPL) minSPL = spl;
+      if (spl > maxSPL) maxSPL = spl;
+    }
+  }
+  // Auto-scale with ≥20 dB vertical range so small variations don't look huge
+  // and large variations don't clip.
+  if (!isFinite(minSPL) || !isFinite(maxSPL)) return;
+  const span = Math.max(20, maxSPL - minSPL + 6);
+  const mid = (minSPL + maxSPL) / 2;
+  const yMin = mid - span / 2;
+  const yMax = mid + span / 2;
+
+  // Grid: horizontal dB lines every 10 dB, vertical log-decade lines.
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let db = Math.ceil(yMin / 10) * 10; db <= yMax; db += 10) {
+    const y = H - ((db - yMin) / (yMax - yMin)) * H;
+    ctx.moveTo(0, y); ctx.lineTo(W, y);
+  }
+  const lnRange = Math.log(FR_MAX_HZ / FR_MIN_HZ);
+  for (const dec of [100, 1000, 10000]) {
+    const x = (Math.log(dec / FR_MIN_HZ) / lnRange) * W;
+    ctx.moveTo(x, 0); ctx.lineTo(x, H);
+  }
+  ctx.stroke();
+
+  // Decade labels.
+  ctx.fillStyle = 'rgba(200, 210, 220, 0.55)';
+  ctx.font = '9px monospace';
+  ctx.textBaseline = 'bottom';
+  for (const [dec, label] of [[100, '100'], [1000, '1k'], [10000, '10k']]) {
+    const x = (Math.log(dec / FR_MIN_HZ) / lnRange) * W;
+    ctx.fillText(label, x + 2, H - 1);
+  }
+
+  // FR curve (accent cyan).
+  ctx.strokeStyle = '#4aa3ff';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  for (let i = 0; i < FR_SAMPLE_COUNT; i++) {
+    const t = i / (FR_SAMPLE_COUNT - 1);
+    const x = t * W;
+    const y = H - ((spls[i] - yMin) / (yMax - yMin)) * H;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Y-axis span indicator (min / max dB).
+  ctx.fillStyle = 'rgba(200, 210, 220, 0.75)';
+  ctx.font = '9px monospace';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`${maxSPL.toFixed(0)} dB`, 2, 1);
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(`${minSPL.toFixed(0)} dB`, 2, H - 1);
 }
 
 // Suited-man avatar built from primitives — ~1.78 m tall with realistic
@@ -2145,6 +2277,10 @@ function currentPhysicsOpts(room) {
     roomConstantR: phys.reverberantField && materialsRef
       ? computeRoomConstant(room, materialsRef, freq, state.zones)
       : 0,
+    // Master EQ gain at the current heatmap frequency. eqGainAt returns 0
+    // when the EQ is bypassed so SPL / heatmap physics is identical to
+    // before when eq.enabled === false.
+    eqGainDb: eqGainAt(phys.eq, freq),
   };
 }
 

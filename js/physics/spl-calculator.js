@@ -144,14 +144,17 @@ export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   };
 }
 
-export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, airAbsorption = true }) {
+export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, airAbsorption = true, eqGainDb = 0 }) {
   const { r, azimuth_deg, elevation_deg } = localAngles(
     speakerState.position, speakerState.aim, listenerPos
   );
   const clampedR = Math.max(r, 0.1);
   const sens = speakerDef.acoustic.sensitivity_db_1w_1m;
   const attn = interpolateAttenuation(speakerDef.directivity, azimuth_deg, elevation_deg, freq_hz);
-  let spl_db = sens + 10 * Math.log10(speakerState.power_watts) - 20 * Math.log10(clampedR) + attn;
+  // Master EQ is a pre-speaker signal gain — adds directly to the SPL at
+  // every listener position, per-frequency. When eq is bypassed the caller
+  // passes 0. Typical professional-PA range is ±12 dB.
+  let spl_db = sens + 10 * Math.log10(speakerState.power_watts) - 20 * Math.log10(clampedR) + attn + eqGainDb;
   // Air absorption (ISO 9613-1) — negligible at 1 kHz short range, significant
   // at 4+ kHz / long range. Pre-scaled α (dB / m) × distance.
   if (airAbsorption) {
@@ -200,6 +203,7 @@ export function computeMultiSourceSPL({
   coherent = false,
   temperature_C = DEFAULT_TEMPERATURE_C,
   airAbsorption = true,
+  eqGainDb = 0,
 }) {
   // Direct field — either incoherent (pressure²) or coherent (complex).
   // Both paths work in units of p_ref (20 µPa) so the final 10·log10 converts
@@ -215,7 +219,7 @@ export function computeMultiSourceSPL({
     const def = getSpeakerDef(src.modelUrl);
     if (!def) continue;
     const d = computeDirectSPL({
-      speakerDef: def, speakerState: src, listenerPos, freq_hz, room, airAbsorption,
+      speakerDef: def, speakerState: src, listenerPos, freq_hz, room, airAbsorption, eqGainDb,
     });
     const spl_db = d.spl_db;
     if (!isFinite(spl_db)) continue;
@@ -230,8 +234,10 @@ export function computeMultiSourceSPL({
     }
     if (roomConstantR > 0) {
       // Diffuse reverberant field is spatially uniform for a given source;
-      // add one term per source, independent of listener position.
-      let L_w = approxSoundPowerLevel(def, src.power_watts);
+      // add one term per source, independent of listener position. EQ gain
+      // lifts the source's radiated power too — direct AND reverb feel the
+      // same boost, exactly as a pre-speaker EQ would in the real world.
+      let L_w = approxSoundPowerLevel(def, src.power_watts) + eqGainDb;
       if (d.through_wall) L_w -= WALL_TRANSMISSION_LOSS_DB;
       const L_rev = L_w + 10 * Math.log10(4 / roomConstantR);
       reverbPower_sum.push(Math.pow(10, L_rev / 10));

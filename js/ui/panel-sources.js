@@ -8,6 +8,7 @@ export function mountSourcesPanel({ speakerCatalog }) {
   const root = document.getElementById('panel-sources');
   root.innerHTML = `
     <h2>Sources</h2>
+    <div id="master-eq"></div>
     <div id="sources-list"></div>
     <div class="source-actions">
       <button id="add-source-btn" class="btn-add">+ Add speaker</button>
@@ -16,8 +17,67 @@ export function mountSourcesPanel({ speakerCatalog }) {
   `;
   root.querySelector('#add-source-btn').addEventListener('click', addSource);
   root.querySelector('#add-array-btn').addEventListener('click', addLineArray);
+  renderMasterEQ();
   render();
-  on('scene:reset', render);
+  on('scene:reset', () => { renderMasterEQ(); render(); });
+}
+
+// ---- Master EQ — 10-band graphic EQ applied to the source signal before
+// physical propagation. Global (one per scene, applies to all speakers).
+// When bypassed, the EQ has zero effect on physics; the Probe tool also
+// suppresses its frequency-response curve.
+function renderMasterEQ() {
+  const root = document.getElementById('master-eq');
+  if (!root) return;
+  const eq = state.physics?.eq;
+  if (!eq) { root.innerHTML = ''; return; }
+  const sliders = eq.bands.map((b, i) => {
+    const label = b.freq_hz >= 1000 ? `${b.freq_hz / 1000}k` : `${b.freq_hz}`;
+    return `
+      <div class="eq-band">
+        <div class="eq-band-readout" data-eq-readout="${i}">${b.gain_db >= 0 ? '+' : ''}${b.gain_db.toFixed(1)}</div>
+        <input type="range" class="eq-slider" data-eq-band="${i}"
+               min="-12" max="12" step="0.5" value="${b.gain_db}"
+               orient="vertical" ${eq.enabled ? '' : 'disabled'} />
+        <div class="eq-band-label">${label}</div>
+      </div>
+    `;
+  }).join('');
+  root.innerHTML = `
+    <div class="eq-section${eq.enabled ? ' enabled' : ' bypassed'}">
+      <div class="eq-header">
+        <span class="eq-title">Master EQ</span>
+        <span class="eq-sub">20 Hz – 20 kHz · ±12 dB</span>
+        <button class="eq-bypass ${eq.enabled ? 'on' : ''}" id="eq-bypass-btn"
+                title="Toggle master EQ. When bypassed, the Probe tool does not show the frequency-response curve.">
+          ${eq.enabled ? '● ON' : '○ BYPASS'}
+        </button>
+        <button class="eq-flatten" id="eq-flatten-btn" title="Reset all bands to 0 dB">Flatten</button>
+      </div>
+      <div class="eq-sliders">${sliders}</div>
+    </div>
+  `;
+  root.querySelector('#eq-bypass-btn')?.addEventListener('click', () => {
+    state.physics.eq.enabled = !state.physics.eq.enabled;
+    renderMasterEQ();
+    emit('physics:eq_changed');
+  });
+  root.querySelector('#eq-flatten-btn')?.addEventListener('click', () => {
+    for (const b of state.physics.eq.bands) b.gain_db = 0;
+    renderMasterEQ();
+    emit('physics:eq_changed');
+  });
+  root.querySelectorAll('.eq-slider').forEach(el => {
+    el.addEventListener('input', e => {
+      const idx = parseInt(e.target.dataset.eqBand, 10);
+      const val = parseFloat(e.target.value);
+      if (!Number.isFinite(val)) return;
+      state.physics.eq.bands[idx].gain_db = val;
+      const readout = root.querySelector(`[data-eq-readout="${idx}"]`);
+      if (readout) readout.textContent = `${val >= 0 ? '+' : ''}${val.toFixed(1)}`;
+      emit('physics:eq_changed');
+    });
+  });
 }
 
 function addSource() {

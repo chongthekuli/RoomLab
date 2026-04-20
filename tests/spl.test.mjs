@@ -572,5 +572,41 @@ import { airAbsorptionAt, AIR_ABSORPTION_DB_PER_M, computeRoomConstant, speedOfS
   if (diff <= 10) failed++;
 }
 
+// --- Master EQ (source-side pre-speaker gain) -----------------------------
+// eqGainDb is a per-frequency scalar added to the direct SPL and to L_w for
+// the reverb term. Bypass (gain=0) must produce identical numbers to pre-EQ.
+import { eqGainAt } from '../js/app-state.js';
+{
+  const s = { ...baseState, power_watts: 1 };
+  const listener = { x: 0, y: 2, z: 0 };
+  const splBypass = computeDirectSPL({ speakerDef: speaker, speakerState: s, listenerPos: listener });
+  const splPlus6  = computeDirectSPL({ speakerDef: speaker, speakerState: s, listenerPos: listener, eqGainDb: 6 });
+  const splMinus6 = computeDirectSPL({ speakerDef: speaker, speakerState: s, listenerPos: listener, eqGainDb: -6 });
+  assertClose(splPlus6.spl_db - splBypass.spl_db,  6, 0.01, 'EQ +6 dB raises direct SPL by 6 dB');
+  assertClose(splMinus6.spl_db - splBypass.spl_db, -6, 0.01, 'EQ −6 dB drops direct SPL by 6 dB');
+}
+{
+  const eq = {
+    enabled: true,
+    bands: [
+      { freq_hz: 125,  gain_db:  0 },
+      { freq_hz: 1000, gain_db:  6 },
+      { freq_hz: 8000, gain_db: -6 },
+    ],
+  };
+  assertClose(eqGainAt(eq, 125),   0, 0.001, 'eqGainAt at band edge returns band gain');
+  assertClose(eqGainAt(eq, 1000),  6, 0.001, 'eqGainAt at 1 kHz returns +6');
+  assertClose(eqGainAt(eq, 8000), -6, 0.001, 'eqGainAt at 8 kHz returns −6');
+  // Halfway between 125 and 1000 on log-freq scale is ~354 Hz.
+  const midDb = eqGainAt(eq, Math.sqrt(125 * 1000));
+  assertClose(midDb, 3, 0.5, 'eqGainAt interpolates log-freq between bands');
+  // Out-of-range: clamp to edge bands.
+  assertClose(eqGainAt(eq, 50),     0, 0.001, 'eqGainAt below lowest band clamps to edge');
+  assertClose(eqGainAt(eq, 20000), -6, 0.001, 'eqGainAt above highest band clamps to edge');
+  // Bypass returns 0 regardless.
+  const bypassed = { ...eq, enabled: false };
+  assertClose(eqGainAt(bypassed, 1000), 0, 0.001, 'eqGainAt returns 0 when EQ bypassed');
+}
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');

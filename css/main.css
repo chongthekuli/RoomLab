@@ -329,6 +329,26 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+.probe-tooltip .probe-fr-wrap {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.probe-tooltip .probe-fr-chart {
+  display: block;
+  width: 200px;
+  height: 90px;
+  background: rgba(8, 12, 18, 0.55);
+  border: 1px solid rgba(90, 122, 176, 0.25);
+  border-radius: 3px;
+}
+.probe-tooltip .probe-fr-label {
+  margin-top: 3px;
+  color: var(--muted-dim);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .viewport-view { position: relative; overflow: hidden; }
 .viewport-view[hidden] { display: none; }
 #view-3d { background: #0e1116; position: relative; }
@@ -551,6 +571,90 @@ section h3 {
   border: 1px dashed var(--border);
   border-radius: var(--radius-lg);
   line-height: 1.5;
+}
+
+/* Master EQ — 10-band graphic EQ at top of Sources panel. Vertical sliders,
+   compact so 10 fit in the left-rail width. Bypass + Flatten in header. */
+.eq-section {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.55rem 0.65rem 0.6rem;
+  margin-bottom: 0.55rem;
+}
+.eq-section.bypassed { opacity: 0.72; }
+.eq-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0.45rem;
+}
+.eq-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--fg-strong);
+  letter-spacing: 0.02em;
+}
+.eq-sub {
+  font-size: 0.65rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex: 1;
+}
+.eq-bypass, .eq-flatten {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 0.7rem;
+  border-radius: 3px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+.eq-bypass:hover, .eq-flatten:hover { color: var(--fg); border-color: var(--border-strong); }
+.eq-bypass.on {
+  background: #3a5a8a;
+  color: #fff;
+  border-color: #5a7ab0;
+  font-weight: 600;
+}
+.eq-sliders {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 4px;
+  align-items: end;
+}
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.eq-band-readout {
+  font-size: 0.6rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-height: 11px;
+  line-height: 1;
+}
+.eq-slider {
+  appearance: slider-vertical;
+  -webkit-appearance: slider-vertical;
+  writing-mode: bt-lr;
+  width: 16px;
+  height: 100px;
+  padding: 0;
+  margin: 0;
+  accent-color: #5a7ab0;
+  cursor: pointer;
+}
+.eq-slider:disabled { cursor: not-allowed; opacity: 0.5; }
+.eq-band-label {
+  font-size: 0.58rem;
+  color: var(--muted-dim);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 .source-card,
