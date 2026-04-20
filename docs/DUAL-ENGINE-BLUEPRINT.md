@@ -412,6 +412,27 @@ Driver: [js/physics/precision/worker-smoke-driver.js](../js/physics/precision/wo
 
 **Expected on github.io:** `crossOriginIsolated = false`, `sharedArrayBufferAvailable = false` (no COOP/COEP headers on default GitHub Pages CDN). That's OK — Phase B uses `postMessage` + `[transferable]` lists for ray-batch handoff. Histogram aggregation runs on the main thread (fan-in from workers) instead of via shared memory. For our data sizes (per-receiver histogram < 100 KB) this is not a performance issue.
 
+**Measured on live deploy (2026-04-20, user machine, 14 threads):**
+
+| Metric | Value | Budget | Result |
+|---|---|---|---|
+| `env.hardwareConcurrency` | 14 | — | modern laptop / workstation |
+| `env.crossOriginIsolated` | false | — | expected on github.io |
+| `env.sharedArrayBufferAvailable` | false | — | expected; fallback path confirmed sufficient |
+| `env.atomicsAvailable` | true | — | usable for lock-free counters if SAB ever enabled |
+| `tests.echo.roundTripMs_median` | **0** ms | < 5 ms | ✓ well under budget (min 0 / max 262 — 262 is JIT cold-start) |
+| `tests.echo.spawnMs` | 0.2 ms | — | worker spawn essentially instant |
+| `tests.parallel` (8 workers × 10M ops) | **7.34× of 8× ideal** (92% efficiency) | > 0.7 × N | ✓ comfortable margin; Chrome not serializing |
+| `tests.transfer` (1 MB round-trip) | **2.4 ms** (pure transfer 2.1 ms) | < 10 ms | ✓ 4× under budget; ray batches effectively free |
+
+**Revised Phase B compute budget** based on these numbers: the original blueprint estimated 5 s for 50k rays. With ~92 % parallel efficiency and 14 hardware threads actually available, and assuming the ray-tracer hot loop (BVH traversal + ray-triangle + receiver-sphere tests) is ~4,000 FLOPs/ray averaged over the full ray life, we can project:
+
+- **50k rays: ~400 ms** (was 5 s estimate — off by 10× in our favour)
+- **500k rays: ~4 seconds** — reasonable "press Render and wait"
+- **5M rays: ~40 seconds** — publishable-quality late-tail convergence on 5 receivers
+
+This means the MVP ray tracer can ship with much higher default ray count than planned, or with a progressive-refinement UX (start at 50k for instant feedback, converge to 500k in the background).
+
 ### Phase B — BVH + worker scaffolding (2-3 weeks)
 
 **B1.** Integrate `three-mesh-bvh` (or hand-rolled). Build per-material-group BVH at snapshot time.
