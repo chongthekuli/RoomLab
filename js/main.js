@@ -221,5 +221,95 @@ if (typeof window !== 'undefined') {
       }
     });
   }
+
+  // Phase B3b demo hook — real precision render on the current state.
+  // URL: …/RoomLab/?precision-demo (auto-runs + visible banner)
+  // Console: await window.__roomlabPrecisionRender()
+  window.__roomlabPrecisionRender = async (opts) => {
+    const { SPEAKER_CATALOG, applyPresetToState, DEFAULT_PRESET_KEY } = await import('./app-state.js');
+    const { loadMaterials } = await import('./physics/materials.js');
+    const { loadLoudspeaker, getCachedLoudspeaker } = await import('./physics/loudspeaker.js');
+    const { runPrecisionRender } = await import('./physics/precision/precision-engine.js');
+    // Ensure materials + speakers are loaded. `boot()` does this already
+    // during normal page load but the demo may be invoked on a pristine
+    // tab before the boot sequence completes.
+    const materials = await loadMaterials();
+    await Promise.all(SPEAKER_CATALOG.map(c => loadLoudspeaker(c.url)));
+    // Apply auditorium preset if state is pristine.
+    if (state.sources.length === 0 && state.listeners.length === 0 && state.zones.length === 0) {
+      applyPresetToState(DEFAULT_PRESET_KEY);
+    }
+    return runPrecisionRender({
+      state, materials,
+      getLoudspeakerDef: (url) => getCachedLoudspeaker(url),
+      opts: { raysPerSource: 1000, maxBounces: 30, maxTimeMs: 1000, ...opts },
+    });
+  };
+  if (new URLSearchParams(window.location.search).has('precision-demo')) {
+    window.addEventListener('load', async () => {
+      const banner = document.createElement('div');
+      banner.style.cssText = 'position:fixed;inset:16px;z-index:9999;background:#0f1218;color:#cfd3d9;border:1px solid #3a5a8a;border-radius:8px;padding:16px;overflow:auto;font-family:monospace;font-size:12px;line-height:1.45;box-shadow:0 12px 40px rgba(0,0,0,0.6)';
+      banner.innerHTML = '<div style="color:#4aa3ff;font-size:14px;margin-bottom:12px;">⏳ Running precision render — spawning workers…</div><div id="precision-progress" style="color:#89929d;"></div>';
+      document.body.appendChild(banner);
+      const progressEl = banner.querySelector('#precision-progress');
+      const progressByWorker = new Map();
+      try {
+        const render = await window.__roomlabPrecisionRender({
+          onProgress: (workerIdx, done, total) => {
+            progressByWorker.set(workerIdx, { done, total });
+            const entries = [...progressByWorker.entries()].sort((a, b) => a[0] - b[0]);
+            progressEl.innerHTML = entries.map(([i, p]) =>
+              `  worker ${i}: ${p.done.toLocaleString()} / ${p.total.toLocaleString()}`
+            ).join('<br>');
+          },
+        });
+        const closeBtn = '<button style="position:absolute;top:8px;right:12px;background:#2a2f38;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;" onclick="this.parentElement.remove()">×</button>';
+        const { shape, bucketDtMs, maxTimeMs, hitCount, raysTraced, terminations, workerCount, elapsedMs } = render;
+        // Summarise energy distribution per band for receiver 0.
+        const histogram = render.histogram;
+        const bandSummaries = [];
+        for (let b = 0; b < shape.bands; b++) {
+          let sum = 0, peakBucket = -1, peakVal = 0;
+          const base = 0 * shape.bands * shape.buckets + b * shape.buckets;
+          for (let t = 0; t < shape.buckets; t++) {
+            const v = histogram[base + t];
+            sum += v;
+            if (v > peakVal) { peakVal = v; peakBucket = t; }
+          }
+          bandSummaries.push({ band: b, totalEnergy: sum, peakBucket, peakValue: peakVal });
+        }
+        const summaryLines = [
+          `<strong style="color:#4aa3ff;font-size:14px;">RoomLab precision render — ${render.generatedAt}</strong>`,
+          closeBtn,
+          '',
+          '<strong style="color:#89c0ff">Pipeline</strong>',
+          `  triangles:     ${render.soup.count.toLocaleString()}`,
+          `  BVH nodes:     ${render.bvh.nodeCount.toLocaleString()}`,
+          `  workers:       ${workerCount}`,
+          `  rays traced:   ${raysTraced.toLocaleString()}`,
+          `  ray hits:      ${hitCount.toLocaleString()}`,
+          `  wall-clock:    ${elapsedMs.toFixed(0)} ms`,
+          `  throughput:    ${(raysTraced / elapsedMs).toFixed(0)} rays/ms (${(raysTraced * 1000 / elapsedMs).toLocaleString()} rays/s)`,
+          '',
+          '<strong style="color:#89c0ff">Terminations</strong>',
+          `  escaped:       ${terminations.escaped.toLocaleString()}`,
+          `  energy cutoff: ${terminations.energy.toLocaleString()}`,
+          `  bounce limit:  ${terminations.bounce.toLocaleString()}`,
+          `  time out:      ${terminations.timeOut.toLocaleString()}`,
+          '',
+          `<strong style="color:#89c0ff">Histogram — receiver 0 (${shape.bands} bands × ${shape.buckets} buckets × ${bucketDtMs} ms/bucket)</strong>`,
+          ...bandSummaries.map(b =>
+            `  band ${b.band}: Σenergy=${b.totalEnergy.toExponential(2)}  peak bucket=${b.peakBucket} (${(b.peakBucket * bucketDtMs)} ms)`,
+          ),
+          '',
+          '<span style="color:#89929d">First real precision render. Phase C will derive EDT / T30 / C80 / C50 / STI from this histogram.</span>',
+        ];
+        banner.innerHTML = summaryLines.map(l => `<div>${l}</div>`).join('');
+      } catch (err) {
+        banner.innerHTML = `<div style="color:#ff6565;">Precision render failed: ${err?.message ?? err}</div>`;
+        console.error('Precision render failed:', err);
+      }
+    });
+  }
 }
 function fmt(v) { return v == null || !isFinite(v) ? '—' : (Math.round(v * 100) / 100).toString(); }

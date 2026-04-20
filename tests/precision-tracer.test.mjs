@@ -52,7 +52,7 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
   const scene = makeShoebox();
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
-  const result = traceRays(scene, soup, bvh, {
+  const result = traceRays(scene, bvh, {
     raysPerSource: 1000, maxBounces: 20, bucketDtMs: 2, maxTimeMs: 500, seed: 42,
   });
   ok(result.histogram instanceof Float32Array, 'result.histogram is Float32Array');
@@ -67,8 +67,8 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
   const scene = makeShoebox();
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
-  const r1 = traceRays(scene, soup, bvh, { raysPerSource: 500, maxBounces: 15, seed: 12345, maxTimeMs: 300 });
-  const r2 = traceRays(scene, soup, bvh, { raysPerSource: 500, maxBounces: 15, seed: 12345, maxTimeMs: 300 });
+  const r1 = traceRays(scene, bvh, { raysPerSource: 500, maxBounces: 15, seed: 12345, maxTimeMs: 300 });
+  const r2 = traceRays(scene, bvh, { raysPerSource: 500, maxBounces: 15, seed: 12345, maxTimeMs: 300 });
   let identical = r1.histogram.length === r2.histogram.length;
   for (let i = 0; i < r1.histogram.length && identical; i++) {
     if (r1.histogram[i] !== r2.histogram[i]) identical = false;
@@ -89,7 +89,7 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
   const scene = makeShoebox();
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
-  const result = traceRays(scene, soup, bvh, {
+  const result = traceRays(scene, bvh, {
     raysPerSource: 50000, maxBounces: 1, bucketDtMs: 2, maxTimeMs: 100, seed: 99,
   });
   // Find the first bucket with non-zero energy at band 3 (1 kHz).
@@ -120,7 +120,7 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
   const scene = makeShoebox();
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
-  const result = traceRays(scene, soup, bvh, {
+  const result = traceRays(scene, bvh, {
     raysPerSource: 20000, maxBounces: 200, bucketDtMs: 5, maxTimeMs: 600, seed: 7,
   });
   const bucketsPer100ms = 100 / 5;
@@ -155,7 +155,7 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
     const scene = buildPhysicsScene({ state, materials, getLoudspeakerDef: getDef });
     const soup = triangulateScene(scene);
     const bvh = buildBVH(soup);
-    return traceRays(scene, soup, bvh, {
+    return traceRays(scene, bvh, {
       raysPerSource: 10000, maxBounces: 200, bucketDtMs: 5, maxTimeMs: 800, seed: 31,
     });
   }
@@ -184,7 +184,7 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
   const scene = makeShoebox();
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
-  const result = traceRays(scene, soup, bvh, {
+  const result = traceRays(scene, bvh, {
     raysPerSource: 20000, maxBounces: 300, bucketDtMs: 5, maxTimeMs: 1000, seed: 13,
   });
   const totalBuckets = result.shape.buckets;
@@ -205,7 +205,7 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
   const t0 = performance.now();
-  const result = traceRays(scene, soup, bvh, {
+  const result = traceRays(scene, bvh, {
     raysPerSource: 2000, maxBounces: 50, bucketDtMs: 2, maxTimeMs: 1500, seed: 1,
   });
   const wallMs = performance.now() - t0;

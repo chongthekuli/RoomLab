@@ -92,11 +92,25 @@ function raySphereEntry(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, tMax) {
 /**
  * traceRays — main kernel.
  *
+ * Signature kept minimal because this is what goes over the worker wire.
+ * Soup is reached via `bvh.soup` when the tracer needs vertex/normal
+ * arrays (it currently only uses the hit info returned by intersectRay,
+ * which reads from bvh.soup internally).
+ *
  * @param {PhysicsScene} scene   snapshot from scene-snapshot.js
- * @param {TriangleSoup} soup    from triangulate-scene.js (for reference; BVH already points at it)
- * @param {BVH} bvh              from bvh.js
+ * @param {BVH} bvh              from bvh.js (contains soup internally)
  * @param {object} opts
- * @param {number} [opts.raysPerSource=10000]
+ * @param {number} [opts.raysPerSource=10000]       rays this call will emit per source
+ * @param {number} [opts.normalizationRays]         denominator for per-ray energy
+ *                                                  normalization. Defaults to
+ *                                                  `raysPerSource`. When a pool splits
+ *                                                  a N-worker render, EACH worker sets
+ *                                                  raysPerSource to its own slice (say
+ *                                                  2500 of 10000) but normalizationRays
+ *                                                  to the TOTAL budget (10000) so
+ *                                                  merging partials gives the correct
+ *                                                  total energy rather than N× over-
+ *                                                  count.
  * @param {number} [opts.maxBounces=50]
  * @param {number} [opts.bucketDtMs=2]
  * @param {number} [opts.maxTimeMs=2000]
@@ -114,8 +128,9 @@ function raySphereEntry(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, tMax) {
  *   terminations: { escaped, energy, bounce, timeOut },
  * }}
  */
-export function traceRays(scene, soup, bvh, opts = {}) {
+export function traceRays(scene, bvh, opts = {}) {
   const raysPerSource = opts.raysPerSource ?? DEFAULT_RAYS_PER_SOURCE;
+  const normalizationRays = opts.normalizationRays ?? raysPerSource;
   const maxBounces = opts.maxBounces ?? DEFAULT_MAX_BOUNCES;
   const bucketDtMs = opts.bucketDtMs ?? DEFAULT_BUCKET_DT_MS;
   const maxTimeMs = opts.maxTimeMs ?? DEFAULT_MAX_TIME_MS;
@@ -154,10 +169,12 @@ export function traceRays(scene, soup, bvh, opts = {}) {
   const maxTime_s = maxTimeMs / 1000;
 
   for (let sIdx = 0; sIdx < S; sIdx++) {
-    // Initial per-band energy for one ray from this source.
+    // Initial per-band energy for one ray from this source. Divided by
+    // `normalizationRays` (total across pool) rather than `raysPerSource`
+    // (this worker's slice), so N partials summed give the correct total.
     let maxInitialE = 0;
     for (let k = 0; k < B; k++) {
-      initialEnergy[k] = Math.pow(10, srcLw[sIdx * B + k] / 10) / raysPerSource;
+      initialEnergy[k] = Math.pow(10, srcLw[sIdx * B + k] / 10) / normalizationRays;
       if (initialEnergy[k] > maxInitialE) maxInitialE = initialEnergy[k];
     }
     const cutoffE = maxInitialE * Math.pow(10, energyCutoffDb / 10);

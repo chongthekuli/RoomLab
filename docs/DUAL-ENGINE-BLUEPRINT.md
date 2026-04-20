@@ -454,7 +454,20 @@ This means the MVP ray tracer can ship with much higher default ray count than p
 
     Perf spot-check: arena preset with 2000 rays/source × 24 sources × 50 max bounces = 48,000 ray-paths in 8.8 s single-threaded on a typical dev machine. With Phase A5's measured 92 % parallel efficiency over 8 workers, that projects to ~1.2 s wall-clock once B3b ships.
 
-  - **B3b — Worker pool** ⏳ next session. [js/physics/precision/precision-worker.js](../js/physics/precision/) (to be written) imports `tracer-core.js` and wraps it in a message-driven shell. [js/physics/precision/worker-pool.js](../js/physics/precision/) orchestrates N workers, fans out ray batches, aggregates partial histograms on the main thread (simple element-wise sum). Cancellation via shared flag.
+  - **B3b — Worker pool** ✅ landed `HEAD`. Three new files:
+    - [js/physics/precision/precision-worker.js](../js/physics/precision/precision-worker.js) — thin message-driven shell. Handlers: `init` (structured-clone of scene + bvh once), `trace` (runs `traceRays`, transfers histogram buffer back), `shutdown`.
+    - [js/physics/precision/worker-pool.js](../js/physics/precision/worker-pool.js) — `PrecisionWorkerPool` class. `init(scene, bvh)` spawns N workers and awaits their `ready`. `trace(opts, onProgress)` divides `raysPerSource` by N, gives each worker a unique seed (`baseSeed + i × 1,000,003`), and passes a `normalizationRays = raysPerSource_total` field so each partial's per-ray energy is scaled to the FULL budget, not its N-th slice. `mergePartialHistograms(partials)` does element-wise `Float32Array` sum on return. Exported separately so tests can exercise aggregation without Workers.
+    - [js/physics/precision/precision-engine.js](../js/physics/precision/precision-engine.js) — `runPrecisionRender({ state, materials, getLoudspeakerDef, opts })` is the main-thread entry. Internally: snapshot → triangulate → BVH → pool init → trace → terminate → return. Supports `opts.signal` (`AbortSignal`) for cancellation, `opts.onProgress` for UI progress bars.
+
+    **Normalization invariant (important):** each worker's `initialEnergy_per_ray = 10^(L_w/10) / normalizationRays`. If all N workers emit (raysPerSource / N) rays each, summed they total `raysPerSource` rays and reconstruct the single-shot result within Monte Carlo noise. Verified by test: 4-worker split vs single 4000-ray trace on the shoebox fixture gives total-energy ratio **1.025** (2.5 % sampling noise, as expected). Without the `normalizationRays` separation each worker would carry N× the energy per ray → 4× over-count. Bug caught in the first integration test.
+
+    **Dev hook live on deploy.** Run the first real precision render from a single URL:
+
+    ```
+    https://chongthekuli.github.io/RoomLab/?precision-demo
+    ```
+
+    Banner shows pipeline stats (triangles, BVH nodes, workers, rays traced, wall-clock, throughput), termination breakdown, and per-band energy + peak-arrival-time summary for receiver 0.
 
 **B4.** Progress UI — spinner, rays-done/total counter, cancel button.
 
