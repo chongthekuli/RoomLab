@@ -210,9 +210,9 @@ async function render() {
     </section>
 
     <section class="sv-section">
-      <h4>Directivity waterfall (amplitude × angle × frequency)</h4>
-      <canvas id="sv-waterfall" width="720" height="400"></canvas>
-      <div class="sub sv-caption">3D surface plot of the horizontal polar response: X = azimuth angle (−110° to +110°), depth = frequency (20 kHz at front, 125 Hz at back), Z = SPL in dB. Warm reds along the centre line show on-axis energy; cool blues at the edges show off-axis roll-off. Narrowing with frequency (warm stripe gets thinner toward the front) is HF beaming.</div>
+      <h4>Directivity waterfall (amplitude × frequency × angle)</h4>
+      <canvas id="sv-waterfall" width="760" height="420"></canvas>
+      <div class="sub sv-caption">3D surface plot of the horizontal polar response: X = frequency (log, 125 Hz → 20 kHz), depth = azimuth angle (−110° at back, +110° at front, on-axis in the middle), Z = SPL in dB. A warm-red ridge running along the middle depth is the on-axis response; the surface tapers toward cool blue at ±110°. A wide ridge = wide pattern; a narrow ridge concentrated at 0° = directive cabinet.</div>
     </section>
 
     <section class="sv-section">
@@ -494,50 +494,52 @@ function drawWaterfall(canvas, def, onAxis) {
   // Off-axis attenuation at (angle, freq) from the directivity grid.
   const attAt = (angle_deg, hz) => interpolateAttenuation(dir, angle_deg, 0, hz);
 
-  // Oblique projection — viewer looks DOWN at the mesh. Back slices
-  // shift slightly right AND UP on the canvas (skewY < 0), matching the
-  // measurement-lab convention (REW / ARTA / Klippel and the reference
-  // in docs/WATERFALL.md).
-  const padL = 60, padR = 32, padT = 22, padB = 44;
-  const nSlices = 24;                 // frequency slices (depth)
-  const skewX = 0.7;                  // per slice horizontal pixels (+right)
-  const skewY = -5.5;                 // per slice vertical pixels (−up)
-  const bkX = skewX * (nSlices - 1);
-  const bkY = skewY * (nSlices - 1);  // negative
+  // Oblique projection — stronger tilt than the earlier draft so the
+  // mesh reads as a proper 3D surface rather than a stacked-ribbon plot.
+  // Back slices shift RIGHT + UP on the canvas (the viewer is above,
+  // looking down-right at the mesh).
+  const padL = 60, padR = 36, padT = 24, padB = 48;
+  const nSlices = 23;                 // angle depth slices — 10° step, 0° lands exactly on the middle slice
+  const skewX = 2.6;                  // per slice horizontal pixels (+right)
+  const skewY = -7.0;                 // per slice vertical pixels (−up)
+  const bkX = skewX * (nSlices - 1);  // ≈ 57 px
+  const bkY = skewY * (nSlices - 1);  // ≈ −154 px
   const plotW = W - padL - padR - bkX;
   const plotH = H - padT - padB - Math.abs(bkY);
 
-  // Axes: angle × dB SPL. The depth axis is frequency (log), with the
-  // highest frequency at the FRONT of the mesh (slice 0) so HF beaming
-  // shows up prominently on the "close" face.
-  const angleMin = -110, angleMax = 110;
+  // Axes: frequency × dB SPL. Depth axis is angle (linear), with the
+  // front slice at +110° and the back slice at −110°. On-axis (0°) is
+  // exactly the middle slice (index 11 of 0..22) — that's the peak of
+  // the mesh, so a warm-red ridge runs along the middle depth.
   const fMin = 125, fMax = 20000;
+  const angleFront = 110, angleBack = -110;
   const peakDb = sens + 5;
   const floorDb = sens - 45;
 
-  const xOfAngle = (a) => padL + ((a - angleMin) / (angleMax - angleMin)) * plotW;
-  const frontBase = padT + plotH - bkY;    // bkY<0 → below padT+plotH
+  const xOfHz = (hz) => padL + ((Math.log2(hz) - Math.log2(fMin)) / (Math.log2(fMax) - Math.log2(fMin))) * plotW;
+  const frontBase = padT + plotH - bkY;
   const yOfDb = (db) => frontBase - ((db - floorDb) / (peakDb - floorDb)) * plotH;
 
-  // Slice index s → frequency (log-spaced from fMax at front to fMin at back).
-  const freqAt = (s) => fMax * Math.pow(fMin / fMax, s / (nSlices - 1));
-  const sOfFreq = (hz) => (nSlices - 1) * Math.log(hz / fMax) / Math.log(fMin / fMax);
+  // Slice index s → angle. s=0 is FRONT (+110°), s=nSlices-1 is BACK (−110°).
+  const angleAt = (s) => angleFront + (s / (nSlices - 1)) * (angleBack - angleFront);
+  const sOfAngle = (deg) => (nSlices - 1) * (deg - angleFront) / (angleBack - angleFront);
 
-  const nAng = 64;                    // angle samples per slice
+  const nFreq = 96;                   // frequency samples per slice
 
   const rightX = padL + plotW;
   const frontTopY = padT - bkY;
   const backTopY = padT;
   const backBotY = frontBase + bkY;
-  const tickAngles = [-110, -90, -70, -50, -30, -10, 10, 30, 50, 70, 90, 110];
-  const tickDbs = [sens, sens - 10, sens - 20, sens - 30, sens - 40];
   const tickFreqs = [125, 250, 500, 1000, 2000, 5000, 10000, 20000];
+  const tickDbs = [sens, sens - 10, sens - 20, sens - 30, sens - 40];
+  const tickAngles = [110, 70, 30, 0, -30, -70, -110];   // for the depth-edge labels
 
   // ---------- Back-plane grid (painted first, behind everything) ----
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
   ctx.lineWidth = 1;
-  for (const ang of tickAngles) {
-    const x = xOfAngle(ang) + bkX;
+  for (const hz of tickFreqs) {
+    if (hz < fMin || hz > fMax) continue;
+    const x = xOfHz(hz) + bkX;
     ctx.beginPath();
     ctx.moveTo(x, backTopY);
     ctx.lineTo(x, backBotY);
@@ -553,22 +555,22 @@ function drawWaterfall(canvas, def, onAxis) {
   ctx.strokeRect(padL + bkX, backTopY, plotW, backBotY - backTopY);
 
   // ---------- Pre-compute slice path geometry + amplitude ----------
-  // Slice s is a constant-frequency trace along the angle axis. The
-  // FRONT slice (s=0) is the highest frequency so HF beaming reads
-  // clearly on the closest face; the BACK slice is the lowest freq.
+  // Slice s is a constant-ANGLE trace along the frequency axis. The
+  // FRONT slice (s=0) is +110°, the middle slice is 0° (on-axis, peak),
+  // and the BACK slice is −110°.
   const slicePaths = new Array(nSlices);
   for (let s = 0; s < nSlices; s++) {
-    const hz = freqAt(s);
-    const frDb = frAt(hz);
+    const angle = angleAt(s);
     const ox = s * skewX;
     const oy = s * skewY;
-    const pts = new Array(nAng + 1);
-    for (let i = 0; i <= nAng; i++) {
-      const u = i / nAng;
-      const angle = angleMin + u * (angleMax - angleMin);
+    const pts = new Array(nFreq + 1);
+    for (let i = 0; i <= nFreq; i++) {
+      const u = i / nFreq;
+      const hz = fMin * Math.pow(fMax / fMin, u);
+      const frDb = frAt(hz);
       const att = attAt(angle, hz);
       const lvl = Math.max(floorDb, sens + frDb + att);
-      pts[i] = { x: xOfAngle(angle) + ox, y: yOfDb(lvl) + oy, db: lvl };
+      pts[i] = { x: xOfHz(hz) + ox, y: yOfDb(lvl) + oy, db: lvl };
     }
     slicePaths[s] = pts;
   }
@@ -577,7 +579,7 @@ function drawWaterfall(canvas, def, onAxis) {
   for (let s = nSlices - 2; s >= 0; s--) {
     const front = slicePaths[s];
     const back = slicePaths[s + 1];
-    for (let i = 0; i < nAng; i++) {
+    for (let i = 0; i < nFreq; i++) {
       const a = front[i], b = front[i + 1];
       const c = back[i + 1], d = back[i];
       const avgDb = (a.db + b.db + c.db + d.db) * 0.25;
@@ -648,24 +650,25 @@ function drawWaterfall(canvas, def, onAxis) {
   ctx.textAlign = 'start';
   ctx.fillText('dB', 4, frontTopY + 10);
 
-  // Angle axis (under the front baseline). Thinned-out labels to
-  // avoid overlap — every-other tick.
+  // Frequency axis — labels under the front baseline (log scale).
   ctx.textAlign = 'center';
-  for (const ang of [-110, -70, -30, 0, 30, 70, 110]) {
-    const x = xOfAngle(ang);
-    ctx.fillText(`${ang}`, x, frontBase + 16);
+  for (const hz of tickFreqs) {
+    if (hz < fMin || hz > fMax) continue;
+    const x = xOfHz(hz);
+    const label = hz >= 1000 ? `${hz / 1000}k` : `${hz}`;
+    ctx.fillText(label, x, frontBase + 16);
   }
   ctx.textAlign = 'start';
-  ctx.fillText('°', rightX + 6, frontBase + 16);
+  ctx.fillText('Hz', rightX + 6, frontBase + 16);
 
-  // Frequency axis — right-depth edge from (rightX, frontBase) to
-  // (rightX + bkX, backBotY). bkY < 0 ⇒ later-freq (= lower-freq)
-  // labels sit UP-RIGHT on the canvas.
+  // Angle depth-axis — right-depth edge from (rightX, frontBase) to
+  // (rightX + bkX, backBotY). +110° sits at the front (close), −110°
+  // at the back (far). Ticks at ±110 / ±70 / ±30 / 0 with the tick
+  // pointing outward from the mesh.
   ctx.strokeStyle = 'rgba(220, 226, 232, 0.55)';
   ctx.lineWidth = 1;
-  for (const fhz of tickFreqs) {
-    if (fhz < fMin || fhz > fMax) continue;
-    const s = sOfFreq(fhz);
+  for (const ang of tickAngles) {
+    const s = sOfAngle(ang);
     if (s < -0.5 || s > nSlices - 0.5) continue;
     const x = rightX + s * skewX;
     const y = frontBase + s * skewY;
@@ -673,10 +676,9 @@ function drawWaterfall(canvas, def, onAxis) {
     ctx.moveTo(x, y);
     ctx.lineTo(x + 5, y);
     ctx.stroke();
-    const label = fhz >= 1000 ? `${fhz / 1000}k` : `${fhz}`;
-    ctx.fillText(label, x + 8, y + 3);
+    ctx.fillText(`${ang}°`, x + 8, y + 3);
   }
-  ctx.fillText('Hz', rightX + bkX + 16, backBotY - 4);
+  ctx.fillText('angle', rightX + bkX + 16, backBotY - 4);
 }
 
 // Classic MATLAB 'jet' colormap — dark blue (low) → cyan → green → yellow

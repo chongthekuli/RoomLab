@@ -2,11 +2,13 @@
 
 File: `js/ui/speaker-detail.js` → `drawWaterfall(canvas, def, onAxis)`.
 
-3D surface of SPL as a function of **horizontal angle and frequency simultaneously**. The convention matches the reference screenshot (a typical REW / ARTA / Klippel directivity waterfall):
+3D surface of SPL as a function of **horizontal angle and frequency simultaneously**. After two iterations the axes settled on:
 
-- **X**: azimuth angle, −110° to +110°
-- **depth**: frequency, log-spaced (20 kHz at front → 125 Hz at back)
+- **X**: frequency, log-spaced, 125 Hz → 20 kHz
+- **depth**: azimuth angle, linear, +110° at front, 0° in the middle, −110° at back
 - **Z**: SPL (dB)
+
+With angle in the depth axis, the on-axis (0°) response sits exactly on the middle slice — so a warm-red ridge runs along the middle depth, tapering to cool blue at ±110° off-axis. Wide ridge = wide-pattern cabinet, narrow ridge concentrated at 0° = directive cabinet.
 
 An earlier draft of this chart plotted Cumulative Spectral Decay (SPL vs freq vs time). That showed time-domain ringing and was swapped out after the user requested the angle-vs-frequency view.
 
@@ -22,23 +24,23 @@ Per-band directivity missing from the JSON is back-filled by `loudspeaker.js` us
 
 ## Physics model
 
-For any `(angle_deg, hz)`:
+For any `(hz, angle_deg)`:
 
 ```
 fr(hz)      = log-space linear interp of onAxis[i].db
 att(a, hz)  = bilinear over dir.attenuation_db[hz][el][az], el=0
-spl(a, hz)  = max(floorDb,  sens + fr(hz) + att(a, hz))
+spl(hz, a)  = max(floorDb,  sens + fr(hz) + att(a, hz))
 ```
 
 Both interpolations **clamp at the endpoints** so sub-125 Hz and super-8 kHz regions stay finite.
 
 ## Layout — tilted-down 3D view
 
-- Canvas: 720 × 400 px
-- Padding: left 60, right 32, top 22, bottom 44
-- 24 frequency slices. Slice `s=0` is the FRONT slice (= `fMax = 20 kHz`); `s = nSlices − 1` is the BACK slice (= `fMin = 125 Hz`). Slicing is log-spaced via `freqAt(s) = fMax × (fMin/fMax)^(s/(nSlices−1))`.
-- Oblique projection: each successive slice shifts `skewX = +0.7 px` right and `skewY = −5.5 px` **up** (`skewY < 0` puts the viewer above the mesh).
-- `bkX = skewX × (nSlices − 1) = +16 px`, `bkY = skewY × (nSlices − 1) = −127 px`.
+- Canvas: 760 × 420 px
+- Padding: left 60, right 36, top 24, bottom 48
+- 23 angle slices (one per 10° step). Slice `s=0` is the FRONT slice (= `+110°`), `s=11` is the middle slice (= `0°`, on-axis, the peak of the mesh), `s=22` is the BACK slice (= `−110°`). Angle axis is linear via `angleAt(s) = 110 − s × 10`.
+- Oblique projection: each successive slice shifts `skewX = +2.6 px` right and `skewY = −7.0 px` **up** (`skewY < 0` puts the viewer above the mesh). Earlier draft used `skewX = 0.7, skewY = −5.5` which read as almost 2D — dialled up for a proper 3D tilt.
+- `bkX = skewX × (nSlices − 1) = +57 px`, `bkY = skewY × (nSlices − 1) = −154 px`.
 - Plot dimensions leave room for the depth offsets:
   ```
   plotW = canvasW − padL − padR − bkX
@@ -47,10 +49,10 @@ Both interpolations **clamp at the endpoints** so sub-125 Hz and super-8 kHz reg
 
 ### Axes
 
-- **X**: angle → `[padL, padL + plotW]`, linear, `angleMin = −110°` to `angleMax = +110°`.
+- **X**: `log2(hz)` → `[padL, padL + plotW]`, 125 Hz → 20 kHz.
 - **Y**: dB SPL → `[frontBase, frontBase − plotH]`. Range is `sens + 5` (top) to `sens − 45` (bottom).
 - `frontBase = padT + plotH − bkY` — because `bkY < 0`, this is the largest Y in the plot (= the front baseline, at the bottom of the canvas).
-- **Depth axis** (frequency) is implicit in the skew. Labels go at `(rightX + s·skewX, frontBase + s·skewY)` for `s = sOfFreq(tick)`.
+- **Depth axis** (angle) is implicit in the skew. Labels go at `(rightX + s·skewX, frontBase + s·skewY)` for `s = sOfAngle(tick)`.
 
 ## Rendering
 
