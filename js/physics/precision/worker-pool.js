@@ -24,6 +24,13 @@
 
 const WORKER_URL = new URL('./precision-worker.js', import.meta.url);
 
+// Fields forwarded from the caller's `opts` into each worker's trace
+// message. Numeric / boolean only — functions + AbortSignal are not
+// structured-cloneable and would throw DataCloneError on postMessage.
+const TRACER_FORWARDED_OPTS = [
+  'maxBounces', 'bucketDtMs', 'maxTimeMs', 'energyCutoffDb', 'c_mps',
+];
+
 export class PrecisionWorkerPool {
   constructor(workerCount) {
     this.workerCount = workerCount;
@@ -112,12 +119,21 @@ export class PrecisionWorkerPool {
       // Each worker emits `perWorker` rays but normalizes energy by the
       // FULL `raysPerSource` budget, so sum-across-workers reconstructs
       // the energy that a single N-ray trace would produce.
+      //
+      // Build workerOpts by WHITELIST, not by {...opts}. The caller's opts
+      // may contain non-cloneable fields (function callbacks like
+      // onProgress, AbortSignal, DOM nodes, etc.) that structured clone
+      // refuses to serialise. Only the numeric tracer knobs go over the
+      // wire; onProgress runs on the main thread via the 'progress'
+      // reverse message.
       const workerOpts = {
-        ...opts,
         raysPerSource: perWorker,
         normalizationRays: raysPerSource,
         seed: baseSeed + i * 1_000_003,
       };
+      for (const k of TRACER_FORWARDED_OPTS) {
+        if (opts[k] !== undefined) workerOpts[k] = opts[k];
+      }
       const p = new Promise((resolve, reject) => {
         this._pending.set(jobId, { resolve, reject, onProgress });
       });
