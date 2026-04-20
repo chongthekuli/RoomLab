@@ -1,6 +1,7 @@
 import { state, PRESETS, SHAPE_LABELS, CEILING_LABELS, applyPresetToState } from '../app-state.js';
 import { emit } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
+import { importDxfFile } from '../physics/dxf-import.js';
 
 const RECT_SURFACE_LABELS = [
   ['floor',      'Floor'],
@@ -25,6 +26,11 @@ export function mountRoomPanel({ materials }) {
   root.innerHTML = `
     <h2>Room</h2>
     <div class="preset-row" id="preset-row"></div>
+    <div class="import-row">
+      <button id="btn-import-dxf" class="btn-import" title="Import room outline from a DXF file (DWG must be converted first)">⇪ Import DXF…</button>
+      <input type="file" id="file-dxf" accept=".dxf,.dwg" hidden />
+    </div>
+    <div id="import-status" class="import-status" hidden></div>
     <h3>Shape</h3>
     <div class="field-group">
       <label>Plan shape
@@ -55,6 +61,18 @@ export function mountRoomPanel({ materials }) {
     btn.addEventListener('click', () => applyPreset(key));
     presetRow.appendChild(btn);
   }
+
+  // DXF import — converts largest closed polyline in the file into the
+  // current room's custom_vertices. Height and surface materials are
+  // preserved; user edits them after.
+  const fileInput = root.querySelector('#file-dxf');
+  root.querySelector('#btn-import-dxf').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handleDxfImport(file);
+    fileInput.value = ''; // allow re-selecting the same file
+  });
 
   root.querySelector('[data-f="shape"]').addEventListener('change', e => {
     state.room.shape = e.target.value;
@@ -305,6 +323,40 @@ function applyPreset(key) {
   // room:changed kept for listeners that only care about room geometry.
   emit('scene:reset');
   emit('room:changed');
+}
+
+async function handleDxfImport(file) {
+  const status = document.getElementById('import-status');
+  status.hidden = false;
+  status.className = 'import-status';
+  status.textContent = `Reading ${file.name}…`;
+  try {
+    const { polygons, bestIndex, source_units } = await importDxfFile(file);
+    const best = polygons[bestIndex];
+    // Translate so the polygon's bbox starts at the origin (consistent with
+    // the draw-custom convention — the 2D viewport expects x/y >= 0).
+    const minX = Math.min(...best.vertices.map(v => v.x));
+    const minY = Math.min(...best.vertices.map(v => v.y));
+    const verts = best.vertices.map(v => ({ x: v.x - minX, y: v.y - minY }));
+    const w = Math.max(...verts.map(v => v.x));
+    const d = Math.max(...verts.map(v => v.y));
+
+    state.room.shape = 'custom';
+    state.room.custom_vertices = verts;
+    state.room.width_m = w;
+    state.room.depth_m = d;
+    state.room.surfaces.edges = verts.map(() => state.room.surfaces.walls || 'gypsum-board');
+
+    render();
+    emit('room:changed');
+
+    const more = polygons.length > 1 ? ` (${polygons.length - 1} other closed polylines in file, largest used)` : '';
+    status.textContent = `Imported ${verts.length}-vertex room · ${best.area_m2.toFixed(1)} m² · bbox ${w.toFixed(1)} × ${d.toFixed(1)} m · units ${source_units}${more}`;
+    status.classList.add('ok');
+  } catch (err) {
+    status.textContent = err.message;
+    status.classList.add('err');
+  }
 }
 
 // Listen for room:changed to re-render panel when draw mode finishes

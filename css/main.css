@@ -466,6 +466,44 @@ section h3 {
   border-color: var(--border-strong);
 }
 
+.import-row { margin-bottom: 0.5rem; }
+.btn-import {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: rgba(116, 208, 255, 0.08);
+  border: 1px dashed rgba(116, 208, 255, 0.4);
+  color: var(--data-cyan, #74d0ff);
+  border-radius: var(--radius);
+  font-size: 0.76rem;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+.btn-import:hover {
+  background: rgba(116, 208, 255, 0.14);
+  border-color: var(--data-cyan, #74d0ff);
+}
+.import-status {
+  margin: 0 0 0.55rem 0;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  border-left: 2px solid var(--border);
+}
+.import-status.ok {
+  color: var(--data-green, #a3d977);
+  border-left-color: var(--data-green, #a3d977);
+  background: rgba(163, 217, 119, 0.08);
+}
+.import-status.err {
+  color: var(--data-red, #ff6b6b);
+  border-left-color: var(--data-red, #ff6b6b);
+  background: rgba(255, 107, 107, 0.08);
+}
+
 .summary { padding: 0.35rem 0 0.6rem; }
 .summary .big {
   font-size: 2.9rem;
