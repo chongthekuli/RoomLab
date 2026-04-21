@@ -2221,6 +2221,11 @@ function rebuildZones() { shadowsNeedRefresh = true;
   }
   state.results.zoneGrids = [];
   if (!state.zones || state.zones.length === 0) {
+    // No zones — but the PREVIOUS scene may have left audience figures
+    // behind. Dispose them explicitly so a zones-less preset (like
+    // Pavilion Mall) shows up empty instead of inheriting the prior
+    // arena crowd.
+    rebuildAudience();
     heatmapGroup.visible = state.display.showHeatmaps;
     return;
   }
