@@ -21,7 +21,7 @@ let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
 let aimLinesGroup, audienceGroup;
-let audienceBodyGeo = null, audienceHeadGeo = null;
+const audienceGeoCache = {}; // { standing: {body, head, ref}, sitting: {...} }
 let materialsRef, container;
 
 // --- Walkthrough (3rd-person) mode ---------------------------------------
@@ -1228,6 +1228,36 @@ function zonePolygonArea2D(verts) {
   return Math.abs(a) / 2;
 }
 
+// Box-Muller unit normal (mean 0, stddev 1). Cached-free; called a few hundred
+// times per rebuild so performance is a non-issue.
+function gaussianStd() {
+  const u = 1 - Math.random();
+  const v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// Pose-specific audience geometry. Standing: 1.70 m total (body 1.40 + head
+// centre 1.58, r=0.12). Seated: 1.24 m total from zone surface (torso 1.00
+// starting at feet, head centre 1.12, r=0.12) — approximates a person on an
+// arena tier where the seat plate is effectively the zone elevation.
+function ensureAudienceGeo(pose) {
+  if (audienceGeoCache[pose]) return audienceGeoCache[pose];
+  if (pose === 'sitting') {
+    const body = new THREE.BoxGeometry(0.42, 1.00, 0.30);
+    body.translate(0, 0.50, 0);
+    const head = new THREE.SphereGeometry(0.12, 10, 8);
+    head.translate(0, 1.12, 0);
+    audienceGeoCache[pose] = { body, head, ref: 1.24 };
+  } else {
+    const body = new THREE.BoxGeometry(0.42, 1.40, 0.28);
+    body.translate(0, 0.70, 0);
+    const head = new THREE.SphereGeometry(0.12, 10, 8);
+    head.translate(0, 1.58, 0);
+    audienceGeoCache[pose] = { body, head, ref: 1.70 };
+  }
+  return audienceGeoCache[pose];
+}
+
 function rebuildAudience() {
   if (!audienceGroup) {
     audienceGroup = new THREE.Group();
@@ -1254,14 +1284,17 @@ function rebuildAudience() {
   if (total === 0) return;
   const scale = total > AUDIENCE_GLOBAL_CAP ? AUDIENCE_GLOBAL_CAP / total : 1;
 
-  // Geometry: body = short box (shirt), head = sphere (skin). Both translated
-  // so the feet sit at y=0 on the zone surface.
-  if (!audienceBodyGeo) {
-    audienceBodyGeo = new THREE.BoxGeometry(0.42, 1.40, 0.28);
-    audienceBodyGeo.translate(0, 0.70, 0);
-    audienceHeadGeo = new THREE.SphereGeometry(0.125, 10, 8);
-    audienceHeadGeo.translate(0, 1.525, 0);
-  }
+  // Pose: seated figures for tiered stadium rooms, standing figures everywhere
+  // else (shopping mall, pavilion concourse, shoebox). Standing reference is
+  // 1.70 m; seated is ~1.24 m from zone surface (seated-on-tier sitting height).
+  // Per-instance uniform scale adds a Gaussian height spread so the crowd
+  // reads as mixed-height humans, not uniform clones.
+  const pose = state.room?.stadiumStructure ? 'sitting' : 'standing';
+  const geo = ensureAudienceGeo(pose);
+  const audienceBodyGeo = geo.body;
+  const audienceHeadGeo = geo.head;
+  const heightJitterStd = pose === 'sitting' ? 0.04 : 0.055;
+  const heightJitterClamp = pose === 'sitting' ? 0.08 : 0.12;
 
   const placements = [];
   for (const plan of plans) {
@@ -1303,7 +1336,7 @@ function rebuildAudience() {
 
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
-  const s1 = new THREE.Vector3(1, 1, 1);
+  const sv = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
   const pos = new THREE.Vector3();
   const col = new THREE.Color();
@@ -1311,7 +1344,10 @@ function rebuildAudience() {
     const p = placements[i];
     pos.set(p.x, p.y, p.z);
     q.setFromAxisAngle(up, p.yaw);
-    m.compose(pos, q, s1);
+    const dh = Math.max(-heightJitterClamp, Math.min(heightJitterClamp, gaussianStd() * heightJitterStd));
+    const s = 1 + dh;
+    sv.set(s, s, s);
+    m.compose(pos, q, sv);
     bodyMesh.setMatrixAt(i, m);
     headMesh.setMatrixAt(i, m);
     col.setHex(p.shirt); bodyMesh.setColorAt(i, col);
