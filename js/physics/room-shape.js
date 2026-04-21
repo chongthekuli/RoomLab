@@ -155,7 +155,54 @@ export function stadiumSolidVolume(stadiumStructure) {
 
 export function roomVolume(room) {
   const gross = baseArea(room) * room.height_m + domeVolume(room);
-  return Math.max(0, gross - stadiumSolidVolume(room.stadiumStructure));
+  return Math.max(0, gross
+    - stadiumSolidVolume(room.stadiumStructure)
+    - multiLevelSolidVolume(room.multiLevelStructure)
+  );
+}
+
+// Multi-level mall presets carry a `multiLevelStructure` with concrete
+// slabs + RC columns + fire-stair / lift / toilet cores occupying real
+// air volume. Subtract them so Sabine sees the actual free air.
+export function multiLevelSolidVolume(mls) {
+  if (!mls) return 0;
+  let vol = 0;
+  // Floor slabs (each slab = footprint − atrium, × thickness)
+  const footArea = polygonSignedArea(mls.footprint ?? []);
+  const atriumArea = polygonSignedArea(mls.atrium ?? []);
+  for (const lv of (mls.levels ?? [])) {
+    vol += Math.max(0, footArea - atriumArea) * (lv.thickness_m ?? 0.4);
+  }
+  // Columns
+  for (const col of (mls.columns ?? [])) {
+    const h = (col.top_z ?? 0) - (col.base_z ?? 0);
+    vol += Math.PI * (col.radius_m ?? 0.4) ** 2 * h;
+  }
+  // Toilet / fire-stair / lift shaft boxes — they take up their footprint
+  // × full shaft height. Approximate the enclosure's interior as lost
+  // air volume since PA/STIPA doesn't penetrate fire-rated walls.
+  const totalH = room => room?.height_m ?? (mls.levels?.length ? (mls.levels.length + 1) * 5.8 : 0);
+  for (const t of (mls.toiletBlocks ?? [])) {
+    vol += (t.x2 - t.x1) * (t.y2 - t.y1) * 5.4;  // per-level toilet volume
+  }
+  for (const s of (mls.fireStairs ?? [])) {
+    vol += (s.x2 - s.x1) * (s.y2 - s.y1) * ((s.top_z ?? 0) - (s.base_z ?? 0));
+  }
+  for (const lift of (mls.passengerLifts ?? [])) {
+    vol += (lift.x2 - lift.x1) * (lift.y2 - lift.y1) * ((lift.top_z ?? 0) - (lift.base_z ?? 0));
+  }
+  return vol;
+}
+
+// Absolute signed area of a polygon (shoelace).
+function polygonSignedArea(verts) {
+  if (!verts || verts.length < 3) return 0;
+  let a = 0;
+  for (let i = 0, n = verts.length; i < n; i++) {
+    const p = verts[i], q = verts[(i + 1) % n];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(a) / 2;
 }
 
 export function roomCenter(room) {
@@ -309,21 +356,20 @@ export function roomSurfaces(room) {
   const floor = { id: 'floor', area_m2: b, materialId: room.surfaces.floor };
   const ceiling = { id: 'ceiling', area_m2: ceilingArea(room), materialId: room.surfaces.ceiling };
 
+  let result;
   if (shape === 'rectangular') {
     const { width_m: w, depth_m: d, surfaces: s } = room;
-    return [
+    result = [
       floor, ceiling,
       { id: 'wall_north', area_m2: w * wallH, materialId: s.wall_north },
       { id: 'wall_south', area_m2: w * wallH, materialId: s.wall_south },
       { id: 'wall_east',  area_m2: d * wallH, materialId: s.wall_east },
       { id: 'wall_west',  area_m2: d * wallH, materialId: s.wall_west },
     ];
-  }
-
-  if (shape === 'custom') {
+  } else if (shape === 'custom') {
     const v = room.custom_vertices || [];
     const edges = room.surfaces.edges || [];
-    const result = [floor, ceiling];
+    result = [floor, ceiling];
     for (let i = 0; i < v.length; i++) {
       const j = (i + 1) % v.length;
       const dx = v[j].x - v[i].x, dy = v[j].y - v[i].y;
@@ -334,14 +380,131 @@ export function roomSurfaces(room) {
         materialId: edges[i] ?? room.surfaces.walls ?? 'gypsum-board',
       });
     }
-    return result;
+  } else {
+    const wallsMat = room.surfaces.walls ?? room.surfaces.wall_north ?? 'gypsum-board';
+    result = [
+      floor, ceiling,
+      { id: 'walls', area_m2: wallPerimeter(room) * wallH, materialId: wallsMat },
+    ];
   }
 
-  const wallsMat = room.surfaces.walls ?? room.surfaces.wall_north ?? 'gypsum-board';
-  return [
-    floor, ceiling,
-    { id: 'walls', area_m2: wallPerimeter(room) * wallH, materialId: wallsMat },
-  ];
+  // Append interior fixtures from multiLevelStructure (mall presets). Each
+  // internal partition adds BOTH faces of absorption — shops have a
+  // front storefront and a back dividing wall shared with the next bay,
+  // so we count both sides once. Big RT60-drop for the Pavilion preset
+  // because the slab undersides alone triple the total surface area.
+  const interior = multiLevelInteriorSurfaces(room);
+  if (interior.length) result = result.concat(interior);
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Interior surfaces introduced by a multi-level mall / atrium structure.
+// Returns an array of { id, area_m2, materialId } entries appended to
+// the outer-shell surfaces by roomSurfaces(). Materials are chosen per
+// real-world mall fit-out: slab soffits are acoustic-tile (suspended
+// ceiling grids throughout retail floors), slab tops are concrete /
+// ceramic-tile shoppers walk on, shop dividers are gypsum, storefronts
+// are glass, toilet ceilings are acoustic-tile, fire-stair enclosures
+// are concrete, lift shafts are glass, columns are concrete.
+function multiLevelInteriorSurfaces(room) {
+  const mls = room.multiLevelStructure;
+  if (!mls) return [];
+  const out = [];
+  const footArea = polygonSignedArea(mls.footprint ?? []);
+  const atriumArea = polygonSignedArea(mls.atrium ?? []);
+  const slabNetArea = Math.max(0, footArea - atriumArea);
+
+  // Slabs — each interior slab has a top (floor of upper level) and a
+  // bottom (ceiling of lower level).
+  for (const lv of (mls.levels ?? [])) {
+    out.push({
+      id: `slab_top_${lv.index}`,
+      area_m2: slabNetArea,
+      materialId: 'concrete',
+    });
+    out.push({
+      id: `slab_soffit_${lv.index}`,
+      area_m2: slabNetArea,
+      materialId: 'acoustic-tile',
+    });
+  }
+
+  // Columns — lateral cylinder surface area, 2 π r h.
+  for (const col of (mls.columns ?? [])) {
+    const h = (col.top_z ?? 0) - (col.base_z ?? 0);
+    const r = col.radius_m ?? 0.4;
+    out.push({
+      id: `column_${col.x.toFixed(0)}_${col.y.toFixed(0)}`,
+      area_m2: 2 * Math.PI * r * h,
+      materialId: 'concrete',
+    });
+  }
+
+  // Shops — two side dividers (gypsum) + two glass storefront panels
+  // flanking a shutter gap. Shutter gap acts as a high-absorption hole
+  // (tagged 'open-shutter' if available, otherwise audience-seated
+  // absorption as a proxy for goods inside the shop).
+  const WALL_H = 5.4;
+  for (const shop of (mls.shops ?? [])) {
+    const isHoriz = shop.side === 'south' || shop.side === 'north';
+    const divLen = isHoriz ? (shop.y2 - shop.y1) : (shop.x2 - shop.x1);
+    const bayWidth = isHoriz ? (shop.x2 - shop.x1) : (shop.y2 - shop.y1);
+    // 2 side dividers × both faces = 4 gypsum rectangles of divLen × WALL_H
+    out.push({
+      id: `shop_dividers_${shop.level}_${shop.x1}_${shop.y1}`,
+      area_m2: 4 * divLen * WALL_H,
+      materialId: 'gypsum-board',
+    });
+    // Storefront glass — bay width minus shutter × glass height, both sides
+    const shutterW = Math.min(shop.shutter_width ?? 3, bayWidth);
+    const glassW = Math.max(0, bayWidth - shutterW);
+    out.push({
+      id: `shop_glass_${shop.level}_${shop.x1}_${shop.y1}`,
+      area_m2: 2 * glassW * (WALL_H - 0.9),   // 0.9 m reserved for sign
+      materialId: 'glass',
+    });
+  }
+
+  // Toilet blocks — gypsum perimeter walls + acoustic-tile ceiling.
+  for (const t of (mls.toiletBlocks ?? [])) {
+    const w = t.x2 - t.x1, d = t.y2 - t.y1;
+    out.push({
+      id: `toilet_walls_L${t.level}_${t.x1}`,
+      area_m2: 2 * (w + d) * WALL_H,
+      materialId: 'gypsum-board',
+    });
+    out.push({
+      id: `toilet_ceil_L${t.level}_${t.x1}`,
+      area_m2: w * d,
+      materialId: 'acoustic-tile',
+    });
+  }
+
+  // Fire stair enclosures — concrete perimeter, full building height.
+  for (const s of (mls.fireStairs ?? [])) {
+    const w = s.x2 - s.x1, d = s.y2 - s.y1;
+    const h = (s.top_z ?? 0) - (s.base_z ?? 0);
+    out.push({
+      id: `fire_stair_${s.x1}_${s.y1}`,
+      area_m2: 2 * (w + d) * h,
+      materialId: 'concrete',
+    });
+  }
+
+  // Lift shafts — glass perimeter full height.
+  for (const lift of (mls.passengerLifts ?? [])) {
+    const w = lift.x2 - lift.x1, d = lift.y2 - lift.y1;
+    const h = (lift.top_z ?? 0) - (lift.base_z ?? 0);
+    out.push({
+      id: `lift_shaft_${lift.x1}_${lift.y1}`,
+      area_m2: 2 * (w + d) * h,
+      materialId: 'glass',
+    });
+  }
+
+  return out;
 }
 
 export function domeGeometry(room) {
