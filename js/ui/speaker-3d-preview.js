@@ -20,6 +20,19 @@ let cabinetGroup = null;
 let drivers = [];           // { mesh, cone, baseZ, type, pulseSpeed, pulseAmp }
 let animId = null;
 let lastDef = null;
+let _amperesLogoTex = null;
+
+// Module-level cache for the Amperes brand badge texture. Mirrors the
+// same file the scoreboard + ceiling-cabinet use in scene.js so the
+// cabinet the user sees here matches the one in the 3D viewport.
+function getAmperesLogoTextureLocal() {
+  if (_amperesLogoTex) return _amperesLogoTex;
+  const tex = new THREE.TextureLoader().load('assets/amperes-logo.png');
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  _amperesLogoTex = tex;
+  return tex;
+}
 
 export function mountSpeaker3DPreview(canvas, def) {
   if (!canvas || !def) return;
@@ -254,13 +267,20 @@ function buildCeilingCabinet(group, def) {
   grille.position.y = grilleY;
   group.add(grille);
 
-  // Subtle Amperes-style blue logo tab on the grille.
-  const logoMat = new THREE.MeshStandardMaterial({
-    color: 0x0066cc, roughness: 0.35, metalness: 0.6, emissive: 0x001430, emissiveIntensity: 0.2,
-  });
-  const logo = new THREE.Mesh(new THREE.BoxGeometry(radius * 0.22, 0.002, radius * 0.05), logoMat);
-  logo.position.set(0, grilleY + 0.001, radius * 0.62);
-  group.add(logo);
+  // Amperes brand badge on the grille — real logo PNG so the preview
+  // matches what the 3D scene renders on the same cabinet.
+  if (/amperes/i.test(def?.manufacturer || '') || /^amperes-/i.test(def?.id || '')) {
+    const logoTex = getAmperesLogoTextureLocal();
+    const logoW = radius * 0.50;
+    const logoH = logoW * 0.75;          // amperes-logo.png ≈ 4:3
+    const logo = new THREE.Mesh(
+      new THREE.PlaneGeometry(logoW, logoH),
+      new THREE.MeshBasicMaterial({ map: logoTex }),
+    );
+    logo.rotation.x = -Math.PI / 2;      // lie flat on the grille
+    logo.position.set(0, grilleY + 0.001, -radius * 0.45);   // front area of the baffle disc
+    group.add(logo);
+  }
 
   // Driver cone — visible JUST under the grille so you can see the cone
   // behind the perforated metal. For coax there's a smaller tweeter in

@@ -1637,6 +1637,7 @@ function speakerCabinetDims(modelUrl) {
       shape: def.physical?.shape || 'round',
       driverInches: def.physical?.driver_size_inches ?? 6,
       isCoax: /coaxial|co-axial/i.test(def.model || ''),
+      isAmperes: /amperes/i.test(def.manufacturer || '') || /^amperes-/i.test(def.id || ''),
     };
   }
 
@@ -1741,7 +1742,7 @@ function addDriverDetails(parent, type, w, h, grillZ) {
 // direction. Earlier revisions put the baffle at −Z — the "butt" ended
 // up firing at the audience.
 function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
-  const { w, h, shape, driverInches, isCoax } = dims;
+  const { w, h, shape, driverInches, isCoax, isAmperes } = dims;
   const radius = w / 2;
   const depth = h;                    // front-to-back cabinet depth
   const isSquare = shape === 'square';
@@ -1832,6 +1833,22 @@ function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
     );
     tweeter.position.z = grilleZ - 0.001;
     encl.add(tweeter);
+  }
+
+  // Amperes brand badge on the grille — same texture as the scoreboard
+  // so the cabinet visually matches its spec sheet and preview.
+  if (isAmperes) {
+    const logoTex = getAmperesLogoTexture();
+    const logoW = (isSquare ? w : radius * 2) * 0.26;
+    const logoH = logoW * 0.75;        // amperes-logo.png ≈ 4:3
+    const logo = new THREE.Mesh(
+      new THREE.PlaneGeometry(logoW, logoH),
+      new THREE.MeshBasicMaterial({ map: logoTex }),
+    );
+    // Low on the grille, slightly in front of the grille plane so it
+    // isn't z-fighting with it.
+    logo.position.set(0, -(isSquare ? w : radius * 2) * 0.30, grilleZ + 0.001);
+    encl.add(logo);
   }
 
   encl.userData.acoustic_material = 'speaker_cabinet';
