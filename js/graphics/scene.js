@@ -1605,6 +1605,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
 
   // Solid stadium bowl structures (LatheGeometry) if the preset provides stadiumStructure.
   rebuildBowlStructure(room);
+  rebuildMultiLevelStructure(room);
 
   if (isFirst && controls) {
     const d3 = Math.max(w, h, d);
@@ -2815,6 +2816,186 @@ function rebuildStadiumHeatmap(room, sources) {
 // Revolved per-sector by LatheGeometry with end caps at both phi boundaries
 // → each of the 4 quadrants becomes a single watertight solid that includes
 // the lower bowl, concourse, upper bowl, and back wall support as one piece.
+// Multi-level shopping-mall architecture. Renders N floor slabs (with an
+// atrium cutout punched through every slab), a grid of structural columns
+// running the full building height, and escalator ramps between levels.
+// Driven by room.multiLevelStructure — built for the Pavilion 2 preset.
+function rebuildMultiLevelStructure(room) {
+  const mls = room.multiLevelStructure;
+  if (!mls) return;
+
+  const concreteMat = new THREE.MeshStandardMaterial({
+    color: 0x9a9c9f, roughness: 0.82, metalness: 0.03,
+    side: THREE.DoubleSide,
+  });
+  const slabEdgeMat = new THREE.MeshStandardMaterial({
+    color: 0x7e8286, roughness: 0.78, metalness: 0.05,
+  });
+  const escalatorMat = new THREE.MeshStandardMaterial({
+    color: 0x34393f, roughness: 0.4, metalness: 0.85,
+  });
+  const escalatorStepMat = new THREE.MeshStandardMaterial({
+    color: 0x52575e, roughness: 0.55, metalness: 0.75,
+  });
+  const railingMat = new THREE.MeshStandardMaterial({
+    color: 0x2b2e34, roughness: 0.35, metalness: 0.9,
+  });
+  const glassRailMat = new THREE.MeshStandardMaterial({
+    color: 0xaaccff, roughness: 0.1, metalness: 0.2,
+    transparent: true, opacity: 0.18,
+    side: THREE.DoubleSide,
+  });
+
+  // -------- Build the 2D Shape for a footprint−atrium cross-section ---
+  function buildFootprintShape(footprint, atrium) {
+    const shape = new THREE.Shape();
+    shape.moveTo(footprint[0].x, footprint[0].y);
+    for (let i = 1; i < footprint.length; i++) {
+      shape.lineTo(footprint[i].x, footprint[i].y);
+    }
+    shape.closePath();
+    if (atrium && atrium.length >= 3) {
+      const hole = new THREE.Path();
+      hole.moveTo(atrium[0].x, atrium[0].y);
+      for (let i = 1; i < atrium.length; i++) {
+        hole.lineTo(atrium[i].x, atrium[i].y);
+      }
+      hole.closePath();
+      shape.holes.push(hole);
+    }
+    return shape;
+  }
+
+  // -------- Floor slabs (one per level above the ground) --------------
+  for (const lv of (mls.levels || [])) {
+    const shape = buildFootprintShape(mls.footprint, mls.atrium);
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: lv.thickness_m ?? 0.4,
+      bevelEnabled: false,
+      steps: 1,
+    });
+    // Shape is authored in (x, y) with +y = world depth. Rotating the
+    // geometry by +π/2 around X maps shape's (x, y) → world (x, y_world = 0, z_world = y) and extrusion direction → downward (-Y world). Position the
+    // mesh at slab_z, top-of-slab — extrusion then hangs the slab
+    // below that, matching "slab_z is the floor of the level above."
+    geo.rotateX(Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, concreteMat);
+    mesh.position.y = lv.slab_z;
+    mesh.userData.acoustic_material = 'concrete';
+    mesh.userData.tag = `slab_level_${lv.index}`;
+    roomGroup.add(mesh);
+
+    // Glass guardrail ring around the atrium opening at this level — a
+    // ribbon of translucent glass 1.1 m tall above the slab top.
+    if (mls.atrium && mls.atrium.length >= 3) {
+      const railH = 1.1;
+      for (let i = 0; i < mls.atrium.length; i++) {
+        const a = mls.atrium[i];
+        const b = mls.atrium[(i + 1) % mls.atrium.length];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        const segGeo = new THREE.BoxGeometry(len, railH, 0.02);
+        const seg = new THREE.Mesh(segGeo, glassRailMat);
+        seg.position.set((a.x + b.x) / 2, lv.slab_z + railH / 2, (a.y + b.y) / 2);
+        seg.rotation.y = -Math.atan2(dy, dx);
+        seg.userData.acoustic_material = 'glass';
+        seg.userData.tag = `atrium_rail_${lv.index}`;
+        roomGroup.add(seg);
+        // Top handrail chrome bar
+        const topRail = new THREE.Mesh(
+          new THREE.BoxGeometry(len, 0.05, 0.08),
+          railingMat,
+        );
+        topRail.position.set((a.x + b.x) / 2, lv.slab_z + railH + 0.03, (a.y + b.y) / 2);
+        topRail.rotation.y = -Math.atan2(dy, dx);
+        roomGroup.add(topRail);
+      }
+    }
+  }
+
+  // -------- Structural columns (full-height cylinders) ---------------
+  const colSegments = 16;
+  for (const col of (mls.columns || [])) {
+    const h = (col.top_z ?? 0) - (col.base_z ?? 0);
+    if (h <= 0) continue;
+    const geo = new THREE.CylinderGeometry(col.radius_m, col.radius_m, h, colSegments);
+    const mesh = new THREE.Mesh(geo, concreteMat);
+    mesh.position.set(col.x, (col.base_z + col.top_z) / 2, col.y);
+    mesh.userData.acoustic_material = 'concrete';
+    mesh.userData.tag = 'column';
+    roomGroup.add(mesh);
+    // Capital — square plate on top, visual detail
+    const capH = 0.15;
+    const cap = new THREE.Mesh(
+      new THREE.BoxGeometry(col.radius_m * 2.2, capH, col.radius_m * 2.2),
+      slabEdgeMat,
+    );
+    cap.position.set(col.x, col.top_z - capH / 2 - 0.02, col.y);
+    roomGroup.add(cap);
+  }
+
+  // -------- Escalator ramps (angled steel boxes) ---------------------
+  for (const esc of (mls.escalators || [])) {
+    const dx = esc.top.x - esc.base.x;
+    const dy = esc.top.y - esc.base.y;
+    const dz = (esc.top_z ?? 0) - (esc.base_z ?? 0);
+    const horizLen = Math.hypot(dx, dy);
+    const totalLen = Math.hypot(horizLen, dz);
+    if (totalLen < 0.1) continue;
+    const width = esc.width_m ?? 1.2;
+    // Ramp body — long box along the incline.
+    const rampGeo = new THREE.BoxGeometry(totalLen, 0.25, width);
+    const ramp = new THREE.Mesh(rampGeo, escalatorMat);
+    const midX = (esc.base.x + esc.top.x) / 2;
+    const midY = (esc.base.y + esc.top.y) / 2;
+    const midZ = (esc.base_z + esc.top_z) / 2;
+    ramp.position.set(midX, midZ, midY);
+    // Orient: the box's long axis runs from base to top. Compute
+    // yaw (around Y) and pitch (around local Z after the yaw) so the
+    // long axis points from base to top.
+    const yaw = Math.atan2(-dy, dx);       // world y is depth → negate for Three.js
+    const pitch = Math.atan2(dz, horizLen);
+    ramp.rotation.set(0, yaw, pitch);
+    ramp.userData.acoustic_material = 'steel';
+    ramp.userData.tag = 'escalator';
+    roomGroup.add(ramp);
+
+    // Step treads on the incline — a row of small dark boxes to hint
+    // at the moving-stair texture.
+    const nSteps = Math.max(4, Math.floor(totalLen / 0.4));
+    for (let s = 0; s < nSteps; s++) {
+      const t = (s + 0.5) / nSteps;
+      const step = new THREE.Mesh(
+        new THREE.BoxGeometry(totalLen / nSteps * 0.85, 0.06, width * 0.9),
+        escalatorStepMat,
+      );
+      step.position.set(
+        esc.base.x + dx * t,
+        esc.base_z + dz * t + 0.14,
+        esc.base.y + dy * t,
+      );
+      step.rotation.set(0, yaw, pitch);
+      roomGroup.add(step);
+    }
+
+    // Hand rails on each side of the escalator — chromed bars.
+    const railYOff = width / 2 + 0.04;
+    for (const side of [-1, 1]) {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(totalLen, 0.06, 0.04),
+        railingMat,
+      );
+      rail.position.set(
+        midX + Math.sin(yaw) * side * railYOff,
+        midZ + 0.55,
+        midY + Math.cos(yaw) * side * railYOff,
+      );
+      rail.rotation.set(0, yaw, pitch);
+      roomGroup.add(rail);
+    }
+  }
+}
+
 // Vomitory gaps between quadrants are enclosed separately with tunnel ceilings.
 //
 // All meshes tagged userData.acoustic_material = 'concrete' for ray tracing.
