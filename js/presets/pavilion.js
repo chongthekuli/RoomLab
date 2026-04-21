@@ -262,16 +262,11 @@ zones.push({
 });
 
 // Ceiling-speaker grid. Amperes CS610B on 10 m centres on L0 (busiest
-// concourse), 12 m centres on L1–L3 (quieter retail). Speakers flush-
-// mount into the suspended plaster ceiling (3.0 m above each level's
-// finished floor) — grille sits in the plaster plane, back-can hides
-// in the plenum above. This puts them ~1.3 m above shopper head level
-// (much closer than the earlier "hang below the slab" placement, which
-// parked them 5.3 m up and was throwing off SPL / STI coverage).
-const CEILING_HEIGHT_M = 3.0;
+// concourse), 12 m centres on L1–L3 (quieter retail). Speakers hang
+// ~0.1 m below the slab above.
 const sources = [];
 for (let lv = 0; lv < nLevels; lv++) {
-  const ceilingZ = lv * levelHeight + CEILING_HEIGHT_M;
+  const ceilingZ = (lv + 1) * levelHeight - slabThickness - 0.10;
   const grid = lv === 0 ? 10 : 12;
   const groupId = lv === 0 ? 'A' : lv === 1 ? 'B' : lv === 2 ? 'C' : 'D';
   for (let x = grid * 0.5; x < W; x += grid) {
@@ -326,7 +321,6 @@ export default {
     footprint,
     atrium,
     levels,
-    ceilingHeight_m: CEILING_HEIGHT_M,
     columns,
     escalators,
     escalatorOpenings,
