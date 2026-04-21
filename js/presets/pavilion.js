@@ -61,27 +61,115 @@ for (let i = 1; i < nLevels; i++) {
   });
 }
 
-// Escalator scissor-pair flanking the atrium at every level pair.
+// Escalators — 30° incline (real escalator standard). horizontal run =
+// 5.8 / tan(30°) ≈ 10 m. Tops land AT the atrium edge where each slab
+// already has a hole, so the escalator physically emerges from the
+// atrium void. Extra escalator openings (see `escalatorOpenings`)
+// punch rectangular holes in the slabs at each upper-level landing so
+// the stairs aren't "sealed" by the ceiling above.
 const escalators = [];
 for (let lv = 0; lv < nLevels - 1; lv++) {
   const z0 = lv * levelHeight;
   const z1 = (lv + 1) * levelHeight;
-  // North-side (up-side runs atrium NE → NW)
+  // North-side up-escalator (base in walkway north of atrium, top at N edge).
   escalators.push({
     from_level: lv, to_level: lv + 1,
-    base: { x: atriumX + atriumW + 2, y: atriumY + atriumD + 2 },
-    top:  { x: atriumX + atriumW / 2 + 3, y: atriumY + atriumD + 2 },
+    base: { x: atriumX + atriumW * 0.65, y: atriumY + atriumD + 10 },
+    top:  { x: atriumX + atriumW * 0.65, y: atriumY + atriumD + 0.2 },
     base_z: z0, top_z: z1,
     width_m: 1.2,
   });
-  // South-side (scissor pair, opposite direction)
+  // South-side up-escalator (scissor pair, offset toward atrium SW).
   escalators.push({
     from_level: lv, to_level: lv + 1,
-    base: { x: atriumX - 2, y: atriumY - 2 },
-    top:  { x: atriumX + atriumW / 2 - 3, y: atriumY - 2 },
+    base: { x: atriumX + atriumW * 0.35, y: atriumY - 10 },
+    top:  { x: atriumX + atriumW * 0.35, y: atriumY - 0.2 },
     base_z: z0, top_z: z1,
     width_m: 1.2,
   });
+}
+
+// Slab cut-outs aligned with escalator landings so each slab has an
+// opening at the level's top step. Scene.js pushes these as additional
+// holes on the slab's THREE.Shape alongside the atrium.
+const escalatorOpenings = [];
+for (let lv = 1; lv < nLevels; lv++) {
+  // Slab at level `lv` receives openings for any escalator whose
+  // to_level === lv. Rectangle 3 m along the escalator run × 2 m wide,
+  // centred on the escalator top.
+  for (const esc of escalators) {
+    if (esc.to_level !== lv) continue;
+    const padRun = 1.5, padWidth = 1.0;
+    const { top } = esc;
+    escalatorOpenings.push({
+      slab_level: lv,
+      x1: top.x - padWidth, y1: top.y - padRun,
+      x2: top.x + padWidth, y2: top.y + padRun,
+    });
+  }
+}
+
+// ---- Shops along the perimeter of every level -----------------------
+// Each shop is a bay running 6 m deep from the exterior wall. Facade
+// faces the walkway with a storefront-glass pane and a 3 m shutter
+// opening centred on the bay. Brand names rotate through a list of
+// real Malaysian-mall tenants so the visual reads like an actual
+// concourse rather than abstract geometry.
+const BRANDS = [
+  'H&M', 'Uniqlo', 'Zara', 'Starbucks', 'Apple', 'Samsung', 'Nike', 'Adidas',
+  'Charles & Keith', 'Pomelo', 'Sephora', 'MAC', 'Chatime', 'Coach',
+  'Michael Kors', 'Timberland', 'Padini', 'Bata', 'MNG', 'Watsons',
+  'Guardian', 'Sushi King', 'KFC', 'Pizza Hut', 'Secret Recipe',
+  'OldTown', 'Mr. DIY', 'Popular', 'Kinokuniya', 'Toys R Us',
+  'Aldo', 'Lovisa', 'Pandora', 'Swatch',
+];
+const SHOP_DEPTH = 6;
+const SHUTTER_WIDTH = 3.0;
+
+function makeShopsAlongEdge(levelIndex, side) {
+  // side: 'south' (y low), 'north' (y high), 'west' (x low), 'east' (x high)
+  const shops = [];
+  let brandIdx = (levelIndex * 13 + side.charCodeAt(0)) % BRANDS.length;
+  const bayWidth = 7.0;
+  if (side === 'south' || side === 'north') {
+    const y1 = side === 'south' ? 0 : D - SHOP_DEPTH;
+    const y2 = side === 'south' ? SHOP_DEPTH : D;
+    for (let x = 0; x + bayWidth <= W; x += bayWidth) {
+      if (x + bayWidth > W - 0.1) break;
+      shops.push({
+        level: levelIndex,
+        brand: BRANDS[brandIdx++ % BRANDS.length],
+        side, x1: x, y1, x2: x + bayWidth, y2,
+        shutter_start: x + (bayWidth - SHUTTER_WIDTH) / 2,
+        shutter_width: SHUTTER_WIDTH,
+      });
+    }
+  } else {
+    // West / east run only between the south and north shop strips.
+    const x1 = side === 'west' ? 0 : W - SHOP_DEPTH;
+    const x2 = side === 'west' ? SHOP_DEPTH : W;
+    for (let y = SHOP_DEPTH; y + bayWidth <= D - SHOP_DEPTH; y += bayWidth) {
+      if (y + bayWidth > D - SHOP_DEPTH - 0.1) break;
+      shops.push({
+        level: levelIndex,
+        brand: BRANDS[brandIdx++ % BRANDS.length],
+        side, x1, y1: y, x2, y2: y + bayWidth,
+        shutter_start: y + (bayWidth - SHUTTER_WIDTH) / 2,
+        shutter_width: SHUTTER_WIDTH,
+      });
+    }
+  }
+  return shops;
+}
+
+const shops = [];
+for (let lv = 0; lv < nLevels; lv++) {
+  shops.push(
+    ...makeShopsAlongEdge(lv, 'south'),
+    ...makeShopsAlongEdge(lv, 'north'),
+    ...makeShopsAlongEdge(lv, 'west'),
+    ...makeShopsAlongEdge(lv, 'east'),
+  );
 }
 
 // Ceiling-speaker grid. Amperes CS610B on 10 m centres on L0 (busiest
@@ -146,6 +234,8 @@ export default {
     levels,
     columns,
     escalators,
+    escalatorOpenings,
+    shops,
   },
   zones: [],
   sources,

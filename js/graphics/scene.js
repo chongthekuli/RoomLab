@@ -2852,28 +2852,46 @@ function rebuildMultiLevelStructure(room) {
   });
 
   // -------- Build the 2D Shape for a footprint−atrium cross-section ---
-  function buildFootprintShape(footprint, atrium) {
+  // Outer contour is CCW (ExtrudeGeometry convention); holes must wind
+  // CW. Earcut fails cleanly on bad winding so we check + reverse as
+  // needed. The slab shape accepts extra rectangular holes for
+  // escalator top-landings so the stairs actually break through the
+  // slab above them.
+  function buildFootprintShape(footprint, atrium, extraHoles) {
     const shape = new THREE.Shape();
     shape.moveTo(footprint[0].x, footprint[0].y);
     for (let i = 1; i < footprint.length; i++) {
       shape.lineTo(footprint[i].x, footprint[i].y);
     }
     shape.closePath();
-    if (atrium && atrium.length >= 3) {
-      const hole = new THREE.Path();
-      hole.moveTo(atrium[0].x, atrium[0].y);
-      for (let i = 1; i < atrium.length; i++) {
-        hole.lineTo(atrium[i].x, atrium[i].y);
+    const pushHole = (pts) => {
+      if (!pts || pts.length < 3) return;
+      const path = new THREE.Path();
+      path.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) path.lineTo(pts[i].x, pts[i].y);
+      path.closePath();
+      // ExtrudeGeometry wants holes CW (outer is CCW). Reverse if
+      // caller supplied a CCW hole by mistake.
+      if (!THREE.ShapeUtils.isClockWise(path.curves.map(c => c.v2 ?? c.v1))) {
+        path.curves.reverse();
       }
-      hole.closePath();
-      shape.holes.push(hole);
-    }
+      shape.holes.push(path);
+    };
+    if (atrium && atrium.length >= 3) pushHole(atrium);
+    if (extraHoles) for (const h of extraHoles) pushHole(h);
     return shape;
   }
 
   // -------- Floor slabs (one per level above the ground) --------------
   for (const lv of (mls.levels || [])) {
-    const shape = buildFootprintShape(mls.footprint, mls.atrium);
+    // Collect escalator openings that land on THIS slab (to_level matches).
+    const extraHoles = (mls.escalatorOpenings || [])
+      .filter(o => o.slab_level === lv.index)
+      .map(o => [
+        { x: o.x1, y: o.y1 }, { x: o.x2, y: o.y1 },
+        { x: o.x2, y: o.y2 }, { x: o.x1, y: o.y2 },
+      ]);
+    const shape = buildFootprintShape(mls.footprint, mls.atrium, extraHoles);
     const geo = new THREE.ExtrudeGeometry(shape, {
       depth: lv.thickness_m ?? 0.4,
       bevelEnabled: false,
@@ -2997,6 +3015,173 @@ function rebuildMultiLevelStructure(room) {
       );
       rail.rotation.set(0, yaw, pitch);
       roomGroup.add(rail);
+    }
+  }
+
+  // -------- Shop bays along each level's perimeter -------------------
+  // Per-shop: two side dividers (gypsum), a storefront glass panel on
+  // the front edge with a shutter opening cut out, and a brand sign
+  // above the shutter. Materials tagged for the precision ray tracer
+  // via userData.acoustic_material — gypsum + glass have very
+  // different absorption coefficients so the mall's RT60 reads right.
+  const gypsumMat = new THREE.MeshStandardMaterial({
+    color: 0xf3f0ea, roughness: 0.88, metalness: 0.0,
+  });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0xb9d4e6, roughness: 0.08, metalness: 0.05,
+    transparent: true, opacity: 0.32, side: THREE.DoubleSide,
+  });
+  const signBackingMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1d22, roughness: 0.55, metalness: 0.25,
+  });
+
+  const DIVIDER_T = 0.1;      // 100 mm stud wall
+  const GLASS_T = 0.04;       // 40 mm tempered storefront glass
+  const SIGN_H = 0.9;         // 900 mm tall brand sign band
+  const WALL_H = 5.4;         // 5.8 − 0.4 slab thickness
+
+  for (const shop of (mls.shops || [])) {
+    const lvZ = shop.level * 5.8;
+    const wallBottom = lvZ + 0.01;
+    const wallTop = lvZ + WALL_H;
+    const wallMidZ = (wallBottom + wallTop) / 2;
+    const wallCenterH = WALL_H;
+
+    // Side dividers — two short walls perpendicular to the front edge.
+    // For south/north strips they run along +y; for east/west along +x.
+    const isHoriz = shop.side === 'south' || shop.side === 'north';
+    const divDepth = shop.y2 - shop.y1;   // depth along Y for N/S shops
+    const divWidth = shop.x2 - shop.x1;   // width along X
+    if (isHoriz) {
+      // Side dividers at x=shop.x1 and shop.x2, extending the full bay depth
+      for (const xPos of [shop.x1, shop.x2]) {
+        const div = new THREE.Mesh(
+          new THREE.BoxGeometry(DIVIDER_T, wallCenterH, divDepth),
+          gypsumMat,
+        );
+        div.position.set(xPos, wallMidZ, (shop.y1 + shop.y2) / 2);
+        div.userData.acoustic_material = 'gypsum-board';
+        div.userData.tag = 'shop_divider';
+        roomGroup.add(div);
+      }
+    } else {
+      // Side dividers at y=shop.y1 and shop.y2, full bay width
+      for (const yPos of [shop.y1, shop.y2]) {
+        const div = new THREE.Mesh(
+          new THREE.BoxGeometry(divWidth, wallCenterH, DIVIDER_T),
+          gypsumMat,
+        );
+        div.position.set((shop.x1 + shop.x2) / 2, wallMidZ, yPos);
+        div.userData.acoustic_material = 'gypsum-board';
+        div.userData.tag = 'shop_divider';
+        roomGroup.add(div);
+      }
+    }
+
+    // Storefront glass with a shutter opening. Split into two glass
+    // panels flanking the shutter; the shutter itself is an open gap.
+    const frontY = shop.side === 'south' ? shop.y2
+                   : shop.side === 'north' ? shop.y1
+                   : null;
+    const frontX = shop.side === 'west' ? shop.x2
+                   : shop.side === 'east' ? shop.x1
+                   : null;
+    const shutS = shop.shutter_start;
+    const shutE = shutS + shop.shutter_width;
+    const glassHeight = WALL_H - SIGN_H;
+    const glassMidZ = lvZ + glassHeight / 2 + 0.01;
+
+    if (isHoriz) {
+      // Left glass panel: from shop.x1 → shutS
+      const leftW = Math.max(0, shutS - shop.x1);
+      if (leftW > 0.01) {
+        const g = new THREE.Mesh(
+          new THREE.BoxGeometry(leftW, glassHeight, GLASS_T),
+          glassMat,
+        );
+        g.position.set((shop.x1 + shutS) / 2, glassMidZ, frontY);
+        g.userData.acoustic_material = 'glass';
+        g.userData.tag = 'shop_storefront';
+        roomGroup.add(g);
+      }
+      // Right glass panel: shutE → shop.x2
+      const rightW = Math.max(0, shop.x2 - shutE);
+      if (rightW > 0.01) {
+        const g = new THREE.Mesh(
+          new THREE.BoxGeometry(rightW, glassHeight, GLASS_T),
+          glassMat,
+        );
+        g.position.set((shutE + shop.x2) / 2, glassMidZ, frontY);
+        g.userData.acoustic_material = 'glass';
+        g.userData.tag = 'shop_storefront';
+        roomGroup.add(g);
+      }
+    } else {
+      const leftW = Math.max(0, shutS - shop.y1);
+      if (leftW > 0.01) {
+        const g = new THREE.Mesh(
+          new THREE.BoxGeometry(GLASS_T, glassHeight, leftW),
+          glassMat,
+        );
+        g.position.set(frontX, glassMidZ, (shop.y1 + shutS) / 2);
+        g.userData.acoustic_material = 'glass';
+        g.userData.tag = 'shop_storefront';
+        roomGroup.add(g);
+      }
+      const rightW = Math.max(0, shop.y2 - shutE);
+      if (rightW > 0.01) {
+        const g = new THREE.Mesh(
+          new THREE.BoxGeometry(GLASS_T, glassHeight, rightW),
+          glassMat,
+        );
+        g.position.set(frontX, glassMidZ, (shutE + shop.y2) / 2);
+        g.userData.acoustic_material = 'glass';
+        g.userData.tag = 'shop_storefront';
+        roomGroup.add(g);
+      }
+    }
+
+    // Brand sign band above the storefront — dark backing box with a
+    // canvas texture plane on the front face for the brand name.
+    const signMidZ = lvZ + glassHeight + SIGN_H / 2 + 0.01;
+    const signFullW = isHoriz ? divWidth : divWidth;
+    const signFullD = isHoriz ? 0.08 : 0.08;
+    if (isHoriz) {
+      const back = new THREE.Mesh(
+        new THREE.BoxGeometry(divWidth, SIGN_H, signFullD),
+        signBackingMat,
+      );
+      back.position.set((shop.x1 + shop.x2) / 2, signMidZ, frontY);
+      back.userData.acoustic_material = 'gypsum-board';
+      back.userData.tag = 'shop_sign';
+      roomGroup.add(back);
+      const tex = getShopBrandTexture(shop.brand);
+      const sign = new THREE.Mesh(
+        new THREE.PlaneGeometry(divWidth * 0.92, SIGN_H * 0.78),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true }),
+      );
+      const frontOffset = (shop.side === 'south' ? 1 : -1) * (signFullD / 2 + 0.002);
+      sign.position.set((shop.x1 + shop.x2) / 2, signMidZ, frontY + frontOffset);
+      sign.rotation.y = shop.side === 'south' ? 0 : Math.PI;
+      roomGroup.add(sign);
+    } else {
+      const back = new THREE.Mesh(
+        new THREE.BoxGeometry(signFullD, SIGN_H, divWidth),
+        signBackingMat,
+      );
+      back.position.set(frontX, signMidZ, (shop.y1 + shop.y2) / 2);
+      back.userData.acoustic_material = 'gypsum-board';
+      back.userData.tag = 'shop_sign';
+      roomGroup.add(back);
+      const tex = getShopBrandTexture(shop.brand);
+      const sign = new THREE.Mesh(
+        new THREE.PlaneGeometry(divWidth * 0.92, SIGN_H * 0.78),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true }),
+      );
+      const frontOffset = (shop.side === 'west' ? 1 : -1) * (signFullD / 2 + 0.002);
+      sign.position.set(frontX + frontOffset, signMidZ, (shop.y1 + shop.y2) / 2);
+      sign.rotation.y = shop.side === 'west' ? Math.PI / 2 : -Math.PI / 2;
+      roomGroup.add(sign);
     }
   }
 }
@@ -3268,6 +3453,43 @@ function getAmperesLogoTexture() {
 // dark lower shadow + light upper highlight for the 3D embossed cue).
 // Used on ceiling-speaker grilles, separate from the full-logo PNG
 // (which lives on the arena scoreboard).
+// Per-brand canvas-texture cache for mall storefront signs. One
+// CanvasTexture per unique brand name; shared across every shop
+// showing that brand. The sign reads as a retail facade plate —
+// dark backing with the brand word in a bright accent colour.
+const _shopBrandTexCache = new Map();
+function getShopBrandTexture(brand) {
+  if (_shopBrandTexCache.has(brand)) return _shopBrandTexCache.get(brand);
+  const W = 512, H = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  // Dark translucent backing painted into the texture so the sign reads
+  // against any wall colour behind it.
+  ctx.fillStyle = 'rgba(15, 18, 24, 0.92)';
+  ctx.fillRect(0, 0, W, H);
+  // Accent-colour brand word. Pick a deterministic warm-tone per brand
+  // so the concourse looks varied without being random on every reload.
+  const hash = [...brand].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
+  const hues = ['#ffcc5a', '#ff6b6b', '#74d0ff', '#a3d977', '#f07bd6', '#ffa95a', '#b08bff'];
+  const color = hues[Math.abs(hash) % hues.length];
+  const fontSize = brand.length > 12 ? 44 : 64;
+  ctx.font = `bold ${fontSize}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Slight embossed effect.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillText(brand, W / 2 + 2, H / 2 + 2);
+  ctx.fillStyle = color;
+  ctx.fillText(brand, W / 2, H / 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  _shopBrandTexCache.set(brand, tex);
+  return tex;
+}
+
 let _amperesTextTex = null;
 function getAmperesTextTexture() {
   if (_amperesTextTex) return _amperesTextTex;
