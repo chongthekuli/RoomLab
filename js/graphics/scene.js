@@ -1257,10 +1257,10 @@ function rebuildAudience() {
   // Geometry: body = short box (shirt), head = sphere (skin). Both translated
   // so the feet sit at y=0 on the zone surface.
   if (!audienceBodyGeo) {
-    audienceBodyGeo = new THREE.BoxGeometry(0.42, 0.62, 0.32);
-    audienceBodyGeo.translate(0, 0.31, 0);
-    audienceHeadGeo = new THREE.SphereGeometry(0.13, 8, 6);
-    audienceHeadGeo.translate(0, 0.78, 0);
+    audienceBodyGeo = new THREE.BoxGeometry(0.42, 1.40, 0.28);
+    audienceBodyGeo.translate(0, 0.70, 0);
+    audienceHeadGeo = new THREE.SphereGeometry(0.125, 10, 8);
+    audienceHeadGeo.translate(0, 1.525, 0);
   }
 
   const placements = [];
