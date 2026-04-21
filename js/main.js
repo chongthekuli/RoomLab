@@ -189,7 +189,15 @@ async function boot() {
 
 boot().catch(err => {
   console.error('RoomLAB boot failed', err);
-  const vp = document.getElementById('view-2d') || document.getElementById('view-3d');
+  // Write the error to the VISIBLE viewport — if we wrote to the first
+  // one we found (view-2d) when the user was on the 3D tab, the
+  // "Loading 3D view…" placeholder would sit there forever while the
+  // real error hid inside the unseen 2D tab. Check the visible one
+  // first; fall back to anything we can find.
+  const visible = [...document.querySelectorAll('.viewport-view')].find(el => !el.hidden);
+  const vp = visible
+    || document.getElementById('view-3d')
+    || document.getElementById('view-2d');
   if (vp) vp.innerHTML = `<div class="viewport-2d"><div class="vp-header">Startup error: ${err.message}</div></div>`;
 });
 

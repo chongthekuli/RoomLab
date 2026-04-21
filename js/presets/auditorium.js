@@ -15,7 +15,7 @@
 
 import {
   SPKLA, rectVerts, generateTieredBowl, generateCenterLineArrayCluster,
-} from './_shared.js';
+} from './shared.js';
 
 const cx = 30, cy = 30;
 const lowerBowl = { r_in: 20, r_out: 24, floor_z: 0,    tier_heights_m: [1.0, 1.45, 1.9, 2.35, 2.8, 3.25] };

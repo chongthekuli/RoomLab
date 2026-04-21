@@ -1,6 +1,6 @@
 // Small-arena chamber hall with 4-corner audience wings around a central
 // stage. 20 m hexadecagonal plan, domed roof at 7 m eaves + 1.5 m rise.
-import { SPK12, rectVerts, hexagonVerts } from './_shared.js';
+import { SPK12, rectVerts, hexagonVerts } from './shared.js';
 
 export default {
   label: 'Chamber (small arena)',

@@ -1,6 +1,6 @@
 // Treated recording studio — heavy absorption on walls + ceiling giving
 // a very dead, tight response suitable for critical mixing.
-import { SPK6 } from './_shared.js';
+import { SPK6 } from './shared.js';
 
 export default {
   label: 'Studio (dead)',

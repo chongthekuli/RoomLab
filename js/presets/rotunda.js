@@ -1,5 +1,5 @@
 // Small round domed room — 4 compact speakers on the walls.
-import { SPK6 } from './_shared.js';
+import { SPK6 } from './shared.js';
 
 export default {
   label: 'Rotunda (round + dome)',

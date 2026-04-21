@@ -1,6 +1,6 @@
 // Classical recital hall — 12 × 18 m shoebox with a slight domed rise,
 // stage at front, tiered stalls.
-import { SPK12, rectVerts } from './_shared.js';
+import { SPK12, rectVerts } from './shared.js';
 
 export default {
   label: 'Recital hall',

@@ -1,6 +1,6 @@
 // Live-music venue — 15 × 20 m rectangle, stage front, line-array mains
 // flanking the stage + a centre-fill 12" driver.
-import { SPK12, SPKLA, rectVerts } from './_shared.js';
+import { SPK12, SPKLA, rectVerts } from './shared.js';
 
 export default {
   label: 'Live venue',

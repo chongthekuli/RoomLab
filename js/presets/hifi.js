@@ -1,6 +1,6 @@
 // Domestic hi-fi listening room — small rectangular, two bookshelf
 // monitors toed in toward the listening seat.
-import { SPK12 } from './_shared.js';
+import { SPK12 } from './shared.js';
 
 export default {
   label: 'Hi-fi room',

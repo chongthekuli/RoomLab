@@ -1,5 +1,5 @@
 // Rectangular classroom — two ceiling-mount 6" speakers firing down.
-import { SPK6 } from './_shared.js';
+import { SPK6 } from './shared.js';
 
 export default {
   label: 'Classroom',

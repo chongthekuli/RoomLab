@@ -1,5 +1,5 @@
 // Flat-roof octagonal hall, 4 directional speakers near the walls.
-import { SPK12 } from './_shared.js';
+import { SPK12 } from './shared.js';
 
 export default {
   label: 'Octagonal hall',

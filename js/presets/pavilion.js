@@ -11,7 +11,7 @@
 // Walkthrough for this preset is currently limited to the ground floor —
 // escalator elevation transitions are the Phase 2 upgrade.
 
-import { SPK_AMPERES_CS610B } from './_shared.js';
+import { SPK_AMPERES_CS610B } from './shared.js';
 
 const W = 80, D = 40;
 const levelHeight = 5.8;
