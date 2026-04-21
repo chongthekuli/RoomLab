@@ -463,9 +463,16 @@ function onSpeakerClick(e) {
   for (const h of hits) {
     const url = h.object.userData?.speakerModelUrl;
     if (!url) continue;
+    const srcIdx = h.object.userData?.sourceIndex;
     state.selectedSpeakerUrl = url;
     emit('speaker:selected');
-    document.dispatchEvent(new CustomEvent('viewport:show-speaker'));
+    // Jump the Sources side-panel to this speaker's config card so the
+    // user can immediately edit position, aim, power, group for this
+    // specific instance. Also carry a world position for any future
+    // consumers that want to tag it.
+    if (typeof srcIdx === 'number') {
+      emit('source:highlight', { index: srcIdx });
+    }
     return;
   }
 }
@@ -2146,50 +2153,66 @@ function rebuildSources() { shadowsNeedRefresh = true;
     }
   }
 
-  for (const src of expandSources(state.sources)) {
-    const outside = !isInsideRoom3D(src.position, state.room);
-    const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
-    const groupInt = groupHex ? parseInt(groupHex.slice(1), 16) : null;
+  // Walk state.sources directly so each enclosure can be tagged with its
+  // parent's index in state.sources (needed to jump the Sources side-panel
+  // to the clicked speaker's config card). For a line-array entry, every
+  // expanded element shares the same sourceIndex = the array's index in
+  // state.sources; clicking any element in the column scrolls to the same
+  // side-panel card.
+  for (let sourceIdx = 0; sourceIdx < state.sources.length; sourceIdx++) {
+    const original = state.sources[sourceIdx];
+    const elements = original.kind === 'line-array'
+      ? expandSources([original])
+      : [original];
+    for (const src of elements) {
+      const outside = !isInsideRoom3D(src.position, state.room);
+      const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
+      const groupInt = groupHex ? parseInt(groupHex.slice(1), 16) : null;
 
-    const encl = buildSpeakerEnclosure(src, groupInt, outside);
-    encl.position.set(src.position.x, src.position.z, src.position.y);
-    // Tag the enclosure + every child mesh so a raycast hit can recover the
-    // model URL (needed by the Speaker-workbench click-to-open handler).
-    encl.userData.speakerModelUrl = src.modelUrl;
-    encl.traverse(child => { child.userData.speakerModelUrl = src.modelUrl; });
+      const encl = buildSpeakerEnclosure(src, groupInt, outside);
+      encl.position.set(src.position.x, src.position.z, src.position.y);
+      // Tag the enclosure + every child mesh with modelUrl (for the Speaker-
+      // workbench raycast handler) AND sourceIndex (for the Sources side-
+      // panel jump handler).
+      encl.userData.speakerModelUrl = src.modelUrl;
+      encl.userData.sourceIndex = sourceIdx;
+      encl.traverse(child => {
+        child.userData.speakerModelUrl = src.modelUrl;
+        child.userData.sourceIndex = sourceIdx;
+      });
 
-    // Orient via lookAt so line-array boxes stay horizontally level even at
-    // non-zero pitch (unlike setFromUnitVectors which can roll the box).
-    const yaw = src.aim.yaw * Math.PI / 180;
-    const pitch = src.aim.pitch * Math.PI / 180;
-    const aimX = Math.sin(yaw) * Math.cos(pitch);
-    const aimY = Math.sin(pitch);
-    const aimZ = Math.cos(yaw) * Math.cos(pitch);
-    encl.lookAt(
-      encl.position.x + aimX,
-      encl.position.y + aimY,
-      encl.position.z + aimZ,
-    );
-    // Optional roll about the aim axis (rotation around local -Z which now
-    // points along the aim direction after lookAt).
-    if (src.aim.roll) {
-      encl.rotateOnAxis(new THREE.Vector3(0, 0, -1), src.aim.roll * Math.PI / 180);
-    }
-    sourcesGroup.add(encl);
-
-    // Group indicator ring on the floor below the speaker — helpful for
-    // ground-placed speakers. Skip for line-array elements (they all share
-    // one origin/hang, so N overlapping rings just make noise).
-    if (groupInt && !outside && !src.arrayId) {
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.35, 0.04, 8, 32),
-        new THREE.MeshBasicMaterial({ color: groupInt }),
+      // Orient via lookAt so line-array boxes stay horizontally level even at
+      // non-zero pitch (unlike setFromUnitVectors which can roll the box).
+      const yaw = src.aim.yaw * Math.PI / 180;
+      const pitch = src.aim.pitch * Math.PI / 180;
+      const aimX = Math.sin(yaw) * Math.cos(pitch);
+      const aimY = Math.sin(pitch);
+      const aimZ = Math.cos(yaw) * Math.cos(pitch);
+      encl.lookAt(
+        encl.position.x + aimX,
+        encl.position.y + aimY,
+        encl.position.z + aimZ,
       );
-      ring.rotation.x = Math.PI / 2;
-      ring.position.set(src.position.x, 0.02, src.position.y);
-      sourcesGroup.add(ring);
-    }
+      // Optional roll about the aim axis (rotation around local -Z which now
+      // points along the aim direction after lookAt).
+      if (src.aim.roll) {
+        encl.rotateOnAxis(new THREE.Vector3(0, 0, -1), src.aim.roll * Math.PI / 180);
+      }
+      sourcesGroup.add(encl);
 
+      // Group indicator ring on the floor below the speaker — helpful for
+      // ground-placed speakers. Skip for line-array elements (they all share
+      // one origin/hang, so N overlapping rings just make noise).
+      if (groupInt && !outside && !src.arrayId) {
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(0.35, 0.04, 8, 32),
+          new THREE.MeshBasicMaterial({ color: groupInt }),
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.position.set(src.position.x, 0.02, src.position.y);
+        sourcesGroup.add(ring);
+      }
+    }
   }
 
   rebuildAimLines();

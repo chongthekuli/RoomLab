@@ -23,6 +23,28 @@ export function mountSourcesPanel({ speakerCatalog }) {
   // Imported speaker added to the catalogue → re-render cards so the
   // Model dropdowns pick up the new entry.
   on('source:model_changed', render);
+  // Click-on-speaker in 3D viewport → scroll this panel to that speaker's
+  // config card and briefly pulse it so the user knows where they landed.
+  on('source:highlight', payload => focusSourceCard(payload?.index));
+}
+
+function focusSourceCard(idx) {
+  if (typeof idx !== 'number' || idx < 0) return;
+  const listRoot = document.getElementById('sources-list');
+  if (!listRoot) return;
+  const card = listRoot.querySelector(`.source-card[data-source-idx="${idx}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Strip any stale pulse so rapid repeats re-trigger the animation.
+  listRoot.querySelectorAll('.source-card.source-card-flash').forEach(c => {
+    c.classList.remove('source-card-flash');
+  });
+  // Force reflow before re-adding so the browser restarts the animation.
+  // Reading offsetHeight is the standard idiomatic way to flush pending
+  // style + restart a CSS animation on the same element.
+  void card.offsetHeight;
+  card.classList.add('source-card-flash');
+  setTimeout(() => card.classList.remove('source-card-flash'), 1400);
 }
 
 // ---- Master EQ — 10-band graphic EQ applied to the source signal before

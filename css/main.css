@@ -1242,6 +1242,33 @@ section h3 {
   margin-bottom: 0.55rem;
 }
 
+/* Flash pulse for the source card targeted by a 3D click-on-speaker. Warm
+   amber outline + soft inner glow fade across ~1.3 s so the user sees
+   exactly which card matches the cabinet they just tapped. */
+.source-card.source-card-flash {
+  animation: sourceCardFlash 1.3s ease-out;
+}
+@keyframes sourceCardFlash {
+  0% {
+    outline: 2px solid #ffcc55;
+    outline-offset: -1px;
+    box-shadow: 0 0 0 0 rgba(255, 204, 85, 0.7), var(--shadow-card);
+    background: rgba(255, 204, 85, 0.12);
+  }
+  70% {
+    outline: 2px solid #ffcc55;
+    outline-offset: -1px;
+    box-shadow: 0 0 0 8px rgba(255, 204, 85, 0), var(--shadow-card);
+    background: rgba(255, 204, 85, 0.06);
+  }
+  100% {
+    outline: 2px solid transparent;
+    outline-offset: -1px;
+    box-shadow: 0 0 0 0 rgba(255, 204, 85, 0), var(--shadow-card);
+    background: var(--bg-elev);
+  }
+}
+
 /* Zone groups — collapsible sections keyed on the first word of a zone's
    label. Arena preset yields 4 groups: Court · Concourse · Lower · Upper.
    Group header shows count + avg occupancy + bulk-edit controls. */
