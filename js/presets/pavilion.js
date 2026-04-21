@@ -224,7 +224,7 @@ const foodCourt = {
 // instanced human figures at that rate. The BOMBA PA coverage test
 // then happens with these shoppers present so STI / SPL readings
 // reflect a real operating mall, not an empty box.
-const SHOPPER_OCCUPANCY = 20;
+const SHOPPER_OCCUPANCY = 5;
 const zones = [];
 for (let lv = 0; lv < nLevels; lv++) {
   const z = lv * levelHeight + 0.02;                // just above slab top
