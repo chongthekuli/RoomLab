@@ -491,8 +491,30 @@ function drawWaterfall(canvas, def, onAxis) {
     }
     return 0;
   };
-  // Off-axis attenuation at (angle, freq) from the directivity grid.
-  const attAt = (angle_deg, hz) => interpolateAttenuation(dir, angle_deg, 0, hz);
+  // Off-axis attenuation at (angle, freq). `interpolateAttenuation` only
+  // accepts an exact band centre (it key-lookups attenuation_db[freq_hz]
+  // and returns 0 on miss), so frequencies between bands would otherwise
+  // show zero beaming. Here we find the two nearest available bands and
+  // log-blend the attenuations between them — the fix that finally made
+  // the HF end of the waterfall taper the way it should.
+  const bandHz = Object.keys(dir.attenuation_db).map(Number).sort((a, b) => a - b);
+  const attAt = (angle_deg, hz) => {
+    if (bandHz.length === 0) return 0;
+    if (hz <= bandHz[0]) return interpolateAttenuation(dir, angle_deg, 0, bandHz[0]);
+    if (hz >= bandHz[bandHz.length - 1]) {
+      return interpolateAttenuation(dir, angle_deg, 0, bandHz[bandHz.length - 1]);
+    }
+    for (let i = 0; i < bandHz.length - 1; i++) {
+      const lo = bandHz[i], hi = bandHz[i + 1];
+      if (hz >= lo && hz <= hi) {
+        const a = interpolateAttenuation(dir, angle_deg, 0, lo);
+        const b = interpolateAttenuation(dir, angle_deg, 0, hi);
+        const t = (Math.log2(hz) - Math.log2(lo)) / (Math.log2(hi) - Math.log2(lo));
+        return a + t * (b - a);
+      }
+    }
+    return 0;
+  };
 
   // Oblique projection — stronger tilt than the earlier draft so the
   // mesh reads as a proper 3D surface rather than a stacked-ribbon plot.
