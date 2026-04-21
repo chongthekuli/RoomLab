@@ -68,5 +68,25 @@ applyPresetToState('auditorium'); // re-apply
 assert(state.room.stadiumStructure.catwalkHeight_m !== -999,
   'stadiumStructure deep-cloned (no template mutation)');
 
+// Pavilion preset: multiLevelStructure must be copied and cleared through
+// presets cleanly — this was the "arena's audience carried into pavilion"
+// bug reported in commit 4708b53.
+applyPresetToState('auditorium');
+assert(state.zones.length > 0, 'Auditorium: zones populated (baseline)');
+applyPresetToState('pavilion');
+assert(state.room.stadiumStructure === null,
+  'Pavilion: auditorium stadiumStructure cleared');
+assert(state.room.multiLevelStructure != null,
+  'Pavilion: multiLevelStructure copied');
+assert(state.zones.length === 0,
+  'Pavilion: previous audience zones fully cleared (no cross-contamination)');
+assert(state.sources.length === PRESETS.pavilion.sources.length,
+  'Pavilion: sources match preset (no leftover arena PA)');
+applyPresetToState('auditorium');
+assert(state.room.multiLevelStructure === null,
+  'Auditorium (after Pavilion): multiLevelStructure cleared');
+assert(state.room.stadiumStructure != null,
+  'Auditorium (after Pavilion): stadiumStructure restored');
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll preset tests passed.');
