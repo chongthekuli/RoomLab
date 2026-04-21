@@ -11,7 +11,7 @@
 // Walkthrough for this preset is currently limited to the ground floor —
 // escalator elevation transitions are the Phase 2 upgrade.
 
-import { SPK_AMPERES_CS610B } from './shared.js';
+import { SPK_AMPERES_CS610B, rectVerts } from './shared.js';
 
 const W = 80, D = 40;
 const levelHeight = 5.8;
@@ -170,6 +170,40 @@ for (let lv = 0; lv < nLevels; lv++) {
   );
 }
 
+// ---- Audience zones — concourse walkways, per-level --------------
+// Four concourse strips per level (south, north, east, west), each
+// between the shop strip and the atrium edge. 20% occupancy gives
+// the classic weekend-lunch-hour shopper density; scene.js spawns
+// instanced human figures at that rate. The BOMBA PA coverage test
+// then happens with these shoppers present so STI / SPL readings
+// reflect a real operating mall, not an empty box.
+const SHOPPER_OCCUPANCY = 20;
+const zones = [];
+for (let lv = 0; lv < nLevels; lv++) {
+  const z = lv * levelHeight + 0.02;                // just above slab top
+  const idPrefix = `P_L${lv}`;
+  const labelPrefix = lv === 0 ? 'Ground floor' : `Level ${lv}`;
+  const commonMat = 'concrete';
+  zones.push(
+    { id: `${idPrefix}_south`, label: `${labelPrefix} — south concourse`,
+      vertices: rectVerts(SHOP_DEPTH + 0.1, SHOP_DEPTH + 0.1, W - SHOP_DEPTH - 0.1, atriumY - 0.1),
+      elevation_m: z, material_id: commonMat,
+      occupancy_percent: SHOPPER_OCCUPANCY },
+    { id: `${idPrefix}_north`, label: `${labelPrefix} — north concourse`,
+      vertices: rectVerts(SHOP_DEPTH + 0.1, atriumY + atriumD + 0.1, W - SHOP_DEPTH - 0.1, D - SHOP_DEPTH - 0.1),
+      elevation_m: z, material_id: commonMat,
+      occupancy_percent: SHOPPER_OCCUPANCY },
+    { id: `${idPrefix}_east`, label: `${labelPrefix} — east concourse`,
+      vertices: rectVerts(atriumX + atriumW + 0.1, atriumY + 0.1, W - SHOP_DEPTH - 0.1, atriumY + atriumD - 0.1),
+      elevation_m: z, material_id: commonMat,
+      occupancy_percent: SHOPPER_OCCUPANCY },
+    { id: `${idPrefix}_west`, label: `${labelPrefix} — west concourse`,
+      vertices: rectVerts(SHOP_DEPTH + 0.1, atriumY + 0.1, atriumX - 0.1, atriumY + atriumD - 0.1),
+      elevation_m: z, material_id: commonMat,
+      occupancy_percent: SHOPPER_OCCUPANCY },
+  );
+}
+
 // Ceiling-speaker grid. Amperes CS610B on 10 m centres on L0 (busiest
 // concourse), 12 m centres on L1–L3 (quieter retail). Speakers hang
 // ~0.1 m below the slab above.
@@ -235,7 +269,7 @@ export default {
     escalatorOpenings,
     shops,
   },
-  zones: [],
+  zones,
   sources,
   listeners,
 };

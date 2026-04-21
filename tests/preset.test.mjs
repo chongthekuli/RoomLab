@@ -78,8 +78,10 @@ assert(state.room.stadiumStructure === null,
   'Pavilion: auditorium stadiumStructure cleared');
 assert(state.room.multiLevelStructure != null,
   'Pavilion: multiLevelStructure copied');
-assert(state.zones.length === 0,
-  'Pavilion: previous audience zones fully cleared (no cross-contamination)');
+assert(state.zones.length === PRESETS.pavilion.zones.length,
+  'Pavilion: arena zones replaced with pavilion zones (no cross-contamination)');
+assert(state.zones.every(z => !z.id.startsWith('Z_')),
+  'Pavilion: none of arena\'s Z_-prefixed zone ids survived the swap');
 assert(state.sources.length === PRESETS.pavilion.sources.length,
   'Pavilion: sources match preset (no leftover arena PA)');
 applyPresetToState('auditorium');
