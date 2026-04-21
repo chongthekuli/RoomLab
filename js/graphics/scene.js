@@ -3095,13 +3095,13 @@ function getAmperesTextTexture() {
   ctx.textBaseline = 'middle';
   const cx = W / 2, cy = H / 2;
   // Lower dark shadow (embossed depth)
-  ctx.fillStyle = 'rgba(70, 0, 10, 0.55)';
+  ctx.fillStyle = 'rgba(60, 40, 0, 0.60)';
   ctx.fillText('amperes', cx + 3, cy + 3);
   // Upper light highlight (embossed lift)
-  ctx.fillStyle = 'rgba(255, 220, 220, 0.6)';
+  ctx.fillStyle = 'rgba(255, 245, 200, 0.70)';
   ctx.fillText('amperes', cx - 2, cy - 2);
-  // Main body — Amperes brand red.
-  ctx.fillStyle = '#C8102E';
+  // Main body — gold wordmark.
+  ctx.fillStyle = '#D4AF37';
   ctx.fillText('amperes', cx, cy);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
