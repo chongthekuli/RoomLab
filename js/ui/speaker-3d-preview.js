@@ -20,17 +20,33 @@ let cabinetGroup = null;
 let drivers = [];           // { mesh, cone, baseZ, type, pulseSpeed, pulseAmp }
 let animId = null;
 let lastDef = null;
-let _amperesLogoTex = null;
+let _amperesTextTex = null;
 
-// Module-level cache for the Amperes brand badge texture. Mirrors the
-// same file the scoreboard + ceiling-cabinet use in scene.js so the
-// cabinet the user sees here matches the one in the 3D viewport.
-function getAmperesLogoTextureLocal() {
-  if (_amperesLogoTex) return _amperesLogoTex;
-  const tex = new THREE.TextureLoader().load('assets/amperes-logo.png');
+// Module-level cache for the small "amperes" wordmark texture. Mirrors
+// the scene.js getAmperesTextTexture() — embossed-style brand plate
+// rendered on a canvas so preview and 3D viewport share the same look.
+function getAmperesTextTextureLocal() {
+  if (_amperesTextTex) return _amperesTextTex;
+  const W = 768, H = 192;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = 'bold 128px Arial, "Helvetica Neue", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const cx = W / 2, cy = H / 2;
+  ctx.fillStyle = 'rgba(70, 0, 10, 0.55)';
+  ctx.fillText('amperes', cx + 3, cy + 3);
+  ctx.fillStyle = 'rgba(255, 220, 220, 0.6)';
+  ctx.fillText('amperes', cx - 2, cy - 2);
+  ctx.fillStyle = '#C8102E';
+  ctx.fillText('amperes', cx, cy);
+  const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
-  _amperesLogoTex = tex;
+  tex.needsUpdate = true;
+  _amperesTextTex = tex;
   return tex;
 }
 
@@ -267,19 +283,20 @@ function buildCeilingCabinet(group, def) {
   grille.position.y = grilleY;
   group.add(grille);
 
-  // Amperes brand badge on the grille — real logo PNG so the preview
-  // matches what the 3D scene renders on the same cabinet.
+  // Amperes "amperes" wordmark — embossed-style canvas text tag on
+  // the grille. Same textured plane logic as in scene.js so preview
+  // and 3D viewport match.
   if (/amperes/i.test(def?.manufacturer || '') || /^amperes-/i.test(def?.id || '')) {
-    const logoTex = getAmperesLogoTextureLocal();
-    const logoW = radius * 0.50;
-    const logoH = logoW * 0.75;          // amperes-logo.png ≈ 4:3
-    const logo = new THREE.Mesh(
-      new THREE.PlaneGeometry(logoW, logoH),
-      new THREE.MeshBasicMaterial({ map: logoTex }),
+    const textTex = getAmperesTextTextureLocal();
+    const textW = radius * 0.56;
+    const textH = textW * 0.25;          // canvas 768 × 192 ≈ 4:1
+    const badge = new THREE.Mesh(
+      new THREE.PlaneGeometry(textW, textH),
+      new THREE.MeshBasicMaterial({ map: textTex, transparent: true }),
     );
-    logo.rotation.x = -Math.PI / 2;      // lie flat on the grille
-    logo.position.set(0, grilleY + 0.001, -radius * 0.45);   // front area of the baffle disc
-    group.add(logo);
+    badge.rotation.x = -Math.PI / 2;     // lie flat on the grille
+    badge.position.set(0, grilleY + 0.001, -radius * 0.55);
+    group.add(badge);
   }
 
   // Driver cone — visible JUST under the grille so you can see the cone

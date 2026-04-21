@@ -1835,20 +1835,20 @@ function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
     encl.add(tweeter);
   }
 
-  // Amperes brand badge on the grille — same texture as the scoreboard
-  // so the cabinet visually matches its spec sheet and preview.
+  // Amperes "amperes" wordmark — embossed-style canvas text tag on the
+  // grille (not the full scoreboard PNG). Transparent background so it
+  // reads as a small brand plate rather than a rectangular sticker.
   if (isAmperes) {
-    const logoTex = getAmperesLogoTexture();
-    const logoW = (isSquare ? w : radius * 2) * 0.26;
-    const logoH = logoW * 0.75;        // amperes-logo.png ≈ 4:3
-    const logo = new THREE.Mesh(
-      new THREE.PlaneGeometry(logoW, logoH),
-      new THREE.MeshBasicMaterial({ map: logoTex }),
+    const textTex = getAmperesTextTexture();
+    const textW = (isSquare ? w : radius * 2) * 0.28;
+    const textH = textW * 0.25;        // 768 × 192 canvas → 4:1
+    const badge = new THREE.Mesh(
+      new THREE.PlaneGeometry(textW, textH),
+      new THREE.MeshBasicMaterial({ map: textTex, transparent: true }),
     );
-    // Low on the grille, slightly in front of the grille plane so it
-    // isn't z-fighting with it.
-    logo.position.set(0, -(isSquare ? w : radius * 2) * 0.30, grilleZ + 0.001);
-    encl.add(logo);
+    // Low on the grille, slightly in front of the grille plane.
+    badge.position.set(0, -(isSquare ? w : radius * 2) * 0.32, grilleZ + 0.001);
+    encl.add(badge);
   }
 
   encl.userData.acoustic_material = 'speaker_cabinet';
@@ -3074,6 +3074,40 @@ function getAmperesLogoTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
   _amperesLogoTex = tex;
+  return tex;
+}
+
+// Small "amperes" wordmark rendered as a canvas texture — looks like an
+// embossed molding plate on the speaker body (brand-red text with a
+// dark lower shadow + light upper highlight for the 3D embossed cue).
+// Used on ceiling-speaker grilles, separate from the full-logo PNG
+// (which lives on the arena scoreboard).
+let _amperesTextTex = null;
+function getAmperesTextTexture() {
+  if (_amperesTextTex) return _amperesTextTex;
+  const W = 768, H = 192;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = 'bold 128px Arial, "Helvetica Neue", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const cx = W / 2, cy = H / 2;
+  // Lower dark shadow (embossed depth)
+  ctx.fillStyle = 'rgba(70, 0, 10, 0.55)';
+  ctx.fillText('amperes', cx + 3, cy + 3);
+  // Upper light highlight (embossed lift)
+  ctx.fillStyle = 'rgba(255, 220, 220, 0.6)';
+  ctx.fillText('amperes', cx - 2, cy - 2);
+  // Main body — Amperes brand red.
+  ctx.fillStyle = '#C8102E';
+  ctx.fillText('amperes', cx, cy);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  _amperesTextTex = tex;
   return tex;
 }
 
