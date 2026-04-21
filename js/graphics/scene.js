@@ -2852,11 +2852,12 @@ function rebuildMultiLevelStructure(room) {
   });
 
   // -------- Build the 2D Shape for a footprint−atrium cross-section ---
-  // Outer contour is CCW (ExtrudeGeometry convention); holes must wind
-  // CW. Earcut fails cleanly on bad winding so we check + reverse as
-  // needed. The slab shape accepts extra rectangular holes for
-  // escalator top-landings so the stairs actually break through the
-  // slab above them.
+  // THREE.ExtrudeGeometry's triangulator handles hole winding internally,
+  // so we just push every hole onto `shape.holes` and let the built-in
+  // earcut sort it out. (An earlier revision ran an explicit
+  // isClockWise / curves.reverse() pass — that sealed the atrium in
+  // every slab because reversing the curves array left each curve's
+  // v1→v2 direction untouched, producing a malformed hole path.)
   function buildFootprintShape(footprint, atrium, extraHoles) {
     const shape = new THREE.Shape();
     shape.moveTo(footprint[0].x, footprint[0].y);
@@ -2870,11 +2871,6 @@ function rebuildMultiLevelStructure(room) {
       path.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) path.lineTo(pts[i].x, pts[i].y);
       path.closePath();
-      // ExtrudeGeometry wants holes CW (outer is CCW). Reverse if
-      // caller supplied a CCW hole by mistake.
-      if (!THREE.ShapeUtils.isClockWise(path.curves.map(c => c.v2 ?? c.v1))) {
-        path.curves.reverse();
-      }
       shape.holes.push(path);
     };
     if (atrium && atrium.length >= 3) pushHole(atrium);
@@ -2884,9 +2880,17 @@ function rebuildMultiLevelStructure(room) {
 
   // -------- Floor slabs (one per level above the ground) --------------
   for (const lv of (mls.levels || [])) {
-    // Escalators live inside the atrium void, so the atrium hole
-    // covers them already — no extra slab cut-outs needed.
-    const shape = buildFootprintShape(mls.footprint, mls.atrium);
+    // Escalator landings get a square hole in the slab above them so
+    // the escalator's top step isn't sealed by the ceiling. Hole
+    // applies to the slab at `to_level` (the floor the rider is
+    // stepping onto).
+    const extraHoles = (mls.escalatorOpenings || [])
+      .filter(o => o.slab_level === lv.index)
+      .map(o => [
+        { x: o.x1, y: o.y1 }, { x: o.x2, y: o.y1 },
+        { x: o.x2, y: o.y2 }, { x: o.x1, y: o.y2 },
+      ]);
+    const shape = buildFootprintShape(mls.footprint, mls.atrium, extraHoles);
     const geo = new THREE.ExtrudeGeometry(shape, {
       depth: lv.thickness_m ?? 0.4,
       bevelEnabled: false,

@@ -65,41 +65,45 @@ for (let i = 1; i < nLevels; i++) {
   });
 }
 
-// Escalators — placed INSIDE the atrium void. Real malls put
-// escalators through the atrium so people step off onto the walkway
-// right at the railing; the atrium hole in every slab already gives
-// the clear vertical space, so no extra slab cut-outs are needed.
-//
-// 30° incline (standard). Vertical 5.8 m per flight ⇒ horizontal run
-// 10 m — fits comfortably inside the 14 m deep atrium. Base on the
-// LOWER level's floor inside the atrium; top at the atrium edge of
-// the UPPER level (y = atriumY + atriumD for an up-north escalator).
-// Scissor pair: up on the east half, down on the west half.
+// Escalators — short climbs in the walkway, scissor pair flanking the
+// atrium. Base in walkway on the lower level, top in walkway on the
+// upper level. Each top gets a small square cut-out in the slab above
+// (see `escalatorOpenings` below) so the person stepping off the
+// escalator isn't sealed by the ceiling above them.
 const escalators = [];
-const ESC_UP_X   = atriumX + atriumW * 0.65;   // east half of atrium
-const ESC_DOWN_X = atriumX + atriumW * 0.35;   // west half
-const ESC_RUN = 10;                              // horizontal run, 30° @ 5.8 m rise
 for (let lv = 0; lv < nLevels - 1; lv++) {
   const z0 = lv * levelHeight;
   const z1 = (lv + 1) * levelHeight;
-
-  // Up-escalator: ascends through atrium to the north edge of level lv+1.
+  // North-side escalator (in north walkway, going up).
   escalators.push({
     from_level: lv, to_level: lv + 1,
-    base: { x: ESC_UP_X, y: atriumY + atriumD - ESC_RUN },   // inside atrium
-    top:  { x: ESC_UP_X, y: atriumY + atriumD },              // at north edge of atrium
+    base: { x: atriumX + atriumW + 2, y: atriumY + atriumD + 2 },
+    top:  { x: atriumX + atriumW / 2 + 3, y: atriumY + atriumD + 2 },
     base_z: z0, top_z: z1,
     width_m: 1.2,
   });
-
-  // Down-escalator (scissor pair): descends from south edge of lv+1
-  // down to the atrium floor of level lv.
+  // South-side escalator (scissor pair in south walkway).
   escalators.push({
-    from_level: lv + 1, to_level: lv,
-    base: { x: ESC_DOWN_X, y: atriumY + ESC_RUN },            // inside atrium
-    top:  { x: ESC_DOWN_X, y: atriumY },                       // at south edge of atrium
+    from_level: lv, to_level: lv + 1,
+    base: { x: atriumX - 2, y: atriumY - 2 },
+    top:  { x: atriumX + atriumW / 2 - 3, y: atriumY - 2 },
     base_z: z0, top_z: z1,
     width_m: 1.2,
+  });
+}
+
+// Slab cut-outs at each escalator's top landing — a small rectangular
+// hole punched in the slab above so the escalator actually reaches
+// the next floor. Without this, the top step bumps into the
+// underside of the upper slab. 2 m × 2.5 m centred on the top
+// position, generously sized so a person can comfortably step off.
+const escalatorOpenings = [];
+for (const esc of escalators) {
+  const padW = 1.0, padRun = 1.25;
+  escalatorOpenings.push({
+    slab_level: esc.to_level,
+    x1: esc.top.x - padW,  y1: esc.top.y - padRun,
+    x2: esc.top.x + padW,  y2: esc.top.y + padRun,
   });
 }
 
@@ -228,6 +232,7 @@ export default {
     levels,
     columns,
     escalators,
+    escalatorOpenings,
     shops,
   },
   zones: [],
