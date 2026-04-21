@@ -355,10 +355,100 @@ function initProbeTool() {
   renderer.domElement.addEventListener('mouseleave', () => {
     if (probeMarker) probeMarker.visible = false;
     if (probeTooltip) probeTooltip.classList.add('hidden');
+    setSpeakerHighlight(_hoveredSpeakerGroup, false);
+    _hoveredSpeakerGroup = null;
+    renderer.domElement.style.cursor = '';
   });
   // Click-to-inspect: tapping a loudspeaker cabinet in 3D opens the
   // Speaker workbench focused on that model.
   renderer.domElement.addEventListener('click', onSpeakerClick);
+  // Hover-highlight + click-to-pivot on speakers.
+  renderer.domElement.addEventListener('pointermove', onSpeakerHoverMove);
+  renderer.domElement.addEventListener('pointerdown', onSpeakerPointerDown);
+}
+
+// ---- Speaker hover-highlight + click-to-pivot -------------------------
+// Hover: on mouse-over, emissive-boost the speaker's materials so the user
+// knows they've caught one. Click-hold: the speaker becomes the OrbitControls
+// pivot so dragging orbits AROUND the speaker instead of the room centre —
+// useful when inspecting a specific element in a dense line-array or a
+// ceiling-speaker grid. The short click (no drag) still opens the Speaker
+// workbench via the separate onSpeakerClick handler; setting the pivot on
+// pointerdown doesn't interfere because OrbitControls reads the new target
+// only when a subsequent drag gesture starts.
+let _hoveredSpeakerGroup = null;
+const _hoverRay = new THREE.Raycaster();
+const _hoverNdc = { x: 0, y: 0 };
+const _speakerHighlightColor = new THREE.Color(0xffcc55);   // warm amber
+const _speakerHighlightBoost = 0.55;
+
+function findSpeakerGroup(obj) {
+  // Walk up from a hit mesh to the Group that represents the whole cabinet.
+  // Every speaker root gets userData.speakerModelUrl on its direct-child
+  // Group (see rebuildSources → encl). Aim rings under sourcesGroup lack
+  // that tag, so they're excluded naturally.
+  let o = obj;
+  while (o && o !== sourcesGroup) {
+    if (o.userData?.speakerModelUrl && o.parent === sourcesGroup) return o;
+    o = o.parent;
+  }
+  return null;
+}
+
+function setSpeakerHighlight(group, on) {
+  if (!group) return;
+  group.traverse(m => {
+    if (!m.isMesh || !m.material || !m.material.emissive) return;
+    const store = m.userData;
+    if (on) {
+      if (!store._origEmissiveHex && store._origEmissiveHex !== 0) {
+        store._origEmissiveHex = m.material.emissive.getHex();
+        store._origEmissiveIntensity = m.material.emissiveIntensity ?? 1;
+      }
+      m.material.emissive.copy(_speakerHighlightColor);
+      m.material.emissiveIntensity = (store._origEmissiveIntensity ?? 1) + _speakerHighlightBoost;
+      m.material.needsUpdate = true;
+    } else if (store._origEmissiveHex !== undefined) {
+      m.material.emissive.setHex(store._origEmissiveHex);
+      m.material.emissiveIntensity = store._origEmissiveIntensity ?? 1;
+      m.material.needsUpdate = true;
+      delete store._origEmissiveHex;
+      delete store._origEmissiveIntensity;
+    }
+  });
+}
+
+function onSpeakerHoverMove(e) {
+  if (walkMode || !sourcesGroup) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  _hoverNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  _hoverNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  _hoverRay.setFromCamera(_hoverNdc, activeCamera || camera);
+  const hits = _hoverRay.intersectObject(sourcesGroup, true);
+  const hitGroup = hits.length > 0 ? findSpeakerGroup(hits[0].object) : null;
+  if (hitGroup !== _hoveredSpeakerGroup) {
+    setSpeakerHighlight(_hoveredSpeakerGroup, false);
+    setSpeakerHighlight(hitGroup, true);
+    _hoveredSpeakerGroup = hitGroup;
+    renderer.domElement.style.cursor = hitGroup ? 'grab' : '';
+  }
+}
+
+const _pivotVec = new THREE.Vector3();
+function onSpeakerPointerDown(e) {
+  // Left-button only — middle/right drag should pan normally on room centre.
+  if (e.button !== 0) return;
+  if (walkMode || !_hoveredSpeakerGroup || !controls) return;
+  _hoveredSpeakerGroup.getWorldPosition(_pivotVec);
+  controls.target.copy(_pivotVec);
+  renderer.domElement.style.cursor = 'grabbing';
+  const onUp = () => {
+    renderer.domElement.style.cursor = _hoveredSpeakerGroup ? 'grab' : '';
+    renderer.domElement.removeEventListener('pointerup', onUp);
+    renderer.domElement.removeEventListener('pointercancel', onUp);
+  };
+  renderer.domElement.addEventListener('pointerup', onUp);
+  renderer.domElement.addEventListener('pointercancel', onUp);
 }
 
 const _speakerClickRay = new THREE.Raycaster();
@@ -1972,6 +2062,11 @@ function buildSpeakerEnclosure(src, groupInt, outside) {
 }
 
 function rebuildSources() { shadowsNeedRefresh = true;
+  // Highlight state holds a reference to a specific speaker Group; when
+  // the whole sourcesGroup is replaced, that reference becomes stale and
+  // the next pointermove would try to un-highlight a disposed Group.
+  _hoveredSpeakerGroup = null;
+  if (renderer) renderer.domElement.style.cursor = '';
   if (!sourcesGroup) {
     sourcesGroup = new THREE.Group();
     scene.add(sourcesGroup);
