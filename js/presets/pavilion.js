@@ -23,8 +23,12 @@ const slabThickness = 0.4;
 const atriumW = 20, atriumD = 14;
 const atriumX = (W - atriumW) / 2;          // 30
 const atriumY = (D - atriumD) / 2;          // 13
+// Slight inward padding (0.5 m) so columns that would sit EXACTLY on
+// the atrium edge (e.g. x = atriumX) still get culled. Avoids the
+// "column half inside the hole, half straddling the slab" look.
 const inAtrium = (x, y) =>
-  x > atriumX && x < atriumX + atriumW && y > atriumY && y < atriumY + atriumD;
+  x >= atriumX - 0.5 && x <= atriumX + atriumW + 0.5
+  && y >= atriumY - 0.5 && y <= atriumY + atriumD + 0.5;
 
 const footprint = [
   { x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: D }, { x: 0, y: D },
@@ -61,52 +65,42 @@ for (let i = 1; i < nLevels; i++) {
   });
 }
 
-// Escalators — 30° incline (real escalator standard). horizontal run =
-// 5.8 / tan(30°) ≈ 10 m. Tops land AT the atrium edge where each slab
-// already has a hole, so the escalator physically emerges from the
-// atrium void. Extra escalator openings (see `escalatorOpenings`)
-// punch rectangular holes in the slabs at each upper-level landing so
-// the stairs aren't "sealed" by the ceiling above.
+// Escalators — placed INSIDE the atrium void. Real malls put
+// escalators through the atrium so people step off onto the walkway
+// right at the railing; the atrium hole in every slab already gives
+// the clear vertical space, so no extra slab cut-outs are needed.
+//
+// 30° incline (standard). Vertical 5.8 m per flight ⇒ horizontal run
+// 10 m — fits comfortably inside the 14 m deep atrium. Base on the
+// LOWER level's floor inside the atrium; top at the atrium edge of
+// the UPPER level (y = atriumY + atriumD for an up-north escalator).
+// Scissor pair: up on the east half, down on the west half.
 const escalators = [];
+const ESC_UP_X   = atriumX + atriumW * 0.65;   // east half of atrium
+const ESC_DOWN_X = atriumX + atriumW * 0.35;   // west half
+const ESC_RUN = 10;                              // horizontal run, 30° @ 5.8 m rise
 for (let lv = 0; lv < nLevels - 1; lv++) {
   const z0 = lv * levelHeight;
   const z1 = (lv + 1) * levelHeight;
-  // North-side up-escalator (base in walkway north of atrium, top at N edge).
-  escalators.push({
-    from_level: lv, to_level: lv + 1,
-    base: { x: atriumX + atriumW * 0.65, y: atriumY + atriumD + 10 },
-    top:  { x: atriumX + atriumW * 0.65, y: atriumY + atriumD + 0.2 },
-    base_z: z0, top_z: z1,
-    width_m: 1.2,
-  });
-  // South-side up-escalator (scissor pair, offset toward atrium SW).
-  escalators.push({
-    from_level: lv, to_level: lv + 1,
-    base: { x: atriumX + atriumW * 0.35, y: atriumY - 10 },
-    top:  { x: atriumX + atriumW * 0.35, y: atriumY - 0.2 },
-    base_z: z0, top_z: z1,
-    width_m: 1.2,
-  });
-}
 
-// Slab cut-outs aligned with escalator landings so each slab has an
-// opening at the level's top step. Scene.js pushes these as additional
-// holes on the slab's THREE.Shape alongside the atrium.
-const escalatorOpenings = [];
-for (let lv = 1; lv < nLevels; lv++) {
-  // Slab at level `lv` receives openings for any escalator whose
-  // to_level === lv. Rectangle 3 m along the escalator run × 2 m wide,
-  // centred on the escalator top.
-  for (const esc of escalators) {
-    if (esc.to_level !== lv) continue;
-    const padRun = 1.5, padWidth = 1.0;
-    const { top } = esc;
-    escalatorOpenings.push({
-      slab_level: lv,
-      x1: top.x - padWidth, y1: top.y - padRun,
-      x2: top.x + padWidth, y2: top.y + padRun,
-    });
-  }
+  // Up-escalator: ascends through atrium to the north edge of level lv+1.
+  escalators.push({
+    from_level: lv, to_level: lv + 1,
+    base: { x: ESC_UP_X, y: atriumY + atriumD - ESC_RUN },   // inside atrium
+    top:  { x: ESC_UP_X, y: atriumY + atriumD },              // at north edge of atrium
+    base_z: z0, top_z: z1,
+    width_m: 1.2,
+  });
+
+  // Down-escalator (scissor pair): descends from south edge of lv+1
+  // down to the atrium floor of level lv.
+  escalators.push({
+    from_level: lv + 1, to_level: lv,
+    base: { x: ESC_DOWN_X, y: atriumY + ESC_RUN },            // inside atrium
+    top:  { x: ESC_DOWN_X, y: atriumY },                       // at south edge of atrium
+    base_z: z0, top_z: z1,
+    width_m: 1.2,
+  });
 }
 
 // ---- Shops along the perimeter of every level -----------------------
@@ -234,7 +228,6 @@ export default {
     levels,
     columns,
     escalators,
-    escalatorOpenings,
     shops,
   },
   zones: [],

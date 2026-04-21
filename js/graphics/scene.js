@@ -2884,14 +2884,9 @@ function rebuildMultiLevelStructure(room) {
 
   // -------- Floor slabs (one per level above the ground) --------------
   for (const lv of (mls.levels || [])) {
-    // Collect escalator openings that land on THIS slab (to_level matches).
-    const extraHoles = (mls.escalatorOpenings || [])
-      .filter(o => o.slab_level === lv.index)
-      .map(o => [
-        { x: o.x1, y: o.y1 }, { x: o.x2, y: o.y1 },
-        { x: o.x2, y: o.y2 }, { x: o.x1, y: o.y2 },
-      ]);
-    const shape = buildFootprintShape(mls.footprint, mls.atrium, extraHoles);
+    // Escalators live inside the atrium void, so the atrium hole
+    // covers them already — no extra slab cut-outs needed.
+    const shape = buildFootprintShape(mls.footprint, mls.atrium);
     const geo = new THREE.ExtrudeGeometry(shape, {
       depth: lv.thickness_m ?? 0.4,
       bevelEnabled: false,
