@@ -1730,15 +1730,26 @@ function addDriverDetails(parent, type, w, h, grillZ) {
 }
 
 // Ceiling-speaker enclosure — cylinder (or square box for CS518 / similar)
-// with a flat grille on the local -Z face and a visible driver cone behind
-// it. Shape mirrors the js/ui/speaker-3d-preview.js builder so what the
-// user sees in the Speaker workbench matches what they see placed in the
-// 3D viewport once they pick the model.
+// with a flat grille on the local +Z face and a visible driver cone behind
+// it. Shape mirrors the js/ui/speaker-3d-preview.js builder.
+//
+// Orientation note: Three.js Object3D.lookAt() on a NON-camera object
+// aligns the object's local +Z axis with the direction toward the
+// target (the opposite of cameras, which use −Z). Since the cabinet is
+// positioned with encl.lookAt(pos + aim) in rebuildSources(), the
+// baffle MUST live at local +Z for the grille to face the aim
+// direction. Earlier revisions put the baffle at −Z — the "butt" ended
+// up firing at the audience.
 function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
   const { w, h, shape, driverInches, isCoax } = dims;
   const radius = w / 2;
   const depth = h;                    // front-to-back cabinet depth
   const isSquare = shape === 'square';
+
+  // Dramatic front-to-back taper so the baffle side is unmistakably the
+  // larger face — matches real ceiling cabinets whose rear bowl hides
+  // inside the ceiling tile while the visible grille sticks out.
+  const rearR = radius * 0.72;
 
   const bodyColor = outside ? 0x6a1a0c : 0xe9ebee;
   const bodyMat = new THREE.MeshStandardMaterial({
@@ -1748,13 +1759,16 @@ function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
   if (isSquare) {
     bodyGeo = new THREE.BoxGeometry(w, w, depth * 0.9);
   } else {
-    bodyGeo = new THREE.CylinderGeometry(radius * 0.95, radius, depth * 0.9, 36);
-    bodyGeo.rotateX(Math.PI / 2);     // axis Y → Z so −Z is the baffle
+    // Top of cylinder (+Y in local geom) becomes +Z after rotateX(+π/2).
+    // Put the LARGER radius there so the front (+Z = aim direction)
+    // reads as the baffle.
+    bodyGeo = new THREE.CylinderGeometry(radius, rearR, depth * 0.9, 36);
+    bodyGeo.rotateX(Math.PI / 2);
   }
   const body = new THREE.Mesh(bodyGeo, bodyMat);
 
-  // Bezel ring just in front of the body — the trim visible below a real
-  // ceiling tile.
+  // Bezel ring just IN FRONT of the body (+Z side) — the visible trim
+  // below a real ceiling tile.
   const bezelMat = new THREE.MeshStandardMaterial({
     color: outside ? 0xff5a3c : 0xdadee2, roughness: 0.6, metalness: 0.25,
   });
@@ -1766,9 +1780,9 @@ function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
     bezelGeo.rotateX(Math.PI / 2);
   }
   const bezel = new THREE.Mesh(bezelGeo, bezelMat);
-  bezel.position.z = -depth / 2 + depth * 0.02;
+  bezel.position.z = +depth / 2 - depth * 0.02;
 
-  // Grille disc (or square) on the front face — tinted by speaker group.
+  // Grille disc (or square) on the +Z face — tinted by speaker group.
   const grilleColor = groupInt ?? 0xd6dade;
   const grilleEmissive = outside ? 0x551100 : (groupInt ? (groupInt & 0x2a2a2a) : 0x141414);
   const grilleMat = new THREE.MeshStandardMaterial({
@@ -1779,26 +1793,26 @@ function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
     ? new THREE.PlaneGeometry(w * 0.94, w * 0.94)
     : new THREE.CircleGeometry(radius * 0.92, 36);
   const grille = new THREE.Mesh(grilleGeo, grilleMat);
-  const grilleZ = -depth / 2 - 0.003;
+  const grilleZ = +depth / 2 + 0.003;
   grille.position.z = grilleZ;
-  grille.rotation.y = Math.PI;        // face −Z
+  // Default CircleGeometry/PlaneGeometry faces +Z — no rotation needed.
 
-  // Woofer cone visible just behind the grille.
+  // Woofer cone visible through the grille, pointing apex outward (+Z).
   const driverR = Math.min(radius * 0.72, driverInches * 0.0127);
   const coneDepth = depth * 0.25;
   const coneMat = new THREE.MeshStandardMaterial({
     color: 0x16191f, roughness: 0.65, metalness: 0.22,
   });
   const coneGeo = new THREE.ConeGeometry(driverR * 0.95, coneDepth, 32, 1, true);
-  coneGeo.rotateX(-Math.PI / 2);      // apex toward −Z so it reads through the grille
+  coneGeo.rotateX(Math.PI / 2);       // apex (+Y originally) → +Z
   const cone = new THREE.Mesh(coneGeo, coneMat);
-  cone.position.z = grilleZ + coneDepth * 0.55;
+  cone.position.z = grilleZ - coneDepth * 0.55;   // set BACK from grille
 
   const cap = new THREE.Mesh(
     new THREE.SphereGeometry(driverR * 0.24, 20, 14),
     new THREE.MeshStandardMaterial({ color: 0x2a2d34, roughness: 0.5, metalness: 0.3 }),
   );
-  cap.position.z = grilleZ + 0.003;
+  cap.position.z = grilleZ - 0.003;
 
   const encl = new THREE.Group();
   encl.add(body);
@@ -1816,7 +1830,7 @@ function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
       new THREE.SphereGeometry(driverR * 0.18, 20, 14),
       tweeterMat,
     );
-    tweeter.position.z = grilleZ + 0.001;
+    tweeter.position.z = grilleZ - 0.001;
     encl.add(tweeter);
   }
 

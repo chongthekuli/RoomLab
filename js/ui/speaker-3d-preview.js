@@ -217,12 +217,17 @@ function buildCeilingCabinet(group, def) {
   const driverR = Math.min(radius * 0.72, driverInches * 0.0127);   // rough real driver size
 
   // Cabinet body — cylinder (or square box for square-grille models).
+  // Baffle side is +Y (the top of the cabinet in the preview), with
+  // LARGER radius at that end; the back tapers down so the truncated-
+  // cone shape reads clearly. Matches the ceiling cabinet placed in
+  // the 3D viewport (which has baffle at +Z via its lookAt rotation).
+  const rearR = radius * 0.72;
   const bodyMat = new THREE.MeshStandardMaterial({
     color: 0xe9ebee, roughness: 0.72, metalness: 0.08,
   });
   const body = isSquare
     ? new THREE.Mesh(new THREE.BoxGeometry(dia, depth * 0.9, dia), bodyMat)
-    : new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.95, radius, depth * 0.9, 48), bodyMat);
+    : new THREE.Mesh(new THREE.CylinderGeometry(radius, rearR, depth * 0.9, 48), bodyMat);
   body.position.y = 0;
   group.add(body);
 
