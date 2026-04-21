@@ -57,6 +57,21 @@ export const SPEAKER_CATALOG = [
   { url: 'data/loudspeakers/generic-12inch.json',       label: 'Generic 12" 2-way' },
   { url: 'data/loudspeakers/compact-6inch.json',        label: 'Compact 6" monitor' },
   { url: 'data/loudspeakers/line-array-element.json',   label: 'Line-array element' },
+  // ----- Amperes Electronics ceiling speakers (ampereselectronics.com) -----
+  { url: 'data/loudspeakers/amperes-cs210.json',        label: 'Amperes CS210 (2\" dual-cone)' },
+  { url: 'data/loudspeakers/amperes-cs343.json',        label: 'Amperes CS343 (4\" IP65)' },
+  { url: 'data/loudspeakers/amperes-cs510.json',        label: 'Amperes CS510 (5\" dual-cone)' },
+  { url: 'data/loudspeakers/amperes-cs515.json',        label: 'Amperes CS515 (5\" honeycomb)' },
+  { url: 'data/loudspeakers/amperes-cs516.json',        label: 'Amperes CS516 (5\" surface)' },
+  { url: 'data/loudspeakers/amperes-cs518.json',        label: 'Amperes CS518 (5\" square co-axial)' },
+  { url: 'data/loudspeakers/amperes-cs520.json',        label: 'Amperes CS520 (5\" co-axial)' },
+  { url: 'data/loudspeakers/amperes-cs606.json',        label: 'Amperes CS606 (6\" metal)' },
+  { url: 'data/loudspeakers/amperes-cs606fr-e.json',    label: 'Amperes CS606FR-E (EN54)' },
+  { url: 'data/loudspeakers/amperes-cs610.json',        label: 'Amperes CS610 (6\" dual-cone)' },
+  { url: 'data/loudspeakers/amperes-cs610b.json',       label: 'Amperes CS610B (6\" 10 W)' },
+  { url: 'data/loudspeakers/amperes-cs620.json',        label: 'Amperes CS620 (6.5\" co-axial)' },
+  { url: 'data/loudspeakers/amperes-cs630.json',        label: 'Amperes CS630 (6.5\" 30 W co-axial)' },
+  { url: 'data/loudspeakers/amperes-cs840.json',        label: 'Amperes CS840 (8\" 40 W co-axial)' },
 ];
 const SPK12 = SPEAKER_CATALOG[0].url;
 const SPK6  = SPEAKER_CATALOG[1].url;

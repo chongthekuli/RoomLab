@@ -106,6 +106,15 @@ function buildCabinet(def) {
   const d = dim.d ?? 0.35;
 
   const isLineArray = /line-array/i.test(def.model ?? '') || /line-array/i.test(def.id ?? '');
+  const isCeiling = def.mount_type === 'ceiling'
+    || /ceiling/i.test(def.model ?? '')
+    || /^amperes-cs/i.test(def.id ?? '');
+
+  // Ceiling speakers are squat cylinders with a round grille on the bottom
+  // (installed recessed into a ceiling tile). Render them as an upright
+  // cylinder — body above, grille + driver visible on top so the user
+  // can see the baffle straight on when the turntable rotates.
+  if (isCeiling) return buildCeilingCabinet(group, def);
 
   // Cabinet body — dark, subtly metallic (matches the scene.js speaker enclosure look).
   const bodyMat = new THREE.MeshStandardMaterial({
@@ -163,6 +172,106 @@ function buildCabinet(def) {
 
   // Centre the group on origin.
   group.position.set(0, 0, 0);
+
+  return group;
+}
+
+// Ceiling speaker: squat round cabinet, grille on top, driver cone
+// visible through the grille. Upright orientation so the viewer sees
+// the baffle face-on as the turntable spins.
+function buildCeilingCabinet(group, def) {
+  const dim = def.physical?.dimensions_m || { w: 0.2, h: 0.11, d: 0.2 };
+  const dia = Math.max(dim.w ?? 0.2, dim.d ?? 0.2);
+  const depth = dim.h ?? 0.11;
+  const radius = dia / 2;
+  const isSquare = def.physical?.shape === 'square';
+  const isCoax = /coaxial|co-axial/i.test(def.model ?? '');
+  const driverInches = def.physical?.driver_size_inches ?? 6;
+  const driverR = Math.min(radius * 0.72, driverInches * 0.0127);   // rough real driver size
+
+  // Cabinet body — cylinder (or square box for square-grille models).
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: 0xe9ebee, roughness: 0.72, metalness: 0.08,
+  });
+  const body = isSquare
+    ? new THREE.Mesh(new THREE.BoxGeometry(dia, depth * 0.9, dia), bodyMat)
+    : new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.95, radius, depth * 0.9, 48), bodyMat);
+  body.position.y = 0;
+  group.add(body);
+
+  // Top flange / bezel that sits below a real ceiling — thin disc on top.
+  const bezelMat = new THREE.MeshStandardMaterial({
+    color: 0xdadee2, roughness: 0.6, metalness: 0.25,
+  });
+  const bezel = isSquare
+    ? new THREE.Mesh(new THREE.BoxGeometry(dia * 1.05, depth * 0.05, dia * 1.05), bezelMat)
+    : new THREE.Mesh(new THREE.CylinderGeometry(radius * 1.04, radius * 1.04, depth * 0.05, 48), bezelMat);
+  bezel.position.y = depth * 0.45;
+  group.add(bezel);
+
+  // Grille — perforated disc. Faked with a slightly raised darker mesh
+  // and a mild metallic shader; the whole thing sits on top of the body.
+  const grilleY = depth * 0.48 + 0.002;
+  const grilleMat = new THREE.MeshStandardMaterial({
+    color: 0xd6dade, roughness: 0.45, metalness: 0.25,
+  });
+  const grille = isSquare
+    ? new THREE.Mesh(new THREE.BoxGeometry(dia * 0.94, 0.003, dia * 0.94), grilleMat)
+    : new THREE.Mesh(new THREE.CircleGeometry(radius * 0.92, 48), grilleMat);
+  if (!isSquare) { grille.rotation.x = -Math.PI / 2; }
+  grille.position.y = grilleY;
+  group.add(grille);
+
+  // Subtle Amperes-style blue logo tab on the grille.
+  const logoMat = new THREE.MeshStandardMaterial({
+    color: 0x0066cc, roughness: 0.35, metalness: 0.6, emissive: 0x001430, emissiveIntensity: 0.2,
+  });
+  const logo = new THREE.Mesh(new THREE.BoxGeometry(radius * 0.22, 0.002, radius * 0.05), logoMat);
+  logo.position.set(0, grilleY + 0.001, radius * 0.62);
+  group.add(logo);
+
+  // Driver cone — visible JUST under the grille so you can see the cone
+  // behind the perforated metal. For coax there's a smaller tweeter in
+  // the middle of the woofer.
+  const coneDepth = depth * 0.25;
+  const coneMat = new THREE.MeshStandardMaterial({
+    color: 0x16191f, roughness: 0.65, metalness: 0.22,
+  });
+  const coneGeo = new THREE.ConeGeometry(driverR * 0.95, coneDepth, 48, 1, true);
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  cone.rotation.x = Math.PI;       // apex facing up → visible through grille
+  cone.position.y = grilleY - coneDepth * 0.6;
+  group.add(cone);
+  const cap = new THREE.Mesh(
+    new THREE.SphereGeometry(driverR * 0.24, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: 0x2a2d34, roughness: 0.5, metalness: 0.3 }),
+  );
+  cap.position.y = grilleY - 0.003;
+  group.add(cap);
+  drivers.push({
+    mesh: cone, cap, baseZ: cone.position.y, type: 'lf',
+    pulseSpeed: 3.6, pulseAmp: 0.008, phase: 0,
+    // Ceiling speakers pulse along Y not Z (driver points down/up in the
+    // preview orientation). Override by setting a custom axis.
+    axis: 'y',
+  });
+
+  if (isCoax) {
+    // Small tweeter dome at the centre of the woofer.
+    const tweeterMat = new THREE.MeshStandardMaterial({
+      color: 0x22252a, roughness: 0.35, metalness: 0.55,
+    });
+    const tweeter = new THREE.Mesh(
+      new THREE.SphereGeometry(driverR * 0.18, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+      tweeterMat,
+    );
+    tweeter.position.y = grilleY - 0.001;
+    group.add(tweeter);
+    drivers.push({
+      mesh: tweeter, baseZ: tweeter.position.y, type: 'hf',
+      pulseSpeed: 13, pulseAmp: 0.002, phase: Math.PI / 3, axis: 'y',
+    });
+  }
 
   return group;
 }
@@ -258,12 +367,18 @@ function animate() {
   // interacting. Rate ~9 RPM.
   if (cabinetGroup) cabinetGroup.rotation.y = t * 0.22;
 
-  // Driver pulse — each driver oscillates along its local +Z with a speed
-  // and amplitude that reflects its bandwidth (HF fast/small, LF slow/big).
+  // Driver pulse — each driver oscillates along its local axis (default +Z
+  // for vertical cabinets; +Y for ceiling speakers where the baffle faces
+  // up). Speed + amplitude reflect the driver's bandwidth (HF small/fast,
+  // LF big/slow).
   for (const drv of drivers) {
-    const z = drv.baseZ + Math.sin(t * drv.pulseSpeed + drv.phase) * drv.pulseAmp;
-    drv.mesh.position.z = z;
-    if (drv.cap) drv.cap.position.z = z + (drv.mesh.geometry?.parameters?.radius ?? 0.05) * 0.35;
+    const offset = Math.sin(t * drv.pulseSpeed + drv.phase) * drv.pulseAmp;
+    const axis = drv.axis ?? 'z';
+    drv.mesh.position[axis] = drv.baseZ + offset;
+    if (drv.cap) {
+      drv.cap.position[axis] = drv.baseZ + offset
+        + (drv.mesh.geometry?.parameters?.radius ?? 0.05) * 0.35 * (axis === 'y' ? -1 : 1);
+    }
   }
 
   renderer.render(scene, camera);
