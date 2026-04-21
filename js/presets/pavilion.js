@@ -205,11 +205,14 @@ const emergencyStairs = [
   { x_outer: 80, y1: 16, y2: 24, base_z: 0, top_z: totalHeight, label: 'External emergency stair' },
 ];
 
-// Food court — L3 (Level 3 / top floor). 30 × 16 m seating hall with
-// carpet + acoustic-tile ceiling for absorption. Carries higher
-// occupancy (35 %) because people sit longer than they walk.
+// Food court — L3 (Level 3 / top floor). Architect's original brief
+// had y=2–18 which overlaps the atrium (y=13–27) and ends up placing
+// carpet + seated shoppers over the void. Clamped to stay strictly
+// south of the atrium edge: 30 × 10 m hall in the south wing.
+// Carpet-heavy floor + acoustic-tile ceiling for absorption. 35 %
+// occupancy because diners sit longer than walkers walk.
 const foodCourt = {
-  level: 3, x1: 25, y1: 2, x2: 55, y2: 18,
+  level: 3, x1: 25, y1: 2, x2: 55, y2: 12,
   label: 'Food court',
   occupancy_percent: 35,
 };
