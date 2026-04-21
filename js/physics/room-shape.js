@@ -403,11 +403,13 @@ export function roomSurfaces(room) {
 // Interior surfaces introduced by a multi-level mall / atrium structure.
 // Returns an array of { id, area_m2, materialId } entries appended to
 // the outer-shell surfaces by roomSurfaces(). Materials are chosen per
-// real-world mall fit-out: slab soffits are acoustic-tile (suspended
-// ceiling grids throughout retail floors), slab tops are concrete /
-// ceramic-tile shoppers walk on, shop dividers are gypsum, storefronts
-// are glass, toilet ceilings are acoustic-tile, fire-stair enclosures
-// are concrete, lift shafts are glass, columns are concrete.
+// real-world premium mall fit-out: slab soffits are smooth painted
+// plaster (gypsum-on-metal suspended below the concrete slab — standard
+// for Pavilion-class retail), slab tops are concrete / ceramic-tile
+// shoppers walk on, shop dividers are gypsum, storefronts are glass,
+// toilet ceilings are acoustic-tile, fire-stair enclosures are concrete,
+// lift shafts are glass, columns are concrete. The atrium polygon is a
+// clear void — no ceiling surface is counted over it.
 function multiLevelInteriorSurfaces(room) {
   const mls = room.multiLevelStructure;
   if (!mls) return [];
@@ -416,18 +418,21 @@ function multiLevelInteriorSurfaces(room) {
   const atriumArea = polygonSignedArea(mls.atrium ?? []);
   const slabNetArea = Math.max(0, footArea - atriumArea);
 
-  // Slabs — each interior slab has a top (floor of upper level) and a
-  // bottom (ceiling of lower level).
+  // Slabs — each interior slab has a top (floor of upper level, ceramic
+  // tile over concrete) and a soffit (ceiling of the level below, which
+  // in a premium mall is a suspended plaster/gypsum finish, not the
+  // raw concrete slab). The atrium area is already excluded from
+  // slabNetArea so no plaster is counted over the open void.
   for (const lv of (mls.levels ?? [])) {
     out.push({
       id: `slab_top_${lv.index}`,
       area_m2: slabNetArea,
-      materialId: 'concrete',
+      materialId: 'concrete-painted',
     });
     out.push({
       id: `slab_soffit_${lv.index}`,
       area_m2: slabNetArea,
-      materialId: 'acoustic-tile',
+      materialId: 'plaster-smooth',
     });
   }
 
@@ -438,7 +443,7 @@ function multiLevelInteriorSurfaces(room) {
     out.push({
       id: `column_${col.x.toFixed(0)}_${col.y.toFixed(0)}`,
       area_m2: 2 * Math.PI * r * h,
-      materialId: 'concrete',
+      materialId: 'concrete-painted',
     });
   }
 
@@ -463,7 +468,7 @@ function multiLevelInteriorSurfaces(room) {
     out.push({
       id: `shop_glass_${shop.level}_${shop.x1}_${shop.y1}`,
       area_m2: 2 * glassW * (WALL_H - 0.9),   // 0.9 m reserved for sign
-      materialId: 'glass',
+      materialId: 'glass-window',
     });
   }
 
@@ -489,7 +494,7 @@ function multiLevelInteriorSurfaces(room) {
     out.push({
       id: `fire_stair_${s.x1}_${s.y1}`,
       area_m2: 2 * (w + d) * h,
-      materialId: 'concrete',
+      materialId: 'concrete-painted',
     });
   }
 
@@ -500,7 +505,7 @@ function multiLevelInteriorSurfaces(room) {
     out.push({
       id: `lift_shaft_${lift.x1}_${lift.y1}`,
       area_m2: 2 * (w + d) * h,
-      materialId: 'glass',
+      materialId: 'glass-window',
     });
   }
 

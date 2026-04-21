@@ -74,6 +74,12 @@
       "name": "LED video wall panel (flat glass + steel chassis)",
       "absorption": [0.18, 0.06, 0.04, 0.03, 0.02, 0.02, 0.02],
       "scattering": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+    },
+    {
+      "id": "plaster-smooth",
+      "name": "Smooth painted plaster on solid backing (premium mall soffit)",
+      "absorption": [0.013, 0.015, 0.02, 0.03, 0.04, 0.05, 0.05],
+      "scattering": [0.05, 0.05, 0.05, 0.08, 0.10, 0.12, 0.12]
     }
   ]
 }

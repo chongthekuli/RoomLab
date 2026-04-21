@@ -2971,6 +2971,51 @@ function rebuildMultiLevelStructure(room) {
     }
   }
 
+  // -------- Suspended plaster ceiling per level -----------------------
+  // Premium malls (Pavilion-class) use a gypsum/plaster suspended ceiling
+  // ~3 m above each finished floor, hiding HVAC / sprinklers / electrical
+  // in the plenum between ceiling and the concrete slab above. Acoustically
+  // it's the plaster face (α ≈ 0.02 @ 1 kHz) that bounds the occupied
+  // volume — the raw concrete slab 2+ m higher is hidden. This is also
+  // where ceiling speakers flush-mount: grille sits in the plane, back-can
+  // disappears into the plenum. Atrium is a clear void so the ceiling
+  // wraps its edge without covering it. Escalator openings pierce both
+  // the slab above and this ceiling so the unit isn't sealed in plaster.
+  const plasterMat = new THREE.MeshStandardMaterial({
+    color: 0xe9e3d2, roughness: 0.85, metalness: 0.02,
+    side: THREE.DoubleSide,
+  });
+  const CEILING_HEIGHT_M = mls.ceilingHeight_m ?? 3.0;
+  const CEILING_THICKNESS_M = 0.04;
+  const levelFloorsZ = [0, ...((mls.levels || []).map(l => l.slab_z))];
+  for (let li = 0; li < levelFloorsZ.length; li++) {
+    const floorZ = levelFloorsZ[li];
+    const ceilingZ = floorZ + CEILING_HEIGHT_M;
+    // Escalator openings in this level's ceiling — same as those that
+    // cut the slab above (slab_level == li + 1 for level li's ceiling).
+    const cExtraHoles = (mls.escalatorOpenings || [])
+      .filter(o => o.slab_level === li + 1)
+      .map(o => [
+        { x: o.x1, y: o.y1 }, { x: o.x2, y: o.y1 },
+        { x: o.x2, y: o.y2 }, { x: o.x1, y: o.y2 },
+      ]);
+    const cShape = buildFootprintShape(mls.footprint, mls.atrium, cExtraHoles);
+    const cGeo = new THREE.ExtrudeGeometry(cShape, {
+      depth: CEILING_THICKNESS_M,
+      bevelEnabled: false,
+      steps: 1,
+    });
+    cGeo.rotateX(Math.PI / 2);
+    const cMesh = new THREE.Mesh(cGeo, plasterMat);
+    // Extrude direction is -Y world after rotateX(+π/2). Position the
+    // top at ceilingZ + THICKNESS so the visible BOTTOM face (what the
+    // shoppers look up at) sits exactly at ceilingZ.
+    cMesh.position.y = ceilingZ + CEILING_THICKNESS_M;
+    cMesh.userData.acoustic_material = 'plaster-smooth';
+    cMesh.userData.tag = `plaster_ceiling_level_${li}`;
+    roomGroup.add(cMesh);
+  }
+
   // -------- Structural columns (full-height cylinders) ---------------
   const colSegments = 16;
   for (const col of (mls.columns || [])) {
