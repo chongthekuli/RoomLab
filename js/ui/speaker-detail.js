@@ -176,7 +176,7 @@ async function render() {
 
     <section class="sv-3d-stage">
       <canvas id="sv-3d-canvas" width="640" height="360"></canvas>
-      <div class="sv-3d-caption">Animated cabinet preview — drivers pulse at representative speed for their passband.</div>
+      <div class="sv-3d-caption">Drag to rotate · right-drag to pan · scroll to zoom · drivers pulse at representative speed for their passband. Auto-rotates when idle.</div>
     </section>
 
     ${def.note ? `<div class="sv-designer-note">${escapeHtml(def.note)}</div>` : ''}

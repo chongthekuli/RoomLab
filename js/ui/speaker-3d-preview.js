@@ -10,10 +10,12 @@
 // before they commit to it in the scene.
 
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 let renderer = null;
 let scene = null;
 let camera = null;
+let controls = null;
 let cabinetGroup = null;
 let drivers = [];           // { mesh, cone, baseZ, type, pulseSpeed, pulseAmp }
 let animId = null;
@@ -70,6 +72,30 @@ export function mountSpeaker3DPreview(canvas, def) {
   // fits nicely with some padding.
   fitCameraToModel(cabinetGroup, camera);
 
+  // Orbit controls — users can drag to rotate, right-drag to pan, scroll
+  // to zoom. Auto-rotate keeps the cabinet turning when the mouse is
+  // idle, and pauses when the user interacts. Damping gives a natural
+  // inertial feel.
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0, 0);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 1.6;
+  controls.enablePan = true;
+  controls.panSpeed = 0.6;
+  controls.zoomSpeed = 0.9;
+  // Pick sensible zoom limits from the framed camera distance.
+  const initDist = camera.position.length();
+  controls.minDistance = initDist * 0.4;
+  controls.maxDistance = initDist * 3.5;
+  // Stop auto-rotate when the user grabs the canvas — restart when they
+  // let go so the model keeps showing itself off in idle.
+  let userInteracting = false;
+  controls.addEventListener('start', () => { userInteracting = true; controls.autoRotate = false; });
+  controls.addEventListener('end', () => { userInteracting = false; setTimeout(() => { if (!userInteracting && controls) controls.autoRotate = true; }, 1500); });
+  controls.update();
+
   lastDef = def;
   if (animId) cancelAnimationFrame(animId);
   animate();
@@ -78,6 +104,7 @@ export function mountSpeaker3DPreview(canvas, def) {
 export function disposePreview() {
   if (animId) { cancelAnimationFrame(animId); animId = null; }
   drivers = [];
+  if (controls) { controls.dispose(); controls = null; }
   if (scene) {
     scene.traverse(obj => {
       if (obj.geometry) obj.geometry.dispose?.();
@@ -363,9 +390,9 @@ function animate() {
   if (!renderer || !scene || !camera) return;
   const t = performance.now() / 1000;
 
-  // Gentle auto-orbit of the cabinet so the user sees all sides without
-  // interacting. Rate ~9 RPM.
-  if (cabinetGroup) cabinetGroup.rotation.y = t * 0.22;
+  // Camera orbit is now handled by OrbitControls (auto-rotate when idle,
+  // user drag when active). Damping needs update() every frame.
+  if (controls) controls.update();
 
   // Driver pulse — each driver oscillates along its local axis (default +Z
   // for vertical cabinets; +Y for ceiling speakers where the baffle faces
