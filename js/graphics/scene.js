@@ -3183,6 +3183,164 @@ function rebuildMultiLevelStructure(room) {
       roomGroup.add(sign);
     }
   }
+
+  // -------- Mall fixtures: toilets, lifts, fire stairs, etc. --------
+  // Each item becomes a simple volumetric enclosure — 4 walls + floor
+  // + ceiling for toilets, glass shaft for lifts, concrete shaft for
+  // fire stairs. Materials tagged for the ray tracer; RT60 accounting
+  // sees these as interior absorptive volumes once the physics layer
+  // reads them.
+  const tileCeilMat = new THREE.MeshStandardMaterial({
+    color: 0xeaeae2, roughness: 0.82, metalness: 0.0,
+  });
+  const concreteMat2 = new THREE.MeshStandardMaterial({
+    color: 0x9a9ca0, roughness: 0.85, metalness: 0.02,
+  });
+  const tallGlassMat = new THREE.MeshStandardMaterial({
+    color: 0xc9dce8, roughness: 0.1, metalness: 0.08,
+    transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+  });
+
+  const WALL_T = 0.10;
+  const CEIL_T = 0.05;
+  const FIX_WALL_H = 5.4;   // levelHeight − slabThickness
+
+  // Toilet blocks — 4 walls + floor + ceiling per block.
+  for (const t of (mls.toiletBlocks || [])) {
+    const z0 = t.level * 5.8 + 0.01;
+    const z1 = z0 + FIX_WALL_H;
+    const zMid = (z0 + z1) / 2;
+    const w = t.x2 - t.x1, d = t.y2 - t.y1;
+    const cx = (t.x1 + t.x2) / 2, cy = (t.y1 + t.y2) / 2;
+    // 4 walls (gypsum)
+    const walls = [
+      { sx: w, sz: WALL_T, px: cx, py: t.y1 },   // south
+      { sx: w, sz: WALL_T, px: cx, py: t.y2 },   // north
+      { sx: WALL_T, sz: d, px: t.x1, py: cy },   // west
+      { sx: WALL_T, sz: d, px: t.x2, py: cy },   // east
+    ];
+    for (const wall of walls) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(wall.sx, FIX_WALL_H, wall.sz),
+        gypsumMat,
+      );
+      m.position.set(wall.px, zMid, wall.py);
+      m.userData.acoustic_material = 'gypsum-board';
+      m.userData.tag = `toilet_wall_L${t.level}`;
+      roomGroup.add(m);
+    }
+    // Ceiling (acoustic-tile)
+    const ceil = new THREE.Mesh(
+      new THREE.BoxGeometry(w, CEIL_T, d),
+      tileCeilMat,
+    );
+    ceil.position.set(cx, z1 - CEIL_T / 2, cy);
+    ceil.userData.acoustic_material = 'acoustic-tile';
+    ceil.userData.tag = `toilet_ceiling_L${t.level}`;
+    roomGroup.add(ceil);
+  }
+
+  // Passenger lift shafts — full-height glass boxes at the atrium corners.
+  for (const lift of (mls.passengerLifts || [])) {
+    const w = lift.x2 - lift.x1, d = lift.y2 - lift.y1;
+    const cx = (lift.x1 + lift.x2) / 2, cy = (lift.y1 + lift.y2) / 2;
+    const zMid = ((lift.base_z ?? 0) + (lift.top_z ?? totalHeight)) / 2;
+    const h = (lift.top_z ?? totalHeight) - (lift.base_z ?? 0);
+    // Glass shaft — 4 thin panes (box geometry so the precision ray
+    // tracer sees both sides as reflecting).
+    const panes = [
+      { sx: w, sz: 0.04, px: cx, py: lift.y1 },
+      { sx: w, sz: 0.04, px: cx, py: lift.y2 },
+      { sx: 0.04, sz: d, px: lift.x1, py: cy },
+      { sx: 0.04, sz: d, px: lift.x2, py: cy },
+    ];
+    for (const pane of panes) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(pane.sx, h, pane.sz),
+        tallGlassMat,
+      );
+      m.position.set(pane.px, zMid, pane.py);
+      m.userData.acoustic_material = 'glass';
+      m.userData.tag = 'passenger_lift_shaft';
+      roomGroup.add(m);
+    }
+    // Simple cab hint — a small dark floor at mid-height.
+    const cab = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 0.85, 0.1, d * 0.85),
+      new THREE.MeshStandardMaterial({ color: 0x2a2d34, roughness: 0.4, metalness: 0.7 }),
+    );
+    cab.position.set(cx, (lift.base_z ?? 0) + 2.0, cy);
+    roomGroup.add(cab);
+  }
+
+  // Fire stair enclosures — full-height concrete boxes at the 4 corners.
+  for (const stair of (mls.fireStairs || [])) {
+    const w = stair.x2 - stair.x1, d = stair.y2 - stair.y1;
+    const cx = (stair.x1 + stair.x2) / 2, cy = (stair.y1 + stair.y2) / 2;
+    const zMid = ((stair.base_z ?? 0) + (stair.top_z ?? totalHeight)) / 2;
+    const h = (stair.top_z ?? totalHeight) - (stair.base_z ?? 0);
+    const walls = [
+      { sx: w, sz: WALL_T, px: cx, py: stair.y1 },
+      { sx: w, sz: WALL_T, px: cx, py: stair.y2 },
+      { sx: WALL_T, sz: d, px: stair.x1, py: cy },
+      { sx: WALL_T, sz: d, px: stair.x2, py: cy },
+    ];
+    for (const wall of walls) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(wall.sx, h, wall.sz),
+        concreteMat2,
+      );
+      m.position.set(wall.px, zMid, wall.py);
+      m.userData.acoustic_material = 'concrete';
+      m.userData.tag = 'fire_stair';
+      roomGroup.add(m);
+    }
+  }
+
+  // Emergency outdoor staircase — cantilevered slab strip along the
+  // east facade, one per half-level. Box geometry with a diagonal
+  // step-pattern hint; no enclosure (it's exterior).
+  for (const esc of (mls.emergencyStairs || [])) {
+    const xOuter = esc.x_outer ?? 80;
+    const y1 = esc.y1, y2 = esc.y2;
+    const d = y2 - y1;
+    const nFlights = Math.round(((esc.top_z ?? totalHeight) - (esc.base_z ?? 0)) / 5.8 * 2);
+    for (let f = 0; f < nFlights; f++) {
+      const flightZ = (esc.base_z ?? 0) + f * 2.9 + 1.0;
+      const flight = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 0.15, d * 0.9),
+        concreteMat2,
+      );
+      flight.position.set(xOuter + 1.0, flightZ, (y1 + y2) / 2);
+      flight.userData.acoustic_material = 'concrete';
+      flight.userData.tag = 'emergency_stair';
+      roomGroup.add(flight);
+    }
+    // Handrail on outer edge
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, (esc.top_z ?? totalHeight) - (esc.base_z ?? 0), d),
+      new THREE.MeshStandardMaterial({ color: 0x2b2e34, roughness: 0.4, metalness: 0.85 }),
+    );
+    rail.position.set(xOuter + 1.8, ((esc.base_z ?? 0) + (esc.top_z ?? totalHeight)) / 2, (y1 + y2) / 2);
+    roomGroup.add(rail);
+  }
+
+  // Food court — on L3 (top floor), a carpeted hall with a soft-
+  // coloured floor overlay that reads "seating area" vs the regular
+  // concrete concourse. Chairs / tables are left to the audience-
+  // zone instanced humans (higher occupancy on this zone).
+  const fc = mls.foodCourt;
+  if (fc) {
+    const z = fc.level * 5.8 + 0.015;
+    const carpet = new THREE.Mesh(
+      new THREE.BoxGeometry(fc.x2 - fc.x1, 0.02, fc.y2 - fc.y1),
+      new THREE.MeshStandardMaterial({ color: 0x7c3f20, roughness: 0.95, metalness: 0.0 }),
+    );
+    carpet.position.set((fc.x1 + fc.x2) / 2, z, (fc.y1 + fc.y2) / 2);
+    carpet.userData.acoustic_material = 'carpet-heavy';
+    carpet.userData.tag = 'food_court_carpet';
+    roomGroup.add(carpet);
+  }
 }
 
 // Vomitory gaps between quadrants are enclosed separately with tunnel ceilings.

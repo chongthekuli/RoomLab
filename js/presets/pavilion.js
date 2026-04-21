@@ -170,6 +170,50 @@ for (let lv = 0; lv < nLevels; lv++) {
   );
 }
 
+// ---- Back-of-house + fire-safety fixtures (architect's brief) -----
+// Toilet blocks — UBBL requires 1 WC per 600 m² retail. Two blocks per
+// level (SW + NE cores), 80 m² each with M / F / OKU + nursing room.
+const toiletBlocks = [];
+for (let lv = 0; lv < nLevels; lv++) {
+  toiletBlocks.push(
+    { level: lv, x1: 8,  y1: 2,  x2: 18, y2: 10, label: 'Toilets (SW)' },
+    { level: lv, x1: 62, y1: 30, x2: 72, y2: 38, label: 'Toilets (NE)' },
+  );
+}
+
+// Passenger lifts — two pairs of glass scenic cabs at the atrium
+// corners, running full height so shoppers can see the lift climb.
+const passengerLifts = [
+  { x1: 29, y1: 19, x2: 33, y2: 23, base_z: 0, top_z: totalHeight, label: 'Lift bank A' },
+  { x1: 47, y1: 19, x2: 51, y2: 23, base_z: 0, top_z: totalHeight, label: 'Lift bank B' },
+];
+
+// Fire-exit staircases — UBBL By-law 166/167 / ≤ 46 m travel distance
+// means 4 enclosed stairs at the footprint corners, FR-rated concrete
+// walls full building height.
+const fireStairs = [
+  { x1: 1,    y1: 1,    x2: 3.5,  y2: 7,    base_z: 0, top_z: totalHeight, label: 'Fire stair SW' },
+  { x1: 76.5, y1: 1,    x2: 79,   y2: 7,    base_z: 0, top_z: totalHeight, label: 'Fire stair SE' },
+  { x1: 1,    y1: 33,   x2: 3.5,  y2: 39,   base_z: 0, top_z: totalHeight, label: 'Fire stair NW' },
+  { x1: 76.5, y1: 33,   x2: 79,   y2: 39,   base_z: 0, top_z: totalHeight, label: 'Fire stair NE' },
+];
+
+// Emergency outdoor staircase — one external escape stair on the east
+// facade, grade-to-top. Rendered as a concrete slab + railing strip
+// cantilevered from the exterior wall.
+const emergencyStairs = [
+  { x_outer: 80, y1: 16, y2: 24, base_z: 0, top_z: totalHeight, label: 'External emergency stair' },
+];
+
+// Food court — L3 (Level 3 / top floor). 30 × 16 m seating hall with
+// carpet + acoustic-tile ceiling for absorption. Carries higher
+// occupancy (35 %) because people sit longer than they walk.
+const foodCourt = {
+  level: 3, x1: 25, y1: 2, x2: 55, y2: 18,
+  label: 'Food court',
+  occupancy_percent: 35,
+};
+
 // ---- Audience zones — concourse walkways, per-level --------------
 // Four concourse strips per level (south, north, east, west), each
 // between the shop strip and the atrium edge. 20% occupancy gives
@@ -203,6 +247,16 @@ for (let lv = 0; lv < nLevels; lv++) {
       occupancy_percent: SHOPPER_OCCUPANCY },
   );
 }
+
+// Food court as its own audience zone — dense seated crowd, carpet floor.
+zones.push({
+  id: `P_foodcourt`,
+  label: `Level ${foodCourt.level} — food court (carpet)`,
+  vertices: rectVerts(foodCourt.x1, foodCourt.y1, foodCourt.x2, foodCourt.y2),
+  elevation_m: foodCourt.level * levelHeight + 0.02,
+  material_id: 'carpet-heavy',
+  occupancy_percent: foodCourt.occupancy_percent,
+});
 
 // Ceiling-speaker grid. Amperes CS610B on 10 m centres on L0 (busiest
 // concourse), 12 m centres on L1–L3 (quieter retail). Speakers hang
@@ -268,6 +322,11 @@ export default {
     escalators,
     escalatorOpenings,
     shops,
+    toiletBlocks,
+    passengerLifts,
+    fireStairs,
+    emergencyStairs,
+    foodCourt,
   },
   zones,
   sources,
