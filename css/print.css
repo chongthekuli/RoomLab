@@ -1,17 +1,12 @@
-/* Print stylesheet for the RoomLAB design summary (Q1 #2).
+/* RoomLAB scene-report print stylesheet (Q1 #2 v2 — proposal-ready).
  *
- * Engaged via @media print AND a class hook (#print-report appears
- * in the live DOM only during print). On screen, #print-report is
- * hidden by default. When printing:
+ * 6 pages, A4 portrait throughout (mixed orientation deferred until v2
+ * adds the SVG floor plan on page 3). Engaged via @media print AND a
+ * class hook (#print-report appears in the live DOM only during print).
  *
- *   - hide every screen element (panels, viewport, header)
- *   - reveal #print-report and let the browser flow it onto pages
- *   - A4 portrait, 1.5 cm margins
- *   - tables with repeated headers and tr break-inside discipline
- *
- * Maya's BLOCKER: every numeric column is rendered with units already
- * embedded by print-report.js. CSS doesn't add suffixes — the data
- * model carries them so any future tweak to units is single-source.
+ * Maya's BLOCKER honoured: every numeric column carries units already
+ * embedded by print-report.js. CSS does not add unit suffixes — single
+ * source of truth in the data layer.
  */
 
 @media screen {
@@ -19,16 +14,15 @@
 }
 
 @media print {
-  /* Force light colours regardless of dark-mode preference — most
-     report-quality printers can't reproduce dark backgrounds, and we
-     don't want grey-on-grey output. */
+  /* Force light colour-scheme regardless of dark-mode preference —
+     report-quality printers can't reproduce dark backgrounds, and
+     grey-on-grey output is unreadable. */
   html { color-scheme: light; }
 
   /* Hide everything else. Direct children only — descendants of
      #print-report stay visible. */
   body > *:not(#print-report) { display: none !important; }
 
-  /* Restore the print container as block-level. */
   #print-report {
     display: block !important;
     color: #000;
@@ -40,61 +34,132 @@
     margin: 0;
   }
 
-  /* A4 portrait; tight margins to fit a small/medium scene on one page. */
   @page {
     size: A4 portrait;
     margin: 1.5cm;
   }
 
-  /* Header / metadata. */
-  #print-report .pr-head {
-    border-bottom: 1px solid #000;
-    padding-bottom: 6pt;
-    margin-bottom: 10pt;
+  /* Each .pr-page becomes its own physical page. */
+  #print-report .pr-page {
+    page-break-after: always;
+    break-after: page;
   }
-  #print-report .pr-head h1 {
-    font-size: 14pt;
-    margin: 0 0 4pt 0;
+  #print-report .pr-page:last-of-type {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  /* ----- Cover page (page 1) ----- */
+  #print-report .pr-page-cover .pr-head {
+    border-bottom: 1.5pt solid #000;
+    padding-bottom: 8pt;
+    margin-bottom: 12pt;
+  }
+  #print-report .pr-page-cover h1 {
+    font-size: 18pt;
+    margin: 0 0 6pt 0;
     font-weight: 600;
     letter-spacing: 0.02em;
   }
   #print-report .pr-meta {
-    font-size: 8.5pt;
+    font-size: 9pt;
     color: #333;
     display: flex;
-    gap: 14pt;
+    gap: 16pt;
     flex-wrap: wrap;
   }
   #print-report .pr-meta strong {
     font-weight: 600;
     color: #000;
   }
+  #print-report .pr-exec-summary {
+    font-size: 10pt;
+    line-height: 1.55;
+    margin: 8pt 0 16pt 0;
+    padding: 8pt 10pt;
+    background: #f5f5f0;
+    border-left: 2pt solid #555;
+  }
+  #print-report .pr-exec-summary strong {
+    font-weight: 600;
+  }
 
-  /* Sections. */
+  /* Tile grid for "Scene at a glance" */
+  #print-report .pr-tilegrid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 5pt;
+    margin: 6pt 0 14pt 0;
+  }
+  #print-report .pr-tile {
+    border: 0.5pt solid #888;
+    border-radius: 2pt;
+    padding: 5pt 7pt;
+    background: #fafafa;
+    break-inside: avoid;
+  }
+  #print-report .pr-tile-label {
+    font-size: 7.5pt;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 3pt;
+  }
+  #print-report .pr-tile-value {
+    font-size: 12pt;
+    font-weight: 600;
+    color: #000;
+  }
+
+  #print-report .pr-reviewer-note {
+    margin-top: 14pt;
+    padding: 8pt 10pt;
+    background: #fff5e1;
+    border-left: 2pt solid #c08000;
+    font-size: 9pt;
+    line-height: 1.5;
+    break-inside: avoid;
+  }
+  #print-report .pr-reviewer-note strong {
+    font-weight: 600;
+    color: #6a4500;
+  }
+
+  /* ----- Sections (apply to every page) ----- */
   #print-report .pr-section {
-    margin-bottom: 10pt;
+    margin-bottom: 12pt;
     break-inside: auto;
   }
   #print-report .pr-section h2 {
-    font-size: 10.5pt;
+    font-size: 11pt;
     font-weight: 600;
-    margin: 0 0 4pt 0;
+    margin: 0 0 5pt 0;
     border-bottom: 0.5pt solid #888;
     padding-bottom: 2pt;
+  }
+  #print-report .pr-section h3 {
+    font-size: 9.5pt;
+    font-weight: 600;
+    margin: 8pt 0 3pt 0;
+    color: #333;
   }
   #print-report .pr-note {
     font-size: 8pt;
     color: #555;
     margin: 4pt 0 0 0;
     font-style: italic;
+    line-height: 1.5;
   }
   #print-report .pr-mono {
     font-family: 'SF Mono', Menlo, Consolas, monospace;
     font-size: 8.5pt;
   }
+  #print-report .pr-mute {
+    color: #666;
+    font-size: 8pt;
+  }
 
-  /* Tables — repeat headers across page breaks (Martina, MEDIUM).
-     tr break-inside: avoid keeps a single row from splitting. */
+  /* ----- Tables ----- */
   #print-report .pr-table {
     width: 100%;
     border-collapse: collapse;
@@ -120,32 +185,81 @@
     text-align: left;
     font-size: 8.5pt;
   }
-  /* Key-value tables (Room dimensions etc.) need left-aligned values. */
   #print-report .pr-table.pr-kv th {
     text-align: right;
     width: 38%;
     background: transparent;
   }
   #print-report .pr-table.pr-kv td { text-align: left; }
-  /* Source table is dense — shrink slightly to fit more columns on page. */
   #print-report .pr-source-table th,
   #print-report .pr-source-table td {
     font-size: 8pt;
     padding: 1.6pt 4pt;
   }
+  #print-report .pr-bom-model {
+    text-align: left;
+  }
 
-  /* Footer. */
+  /* ----- Empty-state placeholder copy (Lin's tone) ----- */
+  #print-report .pr-empty-state {
+    padding: 10pt 12pt;
+    background: #f0f4ff;
+    border-left: 2pt solid #4a6fa5;
+    font-size: 9pt;
+    color: #333;
+    margin: 4pt 0;
+  }
+
+  /* ----- Methodology block ----- */
+  #print-report .pr-method-entry {
+    margin-bottom: 6pt;
+    padding-bottom: 4pt;
+    border-bottom: 0.3pt dotted #ccc;
+    break-inside: avoid;
+  }
+  #print-report .pr-method-heading {
+    font-weight: 600;
+    font-size: 9pt;
+    color: #000;
+  }
+  #print-report .pr-method-cite,
+  #print-report .pr-method-body {
+    font-size: 8.5pt;
+    color: #333;
+    margin-left: 8pt;
+    margin-top: 1pt;
+  }
+
+  /* ----- Disclaimer block ----- */
+  #print-report .pr-disclaimer-intro {
+    font-weight: 600;
+    margin-bottom: 6pt;
+  }
+  #print-report .pr-section p {
+    font-size: 9pt;
+    line-height: 1.5;
+    margin: 3pt 0 6pt 0;
+  }
+
+  /* ----- References list ----- */
+  #print-report .pr-references {
+    font-size: 8.5pt;
+    line-height: 1.6;
+    color: #333;
+  }
+
+  /* ----- Footer (every page) ----- */
   #print-report .pr-foot {
-    margin-top: 12pt;
+    position: running(footer);
     border-top: 0.5pt solid #888;
     padding-top: 4pt;
     font-size: 7.5pt;
     color: #555;
-    display: flex;
-    justify-content: space-between;
+    text-align: center;
+    margin-top: 10pt;
   }
 
-  /* Tooltips, modals, the help overlay must NEVER appear in print. */
+  /* Hide tooltips, modals, the help overlay etc. in print. */
   .help-modal, #help-overlay, .probe-tooltip, .vp-tab, .rl-toast {
     display: none !important;
   }
