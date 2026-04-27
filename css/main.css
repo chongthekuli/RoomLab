@@ -787,7 +787,8 @@ section h3 {
 }
 
 .preset-row { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
-.preset-row button {
+.preset-row button,
+.picker-buttons button {
   padding: 0.32rem 0.6rem;
   border: 1px solid var(--border);
   background: var(--bg-elev);
@@ -798,8 +799,60 @@ section h3 {
   font-family: inherit;
   letter-spacing: 0.02em;
 }
-.preset-row button:hover {
+.preset-row button:hover,
+.picker-buttons button:hover {
   color: var(--fg-strong);
+  background: var(--border);
+  border-color: var(--border-strong);
+}
+
+/* Picker row: small left-aligned label ("Presets" / "Templates") + a
+   wrap-flow row of buttons. Used in #panel-room to split the unified
+   picker into signature-Presets vs parametric-Templates. */
+.picker-row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 0.4rem;
+  align-items: start;
+  margin-bottom: 0.4rem;
+}
+.picker-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding-top: 0.4rem;
+  cursor: help;
+}
+.picker-buttons { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+/* Save / Load buttons in the room-panel header. The header itself
+   becomes a flex row so the buttons sit to the right of the "Room"
+   title. */
+.room-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.room-head h2 { margin: 0; }
+.room-head-actions { display: flex; gap: 0.3rem; }
+.room-head-actions .btn-save,
+.room-head-actions .btn-load {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: inherit;
+  letter-spacing: 0.02em;
+}
+.room-head-actions .btn-save:hover,
+.room-head-actions .btn-load:hover {
   background: var(--border);
   border-color: var(--border-strong);
 }

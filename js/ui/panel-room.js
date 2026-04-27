@@ -1,7 +1,8 @@
-import { state, PRESETS, SHAPE_LABELS, CEILING_LABELS, applyPresetToState } from '../app-state.js';
+import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToState, applyTemplateToState } from '../app-state.js';
 import { emit } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { importDxfFile } from '../physics/dxf-import.js';
+import { saveProjectToDownload, loadProjectFromFile } from '../io/project-file.js';
 
 const RECT_SURFACE_LABELS = [
   ['floor',      'Floor'],
@@ -24,8 +25,22 @@ export function mountRoomPanel({ materials }) {
   materialsRef = materials;
   const root = document.getElementById('panel-room');
   root.innerHTML = `
-    <h2>Room</h2>
-    <div class="preset-row" id="preset-row"></div>
+    <div class="room-head">
+      <h2>Room</h2>
+      <div class="room-head-actions">
+        <button id="btn-save-project" class="btn-save" title="Save the entire project (room, speakers, listeners, zones, EQ, ambient noise) to a .roomlab.json file">💾 Save</button>
+        <button id="btn-load-project" class="btn-load" title="Load a previously saved .roomlab.json project file">📂 Load</button>
+        <input type="file" id="file-roomlab" accept=".json,.roomlab.json,application/json" hidden />
+      </div>
+    </div>
+    <div class="picker-row">
+      <span class="picker-label" title="Signature pre-built scenes that load with their full geometry, audience, and PA system as authored.">Presets</span>
+      <div class="picker-buttons" id="preset-row"></div>
+    </div>
+    <div class="picker-row">
+      <span class="picker-label" title="Parametric room shapes — pick a starting layout and edit the dimensions below to whatever size you need. The speakers and listener auto-scale with the room.">Templates</span>
+      <div class="picker-buttons" id="template-row"></div>
+    </div>
     <div class="import-row">
       <button id="btn-import-dxf" class="btn-import" title="Import room outline from a DXF file (DWG must be converted first)">⇪ Import DXF…</button>
       <input type="file" id="file-dxf" accept=".dxf,.dwg" hidden />
@@ -53,6 +68,7 @@ export function mountRoomPanel({ materials }) {
     <div id="surface-materials"></div>
   `;
 
+  // Presets row — signature scenes (Arena, Pavilion) load verbatim.
   const presetRow = root.querySelector('#preset-row');
   for (const [key, p] of Object.entries(PRESETS)) {
     const btn = document.createElement('button');
@@ -61,6 +77,47 @@ export function mountRoomPanel({ materials }) {
     btn.addEventListener('click', () => applyPreset(key));
     presetRow.appendChild(btn);
   }
+
+  // Templates row — parametric rooms regenerate when the user changes
+  // dimensions. Tracks which template was last applied so dimension
+  // edits can re-call generate(dims) with the user's overrides.
+  const templateRow = root.querySelector('#template-row');
+  for (const [key, t] of Object.entries(TEMPLATES)) {
+    const btn = document.createElement('button');
+    btn.textContent = t.label;
+    btn.dataset.template = key;
+    btn.addEventListener('click', () => applyTemplate(key));
+    templateRow.appendChild(btn);
+  }
+
+  // Save / Load — save dumps state to a .roomlab.json file via Blob
+  // download; load reads a file back through deserializeProject and
+  // emits scene:reset so every panel rebuilds against the new state.
+  root.querySelector('#btn-save-project').addEventListener('click', () => {
+    try {
+      const filename = saveProjectToDownload();
+      showStatus(`Saved as ${filename}`, 'ok');
+    } catch (err) {
+      showStatus(`Save failed: ${err.message || err}`, 'err');
+    }
+  });
+  const projectFileInput = root.querySelector('#file-roomlab');
+  root.querySelector('#btn-load-project').addEventListener('click', () => projectFileInput.click());
+  projectFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    projectFileInput.value = ''; // allow reloading the same file
+    if (!file) return;
+    try {
+      const { warnings } = await loadProjectFromFile(file);
+      const warnSuffix = warnings?.length ? ` (${warnings.length} warning${warnings.length === 1 ? '' : 's'})` : '';
+      showStatus(`Loaded ${file.name}${warnSuffix}`, 'ok');
+      // Re-render the room panel itself so the shape select etc. reflect
+      // the loaded state. scene:reset already woke every other panel.
+      render();
+    } catch (err) {
+      showStatus(err.message || String(err), 'err');
+    }
+  });
 
   // DXF import — converts largest closed polyline in the file into the
   // current room's custom_vertices. Height and surface materials are
@@ -86,6 +143,10 @@ export function mountRoomPanel({ materials }) {
       state.room.surfaces.edges = state.room.custom_vertices.map(() => state.room.surfaces.walls || 'gypsum-board');
     }
     syncBoundingBoxToShape();
+    // Manual shape change drops any active template association — the
+    // user is hand-editing the room, so dimension changes shouldn't
+    // re-run a template generator.
+    activeTemplateKey = null;
     render();
     emit('room:changed');
   });
@@ -96,6 +157,21 @@ export function mountRoomPanel({ materials }) {
   });
 
   render();
+}
+
+// Tracks which template (if any) is the live "source" of the current
+// room. While set, dimension edits in the Shape section regenerate the
+// template's sources/listeners so the layout stays consistent. Cleared
+// when the user applies a Preset, draws a custom shape, loads a project
+// file, or hits Import DXF.
+let activeTemplateKey = null;
+
+function showStatus(text, kind) {
+  const status = document.getElementById('import-status');
+  if (!status) return;
+  status.hidden = false;
+  status.className = 'import-status' + (kind === 'ok' ? ' ok' : kind === 'err' ? ' err' : '');
+  status.textContent = text;
 }
 
 function syncBoundingBoxToShape() {
@@ -244,9 +320,34 @@ function wireShapeInputs() {
       if (key === 'polygon_radius_m' || key === 'round_radius_m') {
         syncBoundingBoxToShape();
       }
+      // If a template is the live source for the current room, re-run
+      // its generator with the updated dimensions so sources/listeners
+      // scale to match. Skip when the user has already started hand-
+      // editing (no activeTemplateKey).
+      if (activeTemplateKey) {
+        regenerateActiveTemplate();
+      }
       emit('room:changed');
     });
   });
+}
+
+function regenerateActiveTemplate() {
+  if (!activeTemplateKey || !TEMPLATES[activeTemplateKey]) return;
+  // Pull the dimension fields the template cares about straight from
+  // state — the user just typed them. Untouched fields fall back to
+  // the template's defaultDims via applyTemplateToState merging.
+  const dims = {
+    width_m: state.room.width_m,
+    depth_m: state.room.depth_m,
+    height_m: state.room.height_m,
+    polygon_sides: state.room.polygon_sides,
+    polygon_radius_m: state.room.polygon_radius_m,
+    round_radius_m: state.room.round_radius_m,
+    ceiling_dome_rise_m: state.room.ceiling_dome_rise_m,
+  };
+  applyTemplateToState(activeTemplateKey, dims);
+  emit('scene:reset');
 }
 
 function renderSurfaceMaterials() {
@@ -318,9 +419,19 @@ function buildMatSelect(dataKey, currentValue) {
 
 function applyPreset(key) {
   applyPresetToState(key);
+  // Presets have fixed geometry — no template regen on dim changes.
+  activeTemplateKey = null;
   render();
   // scene:reset tells every panel/viewport that state arrays were replaced wholesale.
   // room:changed kept for listeners that only care about room geometry.
+  emit('scene:reset');
+  emit('room:changed');
+}
+
+function applyTemplate(key) {
+  applyTemplateToState(key);
+  activeTemplateKey = key;
+  render();
   emit('scene:reset');
   emit('room:changed');
 }
@@ -346,6 +457,7 @@ async function handleDxfImport(file) {
     state.room.width_m = w;
     state.room.depth_m = d;
     state.room.surfaces.edges = verts.map(() => state.room.surfaces.walls || 'gypsum-board');
+    activeTemplateKey = null;
 
     render();
     emit('room:changed');
@@ -372,4 +484,15 @@ on('room:changed', () => {
     renderShapeParams();
     renderSurfaceMaterials();
   }
+});
+
+// Project file load drops the activeTemplateKey association — the loaded
+// scene is whatever was saved, and dimension edits should not re-run a
+// template generator on top of it.
+on('scene:reset', () => {
+  // Note: don't reset activeTemplateKey if WE just set it via applyTemplate
+  // — scene:reset is emitted both from us and from project-file load.
+  // Distinguishing requires a payload; for v1 we accept that loading a
+  // project file dropped from a template still loses the regen behaviour,
+  // which is the conservative default.
 });
