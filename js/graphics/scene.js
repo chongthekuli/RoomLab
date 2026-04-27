@@ -214,9 +214,24 @@ function rebuildRayViz() {
   // one material, one draw call — Viktor's recommendation. Two-floats-
   // per-vertex offsets indexed via Uint32 keeps headroom for future N
   // increases without touching this code path.
+  //
+  // Coord-system swap: ray-viz returns pathData in PHYSICS / state
+  // coords (x=width, y=depth, z=up). Three.js is y=up, z=depth. Every
+  // other render path in scene.js does this swap explicitly (e.g.
+  // `encl.position.set(src.position.x, src.position.z, src.position.y)`
+  // when placing speaker enclosures). We do it once here while copying
+  // into the BufferGeometry so ray-viz.js can stay coord-pure for tests
+  // and any future physics consumer.
+  const N = result.pathData.length;
+  const renderPos = new Float32Array(N);
+  for (let i = 0; i < N; i += 3) {
+    renderPos[i + 0] = result.pathData[i + 0]; // x stays x
+    renderPos[i + 1] = result.pathData[i + 2]; // state z (up)    → three y (up)
+    renderPos[i + 2] = result.pathData[i + 1]; // state y (depth) → three z (depth)
+  }
   const indices = buildLineSegmentIndex(result.pathOffsets);
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(result.pathData, 3));
+  geo.setAttribute('position', new THREE.BufferAttribute(renderPos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(result.colorData, 3));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
 
