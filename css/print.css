@@ -210,6 +210,58 @@
     margin: 4pt 0;
   }
 
+  /* ----- Floor-plan page ----- */
+  #print-report .pr-page-plan { /* portrait — SVG fills remaining height after the heading */ }
+  #print-report .pr-plan-grid {
+    display: grid;
+    grid-template-columns: 1fr 110pt;
+    gap: 12pt;
+    align-items: stretch;
+    margin: 6pt 0 8pt 0;
+  }
+  #print-report .pr-plan-svg-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+  #print-report .pr-plan-svg {
+    width: 100%;
+    max-height: 22cm;       /* leave room for the heading + legend caption + note */
+    height: auto;
+    display: block;
+  }
+  /* Print-engine overrides — Chromium sometimes ignores % widths in
+     SVG inside @media print. Forcing display:block + width:100% keeps
+     the plan from collapsing. */
+  #print-report .pr-plan-svg svg { width: 100%; height: auto; }
+
+  #print-report .pr-plan-legend {
+    border-left: 0.5pt solid #888;
+    padding-left: 8pt;
+    font-size: 8.5pt;
+    color: #222;
+    display: flex;
+    flex-direction: column;
+    gap: 5pt;
+  }
+  #print-report .pr-plan-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 6pt;
+  }
+  #print-report .pr-plan-legend-icon {
+    width: 12pt;
+    height: 12pt;
+    flex: 0 0 12pt;
+  }
+  #print-report .pr-plan-legend-note {
+    margin-top: 6pt;
+    font-size: 7.5pt;
+    color: #555;
+    font-style: italic;
+    line-height: 1.45;
+  }
+
   /* ----- Methodology block ----- */
   #print-report .pr-method-entry {
     margin-bottom: 6pt;

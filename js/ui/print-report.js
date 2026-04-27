@@ -29,6 +29,7 @@ import { state, earHeightFor, expandSources, POSTURE_LABELS, SPEAKER_CATALOG } f
 import { computeAllBands } from '../physics/rt60.js';
 import { roomVolume, baseArea } from '../physics/room-shape.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
+import { buildFloorPlanSVG, buildFloorPlanLegend } from './print-plan-svg.js';
 
 // ---------------------------------------------------------------------------
 // buildPrintModel — pure data function (testable without a headless browser).
@@ -383,7 +384,22 @@ function renderPrintReport(model) {
       </div>
     </div>`;
 
-  // ------ Page 2: room geometry + reverberation -----------------------
+  // ------ Page 2: floor plan ------------------------------------------
+  const planSvg = buildFloorPlanSVG(state);
+  const planLegend = buildFloorPlanLegend();
+  const planPage = `
+    <div class="pr-page pr-page-plan">
+      <section class="pr-section">
+        <h2>Floor plan — top-down view</h2>
+        <div class="pr-plan-grid">
+          <div class="pr-plan-svg-wrap">${planSvg}</div>
+          ${planLegend}
+        </div>
+        <p class="pr-note">Numbers next to source markers index the equipment list on the next page (e.g. <span class="pr-mono">3.2</span> = source 3, line-array element 2). Listener labels match the listener table on page 4.</p>
+      </section>
+    </div>`;
+
+  // ------ Page 3: room geometry + reverberation -----------------------
   const rt60Rows = model.rt60.map(r => `
     <tr>
       <td>${fmtBand(r.freq_hz)}</td>
@@ -555,6 +571,7 @@ function renderPrintReport(model) {
 
   root.innerHTML = `
     ${cover}
+    ${planPage}
     ${roomPage}
     ${sourcePage}
     ${listenerPage}
