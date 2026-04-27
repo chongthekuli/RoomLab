@@ -69,10 +69,40 @@ function hexToRgb(hex) {
 
 const DEFAULT_RAY_RGB = [0.55, 0.78, 1.0]; // soft blue when no source group
 
+// Ray-segment vs sphere entry test. Returns the parameter t (in
+// world-distance units, same as `intersectRay`) at which a unit-
+// direction ray first enters the sphere, or -1 if it doesn't enter
+// within [0, tMax]. Used by listener-biased mode to test whether a
+// ray segment crosses any receiver sphere on its way to the next
+// surface hit.
+function raySphereEntry(ox, oy, oz, dx, dy, dz, sx, sy, sz, sr, tMax) {
+  const fx = ox - sx;
+  const fy = oy - sy;
+  const fz = oz - sz;
+  const b = fx * dx + fy * dy + fz * dz;
+  const c = fx * fx + fy * fy + fz * fz - sr * sr;
+  const disc = b * b - c;
+  if (disc < 0) return -1;
+  const t = -b - Math.sqrt(disc);
+  if (t < 0 || t > tMax) return -1;
+  return t;
+}
+
 // Trace ray paths from every source in the scene, distributing N total
 // paths proportional to source count (so a 1-source hi-fi gets all
 // N=200, but pavilion's 88 ceiling speakers get ~2 paths each — Viktor's
 // rule: budget total, not per-source).
+//
+// `bias` ('auto' | 'listeners' | 'uniform'):
+//   'auto' (default) → listener-biased when at least one listener
+//     exists, else falls back to uniform sampling.
+//   'listeners' → reject paths that don't cross a receiver sphere.
+//     Up to ~50 sample candidates per requested path; if none
+//     hits a listener after that budget, accept whatever was sampled
+//     so the user sees something rather than nothing.
+//   'uniform' → keep every sampled path regardless of listener
+//     intersection. Faster (1× cost). Useful when no listeners are
+//     placed yet.
 //
 // Returns the interleaved buffers described in the module header, plus
 // `stats` for caller diagnostics. Throws if the scene has no sources
@@ -84,6 +114,7 @@ export function recordRayPaths({
   totalPaths = DEFAULT_TOTAL_PATHS,
   maxBounces = DEFAULT_MAX_BOUNCES,
   seed = DEFAULT_SEED,
+  bias = 'auto',
 } = {}) {
   if (!state || !materials) throw new Error('recordRayPaths: state + materials are required');
 
@@ -136,11 +167,30 @@ export function recordRayPaths({
   const colorData = new Float32Array(maxVerts * 3);
   const pathOffsets = new Uint32Array(totalPaths + 1);
 
+  // Listener bias: rejection-sample so committed paths actually cross
+  // a receiver. Most random rays from a small source don't go anywhere
+  // near a listener; without this, ~95 % of viz lines are uninformative.
+  const recPositions = scene.receivers?.positions;
+  const recRadii = scene.receivers?.radii;
+  const R = scene.receivers?.count ?? 0;
+  const useListenerBias = (bias === 'listeners' || (bias === 'auto' && R > 0));
+  // Per-source candidate budget — over-sample when biased so we can
+  // afford rejections. Capped to avoid pathological scenes (e.g.
+  // listener placed in a sealed cavity) chewing seconds.
+  const CANDIDATE_MULTIPLIER = useListenerBias ? 50 : 1;
+
   const rng = mulberry32(seed);
   const dir = new Float32Array(3);
+  // Scratch buffers for one candidate path. We trace into these, and
+  // copy into the main pathData/colorData buffers ONLY if the path
+  // qualifies (crossed a listener, or bias='uniform').
+  const candXYZ = new Float32Array((maxBounces + 1) * 3);
+  const candRGB = new Float32Array((maxBounces + 1) * 3);
   let writeVert = 0;
   let pathCount = 0;
   let totalBouncesRecorded = 0;
+  let totalCandidates = 0;
+  let totalListenerHits = 0;
 
   for (let sIdx = 0; sIdx < S; sIdx++) {
     const sx = sourcePositions[sIdx * 3 + 0];
@@ -148,56 +198,67 @@ export function recordRayPaths({
     const sz = sourcePositions[sIdx * 3 + 2];
     const [r0, g0, b0] = sourceColors[sIdx];
     const N = perSource[sIdx];
+    const maxAttempts = N * CANDIDATE_MULTIPLIER;
+    let recorded = 0;
+    let attempts = 0;
 
-    for (let ri = 0; ri < N; ri++) {
-      if (pathCount >= totalPaths) break; // safety — over-budget
-      pathOffsets[pathCount] = writeVert;
-      // Vertex 0 = source position.
-      pathData[writeVert * 3 + 0] = sx;
-      pathData[writeVert * 3 + 1] = sy;
-      pathData[writeVert * 3 + 2] = sz;
-      colorData[writeVert * 3 + 0] = r0;
-      colorData[writeVert * 3 + 1] = g0;
-      colorData[writeVert * 3 + 2] = b0;
-      writeVert++;
+    while (recorded < N && attempts < maxAttempts && pathCount < totalPaths) {
+      attempts++;
+      totalCandidates++;
+
+      // Initialise candidate scratch with the source vertex.
+      candXYZ[0] = sx; candXYZ[1] = sy; candXYZ[2] = sz;
+      candRGB[0] = r0; candRGB[1] = g0; candRGB[2] = b0;
+      let candVerts = 1;
 
       sampleUnitSphere(rng, dir);
       let dx = dir[0], dy = dir[1], dz = dir[2];
       let ox = sx, oy = sy, oz = sz;
-      let energy = 1.0; // single-scalar; fades along path
+      let energy = 1.0;
+      let hitListener = !useListenerBias; // uniform mode → "always commit"
 
       for (let bounce = 0; bounce < maxBounces; bounce++) {
         const hit = intersectRay(bvh, ox, oy, oz, dx, dy, dz);
         if (!hit) break;
 
+        // Listener-bias check: did this segment [origin → hit] cross
+        // any receiver sphere? Only test until we find one — we just
+        // need a yes/no for the commit decision.
+        if (useListenerBias && !hitListener) {
+          for (let recIdx = 0; recIdx < R; recIdx++) {
+            const tRec = raySphereEntry(
+              ox, oy, oz, dx, dy, dz,
+              recPositions[recIdx * 3 + 0],
+              recPositions[recIdx * 3 + 1],
+              recPositions[recIdx * 3 + 2],
+              recRadii[recIdx],
+              hit.t,
+            );
+            if (tRec >= 0) { hitListener = true; break; }
+          }
+        }
+
+        // Advance to surface hit + apply mid-band absorption.
         ox += dx * hit.t;
         oy += dy * hit.t;
         oz += dz * hit.t;
-
-        // Apply the surface's mid-band absorption to the running energy.
-        // (Viktor: "energy fade alpha-equivalent on a log scale.")
         const mat = scene.materials?.[hit.materialIdx];
-        const alphaMid = mat?.absorption?.[3] ?? 0.1; // 1 kHz default
+        const alphaMid = mat?.absorption?.[3] ?? 0.1;
         energy *= Math.max(0.05, 1 - alphaMid);
 
-        // Record vertex with energy-faded colour. Log scale because
-        // even at 0.5 absorption per bounce the linear fade is invisible
-        // by bounce 3.
+        // Record vertex with energy-faded colour.
         const fade = Math.max(0.15, 0.15 + 0.85 * (Math.log10(energy + 0.01) + 2) / 2);
-        pathData[writeVert * 3 + 0] = ox;
-        pathData[writeVert * 3 + 1] = oy;
-        pathData[writeVert * 3 + 2] = oz;
-        colorData[writeVert * 3 + 0] = r0 * fade;
-        colorData[writeVert * 3 + 1] = g0 * fade;
-        colorData[writeVert * 3 + 2] = b0 * fade;
-        writeVert++;
+        candXYZ[candVerts * 3 + 0] = ox;
+        candXYZ[candVerts * 3 + 1] = oy;
+        candXYZ[candVerts * 3 + 2] = oz;
+        candRGB[candVerts * 3 + 0] = r0 * fade;
+        candRGB[candVerts * 3 + 1] = g0 * fade;
+        candRGB[candVerts * 3 + 2] = b0 * fade;
+        candVerts++;
 
-        // Stop once the ray is essentially silent — prevents pretty
-        // but uninformative low-energy late tails. -20 dB ≈ 1 % of source.
         if (energy < 0.01) break;
 
-        // Specular reflection. Viz doesn't model scattering — rays look
-        // like the geometric reflection paths users learn from textbooks.
+        // Specular reflection.
         const nx = hit.normal[0], ny = hit.normal[1], nz = hit.normal[2];
         const dDotN = dx * nx + dy * ny + dz * nz;
         dx -= 2 * dDotN * nx;
@@ -205,15 +266,33 @@ export function recordRayPaths({
         dz -= 2 * dDotN * nz;
         const dLen = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (dLen > EPS) { dx /= dLen; dy /= dLen; dz /= dLen; }
-
-        // Nudge off surface to avoid self-intersection.
         ox += dx * EPS;
         oy += dy * EPS;
         oz += dz * EPS;
-
-        totalBouncesRecorded++;
       }
-      pathCount++;
+
+      // Commit decision. Listener bias: keep only paths that crossed.
+      // Last-resort fallback: if we exhaust the candidate budget for
+      // this source without any listener hits, commit whatever we got
+      // so the user sees something instead of an empty toggle.
+      const isLastResort = useListenerBias
+        && (attempts >= maxAttempts) && (recorded === 0);
+      if (hitListener || isLastResort) {
+        if (hitListener) totalListenerHits++;
+        pathOffsets[pathCount] = writeVert;
+        for (let v = 0; v < candVerts; v++) {
+          pathData[writeVert * 3 + 0] = candXYZ[v * 3 + 0];
+          pathData[writeVert * 3 + 1] = candXYZ[v * 3 + 1];
+          pathData[writeVert * 3 + 2] = candXYZ[v * 3 + 2];
+          colorData[writeVert * 3 + 0] = candRGB[v * 3 + 0];
+          colorData[writeVert * 3 + 1] = candRGB[v * 3 + 1];
+          colorData[writeVert * 3 + 2] = candRGB[v * 3 + 2];
+          writeVert++;
+        }
+        pathCount++;
+        recorded++;
+        totalBouncesRecorded += Math.max(0, candVerts - 1);
+      }
     }
   }
   pathOffsets[pathCount] = writeVert;
@@ -229,6 +308,10 @@ export function recordRayPaths({
       totalPaths: pathCount,
       avgBounces: pathCount > 0 ? totalBouncesRecorded / pathCount : 0,
       sources: S,
+      receivers: R,
+      bias: useListenerBias ? 'listeners' : 'uniform',
+      candidatesTraced: totalCandidates,
+      listenerHits: totalListenerHits,
       vertices: finalVerts,
     },
   };

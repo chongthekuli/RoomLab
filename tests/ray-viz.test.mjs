@@ -153,6 +153,52 @@ applyPresetToState('auditorium');
   assert(out.stats.avgBounces > 0, `auditorium avg bounces > 0 (${out.stats.avgBounces.toFixed(1)})`);
 }
 
+// 7. Listener-biased default kicks in when listeners exist. The hi-fi
+//    template has 1 listener, so 'auto' bias must select 'listeners'
+//    mode and trace MORE candidates than committed paths.
+applyTemplateToState('hifi');
+{
+  const out = recordRayPaths({ state, materials, getLoudspeakerDef, totalPaths: 50 });
+  assert(out.stats.bias === 'listeners', `bias auto-selected 'listeners' when receivers exist (got ${out.stats.bias})`);
+  assert(out.stats.candidatesTraced >= out.stats.totalPaths,
+    `candidatesTraced (${out.stats.candidatesTraced}) ≥ totalPaths (${out.stats.totalPaths})`);
+  assert(out.stats.listenerHits > 0,
+    `at least one path crossed a listener sphere (${out.stats.listenerHits})`);
+}
+
+// 8. Forcing uniform bias preserves old behaviour: every candidate
+//    traced becomes a committed path, no rejection sampling.
+applyTemplateToState('hifi');
+{
+  const out = recordRayPaths({ state, materials, getLoudspeakerDef, totalPaths: 50, bias: 'uniform' });
+  assert(out.stats.bias === 'uniform', `forced uniform → bias=uniform`);
+  assert(out.stats.candidatesTraced === out.stats.totalPaths,
+    `uniform: candidates == paths (${out.stats.candidatesTraced} == ${out.stats.totalPaths})`);
+  assert(out.stats.totalPaths === 50, 'uniform: requested 50 paths, recorded 50');
+}
+
+// 9. No listeners → 'auto' falls back to uniform sampling, no rejection.
+applyTemplateToState('hifi');
+state.listeners = [];
+{
+  const out = recordRayPaths({ state, materials, getLoudspeakerDef, totalPaths: 50 });
+  assert(out.stats.bias === 'uniform', `no listeners + bias=auto → uniform fallback`);
+  assert(out.stats.totalPaths === 50, 'no listeners: full N committed (no rejection)');
+  assert(out.stats.receivers === 0, `stats.receivers reflects empty listeners (${out.stats.receivers})`);
+}
+
+// 10. Force listeners-mode with NO listeners present: bias is honoured
+//     but every path falls back via the last-resort path so the user
+//     sees something, never an empty toggle.
+applyTemplateToState('hifi');
+state.listeners = [];
+{
+  const out = recordRayPaths({ state, materials, getLoudspeakerDef, totalPaths: 30, bias: 'listeners' });
+  assert(out.stats.bias === 'listeners', 'forced listeners mode honoured');
+  assert(out.stats.listenerHits === 0, 'no listeners: zero listener hits');
+  assert(out.stats.totalPaths > 0, `last-resort fallback kept ≥ 1 path per source (${out.stats.totalPaths})`);
+}
+
 if (failed > 0) {
   console.log(`\n${failed} test(s) FAILED`);
   process.exit(1);
