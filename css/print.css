@@ -1,0 +1,152 @@
+/* Print stylesheet for the RoomLAB design summary (Q1 #2).
+ *
+ * Engaged via @media print AND a class hook (#print-report appears
+ * in the live DOM only during print). On screen, #print-report is
+ * hidden by default. When printing:
+ *
+ *   - hide every screen element (panels, viewport, header)
+ *   - reveal #print-report and let the browser flow it onto pages
+ *   - A4 portrait, 1.5 cm margins
+ *   - tables with repeated headers and tr break-inside discipline
+ *
+ * Maya's BLOCKER: every numeric column is rendered with units already
+ * embedded by print-report.js. CSS doesn't add suffixes — the data
+ * model carries them so any future tweak to units is single-source.
+ */
+
+@media screen {
+  #print-report { display: none; }
+}
+
+@media print {
+  /* Force light colours regardless of dark-mode preference — most
+     report-quality printers can't reproduce dark backgrounds, and we
+     don't want grey-on-grey output. */
+  html { color-scheme: light; }
+
+  /* Hide everything else. Direct children only — descendants of
+     #print-report stay visible. */
+  body > *:not(#print-report) { display: none !important; }
+
+  /* Restore the print container as block-level. */
+  #print-report {
+    display: block !important;
+    color: #000;
+    background: #fff;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.42;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* A4 portrait; tight margins to fit a small/medium scene on one page. */
+  @page {
+    size: A4 portrait;
+    margin: 1.5cm;
+  }
+
+  /* Header / metadata. */
+  #print-report .pr-head {
+    border-bottom: 1px solid #000;
+    padding-bottom: 6pt;
+    margin-bottom: 10pt;
+  }
+  #print-report .pr-head h1 {
+    font-size: 14pt;
+    margin: 0 0 4pt 0;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  #print-report .pr-meta {
+    font-size: 8.5pt;
+    color: #333;
+    display: flex;
+    gap: 14pt;
+    flex-wrap: wrap;
+  }
+  #print-report .pr-meta strong {
+    font-weight: 600;
+    color: #000;
+  }
+
+  /* Sections. */
+  #print-report .pr-section {
+    margin-bottom: 10pt;
+    break-inside: auto;
+  }
+  #print-report .pr-section h2 {
+    font-size: 10.5pt;
+    font-weight: 600;
+    margin: 0 0 4pt 0;
+    border-bottom: 0.5pt solid #888;
+    padding-bottom: 2pt;
+  }
+  #print-report .pr-note {
+    font-size: 8pt;
+    color: #555;
+    margin: 4pt 0 0 0;
+    font-style: italic;
+  }
+  #print-report .pr-mono {
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 8.5pt;
+  }
+
+  /* Tables — repeat headers across page breaks (Martina, MEDIUM).
+     tr break-inside: avoid keeps a single row from splitting. */
+  #print-report .pr-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 4pt;
+  }
+  #print-report .pr-table thead {
+    display: table-header-group;
+  }
+  #print-report .pr-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #print-report .pr-table th,
+  #print-report .pr-table td {
+    border: 0.4pt solid #888;
+    padding: 2pt 5pt;
+    text-align: right;
+    vertical-align: top;
+  }
+  #print-report .pr-table th {
+    background: #ececec;
+    font-weight: 600;
+    text-align: left;
+    font-size: 8.5pt;
+  }
+  /* Key-value tables (Room dimensions etc.) need left-aligned values. */
+  #print-report .pr-table.pr-kv th {
+    text-align: right;
+    width: 38%;
+    background: transparent;
+  }
+  #print-report .pr-table.pr-kv td { text-align: left; }
+  /* Source table is dense — shrink slightly to fit more columns on page. */
+  #print-report .pr-source-table th,
+  #print-report .pr-source-table td {
+    font-size: 8pt;
+    padding: 1.6pt 4pt;
+  }
+
+  /* Footer. */
+  #print-report .pr-foot {
+    margin-top: 12pt;
+    border-top: 0.5pt solid #888;
+    padding-top: 4pt;
+    font-size: 7.5pt;
+    color: #555;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* Tooltips, modals, the help overlay must NEVER appear in print. */
+  .help-modal, #help-overlay, .probe-tooltip, .vp-tab, .rl-toast {
+    display: none !important;
+  }
+}

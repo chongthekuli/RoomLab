@@ -4,6 +4,7 @@ import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { importDxfFile } from '../physics/dxf-import.js';
 import { saveProjectToDownload, loadProjectFromFile } from '../io/project-file.js';
 import { encodeShareLink, buildShareUrl } from '../io/share-link.js';
+import { triggerPrint } from './print-report.js';
 
 const RECT_SURFACE_LABELS = [
   ['floor',      'Floor'],
@@ -32,6 +33,7 @@ export function mountRoomPanel({ materials }) {
         <button id="btn-save-project" class="btn-save" title="Save the entire project (room, speakers, listeners, zones, EQ, ambient noise) to a .roomlab.json file">💾 Save</button>
         <button id="btn-load-project" class="btn-load" title="Load a previously saved .roomlab.json project file">📂 Load</button>
         <button id="btn-share-link" class="btn-share" aria-label="share scene as link" title="copy a URL that opens this exact scene — paste into Slack or email">🔗 Share</button>
+        <button id="btn-print-report" class="btn-print" aria-label="print scene report" title="open the browser print dialog with a one-page design summary (also Ctrl/Cmd-P)">🖨 Print</button>
         <input type="file" id="file-roomlab" accept=".json,.roomlab.json,application/json" hidden />
       </div>
     </div>
@@ -101,6 +103,17 @@ export function mountRoomPanel({ materials }) {
       showStatus(`Saved as ${filename}`, 'ok');
     } catch (err) {
       showStatus(`Save failed: ${err.message || err}`, 'err');
+    }
+  });
+
+  // Print — open the browser print dialog with a one-page design summary.
+  // Cmd/Ctrl-P also works (the print-report module listens to beforeprint
+  // regardless of how the dialog was triggered).
+  root.querySelector('#btn-print-report').addEventListener('click', () => {
+    try {
+      triggerPrint();
+    } catch (err) {
+      showStatus(`Print failed: ${err.message || err}`, 'err');
     }
   });
 

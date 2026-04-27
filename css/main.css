@@ -841,7 +841,8 @@ section h3 {
 .room-head-actions { display: flex; gap: 0.3rem; }
 .room-head-actions .btn-save,
 .room-head-actions .btn-load,
-.room-head-actions .btn-share {
+.room-head-actions .btn-share,
+.room-head-actions .btn-print {
   padding: 0.3rem 0.6rem;
   border: 1px solid var(--border);
   background: var(--bg-elev);
@@ -854,7 +855,8 @@ section h3 {
 }
 .room-head-actions .btn-save:hover,
 .room-head-actions .btn-load:hover,
-.room-head-actions .btn-share:hover {
+.room-head-actions .btn-share:hover,
+.room-head-actions .btn-print:hover {
   background: var(--border);
   border-color: var(--border-strong);
 }

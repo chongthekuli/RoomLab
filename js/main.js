@@ -3,6 +3,7 @@ import { loadMaterials } from './physics/materials.js';
 import { loadLoudspeaker } from './physics/loudspeaker.js';
 import { applyHashStateOnLoad } from './io/share-link.js';
 import { mountRoomPanel, showToast } from './ui/panel-room.js';
+import { mountPrintReport } from './ui/print-report.js';
 import { mountSourcesPanel } from './ui/panel-sources.js';
 import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
@@ -186,6 +187,11 @@ async function boot() {
   // First-run onboarding — sticky-dismissed via localStorage so it appears
   // once and never again for returning users.
   mountWelcomeCard();
+
+  // Print report — Cmd/Ctrl-P or 🖨 button → A4 portrait design summary.
+  // Listens for beforeprint so the browser-driven shortcut works without
+  // hijacking the keystroke.
+  mountPrintReport({ materials });
 
   // Share-link boot apply — runs AFTER every panel mounts AND inside a
   // microtask so by the time emit('scene:reset') fires every panel's
