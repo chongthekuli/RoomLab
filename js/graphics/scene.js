@@ -11,7 +11,6 @@ import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, 
 import { on, emit } from '../ui/events.js';
 import { recordRayPaths, buildLineSegmentIndex } from '../physics/ray-viz.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
-import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
