@@ -340,7 +340,9 @@ function escapeHtml(s) {
 
 // ---------------------------------------------------------------------------
 // renderPrintReport — assemble the hidden DOM that print.css formats
-// for A4. Tear-down is via afterprint, see mountPrintReport.
+// for A4. Composition follows Sofia Calderón's spec (PROPOSAL_DESIGN.md):
+// hero plan on the cover, displayed numbers, two-tone + one accent.
+// Tear-down is via afterprint, see mountPrintReport.
 // ---------------------------------------------------------------------------
 function renderPrintReport(model) {
   let root = document.getElementById('print-report');
@@ -354,70 +356,91 @@ function renderPrintReport(model) {
       ${body}
     </section>`;
 
-  // ------ Page 1: cover + executive summary + key figures tile grid ----
+  // ------ Page 1: COVER — title block + hero plan + 3 displayed nums ----
+  // Per Sofia: floor plan IS the hero element (174 mm wide). Three
+  // displayed figures only (RT60, r_c, Volume). RT60 is the ONE accent
+  // colour on the entire page. The 12-tile grid moves to page 2.
   const room = model.room;
   const rt60_1k = model.rt60[3];
-  const cover = `
-    <div class="pr-page pr-page-cover">
-      <header class="pr-head">
-        <div class="pr-brand">
-          <h1>RoomLAB acoustic design summary</h1>
-          <div class="pr-meta">
-            <span><strong>Project:</strong> ${escapeHtml(model.project.name)}</span>
-            <span><strong>Date:</strong> ${model.project.date}</span>
-            <span><strong>Generated:</strong> ${model.project.generatedAt}</span>
-            <span><strong>Schema:</strong> v${model.project.schemaVersion}</span>
-          </div>
-        </div>
-      </header>
-      <p class="pr-exec-summary">
-        This document is a RoomLAB scene-design report for the project named above. It records the room geometry,
-        sources, listener and zone layout, and the predicted reverberation, coverage, and speech intelligibility
-        against the venue's noise floor. Figures derive from the
-        ${model.precision ? '<strong>precision engine</strong>' : '<strong>draft engine</strong>'}.
-        Use the results to validate equipment selection, placement, and treatment before procurement or
-        BOMBA submission.
-      </p>
-      <h2>Scene at a glance</h2>
-      <div class="pr-tilegrid">
-        ${tile('Volume',           `${fmt(room.volume_m3, 0)} m³`)}
-        ${tile('Floor area',       `${fmt(room.baseArea_m2, 1)} m²`)}
-        ${tile('Surface area',     `${fmt(room.totalArea_m2, 0)} m²`)}
-        ${tile('Mean α @ 1 kHz',   fmt(room.meanAbsorption_1k, 3))}
-        ${tile('RT60 @ 1 kHz (Sabine)',  rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
-        ${tile('RT60 @ 1 kHz (Eyring)',  rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
-        ${tile('Sources (raw / radiating)', `${model.sourceFlat.raw} / ${model.sourceFlat.total}`)}
-        ${tile('Listeners',        `${model.listeners.length}`)}
-        ${tile('Audience zones',   `${model.zones.length}`)}
-        ${tile('Critical distance', model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
-        ${tile('Schroeder cutoff', model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—')}
-        ${tile('Ambient (preset)', escapeHtml(model.ambient.preset))}
-      </div>
-      <div class="pr-reviewer-note">
-        <strong>Reviewer's note.</strong> Before issuing this report, confirm three items.
-        The project name on page 1 matches the tendered scheme.
-        The ambient noise floor reflects the venue's measured or specified condition, not a placeholder.
-        Listener positions correspond to the seating, standing, or circulation intent of the design.
-        Amend the scene and re-export if any item drifts.
-      </div>
-    </div>`;
-
-  // ------ Page 2: floor plan ------------------------------------------
   const planSvg = buildFloorPlanSVG(state);
   const planLegend = buildFloorPlanLegend();
-  const planPage = `
-    <div class="pr-page pr-page-plan">
-      <section class="pr-section">
-        <h2>Floor plan — top-down view</h2>
-        <div class="pr-plan-grid">
-          <div class="pr-plan-svg-wrap">${planSvg}</div>
-          ${planLegend}
-        </div>
-        <p class="pr-note">Numbers next to source markers index the equipment list on the next page (e.g. <span class="pr-mono">3.2</span> = source 3, line-array element 2). Listener labels match the listener table on page 4.</p>
-      </section>
+
+  const coverFigures = `
+    <div class="pr-hero-figures">
+      <div class="pr-hero-figure">
+        <div class="pr-hero-figure-label">RT60 @ 1 kHz · Eyring</div>
+        <div class="pr-hero-figure-value pr-accent">${rt60_1k ? fmt(rt60_1k.eyring_s, 2) : '—'}<span class="pr-hero-figure-unit"> s</span></div>
+      </div>
+      <div class="pr-hero-figure">
+        <div class="pr-hero-figure-label">Critical distance r_c</div>
+        <div class="pr-hero-figure-value">${model.derived.criticalDistance_m != null ? fmt(model.derived.criticalDistance_m, 2) : '—'}<span class="pr-hero-figure-unit"> m</span></div>
+      </div>
+      <div class="pr-hero-figure">
+        <div class="pr-hero-figure-label">Volume</div>
+        <div class="pr-hero-figure-value">${fmt(room.volume_m3, 0)}<span class="pr-hero-figure-unit"> m³</span></div>
+      </div>
     </div>`;
 
-  // ------ Page 3: room geometry + reverberation -----------------------
+  const cover = `
+    <div class="pr-page pr-page-cover">
+      <div class="pr-cover-titleblock">
+        <div>
+          <span class="pr-eyebrow">RoomLAB · Acoustic design summary</span>
+          <h1>${escapeHtml(model.project.name)}</h1>
+        </div>
+        <div class="pr-cover-titleblock-right">
+          ${escapeHtml(model.project.date)}<br>
+          <span class="pr-mute">${model.precision ? 'precision engine' : 'draft engine'}</span>
+        </div>
+      </div>
+      <div class="pr-cover-hero">
+        ${planSvg}
+      </div>
+      ${coverFigures}
+      <p class="pr-lead">
+        This document is a RoomLAB scene-design report for the project above. It records the room geometry,
+        sources, listener and zone layout, and predicted reverberation, coverage, and speech intelligibility
+        against the venue's noise floor. Use the figures to validate equipment selection, placement, and
+        treatment before procurement or BOMBA submission.
+      </p>
+      <div class="pr-cover-foot">
+        <span>schema v${model.project.schemaVersion} · generated ${escapeHtml(model.project.generatedAt)}</span>
+        <span>page 1 / 7</span>
+      </div>
+    </div>`;
+
+  // ------ Page 2: PLAN — drawing-sheet treatment with tile grid below --
+  // Per Sofia: heading demoted to small-caps eyebrow (cover already sold
+  // the plan). Tile grid lands here below the plan as the "scene at a
+  // glance" reference data.
+  const planPage = `
+    <div class="pr-page pr-page-plan">
+      <span class="pr-eyebrow">Drawing 01 · Floor plan, top-down view</span>
+      <div class="pr-plan-grid">
+        <div class="pr-plan-svg-wrap">${planSvg}</div>
+        ${planLegend}
+      </div>
+      <p class="pr-note">Numbers next to source markers index the equipment list on page 4 (<span class="pr-mono">3.2</span> = source 3, line-array element 2). Listener labels match the listener table on page 5.</p>
+      <div class="pr-tilegrid">
+        ${tile('Volume',                  `${fmt(room.volume_m3, 0)} m³`)}
+        ${tile('Floor area',              `${fmt(room.baseArea_m2, 1)} m²`)}
+        ${tile('Surface area',            `${fmt(room.totalArea_m2, 0)} m²`)}
+        ${tile('Mean α @ 1 kHz',          fmt(room.meanAbsorption_1k, 3))}
+        ${tile('RT60 @ 1 kHz · Sabine',   rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
+        ${tile('RT60 @ 1 kHz · Eyring',   rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
+        ${tile('Sources (raw / elements)', `${model.sourceFlat.raw} / ${model.sourceFlat.total}`)}
+        ${tile('Listeners',               `${model.listeners.length}`)}
+        ${tile('Audience zones',          `${model.zones.length}`)}
+        ${tile('Schroeder cutoff',        model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—')}
+        ${tile('Critical distance',       model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
+        ${tile('Ambient preset',          escapeHtml(model.ambient.preset))}
+      </div>
+    </div>`;
+
+  // ------ Page 3: RT60 — chapter opener with ghost number + sparkline --
+  // Per Sofia: chapter eyebrow + 60 pt ghost "02" + h2; sparkline above
+  // the table gives visual texture without being a real chart. Re-style
+  // .pr-kv as left-rag with dotted leader (no boxed form look).
   const rt60Rows = model.rt60.map(r => `
     <tr>
       <td>${fmtBand(r.freq_hz)}</td>
@@ -426,9 +449,16 @@ function renderPrintReport(model) {
       <td>${fmt(r.meanAbsorption, 3)}</td>
     </tr>`).join('');
 
+  const rt60Sparkline = renderRT60Sparkline(model.rt60);
+
   const roomPage = `
     <div class="pr-page">
-      ${sec('', 'Room dimensions', `
+      <div class="pr-chapter-opener">
+        <span class="pr-chapter-number-ghost">02</span>
+        <span class="pr-eyebrow">Chapter 02</span>
+        <h2>Reverberation</h2>
+      </div>
+      <section class="pr-section">
         <table class="pr-table pr-kv">
           <tr><th>Shape</th><td>${escapeHtml(room.shape)}</td></tr>
           <tr><th>Width × Depth × Height</th><td>${fmt(room.width_m, 2)} × ${fmt(room.depth_m, 2)} × ${fmt(room.height_m, 2)} m</td></tr>
@@ -440,14 +470,15 @@ function renderPrintReport(model) {
           <tr><th>Critical distance r_c</th><td>${model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m  <span class="pr-mute">(Q ≈ ${model.derived.Q_assumed}, DI ≈ ${model.derived.DI_assumed_db} dB)</span>` : '—'}</td></tr>
           <tr><th>Schroeder cutoff</th><td>${model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—'}</td></tr>
         </table>
-      `)}
-      ${sec('', 'Reverberation time (draft engine)', `
+      </section>
+      <section class="pr-section">
+        ${rt60Sparkline}
         <table class="pr-table">
           <thead><tr><th>Band</th><th>Sabine</th><th>Eyring</th><th>Mean α</th></tr></thead>
           <tbody>${rt60Rows}</tbody>
         </table>
-        <p class="pr-note">Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2). Air absorption per ISO 9613-1 is included in both denominators. For rooms with strongly asymmetric α, a Fitzroy variant is on the backlog and not yet included.</p>
-      `)}
+        <p class="pr-note">Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2). Air absorption per ISO 9613-1 included in both denominators. Sparkline shows the Eyring per-band values across 125 Hz – 8 kHz.</p>
+      </section>
     </div>`;
 
   // ------ Page 3: sources + BOM + per-element placement ---------------
@@ -474,11 +505,14 @@ function renderPrintReport(model) {
       <td>${escapeHtml(r.groups)}</td>
     </tr>`).join('');
 
+  // Per Sofia: appendix treatment — small h2, 8 pt body, zebra-striped
+  // BOM table for scannability of long lists.
   const sourcePage = `
-    <div class="pr-page">
-      ${sec('', `Equipment list (${model.sourceFlat.total} radiating element${model.sourceFlat.total === 1 ? '' : 's'} from ${model.sourceFlat.raw} entr${model.sourceFlat.raw === 1 ? 'y' : 'ies'})`, `
+    <div class="pr-page pr-page-appendix">
+      <span class="pr-eyebrow">Appendix A · Equipment schedule</span>
+      ${sec('', `Bill of materials (${model.sourceFlat.total} radiating element${model.sourceFlat.total === 1 ? '' : 's'} from ${model.sourceFlat.raw} entr${model.sourceFlat.raw === 1 ? 'y' : 'ies'})`, `
         ${model.bom.length === 0 ? '<p class="pr-note">no sources placed.</p>' : `
-          <table class="pr-table">
+          <table class="pr-table pr-zebra">
             <thead><tr><th>Model</th><th>Qty</th><th>Max power (per element)</th><th>Total power</th><th>Group(s)</th></tr></thead>
             <tbody>${bomRows}</tbody>
           </table>
@@ -487,7 +521,7 @@ function renderPrintReport(model) {
       `)}
       ${sec('', 'Source placement (per element)', `
         ${model.sources.length === 0 ? '<p class="pr-note">no sources placed.</p>' : `
-          <table class="pr-table pr-source-table">
+          <table class="pr-table pr-source-table pr-zebra">
             <thead><tr><th>#</th><th>Kind</th><th>Model</th><th>X</th><th>Y</th><th>Z</th><th>Yaw</th><th>Pitch</th><th>Power</th><th>Group</th></tr></thead>
             <tbody>${sourceRows}</tbody>
           </table>
@@ -517,47 +551,59 @@ function renderPrintReport(model) {
       <td>${fmt(z.occupancy_percent, 0)} %</td>
     </tr>`).join('');
 
-  const ambientHeader = (model.ambient.per_band ?? []).map((_, i) => {
-    const hz = model.rt60[i]?.freq_hz;
-    return `<th>${hz ? fmtBand(hz) : '?'}</th>`;
-  }).join('');
-  const ambientRow = (model.ambient.per_band ?? []).map(v => `<td>${fmt(v, 0)} dB</td>`).join('');
+  // Per Sofia: ambient noise as a horizontal band-strip "fingerprint",
+  // not a table. Reads as a single visual element rather than tabular
+  // data the user has to scan numerically.
+  const ambientStrip = (model.ambient.per_band?.length ?? 0) > 0 ? `
+    <div class="pr-bandstrip">
+      <div class="pr-bandstrip-label">${escapeHtml(model.ambient.preset)}</div>
+      ${model.ambient.per_band.map((v, i) => `
+        <div class="pr-bandstrip-cell">
+          <div class="pr-bandstrip-cell-band">${fmtBand(model.rt60[i]?.freq_hz ?? 0)}</div>
+          <div class="pr-bandstrip-cell-value">${fmt(v, 0)}</div>
+        </div>`).join('')}
+    </div>
+    <p class="pr-note">Per-band noise floor (dB SPL) used as the N term in STIPA (IEC 60268-16) and the ambient subtraction in the heatmap.</p>
+  ` : '';
 
+  // Per Sofia: appendix treatment — same demoted styling as page 4.
   const listenerPage = `
-    <div class="pr-page">
+    <div class="pr-page pr-page-appendix">
+      <span class="pr-eyebrow">Appendix B · Listener and zone schedule</span>
       ${sec('', 'Listener positions', `
-        ${model.listeners.length === 0 ? '<p class="pr-note">No listeners placed. Listener positions drive the zone-by-zone STI calculation.</p>' : `
-          <table class="pr-table">
+        ${model.listeners.length === 0 ? '<p class="pr-empty-state">No listeners placed. Listener positions drive the zone-by-zone STI calculation.</p>' : `
+          <table class="pr-table pr-zebra">
             <thead><tr><th>ID</th><th>Label</th><th>X</th><th>Y</th><th>Elevation</th><th>Posture</th><th>Ear height</th></tr></thead>
             <tbody>${listenerRows}</tbody>
           </table>
         `}
       `)}
       ${sec('', `Audience zones (${model.zones.length})`, `
-        ${model.zones.length === 0 ? '<p class="pr-note">No audience zones defined. Add a zone via the Zones panel to receive a STIPA reading.</p>' : `
-          <table class="pr-table">
+        ${model.zones.length === 0 ? '<p class="pr-empty-state">No audience zones defined. Add a zone via the Zones panel to receive a STIPA reading.</p>' : `
+          <table class="pr-table pr-zebra">
             <thead><tr><th>ID</th><th>Label</th><th>Vertices</th><th>Elevation</th><th>Material</th><th>Occupancy</th></tr></thead>
             <tbody>${zoneRows}</tbody>
           </table>
         `}
       `)}
-      ${ambientHeader ? sec('', 'Ambient noise floor', `
-        <table class="pr-table">
-          <thead><tr><th>Preset</th>${ambientHeader}</tr></thead>
-          <tbody><tr><td class="pr-mono">${escapeHtml(model.ambient.preset)}</td>${ambientRow}</tr></tbody>
-        </table>
-        <p class="pr-note">Per-band noise floor used as the N term in STIPA (IEC 60268-16) and the ambient subtraction in the heatmap.</p>
-      `) : ''}
+      ${ambientStrip ? sec('', 'Ambient noise floor', ambientStrip) : ''}
     </div>`;
 
-  // ------ Page 5: precision-engine results (placeholder if absent) ----
+  // ------ Page 6: PRECISION — chapter opener + STI tier strip ---------
+  // Per Sofia: this is "the second answer" — promote it. STI broadband
+  // pulled out as a 28 pt accent-coloured displayed number with a
+  // 3-cell pass/marginal/fail tier indicator. IEC 60268-16: STI < 0.45
+  // is fail, 0.45–0.50 marginal, ≥ 0.50 pass for emergency-PA.
   const precisionPage = `
     <div class="pr-page">
+      <div class="pr-chapter-opener">
+        <span class="pr-chapter-number-ghost">03</span>
+        <span class="pr-eyebrow">Chapter 03</span>
+        <h2>Precision results</h2>
+      </div>
       ${model.precision
         ? renderPrecisionSection(model.precision)
-        : sec('', 'Precision engine results', `
-            <p class="pr-empty-state">Precision render not yet computed. Re-run with the Render button before submission. Draft RT60 figures on page 2 remain valid for first-pass design.</p>
-          `)
+        : `<p class="pr-empty-state">Precision render not yet computed. Re-run with the Render button before submission. Draft RT60 figures on page 3 remain valid for first-pass design.</p>`
       }
     </div>`;
 
@@ -572,6 +618,10 @@ function renderPrintReport(model) {
 
   const disclaimerBody = DISCLAIMER_BODY.map(p => `<p>${escapeHtml(p)}</p>`).join('');
 
+  // Per Sofia: reviewer's note moves to page 7 (above references), with
+  // accent left-bar on white background (no banana-yellow). References
+  // become a 2-column block at 8pt — comma-separated lists are
+  // amateurish at this length.
   const methodPage = `
     <div class="pr-page">
       ${sec('', 'Methodology', `
@@ -582,8 +632,16 @@ function renderPrintReport(model) {
         <p class="pr-disclaimer-intro">${escapeHtml(DISCLAIMER_INTRO)}</p>
         ${disclaimerBody}
       `)}
+      <div class="pr-reviewer-note">
+        <span class="pr-eyebrow">Reviewer's note</span>
+        Before issuing this report, confirm three items.
+        The project name on page 1 matches the tendered scheme.
+        The ambient noise floor reflects the venue's measured or specified condition, not a placeholder.
+        Listener positions correspond to the seating, standing, or circulation intent of the design.
+        Amend the scene and re-export if any item drifts.
+      </div>
       ${sec('', 'References', `
-        <p class="pr-references">${DISCLAIMER_REFERENCES.map(escapeHtml).join(' · ')}</p>
+        <div class="pr-references">${DISCLAIMER_REFERENCES.map(r => `<div>${escapeHtml(r)}</div>`).join('')}</div>
       `)}
     </div>`;
 
@@ -596,7 +654,7 @@ function renderPrintReport(model) {
     ${precisionPage}
     ${methodPage}
     <footer class="pr-foot">
-      RoomLAB · <span class="pr-mono">chongthekuli.github.io/RoomLab</span> · generated ${escapeHtml(model.project.generatedAt)}
+      RoomLAB · <span class="pr-mono">chongthekuli.github.io/RoomLab</span> · generated ${escapeHtml(model.project.generatedAt)} · schema v${model.project.schemaVersion}
     </footer>
   `;
   document.body.appendChild(root);
@@ -609,6 +667,36 @@ function tile(label, value) {
       <div class="pr-tile-label">${escapeHtml(label)}</div>
       <div class="pr-tile-value">${value}</div>
     </div>`;
+}
+
+// RT60-vs-frequency sparkline for the chapter-02 page. Per Sofia: 7
+// points (one per band) at 180 × 36 logical pt, 1.2pt stroke, no axis
+// labels — texture, not a real chart. Uses Eyring values.
+function renderRT60Sparkline(rt60Bands) {
+  const eyringValues = rt60Bands.map(b => Number.isFinite(b.eyring_s) ? b.eyring_s : null);
+  const finite = eyringValues.filter(v => v !== null);
+  if (finite.length === 0) return '';
+  const maxV = Math.max(...finite, 0.1);
+  const W = 180, H = 36;
+  const pad = 4;
+  const innerW = W - pad * 2, innerH = H - pad * 2;
+  const points = eyringValues.map((v, i) => {
+    const x = pad + (i / (eyringValues.length - 1)) * innerW;
+    const y = v === null ? null : pad + (1 - v / maxV) * innerH;
+    return { x, y };
+  });
+  const dPath = points
+    .filter(p => p.y !== null)
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
+    .join(' ');
+  const dots = points
+    .filter(p => p.y !== null)
+    .map(p => `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="1.4" />`)
+    .join('');
+  return `<svg class="pr-sparkline" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <path d="${dPath}" stroke-width="1.2" />
+    ${dots}
+  </svg>`;
 }
 
 function renderPrecisionSection(p) {
@@ -632,20 +720,51 @@ function renderPrecisionSection(p) {
       ${(r.perBand ?? []).map(b => `<td>${fmt(b.t30_s, 2)} s</td>`).join('')}
     </tr>`).join('');
 
+  // Per Sofia: STI broadband as a displayed number, with a 3-cell tier
+  // strip showing fail / marginal / pass. Use the receiver with the
+  // LOWEST STI as the headline figure — that's the worst-case zone, and
+  // the figure a BOMBA reviewer would care about.
+  const stiValues = p.receivers.map(r => r.sti).filter(v => Number.isFinite(v));
+  const stiMin = stiValues.length > 0 ? Math.min(...stiValues) : null;
+  let stiTier = null;
+  if (stiMin !== null) {
+    if (stiMin < 0.45) stiTier = 0;
+    else if (stiMin < 0.50) stiTier = 1;
+    else stiTier = 2;
+  }
+  const tierLabels = ['< 0.45 fail', '0.45 – 0.50 marginal', '≥ 0.50 pass'];
+  const tierStrip = stiTier === null ? '' : `
+    <div class="pr-tierstrip" aria-label="STI tier">
+      ${tierLabels.map((label, i) => `
+        <div class="pr-tierstrip-cell ${i === stiTier ? 'pr-tierstrip-active' : ''}">${escapeHtml(label)}</div>
+      `).join('')}
+    </div>`;
+  const stiHeadline = stiMin === null ? '' : `
+    <div class="pr-precision-headline">
+      <div>
+        <div class="pr-precision-sti-label">Worst-zone STI · IEC 60268-16</div>
+        <div class="pr-precision-sti">${fmt(stiMin, 2)}</div>
+      </div>
+      <div>
+        ${tierStrip}
+        <p class="pr-note" style="margin-top:4pt">${stiTier === 2 ? 'Above the MS IEC 60849 / BOMBA emergency-PA threshold (0.50). Verify with in-situ commissioning.' : stiTier === 1 ? 'Marginal — between the BS 5839-8 floor (0.45) and the MS IEC 60849 / BOMBA threshold (0.50). Treatment recommended.' : 'Below the BS 5839-8 floor (0.45). Treatment required before submission.'}</p>
+      </div>
+    </div>`;
+
   return `
+    ${stiHeadline}
     <section class="pr-section">
-      <h2>Precision engine results</h2>
-      <p class="pr-note">Values computed by ray-traced energy histograms (Schroeder backward integration). Supersedes draft RT60 for this scene. Per IEC 60268-16, STI ≥ 0.50 typically meets BOMBA / MS IEC 60849 emergency-PA intelligibility; ≥ 0.45 is the BS 5839-8 floor.</p>
       <h3>Broadband per receiver</h3>
-      <table class="pr-table">
+      <table class="pr-table pr-zebra">
         <thead><tr><th>Receiver</th><th>EDT</th><th>T20</th><th>T30</th><th>C50</th><th>C80</th><th>D/R</th><th>STI</th></tr></thead>
         <tbody>${broadbandRows}</tbody>
       </table>
       <h3>T30 per band</h3>
-      <table class="pr-table">
+      <table class="pr-table pr-zebra">
         <thead><tr><th>Receiver</th>${hzCols}</tr></thead>
         <tbody>${perBandT30}</tbody>
       </table>
+      <p class="pr-note">Values computed by ray-traced energy histograms (Schroeder backward integration). Supersedes draft RT60 for this scene.</p>
     </section>`;
 }
 
