@@ -29,6 +29,7 @@ import { state, earHeightFor, expandSources, POSTURE_LABELS, SPEAKER_CATALOG } f
 import { computeAllBands } from '../physics/rt60.js';
 import { roomVolume, baseArea } from '../physics/room-shape.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
+import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { buildFloorPlanSVG, buildFloorPlanLegend } from './print-plan-svg.js';
 
 // ---------------------------------------------------------------------------
@@ -196,18 +197,35 @@ function getSpeakerLabel(url) {
 // Pull precision results into the shape the renderer wants. Returns
 // null when no render has been performed; renderer shows the empty-
 // state placeholder in that case (Lin's copy).
+//
+// `state.results.precision` holds the FULL precision-engine render
+// object (histograms, BVH refs, scene, etc.) — not the derived
+// per-receiver metrics. `deriveMetrics(result)` is what unpacks it
+// into the [{receiverIdx, perBand, broadband, sti}, …] array we
+// want here. (Caught in user testing: print said "not yet computed"
+// even after a successful render because we were checking
+// Array.isArray on an object.)
 function extractPrecisionResults(s, materials) {
-  const p = s.results?.precision;
-  if (!p || !Array.isArray(p) || p.length === 0) return null;
-  // The precision engine returns an array of per-receiver metrics
-  // structured by `derive-metrics.js`. We expose the broadband + per-
-  // band figures on a simplified shape for the report.
+  const result = s.results?.precision;
+  if (!result || typeof result !== 'object') return null;
+  let metrics;
+  try {
+    metrics = deriveMetrics(result, {
+      ambientNoise_per_band: s.physics?.ambientNoise?.per_band,
+    });
+  } catch (err) {
+    console.warn('[print-report] deriveMetrics failed:', err);
+    return null;
+  }
+  if (!Array.isArray(metrics) || metrics.length === 0) return null;
+
+  const bandsHz = materials?.frequency_bands_hz ?? [125, 250, 500, 1000, 2000, 4000, 8000];
   return {
     available: true,
-    bands_hz: materials?.frequency_bands_hz ?? [125, 250, 500, 1000, 2000, 4000, 8000],
-    receivers: p.map((m, i) => ({
+    bands_hz: bandsHz,
+    receivers: metrics.map((m, i) => ({
       index: i,
-      label: state.listeners?.[i]?.label ?? `Listener ${i + 1}`,
+      label: s.listeners?.[i]?.label ?? `Listener ${i + 1}`,
       broadband: {
         edt_s:  Number.isFinite(m.broadband?.edt_s)  ? m.broadband.edt_s  : null,
         t20_s:  Number.isFinite(m.broadband?.t20_s)  ? m.broadband.t20_s  : null,
@@ -217,8 +235,8 @@ function extractPrecisionResults(s, materials) {
         dr_db:  Number.isFinite(m.broadband?.dr_db)  ? m.broadband.dr_db  : null,
       },
       sti: Number.isFinite(m.sti?.sti) ? m.sti.sti : null,
-      perBand: (m.perBand ?? []).map(b => ({
-        freq_hz: b.freq_hz,
+      perBand: (m.perBand ?? []).map((b, idx) => ({
+        freq_hz: bandsHz[idx] ?? null,
         t30_s:  Number.isFinite(b.t30_s)  ? b.t30_s  : null,
         c80_db: Number.isFinite(b.c80_db) ? b.c80_db : null,
         c50_db: Number.isFinite(b.c50_db) ? b.c50_db : null,

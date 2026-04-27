@@ -184,6 +184,39 @@ applyTemplateToState('hifi');
   assert(m.precision === null, 'precision is null when results.precision is empty');
 }
 
+// 10b. Precision results — present when a render object is on state.
+//     Synthesises a minimal precision-engine result with one receiver,
+//     three bands, all-zero histograms (deriveMetrics will yield NaN
+//     for some metrics, which is fine — the report renders "—").
+applyTemplateToState('hifi');
+{
+  const T = 100;          // bucket count
+  const B = materials.frequency_bands_hz.length;
+  const R = state.listeners.length;
+  const histogram = new Float32Array(R * B * T);
+  // Inject a tiny direct-arrival impulse at bucket 5 of band 3 for
+  // receiver 0 so deriveMetrics can compute SOMETHING finite for the
+  // first listener (otherwise full silence → all NaN).
+  histogram[0 * B * T + 3 * T + 5] = 1.0;
+  state.results.precision = {
+    generatedAt: new Date().toISOString(),
+    shape: { receivers: R, bands: B, buckets: T },
+    bucketDtMs: 2,
+    maxTimeMs: 200,
+    histogram,
+    scene: null,
+  };
+  const m = buildPrintModel({ materials });
+  assert(m.precision !== null, 'precision present when results.precision is a render object');
+  assert(m.precision.available === true, 'precision.available === true');
+  assert(Array.isArray(m.precision.receivers), 'precision.receivers is array');
+  assert(m.precision.receivers.length === R, `precision.receivers length matches listener count (${m.precision.receivers.length})`);
+  assert(Array.isArray(m.precision.bands_hz) && m.precision.bands_hz.length === B,
+    `precision.bands_hz has all ${B} bands`);
+  assert(Array.isArray(m.precision.receivers[0].perBand),
+    'receiver.perBand is array');
+}
+
 // 11. Project metadata — name, date, generatedAt all present.
 applyTemplateToState('hifi');
 {
