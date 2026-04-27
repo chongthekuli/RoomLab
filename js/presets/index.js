@@ -1,27 +1,13 @@
-// Preset registry. Add new rooms by creating a file in this folder
-// and re-exporting it here under its key. `applyPresetToState()` in
-// app-state.js uses this map to replace the scene in one swap.
+// Preset registry — signature, fully-built scenes that load verbatim.
+// `auditorium` (sports arena) and `pavilion` (4-level mall) are the only
+// two; the eight smaller rooms (hi-fi, studio, classroom, etc.) live as
+// parametric TEMPLATES in `js/templates/` and regenerate when the user
+// changes their dimensions.
 
-import auditorium  from './auditorium.js';
-import chamber     from './chamber.js';
-import recitalhall from './recitalhall.js';
-import rotunda     from './rotunda.js';
-import octagon     from './octagon.js';
-import hifi        from './hifi.js';
-import classroom   from './classroom.js';
-import livevenue   from './livevenue.js';
-import studio      from './studio.js';
-import pavilion    from './pavilion.js';
+import auditorium from './auditorium.js';
+import pavilion   from './pavilion.js';
 
 export const PRESETS = {
   auditorium,
-  chamber,
-  recitalhall,
-  rotunda,
-  octagon,
-  hifi,
-  classroom,
-  livevenue,
-  studio,
   pavilion,
 };

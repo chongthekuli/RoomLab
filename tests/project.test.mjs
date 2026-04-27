@@ -4,7 +4,7 @@
 // when a future state field gets added but isn't wired into the schema.
 
 import {
-  state, applyPresetToState, PRESETS,
+  state, applyPresetToState, applyTemplateToState, PRESETS, TEMPLATES,
   serializeProject, deserializeProject, PROJECT_FORMAT_VERSION,
 } from '../js/app-state.js';
 
@@ -60,9 +60,16 @@ for (const key of Object.keys(PRESETS)) {
   assert(ok, `Round-trip clean: ${key}`);
 }
 
+// Templates round-trip too — apply each, serialize, restore, compare.
+for (const key of Object.keys(TEMPLATES)) {
+  applyTemplateToState(key);
+  const { ok } = roundTripSnapshot(`template:${key}`);
+  assert(ok, `Round-trip clean: template ${key}`);
+}
+
 // 3. Hand-edited custom scene round-trips: line-array source + EQ-on +
 //    custom ambient noise + selected listener.
-applyPresetToState('hifi');
+applyTemplateToState('hifi');
 state.sources.push({
   kind: 'line-array',
   id: 'LA_TEST',
@@ -108,7 +115,7 @@ try {
 }
 
 // 6. Empty arrays serialize as arrays, not undefined.
-applyPresetToState('hifi');
+applyTemplateToState('hifi');
 state.zones = [];
 state.sources = [];
 state.listeners = [];

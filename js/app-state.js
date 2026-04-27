@@ -74,10 +74,12 @@ export const SPEAKER_CATALOG = [
   { url: 'data/loudspeakers/amperes-cs840.json',        label: 'Amperes CS840 (8\" 40 W co-axial)' },
 ];
 // Per-preset room data lives in js/presets/*.js — imported once below.
-// Helpers (rectVerts, generateTieredBowl, etc.) live in presets/_shared.js
+// Templates (parametric rooms) live in js/templates/*.js. Helpers
+// (rectVerts, generateTieredBowl, etc.) live in presets/shared.js
 // and are consumed by the preset files, not by this module directly.
 import { PRESETS } from './presets/index.js';
-export { PRESETS };
+import { TEMPLATES } from './templates/index.js';
+export { PRESETS, TEMPLATES };
 
 // ---------------------------------------------------------------------------
 // Line-array expansion — one "compound" source entry expands to N element
@@ -406,11 +408,56 @@ export function applyPresetToState(key) {
   }
 }
 
-// Kept for backward-compatibility references
+// Kept for backward-compatibility references — only the auditorium-derived
+// ones survive the templates split, since hifi/studio/etc. are now
+// parametric generators. Callers that need a starter hi-fi config should
+// invoke `applyTemplateToState('hifi')` and read `state.sources`.
 export const DEFAULT_AUDITORIUM_SOURCES = PRESETS.auditorium.sources;
 export const DEFAULT_AUDITORIUM_ZONES = PRESETS.auditorium.zones;
 export const DEFAULT_LISTENER = PRESETS.auditorium.listeners[0];
-export const DEFAULT_HIFI_SOURCES = PRESETS.hifi?.sources ?? [];
+
+// Apply a template (parametric room shape) to state. Pass dimsOverride to
+// substitute specific dimensions; otherwise the template's defaultDims
+// are used. The sources / listeners / zones are regenerated every time
+// so positions stay coherent with the room dimensions.
+export function applyTemplateToState(key, dimsOverride) {
+  const t = TEMPLATES[key];
+  if (!t) return;
+  const dims = { ...t.defaultDims, ...(dimsOverride || {}) };
+  const generated = t.generate(dims);
+
+  // Reuse the same reset-and-overlay flow as applyPresetToState so the
+  // scene swap is identical from the perspective of every panel.
+  Object.assign(state.room, deepClone(DEFAULT_ROOM_STATE));
+  if (generated.shape !== undefined)               state.room.shape = generated.shape;
+  if (generated.ceiling_type !== undefined)        state.room.ceiling_type = generated.ceiling_type;
+  if (generated.width_m !== undefined)             state.room.width_m = generated.width_m;
+  if (generated.height_m !== undefined)            state.room.height_m = generated.height_m;
+  if (generated.depth_m !== undefined)             state.room.depth_m = generated.depth_m;
+  if (generated.polygon_sides !== undefined)       state.room.polygon_sides = generated.polygon_sides;
+  if (generated.polygon_radius_m !== undefined)    state.room.polygon_radius_m = generated.polygon_radius_m;
+  if (generated.round_radius_m !== undefined)      state.room.round_radius_m = generated.round_radius_m;
+  if (generated.ceiling_dome_rise_m !== undefined) state.room.ceiling_dome_rise_m = generated.ceiling_dome_rise_m;
+  if (generated.surfaces) Object.assign(state.room.surfaces, generated.surfaces);
+
+  state.zones     = Array.isArray(generated.zones)     ? generated.zones.map(deepClone)     : [];
+  state.sources   = Array.isArray(generated.sources)   ? generated.sources.map(deepClone)   : [];
+  state.listeners = Array.isArray(generated.listeners) ? generated.listeners.map(deepClone) : [];
+  state.selectedZoneId     = state.zones[0]?.id ?? null;
+  state.selectedListenerId = state.listeners[0]?.id ?? null;
+  state.selectedSpeakerUrl = null;
+
+  if (state.results) {
+    state.results.splGrid = null;
+    state.results.zoneGrids = [];
+    state.results.precision = null;
+    if (state.results.engines?.precision) {
+      state.results.engines.precision.lastRun = null;
+      state.results.engines.precision.staleAt = null;
+      state.results.engines.precision.inProgress = false;
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Project save/load — `.roomlab.json` schema v1
