@@ -410,4 +410,137 @@ export function applyPresetToState(key) {
 export const DEFAULT_AUDITORIUM_SOURCES = PRESETS.auditorium.sources;
 export const DEFAULT_AUDITORIUM_ZONES = PRESETS.auditorium.zones;
 export const DEFAULT_LISTENER = PRESETS.auditorium.listeners[0];
-export const DEFAULT_HIFI_SOURCES = PRESETS.hifi.sources;
+export const DEFAULT_HIFI_SOURCES = PRESETS.hifi?.sources ?? [];
+
+// ---------------------------------------------------------------------------
+// Project save/load — `.roomlab.json` schema v1
+//
+// Captures everything the user can edit in the scene: room geometry,
+// sources (including line-array compound entries with kind:'line-array'),
+// listeners, audience zones, ambient noise per-band, master EQ, current
+// selection ids, and physics toggles. Excluded: results.* (recomputed
+// after load), display.* (UI toggles), walkthrough camera, viewport tab.
+//
+// Versioning: top-level `formatVersion: 1`. A future schema change must
+// either bump the version and add a migration step, OR remain a strict
+// superset (new optional fields only) so v1 readers stay valid.
+// ---------------------------------------------------------------------------
+export const PROJECT_FORMAT_VERSION = 1;
+
+export function serializeProject(src = state) {
+  return {
+    formatVersion: PROJECT_FORMAT_VERSION,
+    meta: {
+      app: 'RoomLAB',
+      savedAt: new Date().toISOString(),
+    },
+    room: deepClone(src.room),
+    sources: deepClone(src.sources ?? []),
+    selectedSpeakerUrl: src.selectedSpeakerUrl ?? null,
+    listeners: deepClone(src.listeners ?? []),
+    selectedListenerId: src.selectedListenerId ?? null,
+    zones: deepClone(src.zones ?? []),
+    selectedZoneId: src.selectedZoneId ?? null,
+    physics: {
+      reverberantField: !!src.physics?.reverberantField,
+      coherent:         !!src.physics?.coherent,
+      airAbsorption:    src.physics?.airAbsorption !== false,
+      freq_hz:          src.physics?.freq_hz ?? 1000,
+      ambientNoise:     deepClone(src.physics?.ambientNoise ?? { preset: 'nc-35', per_band: [60, 52, 45, 40, 36, 34, 33] }),
+      eq:               deepClone(src.physics?.eq ?? { enabled: false, bands: [] }),
+    },
+  };
+}
+
+export function deserializeProject(obj) {
+  if (!obj || typeof obj !== 'object') {
+    throw new Error('Not a valid RoomLAB project file.');
+  }
+  if (typeof obj.formatVersion !== 'number') {
+    throw new Error('Not a valid RoomLAB project file (missing formatVersion).');
+  }
+  if (obj.formatVersion > PROJECT_FORMAT_VERSION) {
+    throw new Error(`Unsupported file version (got ${obj.formatVersion}, expected ≤ ${PROJECT_FORMAT_VERSION}).`);
+  }
+
+  const warnings = [];
+
+  // --- Room: full reset to defaults, then overlay every saved field ----
+  Object.assign(state.room, deepClone(DEFAULT_ROOM_STATE));
+  if (obj.room && typeof obj.room === 'object') {
+    // Assign scalar fields one-by-one so an unexpected key in the file
+    // can't pollute room state with a foreign property.
+    const r = obj.room;
+    if (typeof r.shape === 'string')             state.room.shape = r.shape;
+    if (typeof r.ceiling_type === 'string')      state.room.ceiling_type = r.ceiling_type;
+    if (Number.isFinite(r.width_m))              state.room.width_m = r.width_m;
+    if (Number.isFinite(r.height_m))             state.room.height_m = r.height_m;
+    if (Number.isFinite(r.depth_m))              state.room.depth_m = r.depth_m;
+    if (Number.isFinite(r.polygon_sides))        state.room.polygon_sides = Math.round(r.polygon_sides);
+    if (Number.isFinite(r.polygon_radius_m))     state.room.polygon_radius_m = r.polygon_radius_m;
+    if (Number.isFinite(r.round_radius_m))       state.room.round_radius_m = r.round_radius_m;
+    if (Number.isFinite(r.ceiling_dome_rise_m))  state.room.ceiling_dome_rise_m = r.ceiling_dome_rise_m;
+    if (Array.isArray(r.custom_vertices))        state.room.custom_vertices = deepClone(r.custom_vertices);
+    if (r.stadiumStructure && typeof r.stadiumStructure === 'object') {
+      state.room.stadiumStructure = deepClone(r.stadiumStructure);
+    }
+    if (r.multiLevelStructure && typeof r.multiLevelStructure === 'object') {
+      state.room.multiLevelStructure = deepClone(r.multiLevelStructure);
+    }
+    if (r.surfaces && typeof r.surfaces === 'object') {
+      Object.assign(state.room.surfaces, deepClone(r.surfaces));
+    }
+  } else {
+    warnings.push('room block missing — defaults applied');
+  }
+
+  // --- Sources / listeners / zones — replace whole arrays --------------
+  state.sources    = Array.isArray(obj.sources)   ? obj.sources.map(deepClone)   : [];
+  state.listeners  = Array.isArray(obj.listeners) ? obj.listeners.map(deepClone) : [];
+  state.zones      = Array.isArray(obj.zones)     ? obj.zones.map(deepClone)     : [];
+
+  // --- Selection ids — preserve the user's last hover/selection -------
+  state.selectedSpeakerUrl = typeof obj.selectedSpeakerUrl === 'string' ? obj.selectedSpeakerUrl : null;
+  state.selectedListenerId = obj.selectedListenerId ?? state.listeners[0]?.id ?? null;
+  state.selectedZoneId     = obj.selectedZoneId ?? state.zones[0]?.id ?? null;
+
+  // --- Physics + ambient + EQ — overlay scalars; arrays full replace ---
+  if (obj.physics && typeof obj.physics === 'object') {
+    const p = obj.physics;
+    if (typeof p.reverberantField === 'boolean') state.physics.reverberantField = p.reverberantField;
+    if (typeof p.coherent         === 'boolean') state.physics.coherent         = p.coherent;
+    if (typeof p.airAbsorption    === 'boolean') state.physics.airAbsorption    = p.airAbsorption;
+    if (Number.isFinite(p.freq_hz)) state.physics.freq_hz = p.freq_hz;
+    if (p.ambientNoise && typeof p.ambientNoise === 'object') {
+      state.physics.ambientNoise = deepClone({
+        preset:   typeof p.ambientNoise.preset === 'string' ? p.ambientNoise.preset : 'nc-35',
+        per_band: Array.isArray(p.ambientNoise.per_band) && p.ambientNoise.per_band.length === 7
+          ? p.ambientNoise.per_band.map(v => Number.isFinite(v) ? v : 0)
+          : [60, 52, 45, 40, 36, 34, 33],
+      });
+    }
+    if (p.eq && typeof p.eq === 'object') {
+      if (typeof p.eq.enabled === 'boolean') state.physics.eq.enabled = p.eq.enabled;
+      if (Array.isArray(p.eq.bands) && p.eq.bands.length === state.physics.eq.bands.length) {
+        for (let i = 0; i < p.eq.bands.length; i++) {
+          const b = p.eq.bands[i];
+          if (Number.isFinite(b?.gain_db)) state.physics.eq.bands[i].gain_db = b.gain_db;
+        }
+      }
+    }
+  }
+
+  // --- Invalidate derived caches (same flow as applyPresetToState) -----
+  if (state.results) {
+    state.results.splGrid = null;
+    state.results.zoneGrids = [];
+    state.results.precision = null;
+    if (state.results.engines?.precision) {
+      state.results.engines.precision.lastRun = null;
+      state.results.engines.precision.staleAt = null;
+      state.results.engines.precision.inProgress = false;
+    }
+  }
+
+  return { warnings };
+}
