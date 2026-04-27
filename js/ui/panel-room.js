@@ -3,6 +3,7 @@ import { emit } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { importDxfFile } from '../physics/dxf-import.js';
 import { saveProjectToDownload, loadProjectFromFile } from '../io/project-file.js';
+import { encodeShareLink, buildShareUrl } from '../io/share-link.js';
 
 const RECT_SURFACE_LABELS = [
   ['floor',      'Floor'],
@@ -30,6 +31,7 @@ export function mountRoomPanel({ materials }) {
       <div class="room-head-actions">
         <button id="btn-save-project" class="btn-save" title="Save the entire project (room, speakers, listeners, zones, EQ, ambient noise) to a .roomlab.json file">💾 Save</button>
         <button id="btn-load-project" class="btn-load" title="Load a previously saved .roomlab.json project file">📂 Load</button>
+        <button id="btn-share-link" class="btn-share" aria-label="share scene as link" title="copy a URL that opens this exact scene — paste into Slack or email">🔗 Share</button>
         <input type="file" id="file-roomlab" accept=".json,.roomlab.json,application/json" hidden />
       </div>
     </div>
@@ -99,6 +101,27 @@ export function mountRoomPanel({ materials }) {
       showStatus(`Saved as ${filename}`, 'ok');
     } catch (err) {
       showStatus(`Save failed: ${err.message || err}`, 'err');
+    }
+  });
+
+  // Share — encode current state into a URL fragment, copy it. Oversize
+  // scenes (pavilion-class, ~70 KB encoded) get a "use Save instead"
+  // banner. Clipboard write may silently fail on Safari outside a user
+  // gesture chain — surface the URL inline as the fallback.
+  root.querySelector('#btn-share-link').addEventListener('click', async () => {
+    const { hash, chars, tooLarge, bytes } = encodeShareLink();
+    if (tooLarge) {
+      showStatus(`scene too large for a link (${(bytes / 1024).toFixed(1)} KB) — use 💾 Save instead`, 'err');
+      return;
+    }
+    const url = buildShareUrl(hash);
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast(`link copied — ${(bytes / 1024).toFixed(1)} KB`, 'ok');
+    } catch {
+      // Clipboard rejected (Safari without user gesture, or insecure
+      // context). Show the URL inline so the user can copy by hand.
+      showStatus(`couldn't auto-copy — copy this URL manually:\n${url}`, 'err');
     }
   });
   const projectFileInput = root.querySelector('#file-roomlab');
@@ -172,6 +195,28 @@ function showStatus(text, kind) {
   status.hidden = false;
   status.className = 'import-status' + (kind === 'ok' ? ' ok' : kind === 'err' ? ' err' : '');
   status.textContent = text;
+}
+
+// Transient bottom-of-viewport toast — used for success acks where the
+// import-status banner would be too sticky / formal (link copied,
+// shared scene loaded). Replaces any prior toast so rapid clicks don't
+// stack messages.
+export function showToast(text, kind = 'ok', durationMs = 2500) {
+  document.querySelectorAll('.rl-toast').forEach(t => t.remove());
+  const el = document.createElement('div');
+  el.className = `rl-toast rl-toast-${kind}`;
+  el.textContent = text;
+  document.body.appendChild(el);
+  // Force a reflow so the .show class triggers a transition rather than
+  // applying instantly — no fade-in otherwise.
+  void el.offsetHeight;
+  el.classList.add('show');
+  const dismiss = () => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 250);
+  };
+  const t = setTimeout(dismiss, durationMs);
+  el.addEventListener('click', () => { clearTimeout(t); dismiss(); });
 }
 
 function syncBoundingBoxToShape() {

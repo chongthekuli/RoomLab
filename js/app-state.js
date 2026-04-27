@@ -547,9 +547,12 @@ export function deserializeProject(obj) {
   state.zones      = Array.isArray(obj.zones)     ? obj.zones.map(deepClone)     : [];
 
   // --- Selection ids — preserve the user's last hover/selection -------
+  // `null` is a valid serialized value meaning "no selection". Use
+  // `'key' in obj` instead of `??` so an explicit null round-trips
+  // cleanly (the `??` form would replace it with the first item).
   state.selectedSpeakerUrl = typeof obj.selectedSpeakerUrl === 'string' ? obj.selectedSpeakerUrl : null;
-  state.selectedListenerId = obj.selectedListenerId ?? state.listeners[0]?.id ?? null;
-  state.selectedZoneId     = obj.selectedZoneId ?? state.zones[0]?.id ?? null;
+  state.selectedListenerId = ('selectedListenerId' in obj) ? obj.selectedListenerId : (state.listeners[0]?.id ?? null);
+  state.selectedZoneId     = ('selectedZoneId'     in obj) ? obj.selectedZoneId     : (state.zones[0]?.id     ?? null);
 
   // --- Physics + ambient + EQ — overlay scalars; arrays full replace ---
   if (obj.physics && typeof obj.physics === 'object') {

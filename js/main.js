@@ -1,7 +1,8 @@
 import { state, SPEAKER_CATALOG, DEFAULT_PRESET_KEY, applyPresetToState } from './app-state.js';
 import { loadMaterials } from './physics/materials.js';
 import { loadLoudspeaker } from './physics/loudspeaker.js';
-import { mountRoomPanel } from './ui/panel-room.js';
+import { applyHashStateOnLoad } from './io/share-link.js';
+import { mountRoomPanel, showToast } from './ui/panel-room.js';
 import { mountSourcesPanel } from './ui/panel-sources.js';
 import { mountListenersPanel } from './ui/panel-listeners.js';
 import { mountZonesPanel } from './ui/panel-zones.js';
@@ -185,6 +186,33 @@ async function boot() {
   // First-run onboarding — sticky-dismissed via localStorage so it appears
   // once and never again for returning users.
   mountWelcomeCard();
+
+  // Share-link boot apply — runs AFTER every panel mounts AND inside a
+  // microtask so by the time emit('scene:reset') fires every panel's
+  // listener is registered. Without this discipline the load lands but
+  // no panel sees the event and the UI silently shows the previous
+  // (default) preset (Martina, CRITICAL).
+  queueMicrotask(() => {
+    const hash = window.location.hash || '';
+    if (!hash || hash === '#') return;
+    const { applied, error, warnings } = applyHashStateOnLoad();
+    if (applied) {
+      const msg = warnings.length
+        ? `loaded shared scene (${warnings.length} warning${warnings.length === 1 ? '' : 's'})`
+        : 'loaded shared scene';
+      showToast(msg, 'ok', 3500);
+    } else if (error) {
+      // Show the decode error in the room-panel banner — it's permanent
+      // until the user takes another action, which is the right policy
+      // for "the link you opened is broken."
+      const status = document.getElementById('import-status');
+      if (status) {
+        status.hidden = false;
+        status.className = 'import-status err';
+        status.textContent = error.message;
+      }
+    }
+  });
 }
 
 boot().catch(err => {

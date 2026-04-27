@@ -840,7 +840,8 @@ section h3 {
 .room-head h2 { margin: 0; }
 .room-head-actions { display: flex; gap: 0.3rem; }
 .room-head-actions .btn-save,
-.room-head-actions .btn-load {
+.room-head-actions .btn-load,
+.room-head-actions .btn-share {
   padding: 0.3rem 0.6rem;
   border: 1px solid var(--border);
   background: var(--bg-elev);
@@ -852,9 +853,42 @@ section h3 {
   letter-spacing: 0.02em;
 }
 .room-head-actions .btn-save:hover,
-.room-head-actions .btn-load:hover {
+.room-head-actions .btn-load:hover,
+.room-head-actions .btn-share:hover {
   background: var(--border);
   border-color: var(--border-strong);
+}
+
+/* Transient toast — used for "link copied" / "loaded shared scene"
+   acks where the import-status banner would be too sticky. Bottom-
+   centre, fades in/out, click anywhere on the toast to dismiss. */
+.rl-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  padding: 0.6rem 1.1rem;
+  background: rgba(20, 24, 30, 0.96);
+  color: var(--fg-strong, #e5e7eb);
+  border: 1px solid var(--border-strong, #2a2f38);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  letter-spacing: 0.02em;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  z-index: 10000;
+  opacity: 0;
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+  cursor: default;
+  white-space: pre-wrap;
+}
+.rl-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.rl-toast-err {
+  border-color: rgba(229, 68, 68, 0.5);
+  color: #fca5a5;
 }
 
 .import-row { margin-bottom: 0.5rem; }
