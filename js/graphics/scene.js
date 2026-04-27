@@ -9,6 +9,8 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, eqGainAt } from '../app-state.js';
 import { on, emit } from '../ui/events.js';
+import { recordRayPaths, buildLineSegmentIndex } from '../physics/ray-viz.js';
+import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
@@ -21,6 +23,9 @@ let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
 let aimLinesGroup, audienceGroup;
+let rayGroup = null;
+let _rayPathsCache = null;       // last recorded { pathData, pathOffsets, colorData, stats }
+let _rayBuildToken = 0;          // increments on every (re)build to detect stale work
 const audienceGeoCache = {}; // { standing: {body, head, ref}, sitting: {...} }
 let materialsRef, container;
 
@@ -141,6 +146,113 @@ export function toggleProbe(force) {
   if (container) container.style.cursor = next ? 'crosshair' : '';
 }
 
+// Ray-viz toggle. Off by default — when the user clicks ON for the
+// first time after a state change, we run the small viz tracer
+// (~200 paths total, single-threaded, <500 ms even on pavilion-class
+// scenes) and build a single LineSegments mesh. Subsequent on/off
+// toggles are instant. Any state mutation (preset swap, source move,
+// room edit) clears the cache and disables the toggle until the next
+// successful build.
+//
+// Per Martina's review: paths live in scene-only ephemeral state,
+// NEVER in state.results.* — Float32Array would corrupt save/load.
+export function toggleRayViz(force) {
+  const next = typeof force === 'boolean' ? force : !state.display.showRays;
+  state.display.showRays = next;
+  if (!next) {
+    // Hide instantly. Cache + group stay alive so re-enabling is fast.
+    if (rayGroup) rayGroup.visible = false;
+    return;
+  }
+  // Turning ON. If we have cached paths, just unhide. Otherwise run
+  // the tracer. The build is synchronous and fast enough that a
+  // spinner is overkill; a slight UI hitch on pavilion is acceptable
+  // for a debug feature.
+  if (_rayPathsCache && rayGroup && rayGroup.children.length > 0) {
+    rayGroup.visible = true;
+    return;
+  }
+  rebuildRayViz();
+}
+
+function rebuildRayViz() {
+  if (!materialsRef) return; // viewport not mounted yet
+  if (!rayGroup) {
+    rayGroup = new THREE.Group();
+    rayGroup.name = 'ray-viz';
+    rayGroup.matrixAutoUpdate = false;
+    if (typeof scene !== 'undefined' && scene) scene.add(rayGroup);
+  } else {
+    disposeGroup(rayGroup);
+  }
+  // Stamp this build so a future invalidation event mid-trace doesn't
+  // attach stale geometry. (Tracer is synchronous in v1, so this is
+  // mostly future-proofing — but cheap.)
+  const myToken = ++_rayBuildToken;
+
+  let result;
+  try {
+    result = recordRayPaths({
+      state, materials: materialsRef,
+      getLoudspeakerDef: getCachedLoudspeaker,
+      totalPaths: 200,
+      maxBounces: 24,
+    });
+  } catch (err) {
+    console.error('[ray-viz] tracer failed:', err);
+    return;
+  }
+  if (myToken !== _rayBuildToken) return; // superseded by another build
+
+  _rayPathsCache = result;
+
+  if (!result || result.stats.totalPaths === 0) {
+    rayGroup.visible = !!state.display.showRays;
+    return;
+  }
+
+  // Build a single LineSegments mesh with vertex colors. One geometry,
+  // one material, one draw call — Viktor's recommendation. Two-floats-
+  // per-vertex offsets indexed via Uint32 keeps headroom for future N
+  // increases without touching this code path.
+  const indices = buildLineSegmentIndex(result.pathOffsets);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(result.pathData, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(result.colorData, 3));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+
+  const mat = new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.85,
+    depthWrite: false, depthTest: true,
+  });
+  const lines = new THREE.LineSegments(geo, mat);
+  lines.matrixAutoUpdate = false;
+  lines.userData.tag = 'ray-viz-lines';
+  rayGroup.add(lines);
+  rayGroup.visible = !!state.display.showRays;
+}
+
+// Invalidate cached paths when the scene changes. Subscribed below in
+// init alongside the other rebuild handlers. Disposes the group, nulls
+// the cache, and auto-disables the toggle so the user clicks-to-rebuild
+// rather than seeing stale rays through new geometry (Martina, CRITICAL).
+function invalidateRayViz() {
+  _rayBuildToken++; // poison any in-flight build
+  _rayPathsCache = null;
+  if (rayGroup) {
+    disposeGroup(rayGroup);
+    rayGroup.visible = false;
+  }
+  // Auto-flip the toggle off — the user explicitly opts in again on
+  // the next click, which retraces against the new scene.
+  if (state.display.showRays) {
+    state.display.showRays = false;
+    // Sync the toolbar button's active class via a synthetic emit; the
+    // wiring in main.js already handles this for other toggles.
+    document.getElementById('toggle-rays')?.classList.remove('active');
+  }
+}
+
 export async function mount3DViewport({ materials }) {
   materialsRef = materials;
   container = document.getElementById('view-3d');
@@ -185,14 +297,15 @@ export async function mount3DViewport({ materials }) {
   // If they sit after the rebuilds, a preset-click that lands between
   // boot's Promise.all(loadLoudspeaker…) and mount3DViewport completing
   // emits scene:reset into the void and the 3D view shows stale geometry.
-  on('room:changed', () => queueRebuild(REBUILD_ROOM | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_AIM));
-  on('source:changed', () => queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP));
-  on('source:model_changed', () => queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP));
+  on('room:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_ROOM | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_AIM); });
+  on('source:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
+  on('source:model_changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
   on('listener:changed', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
   on('listener:selected', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
-  on('scene:reset', () => queueRebuild(
-    REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP
-  ));
+  on('scene:reset', () => {
+    invalidateRayViz();
+    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP);
+  });
   // Master EQ change: heatmap + aim lines depend on per-band SPL; refresh
   // both. Zone/listener panels don't need re-render (state.zones is
   // unchanged) so we skip them.

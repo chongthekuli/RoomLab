@@ -247,6 +247,11 @@ export const state = {
   },
   display: {
     showHeatmaps: true, showAimLines: false, showIsobars: true, isobarStep_db: 3,
+    // Ray-path visualisation — debug overlay that traces ~200 sample
+    // rays from the sources and renders their reflection paths as line
+    // segments. Off by default (clutter); user toggles on demand. Cached
+    // paths invalidate on scene mutation.
+    showRays: false,
     // Heatmap metric — 'spl' paints SPL dB vertex colors + the 60–110 dB
     // legend; 'stipa' paints the IEC 60268-16 speech-intelligibility index
     // (0–1) + a different legend scale. Toggled from the toolbar.
