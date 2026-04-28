@@ -1779,10 +1779,27 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       const topRing = new THREE.BufferGeometry().setFromPoints(topPts);
       roomGroup.add(new THREE.Line(topRing, new THREE.LineBasicMaterial({ color: 0xa0a8b4 })));
     } else if (shape === 'custom') {
-      // Custom polygon: plane per edge, per-edge materials
+      // Custom polygon: plane per edge, per-edge materials.
+      //
+      // Bug fix: the previous implementation used `m.lookAt(cx, h/2, cz)`
+      // to point each wall toward the room centroid. That works for
+      // regular polygons (centroid is perpendicular to every edge
+      // midpoint by symmetry) but FAILS for irregular shapes — a user-
+      // drawn triangle has edges where the centroid is NOT perpendicular
+      // to the edge midpoint, so Three.js's auto-computed local X axis
+      // (cross(up, localZ)) doesn't align with the edge direction.
+      // Walls rotate around their centres and the corners stop meeting.
+      //
+      // Correct: build the rotation matrix manually, explicitly mapping
+      // local X to the edge direction, local Y to world up, local Z to
+      // the inward normal. Works for any convex (or concave) polygon.
       const verts = roomPlanVertices(room);
       const edges = room.surfaces.edges || [];
       const n = verts.length;
+      const _basisX = new THREE.Vector3();
+      const _basisY = new THREE.Vector3(0, 1, 0);
+      const _basisZ = new THREE.Vector3();
+      const _basisMat = new THREE.Matrix4();
       for (let i = 0; i < n; i++) {
         const v1 = verts[i];
         const v2 = verts[(i + 1) % n];
@@ -1795,8 +1812,22 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
         const geo = new THREE.PlaneGeometry(edgeLen, h);
         const edgeMat = buildSurfaceMat(edgeSurfId, edgeLen, h, { opacity: 0.55 });
         const m = new THREE.Mesh(geo, edgeMat);
+
+        // Edge direction in the floor (XZ) plane, normalised.
+        const edgeDirX = ex / edgeLen;
+        const edgeDirZ = ey / edgeLen;
+        // Inward normal candidates — 90° rotation of the edge in the
+        // horizontal plane. Two choices; pick the one whose dot product
+        // with (centroid - midpoint) is positive (i.e. points inward).
+        let nx = -edgeDirZ, nz = edgeDirX;
+        const toCx = cx - midX, toCz = cz - midZ;
+        if (nx * toCx + nz * toCz < 0) { nx = -nx; nz = -nz; }
+        _basisX.set(edgeDirX, 0, edgeDirZ);
+        _basisZ.set(nx, 0, nz);
+        _basisMat.makeBasis(_basisX, _basisY, _basisZ);
+
         m.position.set(midX, h/2, midZ);
-        m.lookAt(cx, h/2, cz);
+        m.quaternion.setFromRotationMatrix(_basisMat);
         m.userData.acoustic_material = edgeSurfId;
         m.userData.surface_id = `edge_${i}`;
         roomGroup.add(m);
