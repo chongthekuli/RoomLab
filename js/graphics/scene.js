@@ -1672,6 +1672,8 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(cx, 0.001, cz);
+    floor.userData.acoustic_material = surfaces.floor;
+    floor.userData.surface_id = 'floor';
     roomGroup.add(floor);
 
     if (room.ceiling_type !== 'dome') {
@@ -1679,23 +1681,26 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
       ceiling.rotation.x = Math.PI / 2;
       ceiling.position.set(cx, h - 0.001, cz);
+      ceiling.userData.acoustic_material = surfaces.ceiling;
+      ceiling.userData.surface_id = 'ceiling';
       roomGroup.add(ceiling);
     }
 
     // 4 walls (per-material)
     const wallOpts = [
-      [w, h, [cx, h/2, 0],   [0, Math.PI, 0],    surfaces.wall_north],
-      [w, h, [cx, h/2, d],   [0, 0, 0],          surfaces.wall_south],
-      [d, h, [w,  h/2, cz],  [0, -Math.PI/2, 0], surfaces.wall_east],
-      [d, h, [0,  h/2, cz],  [0, Math.PI/2, 0],  surfaces.wall_west],
+      [w, h, [cx, h/2, 0],   [0, Math.PI, 0],    surfaces.wall_north, 'wall_north'],
+      [w, h, [cx, h/2, d],   [0, 0, 0],          surfaces.wall_south, 'wall_south'],
+      [d, h, [w,  h/2, cz],  [0, -Math.PI/2, 0], surfaces.wall_east,  'wall_east'],
+      [d, h, [0,  h/2, cz],  [0, Math.PI/2, 0],  surfaces.wall_west,  'wall_west'],
     ];
-    for (const [ww, wh, pos, rot, surfId] of wallOpts) {
+    for (const [ww, wh, pos, rot, surfId, surfaceKey] of wallOpts) {
       const geo = new THREE.PlaneGeometry(ww, wh);
       const mat = buildSurfaceMat(surfId, ww, wh, { opacity: 0.55 });
       const m = new THREE.Mesh(geo, mat);
       m.position.set(...pos);
       m.rotation.set(...rot);
       m.userData.acoustic_material = surfId;
+      m.userData.surface_id = surfaceKey;
       roomGroup.add(m);
     }
 
@@ -1715,6 +1720,8 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(cx, 0.001, cz);
+    floor.userData.acoustic_material = surfaces.floor;
+    floor.userData.surface_id = 'floor';
     roomGroup.add(floor);
 
     if (room.ceiling_type !== 'dome') {
@@ -1722,6 +1729,8 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
       ceiling.rotation.x = Math.PI / 2;
       ceiling.position.set(cx, h - 0.001, cz);
+      ceiling.userData.acoustic_material = surfaces.ceiling;
+      ceiling.userData.surface_id = 'ceiling';
       roomGroup.add(ceiling);
     }
 
@@ -1735,6 +1744,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       const cyl = new THREE.Mesh(cylGeo, cylMat);
       cyl.position.set(cx, h/2, cz);
       cyl.userData.acoustic_material = wallsMatId;
+      cyl.userData.surface_id = 'walls';
       roomGroup.add(cyl);
 
       // Top and bottom ring edges
@@ -1768,6 +1778,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
         m.position.set(midX, h/2, midZ);
         m.lookAt(cx, h/2, cz);
         m.userData.acoustic_material = edgeSurfId;
+        m.userData.surface_id = `edge_${i}`;
         roomGroup.add(m);
       }
       const bottom = verts.map(v => new THREE.Vector3(v.x, 0, v.y));
@@ -1832,6 +1843,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
         m.position.set(midX, midY, midZ);
         m.lookAt(cx, midY, cz);
         m.userData.acoustic_material = wallsMatId;
+        m.userData.surface_id = 'walls';
         m.userData.tag = inVom ? 'wall_above_tunnel' : 'wall';
         roomGroup.add(m);
       }
@@ -1871,6 +1883,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     const cap = new THREE.Mesh(capGeo, ceilMat);
     cap.position.set(cx, h + rise - sphereRadius, cz);
     cap.userData.acoustic_material = surfaces.ceiling;
+    cap.userData.surface_id = 'ceiling';
     roomGroup.add(cap);
   }
 

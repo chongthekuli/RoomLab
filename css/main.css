@@ -1833,7 +1833,9 @@ section h3 {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
-.draw-hint { color: #9aa5b3; font-size: 0.78rem; }
+.draw-hint { color: #cfd6e0; font-size: 0.78rem; line-height: 1.2; }
+.draw-hint-ready { color: #ffd000; font-weight: 500; }
+.draw-canvas svg:focus { outline: none; }     /* keyboard-focused SVG shouldn't gain a browser default outline */
 .draw-actions { display: flex; gap: 0.3rem; }
 .draw-actions button {
   padding: 0.28rem 0.7rem;

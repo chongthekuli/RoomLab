@@ -117,6 +117,22 @@ export function mountRoomPanel({ materials }) {
     }
   });
 
+  // After a custom-shape draw closes, scroll the height input into view
+  // and focus + select-all so the user can replace it with one keystroke.
+  // Per Maya's §7: refused a modal "set room height" dialog — modal would
+  // block the user from looking at the floor plan they just drew.
+  document.addEventListener('roomshape:closed', () => {
+    // Defer one tick so the panel re-renders to the custom shape first.
+    setTimeout(() => {
+      const heightInput = document.querySelector('#shape-params input[data-sf="height_m"]');
+      if (heightInput) {
+        heightInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        heightInput.focus();
+        heightInput.select?.();
+      }
+    }, 100);
+  });
+
   // Share — encode current state into a URL fragment, copy it. Oversize
   // scenes (pavilion-class, ~70 KB encoded) get a "use Save instead"
   // banner. Clipboard write may silently fail on Safari outside a user

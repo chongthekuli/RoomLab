@@ -39,14 +39,24 @@ function interp(hex1, hex2, t) {
 
 // --- Draw mode (generic polygon draw) ---
 const CUSTOM_VB_W = 800, CUSTOM_VB_H = 500;
-const CUSTOM_SCALE = 40;
+const CUSTOM_SCALE = 40;             // 1 m = 40 px → 0.5 m = 20 px
 const CUSTOM_ORIGIN = { x: 60, y: 60 };
+const SNAP_M = 0.5;                  // Maya §3: pros work to 0.5 m, not 0.1 m
+const CLOSE_RADIUS_M = 0.6;          // Maya §2: cursor-near-vertex-1 commits as close
 
 let drawActive = false;
 let drawConfig = null;
 let drawVertices = [];
 let drawCursor = null;
+let drawCursorNearStart = false;     // updated by handleDrawMove for visual feedback
 let pendingMove = false;
+// Maya §4: drag-pan moves the canvas origin without touching state.
+// Hold middle-mouse OR space+left to pan. Reset via double-click on empty
+// canvas (when drawVertices is still 0) or the dedicated recentre button.
+const drawPan = { dx: 0, dy: 0 };
+let panActive = false;
+let panStart = null;
+let spaceHeld = false;
 
 export function startDrawCustomShape() {
   drawActive = true;
@@ -103,12 +113,21 @@ function finishDraw() {
   if (drawVertices.length < 3) return;
   const verts = drawVertices.map(v => ({ x: v.x, y: v.y }));
   const cfg = drawConfig;
+  const wasRoomShape = cfg.mode === 'room-shape';
   drawActive = false;
   drawConfig = null;
   drawVertices = [];
   drawCursor = null;
+  drawCursorNearStart = false;
+  drawPan.dx = 0; drawPan.dy = 0;
   cfg.onFinish(verts);
   emit('room:changed');
+  // Maya §7: after auto-close, scroll the side panel to the height
+  // input and select-all so the user can replace it with one keystroke.
+  // The panel-room.js listener handles the actual focus/select.
+  if (wasRoomShape) {
+    document.dispatchEvent(new CustomEvent('roomshape:closed'));
+  }
 }
 
 function cancelDraw() {
@@ -126,15 +145,50 @@ function undoDrawVertex() {
 
 function handleDrawClick(event) {
   if (!drawActive) return;
+  if (panActive) return;       // mid-pan release should not place a vertex
   const c = drawCoordsFromEvent(event);
   if (c.rx < 0 || c.ry < 0) return;
+  // Maya §2: cursor within 0.6 m of vertex 1 (with ≥ 3 placed) commits
+  // as a close. The user clicks anywhere inside that radius and the
+  // polygon closes — no pixel-perfect accuracy required.
+  if (drawConfig.mode === 'room-shape' && drawVertices.length >= 3) {
+    const v1 = drawVertices[0];
+    const dx = c.rx - v1.x;
+    const dy = c.ry - v1.y;
+    if (Math.sqrt(dx * dx + dy * dy) <= CLOSE_RADIUS_M) {
+      finishDraw();
+      return;
+    }
+  }
   drawVertices.push({ x: c.rx, y: c.ry });
   render();
 }
 
 function handleDrawMove(event) {
   if (!drawActive) return;
+  if (panActive) {
+    // Drag-pan the viewport — translate the visible origin without
+    // touching state. Updates render so origin crosshair tracks.
+    const dx = event.clientX - panStart.x;
+    const dy = event.clientY - panStart.y;
+    drawPan.dx = panStart.startDx + dx;
+    drawPan.dy = panStart.startDy + dy;
+    if (!pendingMove) {
+      pendingMove = true;
+      requestAnimationFrame(() => { pendingMove = false; if (drawActive) render(); });
+    }
+    return;
+  }
   drawCursor = drawCoordsFromEvent(event);
+  // Update near-start flag for visual feedback (Maya §2)
+  if (drawConfig.mode === 'room-shape' && drawVertices.length >= 3) {
+    const v1 = drawVertices[0];
+    const dx = drawCursor.rx - v1.x;
+    const dy = drawCursor.ry - v1.y;
+    drawCursorNearStart = Math.sqrt(dx * dx + dy * dy) <= CLOSE_RADIUS_M;
+  } else {
+    drawCursorNearStart = false;
+  }
   if (!pendingMove) {
     pendingMove = true;
     requestAnimationFrame(() => { pendingMove = false; if (drawActive) render(); });
@@ -143,7 +197,45 @@ function handleDrawMove(event) {
 
 function handleDrawDblClick(event) {
   event.preventDefault();
-  if (drawActive) finishDraw();
+  if (!drawActive) return;
+  // Maya §4: double-click on empty canvas resets pan (when no vertices
+  // placed yet). Otherwise double-click finishes the draw.
+  if (drawVertices.length === 0) {
+    drawPan.dx = 0; drawPan.dy = 0;
+    render();
+    return;
+  }
+  finishDraw();
+}
+
+function handleDrawPanStart(event) {
+  // Middle-button or Space + left-button starts a pan
+  if (!drawActive) return;
+  if (event.button !== 1 && !(event.button === 0 && spaceHeld)) return;
+  event.preventDefault();
+  panActive = true;
+  panStart = {
+    x: event.clientX, y: event.clientY,
+    startDx: drawPan.dx, startDy: drawPan.dy,
+  };
+}
+
+function handleDrawPanEnd() {
+  if (panActive) {
+    panActive = false;
+    panStart = null;
+  }
+}
+
+function handleDrawKey(event) {
+  if (!drawActive) return;
+  if (event.key === 'Escape')      { cancelDraw(); event.preventDefault(); }
+  else if (event.key === 'Backspace') { undoDrawVertex(); event.preventDefault(); }
+  else if (event.key === 'Enter')  { if (drawVertices.length >= 3) finishDraw(); event.preventDefault(); }
+  else if (event.key === ' ')      { spaceHeld = true; event.preventDefault(); }
+}
+function handleDrawKeyUp(event) {
+  if (event.key === ' ') spaceHeld = false;
 }
 
 function drawCoordsFromEvent(event) {
@@ -152,9 +244,12 @@ function drawCoordsFromEvent(event) {
   if (drawConfig.mode === 'room-shape') {
     const sx = (event.clientX - rect.left) * (CUSTOM_VB_W / rect.width);
     const sy = (event.clientY - rect.top)  * (CUSTOM_VB_H / rect.height);
-    const rx = (sx - CUSTOM_ORIGIN.x) / CUSTOM_SCALE;
-    const ry = (sy - CUSTOM_ORIGIN.y) / CUSTOM_SCALE;
-    return { sx, sy, rx: Math.round(rx * 10) / 10, ry: Math.round(ry * 10) / 10 };
+    // Account for pan when computing the room-coord under the cursor.
+    const rx = (sx - CUSTOM_ORIGIN.x - drawPan.dx) / CUSTOM_SCALE;
+    const ry = (sy - CUSTOM_ORIGIN.y - drawPan.dy) / CUSTOM_SCALE;
+    // Maya §3: 0.5 m grid snap — Math.round(x / 0.5) * 0.5
+    const snap = (v) => Math.round(v / SNAP_M) * SNAP_M;
+    return { sx, sy, rx: snap(rx), ry: snap(ry) };
   }
   // zone mode: use current room scale
   const geom = currentRoomGeom();
@@ -196,21 +291,81 @@ function render() {
   renderNormal(vp);
 }
 
+// Compute the state copy for the guide-text band based on draw state.
+// Maya §2 — exact strings.
+function drawGuideText() {
+  if (drawConfig?.mode !== 'room-shape') {
+    return drawConfig?.label ?? '';
+  }
+  const n = drawVertices.length;
+  if (drawCursorNearStart && n >= 3) {
+    return `release here to close the loop — ${n} edge${n === 1 ? '' : 's'}.`;
+  }
+  if (n === 0) return 'click on the grid to place point 1. press esc to cancel.';
+  if (n === 1) return 'click to add point 2. snap is 0.5 m.';
+  if (n === 2) return 'click to add point 3. you\'ll need at least 3 to close a polygon.';
+  return `click to add point ${n + 1}. double-click to finish, or click point 1 to close.`;
+}
+
 function renderCustomDraw(vp) {
-  const x0 = CUSTOM_ORIGIN.x, y0 = CUSTOM_ORIGIN.y;
-  let svg = `<svg viewBox="0 0 ${CUSTOM_VB_W} ${CUSTOM_VB_H}" preserveAspectRatio="xMidYMid meet">`;
-  svg += `<defs><pattern id="gridp" width="${CUSTOM_SCALE}" height="${CUSTOM_SCALE}" patternUnits="userSpaceOnUse">`;
-  svg += `<path d="M ${CUSTOM_SCALE} 0 L 0 0 0 ${CUSTOM_SCALE}" fill="none" stroke="#2a2f38" stroke-width="0.5"/></pattern></defs>`;
-  svg += `<rect width="${CUSTOM_VB_W}" height="${CUSTOM_VB_H}" fill="url(#gridp)" />`;
-  svg += `<text x="${x0 - 8}" y="${y0 - 8}" fill="#668" font-size="11" text-anchor="end">0,0</text>`;
-  svg += `<line x1="${x0}" y1="${y0}" x2="${x0 + 50}" y2="${y0}" stroke="#667" stroke-width="1"/>`;
-  svg += `<line x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + 50}" stroke="#667" stroke-width="1"/>`;
+  // Maya §3: origin shifted by viewport pan offset
+  const x0 = CUSTOM_ORIGIN.x + drawPan.dx;
+  const y0 = CUSTOM_ORIGIN.y + drawPan.dy;
+  const minor = CUSTOM_SCALE * SNAP_M;            // 20 px = 0.5 m
+  const major = CUSTOM_SCALE * 5;                 // 200 px = 5 m
+
+  let svg = `<svg viewBox="0 0 ${CUSTOM_VB_W} ${CUSTOM_VB_H}" preserveAspectRatio="xMidYMid meet" tabindex="0">`;
+  // Two stacked grid layers, minor first, major on top.
+  svg += `<defs>
+    <pattern id="gridp-minor" width="${minor}" height="${minor}" x="${x0 % minor}" y="${y0 % minor}" patternUnits="userSpaceOnUse">
+      <path d="M ${minor} 0 L 0 0 0 ${minor}" fill="none" stroke="#1f242c" stroke-width="0.5"/>
+    </pattern>
+    <pattern id="gridp-major" width="${major}" height="${major}" x="${x0 % major}" y="${y0 % major}" patternUnits="userSpaceOnUse">
+      <path d="M ${major} 0 L 0 0 0 ${major}" fill="none" stroke="#2f3744" stroke-width="1"/>
+    </pattern>
+  </defs>`;
+  svg += `<rect width="${CUSTOM_VB_W}" height="${CUSTOM_VB_H}" fill="#13161c" />`;
+  svg += `<rect width="${CUSTOM_VB_W}" height="${CUSTOM_VB_H}" fill="url(#gridp-minor)" />`;
+  svg += `<rect width="${CUSTOM_VB_W}" height="${CUSTOM_VB_H}" fill="url(#gridp-major)" />`;
+
+  // 5 m tick labels along top + left edges (only on majors that fall
+  // inside the viewport). Skip the label at world-origin — the
+  // crosshair already labels itself.
+  const minXm = -x0 / CUSTOM_SCALE;
+  const maxXm = (CUSTOM_VB_W - x0) / CUSTOM_SCALE;
+  const minYm = -y0 / CUSTOM_SCALE;
+  const maxYm = (CUSTOM_VB_H - y0) / CUSTOM_SCALE;
+  for (let m = Math.ceil(minXm / 5) * 5; m <= maxXm; m += 5) {
+    if (m === 0) continue;
+    svg += `<text x="${x0 + m * CUSTOM_SCALE}" y="14" fill="#5a6677" font-size="9" text-anchor="middle">${m} m</text>`;
+  }
+  for (let m = Math.ceil(minYm / 5) * 5; m <= maxYm; m += 5) {
+    if (m === 0) continue;
+    svg += `<text x="6" y="${y0 + m * CUSTOM_SCALE + 3}" fill="#5a6677" font-size="9">${m} m</text>`;
+  }
+
+  // Always-visible origin crosshair (Maya §2)
+  svg += renderOriginCrosshair(x0, y0, '#7a89a0');
 
   svg += renderDrawOverlay(x0, y0, CUSTOM_SCALE, '#4a8ff0');
   svg += `</svg>`;
 
   vp.innerHTML = buildDrawHtml(svg);
   wireDrawEvents(vp);
+}
+
+// Origin crosshair: 14 px stroke arms with a 4 px gap at centre, plus
+// '0.0, 0.0 m' label. Used in BOTH custom-draw and normal modes so the
+// user always knows where world (0, 0) sits on the canvas.
+function renderOriginCrosshair(x0, y0, color = '#7a89a0') {
+  const armLen = 14, gap = 4;
+  return `
+    <line x1="${x0 - armLen - gap}" y1="${y0}" x2="${x0 - gap}" y2="${y0}" stroke="${color}" stroke-width="1"/>
+    <line x1="${x0 + gap}" y1="${y0}" x2="${x0 + armLen + gap}" y2="${y0}" stroke="${color}" stroke-width="1"/>
+    <line x1="${x0}" y1="${y0 - armLen - gap}" x2="${x0}" y2="${y0 - gap}" stroke="${color}" stroke-width="1"/>
+    <line x1="${x0}" y1="${y0 + gap}" x2="${x0}" y2="${y0 + armLen + gap}" stroke="${color}" stroke-width="1"/>
+    <text x="${x0 + 8}" y="${y0 - 10}" fill="${color}" font-size="10">0.0, 0.0 m</text>
+  `;
 }
 
 function renderZoneDraw(vp) {
@@ -248,33 +403,58 @@ function renderDrawOverlay(x0, y0, scale, color) {
   }
   if (drawVertices.length > 0 && drawCursor) {
     const last = drawVertices[drawVertices.length - 1];
-    s += `<line x1="${x0 + last.x * scale}" y1="${y0 + last.y * scale}" x2="${drawCursor.sx}" y2="${drawCursor.sy}" stroke="${color}" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.7"/>`;
+    // Maya §2: when cursor is near vertex 1, the rubber-band line snaps
+    // to vertex 1 (not the cursor) — strong visual signal that the
+    // next click closes the loop.
+    let endX = drawCursor.sx;
+    let endY = drawCursor.sy;
+    if (drawCursorNearStart && drawVertices.length >= 3) {
+      const first = drawVertices[0];
+      endX = x0 + first.x * scale;
+      endY = y0 + first.y * scale;
+    }
+    s += `<line x1="${x0 + last.x * scale}" y1="${y0 + last.y * scale}" x2="${endX}" y2="${endY}" stroke="${color}" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.7"/>`;
     if (drawVertices.length >= 2) {
       const first = drawVertices[0];
-      s += `<line x1="${drawCursor.sx}" y1="${drawCursor.sy}" x2="${x0 + first.x * scale}" y2="${y0 + first.y * scale}" stroke="${color}" stroke-width="1" stroke-dasharray="2,3" opacity="0.4"/>`;
+      // Maya §2: closing dashed line goes solid + opaque when ready to commit.
+      const ready = drawCursorNearStart && drawVertices.length >= 3;
+      const stroke = ready ? color : color;
+      const widthPx = ready ? 2.5 : 1;
+      const dash = ready ? 'none' : '2,3';
+      const opacity = ready ? 1 : 0.4;
+      s += `<line x1="${endX}" y1="${endY}" x2="${x0 + first.x * scale}" y2="${y0 + first.y * scale}" stroke="${stroke}" stroke-width="${widthPx}" stroke-dasharray="${dash}" opacity="${opacity}"/>`;
     }
   }
+  // Vertex 1 grows + highlights when cursor is near; other vertices stay regular
   drawVertices.forEach((v, i) => {
     const sx = x0 + v.x * scale, sy = y0 + v.y * scale;
-    s += `<circle cx="${sx}" cy="${sy}" r="6" fill="${color}" stroke="#fff" stroke-width="2"/>`;
-    s += `<text x="${sx + 10}" y="${sy - 8}" fill="#cce" font-size="11" font-weight="600">${i + 1}</text>`;
+    const isFirstReady = i === 0 && drawCursorNearStart && drawVertices.length >= 3;
+    const r = isFirstReady ? 10 : 6;
+    const stroke = isFirstReady ? 3 : 2;
+    s += `<circle cx="${sx}" cy="${sy}" r="${r}" fill="${color}" stroke="#fff" stroke-width="${stroke}"/>`;
+    s += `<text x="${sx + 12}" y="${sy - 8}" fill="#cce" font-size="11" font-weight="600">${i + 1}</text>`;
   });
+  // Cursor preview — Maya §2: 6 px filled circle at 50% opacity with a
+  // white ring. One decimal coords (snap is 0.5 m).
   if (drawCursor && drawCursor.rx >= 0 && drawCursor.ry >= 0) {
-    s += `<circle cx="${drawCursor.sx}" cy="${drawCursor.sy}" r="4" fill="none" stroke="#ffd000" stroke-width="1.5"/>`;
-    s += `<text x="${drawCursor.sx + 8}" y="${drawCursor.sy - 8}" fill="#ffd000" font-size="10">${drawCursor.rx.toFixed(1)}, ${drawCursor.ry.toFixed(1)}</text>`;
+    s += `<circle cx="${drawCursor.sx}" cy="${drawCursor.sy}" r="6" fill="#4a8ff0" fill-opacity="0.5" stroke="#ffffff" stroke-width="1.5"/>`;
+    s += `<text x="${drawCursor.sx + 10}" y="${drawCursor.sy - 8}" fill="#ffd000" font-size="10">${drawCursor.rx.toFixed(1)}, ${drawCursor.ry.toFixed(1)} m</text>`;
   }
   return s;
 }
 
 function buildDrawHtml(svg) {
+  const guideText = drawGuideText();
+  const ready = drawCursorNearStart && drawVertices.length >= 3;
   return `
     <div class="viewport-2d draw-mode">
       <div class="draw-toolbar">
-        <span class="draw-hint">${drawConfig.label} · click to add vertex · double-click to close · ${drawVertices.length} placed</span>
+        <span class="draw-hint ${ready ? 'draw-hint-ready' : ''}">${guideText}</span>
         <div class="draw-actions">
-          <button id="btn-draw-undo" ${drawVertices.length === 0 ? 'disabled' : ''}>Undo</button>
-          <button id="btn-draw-finish" ${drawVertices.length < 3 ? 'disabled' : ''}>Finish</button>
-          <button id="btn-draw-cancel">Cancel</button>
+          <button id="btn-draw-recentre" title="reset pan (also: double-click empty canvas)">recentre</button>
+          <button id="btn-draw-undo" ${drawVertices.length === 0 ? 'disabled' : ''}>undo last point</button>
+          <button id="btn-draw-finish" ${drawVertices.length < 3 ? 'disabled' : ''}>finish (${drawVertices.length} pt${drawVertices.length === 1 ? '' : 's'})</button>
+          <button id="btn-draw-cancel">cancel</button>
         </div>
       </div>
       <div class="draw-canvas">${svg}</div>
@@ -287,6 +467,22 @@ function wireDrawEvents(vp) {
   svgEl.addEventListener('click', handleDrawClick);
   svgEl.addEventListener('mousemove', handleDrawMove);
   svgEl.addEventListener('dblclick', handleDrawDblClick);
+  // Pan: middle-button or Space + left-button. Middle-button still
+  // gets clicked through, so guard in handleDrawPanStart.
+  svgEl.addEventListener('pointerdown', handleDrawPanStart);
+  svgEl.addEventListener('pointerup', handleDrawPanEnd);
+  svgEl.addEventListener('pointercancel', handleDrawPanEnd);
+  // Keyboard: focus the SVG so Esc / Backspace / Enter / Space reach us.
+  svgEl.addEventListener('keydown', handleDrawKey);
+  svgEl.addEventListener('keyup', handleDrawKeyUp);
+  // Auto-focus so keyboard works from the moment draw mode opens.
+  setTimeout(() => svgEl.focus?.(), 0);
+
+  const recentre = vp.querySelector('#btn-draw-recentre');
+  if (recentre) recentre.addEventListener('click', () => {
+    drawPan.dx = 0; drawPan.dy = 0;
+    render();
+  });
   vp.querySelector('#btn-draw-undo').addEventListener('click', undoDrawVertex);
   vp.querySelector('#btn-draw-finish').addEventListener('click', finishDraw);
   vp.querySelector('#btn-draw-cancel').addEventListener('click', cancelDraw);
@@ -307,6 +503,9 @@ function renderNormal(vp) {
 
   const geom = currentRoomGeom();
   const { x0, y0, pxW, pxD } = geom;
+  // Origin crosshair shown in normal mode too — Maya §2: pros need to
+  // know where world (0, 0) sits before they decide where to draw.
+  // Placed in module scope so renderRoomOutline can compose it in.
 
   const ear = earHeightFor(getSelectedListener());
 
@@ -364,6 +563,7 @@ function renderNormal(vp) {
         ${zonesSvg}
         ${listenerSvg}
         ${speakerSvg}
+        ${renderOriginCrosshair(x0, y0, '#7a89a0')}
         <text x="${x0 + pxW/2}" y="${500 - 20}" text-anchor="middle" class="vp-lbl vp-lbl-dim">${shapeLbl} · h ${h} m · Floor: ${nameOf(surfaces.floor)} · Ceiling: ${nameOf(surfaces.ceiling)}${ceilLbl}</text>
       </svg>
       ${renderLegend(splResult)}
