@@ -1,13 +1,21 @@
-// Speaker detail view — full-specs + polar patterns + expert flags for a
-// single loudspeaker. Lives in the viewport area (toggled via the
-// "Speaker" tab). Driven by state.selectedSpeakerUrl.
+// Speaker detail view — full-specs + polar patterns + expert flags for
+// a single loudspeaker. The main content of SpeakerLAB. Driven by a
+// SpeakerLAB-local `state.selectedSpeakerUrl` so the module stays free
+// of RoomLAB scene-state coupling.
 
-import { state, SPEAKER_CATALOG } from '../app-state.js';
-import { on, emit } from './events.js';
-import { getCachedLoudspeaker, loadLoudspeaker, interpolateAttenuation, registerLoudspeaker } from '../physics/loudspeaker.js';
-import { analyseSpeaker, estimateNominalDispersion, onAxisResponseDb, csdPerBand } from '../physics/speaker-expert.js';
-import { importSpeakerFile, GLL_GUIDE } from '../physics/speaker-import.js';
-import { mountSpeaker3DPreview, disposePreview } from './speaker-3d-preview.js';
+import { SPEAKER_CATALOG } from '../../shared/speaker-catalog.js';
+import { on, emit } from '../../shared/events.js';
+import { getCachedLoudspeaker, loadLoudspeaker, interpolateAttenuation, registerLoudspeaker } from '../../physics/loudspeaker.js';
+import { analyseSpeaker, estimateNominalDispersion, onAxisResponseDb, csdPerBand } from '../../physics/speaker-expert.js';
+import { importSpeakerFile, GLL_GUIDE } from '../../physics/speaker-import.js';
+import { mountSpeaker3DPreview } from './speaker-3d-preview.js';
+
+// SpeakerLAB-local state. Currently just the active speaker URL —
+// future iterations can add comparison pins, library tags, custom
+// collections etc. Exported so the boot script (main.js) can seed
+// selectedSpeakerUrl from the URL's ?model= query param before the
+// first render().
+export const state = { selectedSpeakerUrl: null };
 
 // Imported speakers live here. URL of each imported file is a synthetic
 // `imported:<id>` token; the in-memory cache of loudspeaker.js stores the
@@ -62,18 +70,11 @@ export function mountSpeakerView() {
     e.target.value = '';
   });
 
+  // The only event SpeakerLAB needs to react to is its own selection
+  // change (catalogue card click → state.selectedSpeakerUrl =  ... →
+  // emit('speaker:selected') → re-render). RoomLAB's source:changed /
+  // room:changed / scene:reset events don't exist in this Lab.
   on('speaker:selected', render);
-  on('source:changed', render);   // in case the user changes the selected cabinet's model
-  on('room:changed', render);     // expert flags depend on room
-  on('scene:reset', render);
-
-  // When the viewport tab changes away from speaker, dispose the WebGL
-  // context so it doesn't hog a GPU surface in the background. It'll be
-  // rebuilt on next render() when the user comes back.
-  document.addEventListener('viewport:tab-changed', (e) => {
-    if (e.detail?.view !== 'speaker') disposePreview();
-    else render();
-  });
 
   render();
 }
@@ -110,7 +111,9 @@ async function render() {
     ${def.note ? `<div class="sv-note">${escapeHtml(def.note)}</div>` : ''}
   `;
 
-  const flags = analyseSpeaker(def, { room: state.room });
+  // No room context in SpeakerLAB — the analysis function gracefully
+  // omits room-dependent flags when room is undefined.
+  const flags = analyseSpeaker(def, {});
   const dispersion = estimateNominalDispersion(def);
   const onAxis = onAxisResponseDb(def);
 

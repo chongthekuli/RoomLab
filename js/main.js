@@ -11,11 +11,11 @@ import { mountAmbientPanel } from './ui/panel-ambient.js';
 import { mountResultsPanel } from './ui/panel-results.js';
 import { mountPrecisionPanel } from './ui/panel-precision.js';
 import { mountWelcomeCard } from './ui/welcome-card.js';
-import { mountSpeakerView } from './ui/speaker-detail.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, toggleRayViz, frameCameraToRoom, setRackCatalogues, setWalkthroughMode } from './graphics/scene.js';
 import { mountRackPanel } from './ui/panel-rack.js';
 import { installCollapsibles } from './ui/collapsibles.js';
+import { mountHeaderNav } from './shared/header-nav.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -148,7 +148,7 @@ function setupTabs() {
       case '1': clickTab('2d'); e.preventDefault(); break;
       case '2': clickTab('3d'); e.preventDefault(); break;
       case '3': clickTab('walk'); e.preventDefault(); break;
-      case '5': clickTab('rack'); e.preventDefault(); break;
+      case '4': clickTab('rack'); e.preventDefault(); break;
       case 'h': case 'H': click('toggle-heatmaps'); e.preventDefault(); break;
       case 'i': case 'I': click('toggle-isobars'); e.preventDefault(); break;
       case 'm': case 'M': click('toggle-stipa-mode'); e.preventDefault(); break;
@@ -170,6 +170,7 @@ async function loadJSON(url) {
 }
 
 async function boot() {
+  mountHeaderNav({ activeLab: 'room' });
   const materials = await loadMaterials();
   await Promise.all(SPEAKER_CATALOG.map(c => loadLoudspeaker(c.url)));
 
@@ -193,7 +194,6 @@ async function boot() {
   mountAmbientPanel();
   mountResultsPanel({ materials });
   mountPrecisionPanel({ materials });
-  mountSpeakerView();
   mountRackPanel({ rackCatalogue, ampCatalog });
 
   // Wrap each #panel-left section in a collapsible chrome — defaults
@@ -201,11 +201,6 @@ async function boot() {
   // Idempotent so the scene:reset re-entry inside the module is safe.
   installCollapsibles();
 
-  // "View specs" buttons on Source cards dispatch this synthetic event —
-  // switch to the Speaker viewport tab so the user sees the detail view.
-  document.addEventListener('viewport:show-speaker', () => {
-    document.querySelector('.vp-tab[data-view="speaker"]')?.click();
-  });
   mount2DViewport({ materials });
 
   try {

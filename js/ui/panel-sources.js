@@ -189,15 +189,17 @@ function render() {
     btn.addEventListener('click', () => removeSource(parseInt(btn.dataset.removeIdx, 10)));
   });
 
-  // 📊 button — open the Speaker viewport tab focused on this source's model.
+  // 📊 button — open SpeakerLAB focused on this source's model.
+  // Deep-link via ?model=<url> so refresh / back-button work natively.
+  // Same-tab navigation; RoomLAB autosaves scene state to localStorage,
+  // so the user can return via the browser back button without loss.
   listRoot.querySelectorAll('.btn-spec').forEach(btn => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.dataset.specIdx, 10);
       const src = state.sources[idx];
       if (!src) return;
-      state.selectedSpeakerUrl = src.modelUrl;
-      emit('speaker:selected');
-      document.dispatchEvent(new CustomEvent('viewport:show-speaker'));
+      const url = `speakers.html?model=${encodeURIComponent(src.modelUrl)}`;
+      window.location.href = url;
     });
   });
 

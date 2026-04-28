@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RoomLAB</title>
-  <link rel="stylesheet" href="css/main.css?v=167" />
-  <link rel="stylesheet" href="css/theme.css?v=167" />
-  <link rel="stylesheet" href="css/print.css?v=167" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=168" />
+  <link rel="stylesheet" href="css/theme.css?v=168" />
+  <link rel="stylesheet" href="css/print.css?v=168" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -17,7 +17,7 @@
   </script>
 </head>
 <body>
-  <header id="app-header"><h1>RoomLAB</h1></header>
+  <header id="app-header"></header>
   <main id="app-root">
     <aside id="panel-left">
       <section id="panel-room"><h2>Room</h2></section>
@@ -36,8 +36,7 @@
           <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D</button>
           <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D</button>
           <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walk</button>
-          <button class="vp-tab" data-view="speaker" title="Selected loudspeaker: full specs + polar patterns — shortcut 4">Speaker</button>
-          <button class="vp-tab" data-view="rack" title="PA Rack Builder — assemble amplifier rack and place in room — shortcut 5">Rack</button>
+          <button class="vp-tab" data-view="rack" title="PA Rack Builder — assemble amplifier rack and place in room — shortcut 4">Rack</button>
         </div>
         <div class="vp-group vp-group-layers">
           <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer — shortcut H">Heatmap</button>
@@ -56,7 +55,6 @@
       <div id="view-3d" class="viewport-view">
         <div class="viewport-loading">Loading 3D view…</div>
       </div>
-      <div id="view-speaker" class="viewport-view" hidden></div>
       <div id="view-rack" class="viewport-view" hidden></div>
     </section>
     <aside id="panel-right">
@@ -77,6 +75,7 @@
             <dt>1</dt><dd>2D floor plan</dd>
             <dt>2</dt><dd>3D view</dd>
             <dt>3</dt><dd>Walkthrough</dd>
+            <dt>4</dt><dd>PA Rack builder</dd>
           </dl>
           <h3>Walkthrough</h3>
           <dl class="help-keys">
@@ -113,6 +112,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=167"></script>
+  <script type="module" src="js/main.js?v=168"></script>
 </body>
 </html>
