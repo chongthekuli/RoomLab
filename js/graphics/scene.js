@@ -427,17 +427,24 @@ function initScene() {
   // correct. Revisit as a separate, carefully-validated pass.
   composer = null;
 
-  // SPL legend overlay (HTML over the WebGL canvas, right side, vertical).
-  // Gradient is fixed to the palette used by splColorRGB (60–110 dB range);
-  // the displayed min/max labels update dynamically from the current zone grids.
+  // SPL/STI legend overlay (HTML over the WebGL canvas, bottom-right of
+  // viewport). Three rows: title, gradient bar with tick marks, data-range
+  // footer. Gradient + ticks are populated by updateSPLLegend() based on
+  // state.display.heatmapMode and current min/max.
   const legend = document.createElement('div');
   legend.className = 'spl-legend-3d hidden';
   legend.id = 'spl-legend-3d';
   legend.innerHTML = `
     <div class="legend-title">SPL</div>
-    <div class="legend-max">— dB</div>
-    <div class="legend-bar"></div>
-    <div class="legend-min">— dB</div>
+    <div class="legend-scale">
+      <div class="legend-bar"></div>
+      <div class="legend-ticks"></div>
+    </div>
+    <div class="legend-range">
+      <span class="legend-min">—</span>
+      <span class="legend-sep">–</span>
+      <span class="legend-max">—</span>
+    </div>
   `;
   container.appendChild(legend);
 
@@ -4294,20 +4301,65 @@ function updateSPLLegend() {
   const mode = state.display.heatmapMode;
   const title = legend.querySelector('.legend-title');
   const bar = legend.querySelector('.legend-bar');
+  const ticksEl = legend.querySelector('.legend-ticks');
   const maxL = legend.querySelector('.legend-max');
   const minL = legend.querySelector('.legend-min');
+  if (ticksEl) ticksEl.replaceChildren();
+
+  // Helper: append one tick at `pctFromBottom` % up the bar.
+  const addTick = (pctFromBottom, label) => {
+    if (!ticksEl) return;
+    const t = document.createElement('div');
+    t.className = 'legend-tick';
+    t.style.bottom = pctFromBottom.toFixed(2) + '%';
+    const line = document.createElement('span');
+    line.className = 'legend-tick-line';
+    const lbl = document.createElement('span');
+    lbl.className = 'legend-tick-label';
+    lbl.textContent = label;
+    t.appendChild(line);
+    t.appendChild(lbl);
+    ticksEl.appendChild(t);
+  };
+
   if (mode === 'stipa') {
     if (title) title.textContent = 'STI';
     // Gradient matches stiColorRGB: red (bad) → orange (poor) → yellow
     // (fair) → green (good) → teal (excellent). Top of bar = 1.00.
     if (bar) bar.style.background = 'linear-gradient(to top, ' +
       '#aa1e1e 0%, #e67828 30%, #e6c832 45%, #6ec85a 60%, #28aa82 75%, #148ca0 100%)';
+    // STI ticks are FIXED at the IEC 60268-16 rating-band boundaries —
+    // these are the values the user actually needs to read off the
+    // colour ("where does 'good' start") regardless of the data range.
+    for (const v of [0.00, 0.30, 0.45, 0.60, 0.75, 1.00]) {
+      addTick(v * 100, v.toFixed(2));
+    }
     if (maxL) maxL.textContent = maxVal.toFixed(2);
     if (minL) minL.textContent = minVal.toFixed(2);
   } else {
     if (title) title.textContent = 'SPL';
     if (bar) bar.style.background = 'linear-gradient(to top, ' +
       '#1a1a4a 0%, #0066cc 25%, #00cc66 50%, #ffcc00 75%, #ff3300 100%)';
+    // SPL ticks are dynamic — choose 5 dB step for narrow ranges, 10 dB
+    // for wider, snap to multiples. Cap at 7 ticks to avoid label
+    // collision on the 180 px bar.
+    const span = Math.max(1e-3, maxVal - minVal);
+    let step = span <= 30 ? 5 : 10;
+    let first = Math.ceil(minVal / step) * step;
+    let last  = Math.floor(maxVal / step) * step;
+    let count = Math.floor((last - first) / step) + 1;
+    if (count > 7) {
+      step *= 2;
+      first = Math.ceil(minVal / step) * step;
+      last  = Math.floor(maxVal / step) * step;
+      count = Math.floor((last - first) / step) + 1;
+    }
+    if (count >= 1) {
+      for (let v = first; v <= last + 1e-6; v += step) {
+        const pct = ((v - minVal) / span) * 100;
+        if (pct >= 0 && pct <= 100) addTick(pct, v.toFixed(0));
+      }
+    }
     if (maxL) maxL.textContent = maxVal.toFixed(0) + ' dB';
     if (minL) minL.textContent = minVal.toFixed(0) + ' dB';
   }
