@@ -41,6 +41,42 @@ function loadRacksFromAutosave() {
     : [];
 }
 
+// Pulls a human-readable context out of the shared autosave so the
+// banner can answer "which room am I editing for?". Falls back to a
+// generic label if RoomLAB has never run (no autosave yet).
+function describeSceneContext() {
+  const auto = readAutosave();
+  if (!auto) {
+    return {
+      name: 'No room scene yet',
+      meta: 'Open RoomLAB first to start a scene — racks are tied to the active room.',
+    };
+  }
+  const r = auto.room ?? {};
+  const proj = (typeof auto.projectName === 'string' && auto.projectName.trim())
+    ? auto.projectName.trim()
+    : null;
+  // Room "name" preference order: explicit projectName > shape descriptor > generic.
+  let name = proj;
+  if (!name) {
+    if (r.shape === 'rectangular' && Number.isFinite(r.width_m) && Number.isFinite(r.depth_m)) {
+      name = `Rectangular · ${r.width_m.toFixed(1)} × ${r.depth_m.toFixed(1)} m`;
+    } else if (r.shape === 'polygon' && Number.isFinite(r.polygon_radius_m)) {
+      name = `${r.polygon_sides ?? 8}-gon · radius ${r.polygon_radius_m.toFixed(1)} m`;
+    } else if (r.shape === 'round' && Number.isFinite(r.round_radius_m)) {
+      name = `Round · radius ${r.round_radius_m.toFixed(1)} m`;
+    } else {
+      name = 'Custom room';
+    }
+  }
+  const counts = [
+    `${(auto.sources ?? []).length} sources`,
+    `${(auto.listeners ?? []).length} listeners`,
+    `${(auto.zones ?? []).length} zones`,
+  ].join(' · ');
+  return { name, meta: counts };
+}
+
 function persistRacks() {
   // patchAutosave silently no-ops when there's no existing scene
   // autosave (i.e. user hit DeviceLAB before ever opening RoomLAB).
@@ -69,7 +105,19 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
   loadRacksFromAutosave();
   const root = document.getElementById('view-rack');
   if (!root) return;
+
+  // Context banner: show which RoomLAB scene these racks belong to.
+  // Without this DeviceLAB feels disconnected — user can't tell whether
+  // they're editing for the hifi room they were just in, or a stale
+  // scene from yesterday.
+  const ctx = describeSceneContext();
   root.innerHTML = `
+    <div class="rack-builder-ctx">
+      <span class="rack-ctx-label">Editing racks for</span>
+      <span class="rack-ctx-name">${escapeHtml(ctx.name)}</span>
+      <span class="rack-ctx-meta">${escapeHtml(ctx.meta)}</span>
+      <a class="rack-ctx-back" href="index.html" title="Open RoomLAB">View room →</a>
+    </div>
     <div class="rack-builder">
       <aside class="rack-col-left">
         <h3>Rack frames</h3>

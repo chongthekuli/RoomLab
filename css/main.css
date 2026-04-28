@@ -1509,7 +1509,52 @@ section h3 {
 }
 #devicelab-root #view-rack {
   height: 100%;
+  display: flex;
+  flex-direction: column;
 }
+#devicelab-root #view-rack .rack-builder { flex: 1; min-height: 0; }
+
+/* Context banner — "Editing racks for: <room>". Reminds the user
+   which RoomLAB scene's rackSystem they're modifying. Without this
+   DeviceLAB feels disconnected from RoomLAB — the user cannot tell
+   whether their edits will land in the hifi room they were just in
+   or some other scene. */
+.rack-builder-ctx {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.55rem 0.9rem;
+  background: rgba(74, 163, 255, 0.08);
+  border-bottom: 1px solid rgba(74, 163, 255, 0.2);
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+.rack-ctx-label {
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.66rem;
+}
+.rack-ctx-name {
+  color: var(--fg-strong, #e5e7eb);
+  font-weight: 600;
+}
+.rack-ctx-meta {
+  color: var(--muted);
+  font-size: 0.72rem;
+  flex: 1;
+}
+.rack-ctx-back {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.74rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  transition: background-color 120ms ease-out;
+}
+.rack-ctx-back:hover { background: rgba(74, 163, 255, 0.18); }
 
 /* PA Rack Builder — three-column layout. */
 .rack-builder {

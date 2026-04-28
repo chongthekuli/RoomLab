@@ -30,11 +30,14 @@ export function readAutosave() {
     const raw = localStorage.getItem(AUTOSAVE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    // Reject obvious corruption — must be an object with a `version`
-    // field matching what serializeProject emits. Older payloads from
-    // before this autosave shipped won't have one and are correctly
-    // ignored, falling back to default preset.
-    if (!parsed || typeof parsed !== 'object' || !parsed.version) return null;
+    // Reject obvious corruption — must be an object with the
+    // `formatVersion` field that serializeProject emits. (An earlier
+    // version of this check looked for `version` and silently rejected
+    // every autosave — RoomLAB always booted to the default preset
+    // and DeviceLAB's patchAutosave never merged because there was
+    // "no existing autosave" to merge into. Single-letter field-name
+    // bug, hours of "the autosave doesn't work" pain.)
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.formatVersion !== 'number') return null;
     return parsed;
   } catch (err) {
     console.warn('autosave: read failed', err);
