@@ -1117,6 +1117,49 @@ section h3 {
   border-color: rgba(229, 68, 68, 0.5);
   color: #fca5a5;
 }
+/* Action-toast: a sticky toast with an inline CTA link. Used for the
+   DeviceLAB → RoomLAB handoff after "Place in room" succeeds. */
+.rl-toast-handoff {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.55rem 0.7rem 0.55rem 1.1rem;
+}
+.rl-toast-handoff .rl-toast-action {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 4px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transition: background-color 120ms ease-out;
+}
+.rl-toast-handoff .rl-toast-action:hover {
+  background: #2c6dba;
+}
+
+/* Persistent "Open / View in RoomLAB" button at the top of the
+   DeviceLAB System overview column. Cheaper than a full toolbar —
+   just a clear cross-Lab handoff link the user can find at any time. */
+.rack-go-roomlab {
+  display: block;
+  text-align: center;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.55rem;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: background-color 120ms ease-out;
+}
+.rack-go-roomlab:hover { background: #2c6dba; }
 
 .import-row { margin-bottom: 0.5rem; }
 .btn-import {

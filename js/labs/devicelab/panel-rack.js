@@ -20,6 +20,13 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { emit } from '../../shared/events.js';
 import { buildRackGroup } from '../../graphics/rack-render.js';
 import { readAutosave, patchAutosave } from '../../shared/autosave.js';
+import { bindLab } from '../../shared/lab-storage.js';
+
+// DeviceLAB-namespaced localStorage. Persists in-progress UI state
+// across page navigation: the half-built _currentRack and the amp
+// search filter. Without this, leaving DeviceLAB to glance at
+// RoomLAB and coming back wipes the rack you were building.
+const lab = bindLab('devicelab');
 
 // DeviceLAB-local mirror of state.rackSystem.racks. Seeded from the
 // shared autosave (so RoomLAB scenes with already-placed racks show
@@ -92,13 +99,29 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
     </div>
   `;
 
+  // Restore in-progress rack and search filter from lab storage so the
+  // user picks up exactly where they left off after navigating away.
+  // Validate against the rack catalogue — if the saved frame key has
+  // disappeared (catalogue update), drop the stale entry rather than
+  // crashing later.
+  const savedRack = lab.read('currentRack');
+  if (savedRack?.rackModelKey && _rackCatalogue?.racks?.[savedRack.rackModelKey]) {
+    _currentRack = savedRack;
+  } else if (savedRack) {
+    lab.clear('currentRack');
+  }
+  const savedSearch = lab.read('ampSearch') ?? '';
+
   renderFrameList();
-  renderAmpList('');
+  renderAmpList(savedSearch);
   renderRackMid();
   renderSystemOverview();
   mountPreview();
 
-  document.getElementById('rack-amp-search').addEventListener('input', (e) => {
+  const searchInput = document.getElementById('rack-amp-search');
+  searchInput.value = savedSearch;
+  searchInput.addEventListener('input', (e) => {
+    lab.write('ampSearch', e.target.value);
     renderAmpList(e.target.value);
   });
   document.getElementById('rack-action-place').addEventListener('click', placeCurrentRack);
@@ -250,12 +273,20 @@ function updatePreview() {
   _previewControls.update();
 }
 
-// In-progress rack the user is currently building. Lives outside state
-// until "Place in room" commits it. This means switching presets while
-// building doesn't lose the user's work — they just need to remember
-// to commit it. (The reverse — committing then switching presets —
-// drops the rack as part of applyPresetToState's reset flow.)
+// In-progress rack the user is currently building. Lives outside the
+// shared scene autosave until "Place in room" commits it, but is
+// persisted to DeviceLAB-local storage on every mutation so toggling
+// to RoomLAB / SpeakerLAB and back doesn't wipe the work-in-progress.
 let _currentRack = null;
+
+// Persist _currentRack to lab storage. Called after every mutation
+// (startNewRack / addAmpToRack / removeSlot / discard / place). Passing
+// null clears the saved entry — done after place/discard so a fresh
+// page boot starts on the empty workbench instead of resurrecting a
+// just-placed rack.
+function persistCurrentRack() {
+  lab.write('currentRack', _currentRack);
+}
 
 function renderFrameList() {
   const root = document.getElementById('rack-frame-list');
@@ -323,6 +354,7 @@ function startNewRack(rackKey) {
     yaw_deg: 0,
     slots: [],
   };
+  persistCurrentRack();
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
   updatePreview();
@@ -367,12 +399,14 @@ function addAmpToRack(ampId) {
       ch: i + 1, zoneId: null, tap_w: 0,
     })),
   });
+  persistCurrentRack();
   renderRackMid();
 }
 
 function removeSlot(slotIdx) {
   if (!_currentRack) return;
   _currentRack.slots.splice(slotIdx, 1);
+  persistCurrentRack();
   renderRackMid();
 }
 
@@ -433,6 +467,7 @@ function placeCurrentRack() {
   if (!_currentRack || _currentRack.slots.length === 0) return;
   rackState.racks.push(JSON.parse(JSON.stringify(_currentRack)));
   _currentRack = null;
+  persistCurrentRack();   // clear the in-progress slot in lab storage
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
   updatePreview();
@@ -442,11 +477,14 @@ function placeCurrentRack() {
   // listeners in DeviceLAB — but kept for future per-Lab subscribers.
   persistRacks();
   emit('rack:changed');
-  showToast('Rack placed in room. Switch to RoomLAB to see it in 3D.');
+  // Action-toast version of the handoff: a sticky "View in RoomLAB →"
+  // button so the user actually knows where the rack went.
+  showHandoffToast();
 }
 
 function discardCurrentRack() {
   _currentRack = null;
+  persistCurrentRack();
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
   updatePreview();
@@ -457,10 +495,21 @@ function renderSystemOverview() {
   if (!root) return;
   const racks = rackState.racks;
   if (racks.length === 0) {
-    root.innerHTML = '<p class="rack-empty">No racks placed in this room yet.</p>';
+    root.innerHTML = `
+      <p class="rack-empty">No racks placed in this room yet.</p>
+      <a class="rack-go-roomlab" href="index.html" title="Open RoomLAB to see the room you're designing for">
+        Open RoomLAB →
+      </a>
+    `;
     return;
   }
-  root.innerHTML = racks.map((r, i) => {
+  // With placed racks: prepend a clear handoff CTA so the user knows
+  // exactly where to look at the rack in 3D context.
+  root.innerHTML = `
+    <a class="rack-go-roomlab" href="index.html" title="Open RoomLAB to see these racks placed in the 3D room">
+      View in RoomLAB →
+    </a>
+  ` + racks.map((r, i) => {
     const def = _rackCatalogue?.racks?.[r.rackModelKey];
     const totalU = def?.u ?? 0;
     const usedU = (r.slots ?? []).reduce((a, s) => a + (s.uHeight ?? 1), 0);
@@ -481,6 +530,27 @@ function renderSystemOverview() {
       emit('rack:changed');
     });
   });
+}
+
+// Action-toast shown right after "Place in room" — primary CTA is to
+// jump to RoomLAB so the user actually sees the rack land in the
+// scene. Secondary path is "Stay" which auto-dismisses after 6 s so
+// nothing clutters the UI permanently if they want to keep building.
+function showHandoffToast() {
+  document.querySelectorAll('.rl-toast').forEach(t => t.remove());
+  const el = document.createElement('div');
+  el.className = 'rl-toast rl-toast-ok rl-toast-handoff';
+  el.innerHTML = `
+    <span class="rl-toast-msg">Rack placed in your room.</span>
+    <a class="rl-toast-action" href="index.html">View in RoomLAB →</a>
+  `;
+  document.body.appendChild(el);
+  void el.offsetHeight;
+  el.classList.add('show');
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 250);
+  }, 6000);
 }
 
 // Lightweight toast (separate from panel-room's showToast — that's

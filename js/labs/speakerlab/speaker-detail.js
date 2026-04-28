@@ -9,6 +9,13 @@ import { getCachedLoudspeaker, loadLoudspeaker, interpolateAttenuation, register
 import { analyseSpeaker, estimateNominalDispersion, onAxisResponseDb, csdPerBand } from '../../physics/speaker-expert.js';
 import { importSpeakerFile, GLL_GUIDE } from '../../physics/speaker-import.js';
 import { mountSpeaker3DPreview } from './speaker-3d-preview.js';
+import { bindLab } from '../../shared/lab-storage.js';
+
+// SpeakerLAB-namespaced lab storage. Persists `selectedSpeakerUrl` and
+// the polar-band tab index so navigating to RoomLAB and back lands
+// the user back on the speaker they were studying. The boot script
+// can override selectedSpeakerUrl with a ?model= URL param.
+const lab = bindLab('speakerlab');
 
 // SpeakerLAB-local state. Currently just the active speaker URL —
 // future iterations can add comparison pins, library tags, custom
@@ -26,7 +33,8 @@ const BAND_KEYS = ['125', '250', '500', '1000', '2000', '4000', '8000'];
 const BAND_LABELS = ['125 Hz', '250 Hz', '500 Hz', '1 kHz', '2 kHz', '4 kHz', '8 kHz'];
 const DB_RINGS = [0, -6, -10, -15, -20];  // polar chart concentric rings
 
-let currentFreqIdx = 3;  // 1 kHz default
+// Default 1 kHz; restored from lab storage at mount time below.
+let currentFreqIdx = 3;
 
 export function mountSpeakerView() {
   const root = document.getElementById('view-speaker');
@@ -70,11 +78,28 @@ export function mountSpeakerView() {
     e.target.value = '';
   });
 
+  // Restore selection + freq tab from lab storage UNLESS main.js has
+  // already seeded selectedSpeakerUrl from the ?model= URL param (a
+  // deep-link from RoomLAB's "View specs" buttons should always win).
+  if (!state.selectedSpeakerUrl) {
+    const savedUrl = lab.read('selectedSpeakerUrl');
+    if (typeof savedUrl === 'string' && savedUrl.length > 0) {
+      state.selectedSpeakerUrl = savedUrl;
+    }
+  }
+  const savedFreq = lab.read('freqIdx');
+  if (Number.isInteger(savedFreq) && savedFreq >= 0 && savedFreq < BAND_KEYS.length) {
+    currentFreqIdx = savedFreq;
+  }
+
   // The only event SpeakerLAB needs to react to is its own selection
-  // change (catalogue card click → state.selectedSpeakerUrl =  ... →
+  // change (catalogue card click → state.selectedSpeakerUrl = ... →
   // emit('speaker:selected') → re-render). RoomLAB's source:changed /
   // room:changed / scene:reset events don't exist in this Lab.
-  on('speaker:selected', render);
+  on('speaker:selected', () => {
+    lab.write('selectedSpeakerUrl', state.selectedSpeakerUrl);
+    render();
+  });
 
   render();
 }
@@ -230,6 +255,7 @@ async function render() {
   for (const btn of body.querySelectorAll('.sv-freq-btn')) {
     btn.addEventListener('click', () => {
       currentFreqIdx = Number(btn.dataset.freqIdx);
+      lab.write('freqIdx', currentFreqIdx);
       render();
     });
   }
