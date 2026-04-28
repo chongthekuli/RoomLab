@@ -107,6 +107,33 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
 .vp-help-btn { min-width: 28px; padding: 0.3rem 0.5rem; font-weight: 600; }
 .vp-help-btn::before { content: '' !important; }
 
+/* Toolbar overflow handling. Container queries on .viewport-tabs measure
+   the actual toolbar width (not viewport width), so the row reacts to
+   the central column's real space — independent of left/right panel
+   widths. The Probe / Rays / Aim-lines tools collapse to icon-only when
+   the toolbar gets narrow. The ? help button stays icon-only at all
+   widths (already iconic). Layer toggles keep their labels because the
+   metric names ("Heatmap", "STIPA", "Reverb field") don't abbreviate
+   well visually. */
+.viewport-tabs { container-type: inline-size; }
+
+.vp-toggle .vp-icon { display: none; }
+.vp-toggle .vp-label { display: inline; }
+
+@container (max-width: 1150px) {
+  .vp-group-tools .vp-toggle .vp-label { display: none; }
+  .vp-group-tools .vp-toggle .vp-icon { display: inline; font-weight: 700; font-size: 0.95rem; line-height: 1; }
+  .vp-group-tools .vp-toggle { min-width: 32px; padding: 0.3rem 0.45rem; }
+  /* Drop the ○/● bullet in icon-only mode — the active background
+     already conveys on/off state and the bullet crowds the icon. */
+  .vp-group-tools .vp-toggle::before { content: '' !important; }
+}
+@container (max-width: 920px) {
+  .vp-tab { min-width: 0; padding: 0.3rem 0.45rem; }
+  .vp-group-layers { margin-left: 8px; padding-left: 8px; }
+  .vp-group-tools  { padding-left: 8px; }
+}
+
 /* ? cheat-sheet modal overlay. Opens via the ? key or the ? button in
    the viewport. Dim background, centered card, two columns of shortcuts. */
 #help-overlay {
@@ -808,6 +835,50 @@ section h2 {
   border-bottom: 1px solid var(--border);
 }
 section:first-of-type h2 { margin-top: 0.3rem; }
+
+/* Collapsible sidebar sections. The whole <h2> is the click target;
+   chevron rendered via ::before so it doesn't get wiped by the panel's
+   own innerHTML re-renders. Collapsed state hides the body via display
+   none — variable-height bodies (Sources can be 80 px or 1500 px) make
+   max-height transitions either snap or feel janky, so we skip the
+   animation. The chevron rotation IS the affordance. */
+.panel-collapsible {
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-collapsible:last-of-type { border-bottom: 0; padding-bottom: 0; }
+.panel-collapsible h2 { border-bottom: 0; }
+.panel-collapsible h2.panel-toggle-h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  border-radius: 3px;
+  padding: 0.3rem 0.3rem;
+  margin: 0.5rem 0 0.4rem;
+  transition: background-color 120ms ease-out;
+}
+.panel-collapsible h2.panel-toggle-h2::before {
+  content: '▾';
+  font-size: 0.65rem;
+  width: 10px;
+  color: var(--muted);
+  transition: transform 150ms ease-out;
+}
+.panel-collapsible.collapsed h2.panel-toggle-h2::before { transform: rotate(-90deg); }
+.panel-collapsible h2.panel-toggle-h2:hover { background: var(--bg-elev); color: var(--fg); }
+.panel-collapsible h2.panel-toggle-h2:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+/* Special case: panel-room's h2 sits inside .room-head (with action
+   buttons on the right). The flex layout there already centres the h2
+   vertically; we just need the chevron + click affordance and the
+   click target shouldn't fight the buttons. */
+.room-head h2.panel-toggle-h2 { margin: 0; padding: 0.2rem 0.3rem; }
+.panel-collapsible.collapsed .panel-body { display: none; }
+.panel-body { /* default expanded layout — nothing to do */ }
 section h3 {
   font-size: 0.68rem;
   text-transform: uppercase;

@@ -15,6 +15,7 @@ import { mountSpeakerView } from './ui/speaker-detail.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, toggleRayViz, frameCameraToRoom, setRackCatalogues, setWalkthroughMode } from './graphics/scene.js';
 import { mountRackPanel } from './ui/panel-rack.js';
+import { installCollapsibles } from './ui/collapsibles.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -194,6 +195,11 @@ async function boot() {
   mountPrecisionPanel({ materials });
   mountSpeakerView();
   mountRackPanel({ rackCatalogue, ampCatalog });
+
+  // Wrap each #panel-left section in a collapsible chrome — defaults
+  // to Room+Sources expanded; persists open/closed across reloads.
+  // Idempotent so the scene:reset re-entry inside the module is safe.
+  installCollapsibles();
 
   // "View specs" buttons on Source cards dispatch this synthetic event —
   // switch to the Speaker viewport tab so the user sees the detail view.
