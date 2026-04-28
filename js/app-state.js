@@ -219,6 +219,11 @@ export const state = {
       edges: null,
     },
   },
+  // Project name — user-set string that flows through every export
+  // surface (save file, share link, print-report cover, viewport title).
+  // Set when the user names a custom-drawn room ("Hospital Serdang") or
+  // edits the print-report project field. null = untitled.
+  projectName: null,
   sources: [],
   // Speaker being examined in the Speaker viewport tab. Holds the modelUrl
   // of the selected catalogue entry; null when no speaker is under review.
@@ -410,11 +415,57 @@ export function applyPresetToState(key) {
     ? { racks: p.rackSystem.racks.map(deepClone) }
     : { racks: [] };
 
+  // Project name is per-design — applying a preset means switching to
+  // a different scene, so the user's previous project name doesn't
+  // belong on it. Reset to null; user can rename through save/share/print
+  // surfaces.
+  state.projectName = null;
+
   // --- 4. Invalidate derived caches -----------------------------------
   // Heatmaps, the zone SPL grids, and any cached precision render were
   // computed against the OLD scene and no longer mean anything once the
   // sources / listeners / room have been replaced. Clear them so the
   // Results + Precision panels redraw fresh.
+  if (state.results) {
+    state.results.splGrid = null;
+    state.results.zoneGrids = [];
+    state.results.precision = null;
+    if (state.results.engines?.precision) {
+      state.results.engines.precision.lastRun = null;
+      state.results.engines.precision.staleAt = null;
+      state.results.engines.precision.inProgress = false;
+    }
+  }
+}
+
+// Apply a blank canvas for the user to draw a custom room into. Same
+// reset rigor as applyPresetToState / applyTemplateToState — the
+// previous scene's stadiumStructure / multiLevelStructure / sources /
+// listeners / zones do NOT belong on a brand-new custom room. (User
+// reported that drawing a custom room while Sports Arena was active
+// left the bowl + line-arrays + audience overlapping the new shape.)
+//
+// Caller passes an optional initial bbox so the freshly-drawn polygon
+// has somewhere to sit until the user commits the close — defaults to
+// 10 × 10 × 3 m, which renders as an empty box.
+export function applyBlankCustomRoom({ projectName = null } = {}) {
+  Object.assign(state.room, deepClone(DEFAULT_ROOM_STATE));
+  state.room.shape = 'custom';
+  state.room.custom_vertices = null;
+  state.room.surfaces.edges = null;
+  state.room.width_m = 10;
+  state.room.depth_m = 10;
+  state.room.height_m = 3;
+  state.zones = [];
+  state.sources = [];
+  state.listeners = [];
+  state.selectedZoneId = null;
+  state.selectedListenerId = null;
+  state.selectedSpeakerUrl = null;
+  state.rackSystem = { racks: [] };
+  state.projectName = projectName;
+  // Invalidate derived caches so heatmaps / SPL / precision results
+  // don't bleed across the scene change.
   if (state.results) {
     state.results.splGrid = null;
     state.results.zoneGrids = [];
@@ -468,6 +519,8 @@ export function applyTemplateToState(key, dimsOverride) {
   // Templates don't carry a default rack — user assembles one via the
   // PA Rack Builder. Reset to empty so a previous scene's rack is gone.
   state.rackSystem = { racks: [] };
+  // Templates are unnamed by default — the user labels their project later.
+  state.projectName = null;
 
   if (state.results) {
     state.results.splGrid = null;
@@ -503,6 +556,7 @@ export function serializeProject(src = state) {
       app: 'RoomLAB',
       savedAt: new Date().toISOString(),
     },
+    projectName: src.projectName ?? null,
     room: deepClone(src.room),
     sources: deepClone(src.sources ?? []),
     selectedSpeakerUrl: src.selectedSpeakerUrl ?? null,
@@ -563,6 +617,11 @@ export function deserializeProject(obj) {
   } else {
     warnings.push('room block missing — defaults applied');
   }
+
+  // --- Project name — preserve the saved value, default to null -------
+  state.projectName = (typeof obj.projectName === 'string' && obj.projectName.trim().length > 0)
+    ? obj.projectName.trim()
+    : null;
 
   // --- Sources / listeners / zones — replace whole arrays --------------
   state.sources    = Array.isArray(obj.sources)   ? obj.sources.map(deepClone)   : [];

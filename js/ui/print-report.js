@@ -66,7 +66,7 @@ export function buildPrintModel({ materials, nameHint } = {}) {
 
   return {
     project: {
-      name: nameHint || 'untitled scene',
+      name: nameHint || state.projectName || 'untitled scene',
       date: new Date().toISOString().slice(0, 10),
       generatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
       schemaVersion: 1,

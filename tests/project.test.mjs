@@ -114,6 +114,19 @@ try {
   assert(/formatVersion/.test(err.message), 'Missing formatVersion rejected');
 }
 
+// 5a. Project name round-trip — user-set label survives serialise +
+//     restore + re-serialise, and a preset/template apply clears it.
+applyTemplateToState('hifi');
+state.projectName = 'Hospital Serdang';
+{
+  const { ok } = roundTripSnapshot('hifi + projectName');
+  assert(ok, 'Round-trip clean: projectName="Hospital Serdang" survives');
+}
+applyPresetToState('auditorium');
+assert(state.projectName === null, 'applyPresetToState clears projectName');
+applyTemplateToState('hifi');
+assert(state.projectName === null, 'applyTemplateToState clears projectName');
+
 // 5b. PA equipment rack round-trip — populate state.rackSystem with a
 //     33U rack holding 4 amps and verify byte-equal restore.
 applyTemplateToState('hifi');

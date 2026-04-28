@@ -1,4 +1,4 @@
-import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToState, applyTemplateToState } from '../app-state.js';
+import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToState, applyTemplateToState, applyBlankCustomRoom } from '../app-state.js';
 import { emit } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { importDxfFile } from '../physics/dxf-import.js';
@@ -100,24 +100,29 @@ export function mountRoomPanel({ materials }) {
     templateRow.appendChild(btn);
   }
 
-  // Custom row — single button entry to the draw-custom-room flow.
-  // Clears any previous custom geometry so the user starts fresh,
-  // switches to the 2D floor-plan tab, and kicks off draw mode.
-  // (User reported the existing 3-step path — open shape dropdown,
-  //  pick Custom, see L-shape seed, click Draw — was undiscoverable.)
+  // Custom row — entry to the draw-custom-room flow.
+  //
+  // Full state reset (sources / listeners / zones / structures all gone)
+  // so a custom room never overlays the previous preset's geometry.
+  // Then ask for an optional project name (Hospital Serdang, Theatre A —
+  // concept 3 …) before drawing — the name flows through save/share/
+  // print exports.
   root.querySelector('#btn-draw-custom-room').addEventListener('click', () => {
-    state.room.shape = 'custom';
-    state.room.custom_vertices = null;        // clear any previous draw
-    state.room.surfaces.edges = null;
-    state.room.width_m = 10;
-    state.room.depth_m = 10;
-    state.room.height_m = state.room.height_m || 3;
+    // Native prompt is the right tool here — accessible, keyboard-driven,
+    // works on touch and screen readers, and we're asking for a single
+    // line of text. A custom inline editor adds clicks without value.
+    let name = window.prompt('Project name (optional) — e.g. Hospital Serdang', '') || null;
+    if (typeof name === 'string') {
+      name = name.trim();
+      if (name.length === 0) name = null;
+    }
+    applyBlankCustomRoom({ projectName: name });
     activeTemplateKey = null;
     render();
+    emit('scene:reset');     // panels rebuild — the previous scene's data is gone
     emit('room:changed');
-    // Switch viewport to the 2D Floor plan tab — the draw mode lives
-    // in that viewport. Then start the draw flow on the next tick so
-    // the tab swap completes first.
+    // Switch viewport to the 2D Floor plan tab — draw mode lives there.
+    // Start the draw flow on the next tick so the tab swap completes.
     document.querySelector('.vp-tab[data-view="2d"]')?.click();
     setTimeout(() => startDrawCustomShape(), 50);
   });
