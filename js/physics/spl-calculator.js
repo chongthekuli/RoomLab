@@ -346,20 +346,31 @@ function pointInPoly(x, y, verts) {
   return inside;
 }
 
+// `metric: 'spl' | 'sti'` selects what each cell stores. When 'sti', the
+// caller must also pass `stipaCtx` (from precomputeSTIPAContext) and
+// optionally `ambient_per_band`. Field names stay `*_db` for backward
+// compat — the `metric` tag on the result tells callers (texture
+// builder, legend) how to interpret. Without this, switching the
+// heatmap to STIPA in non-arena rooms left the legacy zone-grid path
+// computing SPL while the legend rendered the values as if they were
+// STI — producing the "STI bar shows 83–96" bug.
 export function computeZoneSPLGrid({
   zone, sources, getSpeakerDef, room,
   gridSize = 22, freq_hz = 1000, earAbove_m = 1.2,
   roomConstantR = 0, coherent = false, airAbsorption = true,
+  metric = 'spl', stipaCtx = null, ambient_per_band = null,
+  computeSTIPAAt = null,
 }) {
   const verts = zone.vertices || [];
   if (verts.length < 3) return null;
+  const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
   const xs = verts.map(v => v.x), ys = verts.map(v => v.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
   const cellW = (maxX - minX) / gridSize;
   const cellH = (maxY - minY) / gridSize;
   const grid = [];
-  let minSPL = Infinity, maxSPL = -Infinity, sum = 0, count = 0;
+  let minVal = Infinity, maxVal = -Infinity, sum = 0, count = 0;
   const earZ = (zone.elevation_m || 0) + earAbove_m;
   for (let j = 0; j < gridSize; j++) {
     const row = [];
@@ -368,15 +379,17 @@ export function computeZoneSPLGrid({
       const y = minY + (j + 0.5) * cellH;
       if (!pointInPoly(x, y, verts)) { row.push(-Infinity); continue; }
       const listenerPos = { x, y, z: earZ };
-      const spl = computeMultiSourceSPL({
-        sources, getSpeakerDef, listenerPos, freq_hz, room,
-        roomConstantR, coherent, airAbsorption,
-      });
-      row.push(spl);
-      if (isFinite(spl)) {
-        if (spl < minSPL) minSPL = spl;
-        if (spl > maxSPL) maxSPL = spl;
-        sum += spl;
+      const v = useSTI
+        ? computeSTIPAAt(stipaCtx, listenerPos, ambient_per_band)
+        : computeMultiSourceSPL({
+            sources, getSpeakerDef, listenerPos, freq_hz, room,
+            roomConstantR, coherent, airAbsorption,
+          });
+      row.push(v);
+      if (isFinite(v)) {
+        if (v < minVal) minVal = v;
+        if (v > maxVal) maxVal = v;
+        sum += v;
         count++;
       }
     }
@@ -390,10 +403,11 @@ export function computeZoneSPLGrid({
     cellW_m: cellW, cellH_m: cellH,
     elevation_m: zone.elevation_m || 0,
     earZ_m: earZ,
-    minSPL_db: ok ? minSPL : 0,
-    maxSPL_db: ok ? maxSPL : 0,
+    metric: useSTI ? 'sti' : 'spl',
+    minSPL_db: ok ? minVal : 0,
+    maxSPL_db: ok ? maxVal : 0,
     avgSPL_db: ok ? sum / count : 0,
-    uniformity_db: ok ? (maxSPL - minSPL) : 0,
+    uniformity_db: ok ? (maxVal - minVal) : 0,
   };
 }
 
@@ -401,13 +415,16 @@ export function computeSPLGrid({
   sources, getSpeakerDef, room,
   earHeight_m = 1.2, gridSize = 25, freq_hz = 1000,
   roomConstantR = 0, coherent = false, airAbsorption = true,
+  metric = 'spl', stipaCtx = null, ambient_per_band = null,
+  computeSTIPAAt = null,
 }) {
+  const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
   const cellsX = gridSize;
   const cellsY = gridSize;
   const cellW_m = room.width_m / cellsX;
   const cellD_m = room.depth_m / cellsY;
   const grid = [];
-  let minSPL = Infinity, maxSPL = -Infinity, sum = 0, count = 0;
+  let minVal = Infinity, maxVal = -Infinity, sum = 0, count = 0;
 
   for (let j = 0; j < cellsY; j++) {
     const row = [];
@@ -419,15 +436,17 @@ export function computeSPLGrid({
         row.push(-Infinity);
         continue;
       }
-      const totalSPL = computeMultiSourceSPL({
-        sources, getSpeakerDef, listenerPos, freq_hz, room,
-        roomConstantR, coherent, airAbsorption,
-      });
-      row.push(totalSPL);
-      if (isFinite(totalSPL)) {
-        if (totalSPL < minSPL) minSPL = totalSPL;
-        if (totalSPL > maxSPL) maxSPL = totalSPL;
-        sum += totalSPL;
+      const v = useSTI
+        ? computeSTIPAAt(stipaCtx, listenerPos, ambient_per_band)
+        : computeMultiSourceSPL({
+            sources, getSpeakerDef, listenerPos, freq_hz, room,
+            roomConstantR, coherent, airAbsorption,
+          });
+      row.push(v);
+      if (isFinite(v)) {
+        if (v < minVal) minVal = v;
+        if (v > maxVal) maxVal = v;
+        sum += v;
         count++;
       }
     }
@@ -437,10 +456,11 @@ export function computeSPLGrid({
   const hasResults = count > 0;
   return {
     grid, cellsX, cellsY, cellW_m, cellD_m,
-    minSPL_db: hasResults ? minSPL : 0,
-    maxSPL_db: hasResults ? maxSPL : 0,
+    metric: useSTI ? 'sti' : 'spl',
+    minSPL_db: hasResults ? minVal : 0,
+    maxSPL_db: hasResults ? maxVal : 0,
     avgSPL_db: hasResults ? sum / count : 0,
-    uniformity_db: hasResults ? (maxSPL - minSPL) : 0,
+    uniformity_db: hasResults ? (maxVal - minVal) : 0,
     freq_hz, earHeight_m,
     sourceCount: sources.length,
   };

@@ -146,5 +146,70 @@ expect(dry.ti_per_band.every(v => v >= 0 && v <= 1), 'All TI values in [0, 1]');
     'Close-to-source STI > far-reverb STI (spatial D/R variation present)');
 }
 
+// --- Heatmap-grid metric routing (regression) --------------------------
+// Bug: switching the heatmap to STIPA in a non-arena room (e.g. recital
+// hall, hifi studio) showed an STI legend with values 80–100 — the
+// legacy zone-grid path always wrote SPL dB and the legend rendered
+// them under the STI label. Fix: computeZoneSPLGrid / computeSPLGrid
+// accept a `metric: 'spl' | 'sti'` parameter, and tag the result so
+// downstream consumers (texture builder, legend) can pick the right
+// palette and reject grids whose metric doesn't match the current mode.
+{
+  const { computeZoneSPLGrid, computeSPLGrid } = await import('../js/physics/spl-calculator.js');
+  const { precomputeSTIPAContext, computeSTIPAAt } = await import('../js/physics/stipa.js');
+
+  const zone = {
+    id: 'Z_test', label: 'test',
+    elevation_m: 0,
+    vertices: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }],
+  };
+  const room = {
+    shape: 'rectangular', width_m: 8, height_m: 3, depth_m: 8,
+    ceiling_type: 'flat',
+    surfaces: { floor: 'wood-floor', ceiling: 'panel', walls: 'carpet',
+                wall_north: 'carpet', wall_south: 'carpet',
+                wall_east: 'carpet', wall_west: 'carpet' },
+  };
+
+  const splGrid = computeZoneSPLGrid({
+    zone, sources: [src],
+    getSpeakerDef: () => speaker,
+    room, gridSize: 8,
+  });
+  expect(splGrid.metric === 'spl', 'computeZoneSPLGrid defaults to metric=spl');
+  expect(splGrid.maxSPL_db > 50 && splGrid.maxSPL_db < 130,
+    'SPL-mode zone grid produces dB-scale values');
+
+  const stipaCtx = precomputeSTIPAContext({
+    sources: [src], getSpeakerDef: () => speaker,
+    room, materials, zones: [],
+  });
+  const stiGrid = computeZoneSPLGrid({
+    zone, sources: [src],
+    getSpeakerDef: () => speaker,
+    room, gridSize: 8,
+    metric: 'sti', stipaCtx, computeSTIPAAt,
+  });
+  expect(stiGrid.metric === 'sti', 'computeZoneSPLGrid honours metric=sti');
+  expect(stiGrid.minSPL_db >= 0 && stiGrid.maxSPL_db <= 1,
+    'STI-mode zone grid produces values in [0, 1] (not dB)');
+
+  // Same for the room-level grid.
+  const roomSplGrid = computeSPLGrid({
+    sources: [src], getSpeakerDef: () => speaker,
+    room, gridSize: 8,
+  });
+  expect(roomSplGrid.metric === 'spl', 'computeSPLGrid defaults to metric=spl');
+
+  const roomStiGrid = computeSPLGrid({
+    sources: [src], getSpeakerDef: () => speaker,
+    room, gridSize: 8,
+    metric: 'sti', stipaCtx, computeSTIPAAt,
+  });
+  expect(roomStiGrid.metric === 'sti', 'computeSPLGrid honours metric=sti');
+  expect(roomStiGrid.minSPL_db >= 0 && roomStiGrid.maxSPL_db <= 1,
+    'STI-mode room grid produces values in [0, 1] (not dB)');
+}
+
 if (failed > 0) { console.log(`\n${failed} STIPA test(s) FAILED`); process.exit(1); }
 console.log('\nAll STIPA tests passed.');

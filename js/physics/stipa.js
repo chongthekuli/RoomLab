@@ -121,6 +121,10 @@ export function precomputeSTIPAContext({ sources, getSpeakerDef, room, materials
 // With the D/R-aware form, positions near sources (D >> R) get MTF ≈ 1
 // and STI rises, while reverb-dominated positions still get MTF ≈ m_rev.
 export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC_35_PER_BAND) {
+  // Treat null as "use default" so callers that read from
+  // state.physics.ambientNoise?.per_band (which is null when no profile
+  // has been picked yet) don't have to special-case it.
+  if (ambientNoise_per_band == null) ambientNoise_per_band = NC_35_PER_BAND;
   const { rt60_per_band, roomR_per_band, sourceCtx } = stipaCtx;
   let sti = 0;
   let prevTi = 0;

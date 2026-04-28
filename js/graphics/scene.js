@@ -2721,11 +2721,29 @@ function rebuildZones() { shadowsNeedRefresh = true;
       const bd = Math.max(...ys) - Math.min(...ys);
       const adaptiveGrid = Math.max(24, Math.min(80, Math.ceil(Math.max(bw, bd) / 0.5)));
       const zoneSplOpts = currentPhysicsOpts(state.room);
+      // STIPA mode: precompute the per-band RT60 / room-constant / source
+      // L_w context once for this zone-rebuild pass and pass it into the
+      // grid sampler so each cell gets STI in [0, 1] instead of SPL dB.
+      // Without this branch the legacy zone-grid path always wrote SPL
+      // values, and the legend (which switches title to "STI" by mode)
+      // displayed dB values labelled as STI — the 83–96 bug.
+      const useSTIz = state.display.heatmapMode === 'stipa';
+      const stipaCtxZ = useSTIz
+        ? precomputeSTIPAContext({
+            sources: flatSources,
+            getSpeakerDef: url => getCachedLoudspeaker(url),
+            room: state.room, materials: materialsRef, zones: state.zones,
+          })
+        : null;
       splInfo = computeZoneSPLGrid({
         zone, sources: flatSources,
         getSpeakerDef: url => getCachedLoudspeaker(url),
         room: state.room, gridSize: adaptiveGrid, earAbove_m: 1.2,
         ...zoneSplOpts,
+        metric: useSTIz ? 'sti' : 'spl',
+        stipaCtx: stipaCtxZ,
+        ambient_per_band: useSTIz ? state.physics.ambientNoise?.per_band : null,
+        computeSTIPAAt: useSTIz ? computeSTIPAAt : null,
       });
       if (splInfo && isFinite(splInfo.maxSPL_db)) {
         state.results.zoneGrids.push(splInfo);
@@ -3158,6 +3176,7 @@ function rebuildStadiumHeatmap(room, sources) {
         elevation_m: elev, earZ_m: elev + 1.2,
         grid: [], cellsX: 0, cellsY: 0, boundsX: [0,0], boundsY: [0,0],
         cellW_m: 0, cellH_m: 0,
+        metric: state.display.heatmapMode === 'stipa' ? 'sti' : 'spl',
         minSPL_db: stats.minSPL_db, maxSPL_db: stats.maxSPL_db,
         avgSPL_db: stats.avgSPL_db, uniformity_db: stats.uniformity_db,
       });
@@ -3245,6 +3264,7 @@ function rebuildStadiumHeatmap(room, sources) {
       earZ_m: (courtZone.elevation_m ?? 0) + 1.2,
       grid: [], cellsX: 0, cellsY: 0, boundsX: [0,0], boundsY: [0,0],
       cellW_m: 0, cellH_m: 0,
+      metric: state.display.heatmapMode === 'stipa' ? 'sti' : 'spl',
       minSPL_db: stats.minSPL_db, maxSPL_db: stats.maxSPL_db,
       avgSPL_db: stats.avgSPL_db, uniformity_db: stats.uniformity_db,
     });
@@ -4123,12 +4143,15 @@ function zoneHeatmapTexture(splInfo) {
   canvas.height = cellsY;
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(cellsX, cellsY);
+  // Pick palette by metric so STIPA zones colour as STI rating bands,
+  // not the SPL gradient.
+  const colorFn = splInfo.metric === 'sti' ? stiColorRGB : splColorRGB;
   for (let j = 0; j < cellsY; j++) {
     for (let i = 0; i < cellsX; i++) {
       const val = grid[j][i];
       const idx = (j * cellsX + i) * 4;
       if (!isFinite(val)) { img.data[idx + 3] = 0; continue; }
-      const [r, g, b] = splColorRGB(val);
+      const [r, g, b] = colorFn(val);
       img.data[idx + 0] = r;
       img.data[idx + 1] = g;
       img.data[idx + 2] = b;
@@ -4164,13 +4187,27 @@ function rebuildHeatmap() {
   // (an 8 m studio → 16 cells; a 60 m arena → 80 cells, capped).
   const longestDim = Math.max(state.room.width_m ?? 0, state.room.depth_m ?? 0);
   const roomGrid = Math.max(40, Math.min(120, Math.ceil(longestDim / 0.5)));
+  const useSTI = state.display.heatmapMode === 'stipa';
+  const stipaCtx = useSTI
+    ? precomputeSTIPAContext({
+        sources: flat, getSpeakerDef: url => getCachedLoudspeaker(url),
+        room: state.room, materials: materialsRef, zones: state.zones,
+      })
+    : null;
   const splResult = computeSPLGrid({
     sources: flat,
     getSpeakerDef: url => getCachedLoudspeaker(url),
     room: state.room, gridSize: roomGrid, earHeight_m: ear,
     ...currentPhysicsOpts(state.room),
+    metric: useSTI ? 'sti' : 'spl',
+    stipaCtx,
+    ambient_per_band: useSTI ? state.physics.ambientNoise?.per_band : null,
+    computeSTIPAAt: useSTI ? computeSTIPAAt : null,
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
+  // Publish the grid for the 3D legend to read (with metric tag so the
+  // legend's metric filter picks it up only in matching mode).
+  state.results.splGrid = splResult;
   const { grid, cellsX, cellsY } = splResult;
 
   const canvas = document.createElement('canvas');
@@ -4179,6 +4216,10 @@ function rebuildHeatmap() {
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(cellsX, cellsY);
 
+  // Pick palette by metric — STI (0..1) gets the IEC 5-tier red→teal
+  // ramp; SPL gets the dB heatmap ramp. The legend reads
+  // state.display.heatmapMode independently so the bar matches.
+  const colorFn = splResult.metric === 'sti' ? stiColorRGB : splColorRGB;
   for (let j = 0; j < cellsY; j++) {
     for (let i = 0; i < cellsX; i++) {
       const val = grid[j][i];
@@ -4187,7 +4228,7 @@ function rebuildHeatmap() {
         img.data[idx + 3] = 0;
         continue;
       }
-      const [r, g, b] = splColorRGB(val);
+      const [r, g, b] = colorFn(val);
       img.data[idx + 0] = r;
       img.data[idx + 1] = g;
       img.data[idx + 2] = b;
@@ -4222,13 +4263,24 @@ function updateSPLLegend() {
   if (!legend) return;
   const grids = state.results?.zoneGrids;
   const rg = state.results?.splGrid;
+  // Only count grids whose metric matches the current heatmap mode —
+  // otherwise an SPL dB grid leaks into the STI legend (and shows
+  // 80–100 instead of 0–1) or vice versa. Grids from before the
+  // metric tag was added default to 'spl' for back-compat.
+  const wantMetric = state.display.heatmapMode === 'stipa' ? 'sti' : 'spl';
+  const gridMetric = g => g.metric ?? 'spl';
   let minVal = Infinity, maxVal = -Infinity;
+  let matched = 0;
   if (grids && grids.length > 0) {
     for (const g of grids) {
+      if (gridMetric(g) !== wantMetric) continue;
       if (isFinite(g.minSPL_db) && g.minSPL_db < minVal) minVal = g.minSPL_db;
       if (isFinite(g.maxSPL_db) && g.maxSPL_db > maxVal) maxVal = g.maxSPL_db;
+      matched++;
     }
-  } else if (rg && isFinite(rg.minSPL_db) && isFinite(rg.maxSPL_db) && rg.sourceCount > 0) {
+  }
+  if (matched === 0 && rg && gridMetric(rg) === wantMetric
+      && isFinite(rg.minSPL_db) && isFinite(rg.maxSPL_db) && rg.sourceCount > 0) {
     minVal = rg.minSPL_db;
     maxVal = rg.maxSPL_db;
   }
