@@ -331,6 +331,26 @@ export async function mount3DViewport({ materials }) {
   on('listener:selected', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
   on('scene:reset', () => {
     invalidateRayViz();
+    // NUCLEAR DISPOSAL — kill every group's contents IMMEDIATELY before
+    // the RAF-coalesced rebuild fires. Without this, between the
+    // emit('scene:reset') call and the next animation frame the user
+    // can see leftover audience figures, speakers, or bowl geometry
+    // for one or more frames. The user reported this exact failure
+    // mode multiple times: arena→pavilion crossover, pavilion-zones
+    // bleed into hi-fi, custom-room-shows-arena-audience.
+    //
+    // Belt-and-braces: the rebuild functions also dispose at their
+    // start, but those run async on RAF. Disposing here closes the
+    // race window completely.
+    if (roomGroup)        disposeGroup(roomGroup);
+    if (sourcesGroup)     disposeGroup(sourcesGroup);
+    if (listenersGroup)   disposeGroup(listenersGroup);
+    if (zonesGroup)       disposeGroup(zonesGroup);
+    if (heatmapGroup)     disposeGroup(heatmapGroup);
+    if (audienceGroup)    disposeGroup(audienceGroup);
+    if (aimLinesGroup)    disposeGroup(aimLinesGroup);
+    if (racksGroup)       disposeGroup(racksGroup);
+
     // Auto-fit camera to the new room. Without this, a swap from a 60 m
     // arena to a 4.5 m hi-fi leaves the camera 80 m back and the user
     // has to scroll-zoom every preset apply. queueRebuild is async (RAF-

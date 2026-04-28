@@ -79,6 +79,7 @@ export const SPEAKER_CATALOG = [
 // and are consumed by the preset files, not by this module directly.
 import { PRESETS } from './presets/index.js';
 import { TEMPLATES } from './templates/index.js';
+import { resetSceneState } from './state/scene-lifecycle.js';
 export { PRESETS, TEMPLATES };
 
 // ---------------------------------------------------------------------------
@@ -368,12 +369,12 @@ export function applyPresetToState(key) {
   const p = PRESETS[key];
   if (!p) return;
 
-  // --- 1. Reset the whole room block to defaults ----------------------
-  // Scrubs stadiumStructure, multiLevelStructure, custom_vertices,
-  // per-edge material overrides — anything the old preset might have
-  // stamped on room state. Deep-cloning the defaults means later
-  // mutations can't bleed back into the template.
-  Object.assign(state.room, deepClone(DEFAULT_ROOM_STATE));
+  // --- 1. Reset all scene state via the canonical entry point --------
+  // This clears state.room → defaults, sources/listeners/zones → [],
+  // rackSystem → empty, projectName → null, results caches → cleared.
+  // Single source of truth at js/state/scene-lifecycle.js — adding a
+  // new state field there flows through every reset path automatically.
+  resetSceneState({ state, defaultRoomState: DEFAULT_ROOM_STATE, deepClone });
 
   // --- 2. Apply preset room fields ------------------------------------
   if (p.shape !== undefined)              state.room.shape = p.shape;
@@ -401,41 +402,20 @@ export function applyPresetToState(key) {
   // preset swap. This was the root cause of the arena→pavilion bug:
   // arena's audience-zone instances + bowl sources were carrying over
   // because the old code only replaced fields when the preset had them.
-  state.zones = Array.isArray(p.zones) ? p.zones.map(deepClone) : [];
-  state.sources = Array.isArray(p.sources) ? p.sources.map(deepClone) : [];
-  state.listeners = Array.isArray(p.listeners) ? p.listeners.map(deepClone) : [];
-  state.selectedZoneId = state.zones[0]?.id ?? null;
+  // --- 3. Overlay preset's per-scene content -------------------------
+  // resetSceneState already cleared sources/listeners/zones/rackSystem
+  // to empty arrays. Now apply this preset's data on top. If the preset
+  // has no entry for a slot it stays empty (no leakage from prior state).
+  if (Array.isArray(p.zones))     state.zones     = p.zones.map(deepClone);
+  if (Array.isArray(p.sources))   state.sources   = p.sources.map(deepClone);
+  if (Array.isArray(p.listeners)) state.listeners = p.listeners.map(deepClone);
+  state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
-  state.selectedSpeakerUrl = null;
 
-  // PA racks reset on every preset apply — the previous scene's rack
-  // doesn't belong in the new room. (Default-rack-per-preset population
-  // is a Phase-C5 feature; until then, presets land empty.)
-  state.rackSystem = Array.isArray(p.rackSystem?.racks)
-    ? { racks: p.rackSystem.racks.map(deepClone) }
-    : { racks: [] };
-
-  // Project name is per-design — applying a preset means switching to
-  // a different scene, so the user's previous project name doesn't
-  // belong on it. Reset to null; user can rename through save/share/print
-  // surfaces.
-  state.projectName = null;
-
-  // --- 4. Invalidate derived caches -----------------------------------
-  // Heatmaps, the zone SPL grids, and any cached precision render were
-  // computed against the OLD scene and no longer mean anything once the
-  // sources / listeners / room have been replaced. Clear them so the
-  // Results + Precision panels redraw fresh.
-  if (state.results) {
-    state.results.splGrid = null;
-    state.results.zoneGrids = [];
-    state.results.precision = null;
-    if (state.results.engines?.precision) {
-      state.results.engines.precision.lastRun = null;
-      state.results.engines.precision.staleAt = null;
-      state.results.engines.precision.inProgress = false;
-    }
+  if (Array.isArray(p.rackSystem?.racks)) {
+    state.rackSystem = { racks: p.rackSystem.racks.map(deepClone) };
   }
+  // (results caches + projectName already cleared by resetSceneState.)
 }
 
 // Apply a blank canvas for the user to draw a custom room into. Same
@@ -449,33 +429,15 @@ export function applyPresetToState(key) {
 // has somewhere to sit until the user commits the close — defaults to
 // 10 × 10 × 3 m, which renders as an empty box.
 export function applyBlankCustomRoom({ projectName = null } = {}) {
-  Object.assign(state.room, deepClone(DEFAULT_ROOM_STATE));
+  // Canonical reset (same path preset/template apply use). Custom-room-
+  // specific overrides applied after.
+  resetSceneState({ state, defaultRoomState: DEFAULT_ROOM_STATE, deepClone, projectName });
   state.room.shape = 'custom';
   state.room.custom_vertices = null;
   state.room.surfaces.edges = null;
   state.room.width_m = 10;
   state.room.depth_m = 10;
   state.room.height_m = 3;
-  state.zones = [];
-  state.sources = [];
-  state.listeners = [];
-  state.selectedZoneId = null;
-  state.selectedListenerId = null;
-  state.selectedSpeakerUrl = null;
-  state.rackSystem = { racks: [] };
-  state.projectName = projectName;
-  // Invalidate derived caches so heatmaps / SPL / precision results
-  // don't bleed across the scene change.
-  if (state.results) {
-    state.results.splGrid = null;
-    state.results.zoneGrids = [];
-    state.results.precision = null;
-    if (state.results.engines?.precision) {
-      state.results.engines.precision.lastRun = null;
-      state.results.engines.precision.staleAt = null;
-      state.results.engines.precision.inProgress = false;
-    }
-  }
 }
 
 // Kept for backward-compatibility references — only the auditorium-derived
@@ -496,9 +458,9 @@ export function applyTemplateToState(key, dimsOverride) {
   const dims = { ...t.defaultDims, ...(dimsOverride || {}) };
   const generated = t.generate(dims);
 
-  // Reuse the same reset-and-overlay flow as applyPresetToState so the
-  // scene swap is identical from the perspective of every panel.
-  Object.assign(state.room, deepClone(DEFAULT_ROOM_STATE));
+  // Same canonical reset path as applyPresetToState — see
+  // js/state/scene-lifecycle.js. Single source of truth.
+  resetSceneState({ state, defaultRoomState: DEFAULT_ROOM_STATE, deepClone });
   if (generated.shape !== undefined)               state.room.shape = generated.shape;
   if (generated.ceiling_type !== undefined)        state.room.ceiling_type = generated.ceiling_type;
   if (generated.width_m !== undefined)             state.room.width_m = generated.width_m;
@@ -510,28 +472,13 @@ export function applyTemplateToState(key, dimsOverride) {
   if (generated.ceiling_dome_rise_m !== undefined) state.room.ceiling_dome_rise_m = generated.ceiling_dome_rise_m;
   if (generated.surfaces) Object.assign(state.room.surfaces, generated.surfaces);
 
-  state.zones     = Array.isArray(generated.zones)     ? generated.zones.map(deepClone)     : [];
-  state.sources   = Array.isArray(generated.sources)   ? generated.sources.map(deepClone)   : [];
-  state.listeners = Array.isArray(generated.listeners) ? generated.listeners.map(deepClone) : [];
-  state.selectedZoneId     = state.zones[0]?.id ?? null;
+  // Overlay this template's per-scene content. resetSceneState already
+  // cleared sources/listeners/zones/rackSystem/projectName/results.
+  if (Array.isArray(generated.zones))     state.zones     = generated.zones.map(deepClone);
+  if (Array.isArray(generated.sources))   state.sources   = generated.sources.map(deepClone);
+  if (Array.isArray(generated.listeners)) state.listeners = generated.listeners.map(deepClone);
+  state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
-  state.selectedSpeakerUrl = null;
-  // Templates don't carry a default rack — user assembles one via the
-  // PA Rack Builder. Reset to empty so a previous scene's rack is gone.
-  state.rackSystem = { racks: [] };
-  // Templates are unnamed by default — the user labels their project later.
-  state.projectName = null;
-
-  if (state.results) {
-    state.results.splGrid = null;
-    state.results.zoneGrids = [];
-    state.results.precision = null;
-    if (state.results.engines?.precision) {
-      state.results.engines.precision.lastRun = null;
-      state.results.engines.precision.staleAt = null;
-      state.results.engines.precision.inProgress = false;
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -589,8 +536,13 @@ export function deserializeProject(obj) {
 
   const warnings = [];
 
-  // --- Room: full reset to defaults, then overlay every saved field ----
-  Object.assign(state.room, deepClone(DEFAULT_ROOM_STATE));
+  // Canonical reset path (same as preset/template/blank-custom apply).
+  // Establishes a clean slate before overlaying the saved values, so any
+  // state field present in the running app but absent from an older
+  // saved file lands on its default rather than carrying through stale
+  // data. js/state/scene-lifecycle.js is the single source of truth.
+  resetSceneState({ state, defaultRoomState: DEFAULT_ROOM_STATE, deepClone });
+
   if (obj.room && typeof obj.room === 'object') {
     // Assign scalar fields one-by-one so an unexpected key in the file
     // can't pollute room state with a foreign property.
@@ -623,10 +575,12 @@ export function deserializeProject(obj) {
     ? obj.projectName.trim()
     : null;
 
-  // --- Sources / listeners / zones — replace whole arrays --------------
-  state.sources    = Array.isArray(obj.sources)   ? obj.sources.map(deepClone)   : [];
-  state.listeners  = Array.isArray(obj.listeners) ? obj.listeners.map(deepClone) : [];
-  state.zones      = Array.isArray(obj.zones)     ? obj.zones.map(deepClone)     : [];
+  // --- Sources / listeners / zones — overlay the saved values --------
+  // (resetSceneState already initialised these to []; only replace if
+  // the saved file actually has data.)
+  if (Array.isArray(obj.sources))   state.sources   = obj.sources.map(deepClone);
+  if (Array.isArray(obj.listeners)) state.listeners = obj.listeners.map(deepClone);
+  if (Array.isArray(obj.zones))     state.zones     = obj.zones.map(deepClone);
 
   // --- Selection ids — preserve the user's last hover/selection -------
   // `null` is a valid serialized value meaning "no selection". Use
@@ -662,25 +616,11 @@ export function deserializeProject(obj) {
     }
   }
 
-  // --- Invalidate derived caches (same flow as applyPresetToState) -----
-  if (state.results) {
-    state.results.splGrid = null;
-    state.results.zoneGrids = [];
-    state.results.precision = null;
-    if (state.results.engines?.precision) {
-      state.results.engines.precision.lastRun = null;
-      state.results.engines.precision.staleAt = null;
-      state.results.engines.precision.inProgress = false;
-    }
-  }
-
-  // --- PA equipment racks — accept the saved value or default to empty.
-  // Optional field; older v1 files won't have it.
+  // --- PA equipment racks — accept the saved value, default already []
   if (obj.rackSystem && typeof obj.rackSystem === 'object' && Array.isArray(obj.rackSystem.racks)) {
     state.rackSystem = deepClone(obj.rackSystem);
-  } else {
-    state.rackSystem = { racks: [] };
   }
+  // (results caches already cleared by resetSceneState above.)
 
   return { warnings };
 }
