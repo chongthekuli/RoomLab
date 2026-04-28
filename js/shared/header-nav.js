@@ -26,7 +26,7 @@ const LABS = [
     label: 'DeviceLAB',
     href: 'devices.html',
     sublabel: 'PA equipment',
-    enabled: false,    // Phase 2 — disabled placeholder for now
+    enabled: true,
   },
 ];
 

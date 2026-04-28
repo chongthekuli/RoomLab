@@ -1456,7 +1456,19 @@ section h3 {
   color: var(--fg-strong);
 }
 
-/* PA Rack Builder — three-column layout inside the #view-rack viewport. */
+/* DeviceLAB-page wrapper — same shape as SpeakerLAB. The
+   #view-rack container fills the viewport area below the header
+   nav; the .rack-builder grid does the three-column layout. */
+#devicelab-root {
+  height: calc(100vh - 60px);
+  background: var(--bg-app);
+  overflow: hidden;
+}
+#devicelab-root #view-rack {
+  height: 100%;
+}
+
+/* PA Rack Builder — three-column layout. */
 .rack-builder {
   display: grid;
   grid-template-columns: 320px 1fr 280px;

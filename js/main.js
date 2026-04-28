@@ -1,4 +1,6 @@
-import { state, SPEAKER_CATALOG, DEFAULT_PRESET_KEY, applyPresetToState } from './app-state.js';
+import { state, SPEAKER_CATALOG, DEFAULT_PRESET_KEY, applyPresetToState, serializeProject, deserializeProject } from './app-state.js';
+import { readAutosave, scheduleAutosave, flushAutosave } from './shared/autosave.js';
+import { on } from './shared/events.js';
 import { loadMaterials } from './physics/materials.js';
 import { loadLoudspeaker } from './physics/loudspeaker.js';
 import { applyHashStateOnLoad } from './io/share-link.js';
@@ -13,7 +15,6 @@ import { mountPrecisionPanel } from './ui/panel-precision.js';
 import { mountWelcomeCard } from './ui/welcome-card.js';
 import { mount2DViewport } from './graphics/room-2d.js';
 import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, toggleRayViz, frameCameraToRoom, setRackCatalogues, setWalkthroughMode } from './graphics/scene.js';
-import { mountRackPanel } from './ui/panel-rack.js';
 import { installCollapsibles } from './ui/collapsibles.js';
 import { mountHeaderNav } from './shared/header-nav.js';
 
@@ -148,7 +149,6 @@ function setupTabs() {
       case '1': clickTab('2d'); e.preventDefault(); break;
       case '2': clickTab('3d'); e.preventDefault(); break;
       case '3': clickTab('walk'); e.preventDefault(); break;
-      case '4': clickTab('rack'); e.preventDefault(); break;
       case 'h': case 'H': click('toggle-heatmaps'); e.preventDefault(); break;
       case 'i': case 'I': click('toggle-isobars'); e.preventDefault(); break;
       case 'm': case 'M': click('toggle-stipa-mode'); e.preventDefault(); break;
@@ -181,10 +181,46 @@ async function boot() {
   ]);
   setRackCatalogues({ rackCatalogue, ampCatalog });
 
-  // Pristine state → apply default preset
-  if (state.sources.length === 0 && state.listeners.length === 0 && state.zones.length === 0) {
+  // Boot order: previously-autosaved scene > URL-hash share-link >
+  // default preset. The autosave bridge is what makes navigating to
+  // SpeakerLAB / DeviceLAB and back non-destructive — without it the
+  // next visit silently re-applies DEFAULT_PRESET_KEY and the user's
+  // work disappears. The hash-share-link path runs separately later
+  // (applyHashStateOnLoad in this same boot) and overrides if present.
+  const autosaved = readAutosave();
+  let bootedFromAutosave = false;
+  if (autosaved) {
+    try {
+      deserializeProject(autosaved);
+      bootedFromAutosave = true;
+    } catch (err) {
+      console.warn('autosave: restore failed, falling back to default preset', err);
+    }
+  }
+  if (!bootedFromAutosave
+      && state.sources.length === 0 && state.listeners.length === 0 && state.zones.length === 0) {
     applyPresetToState(DEFAULT_PRESET_KEY);
   }
+
+  // Wire autosave: every state-mutating event triggers a debounced
+  // write. The 400 ms debounce inside scheduleAutosave coalesces
+  // bursts (slider drags, rapid clicks) so localStorage gets one
+  // write per quiet period. flushAutosave on pagehide guarantees the
+  // last edit lands before navigation.
+  const trigger = () => scheduleAutosave(() => serializeProject(state));
+  for (const ev of [
+    'scene:reset',
+    'source:changed', 'source:model_changed',
+    'listener:changed',
+    'zone:changed',
+    'room:changed',
+    'rack:changed',
+    'physics:eq_changed',
+  ]) on(ev, trigger);
+  // Also fire one autosave right after boot so a fresh-default scene
+  // gets persisted (covers the no-edits-yet case).
+  trigger();
+  window.addEventListener('pagehide', flushAutosave);
 
   setupTabs();
   mountRoomPanel({ materials });
@@ -194,7 +230,10 @@ async function boot() {
   mountAmbientPanel();
   mountResultsPanel({ materials });
   mountPrecisionPanel({ materials });
-  mountRackPanel({ rackCatalogue, ampCatalog });
+  // The rack BUILDER moved to DeviceLAB (devices.html). RoomLAB still
+  // needs the rack + amp catalogues loaded so scene.js's racksGroup
+  // can render any racks the user placed via DeviceLAB — see
+  // setRackCatalogues call earlier in this boot.
 
   // Wrap each #panel-left section in a collapsible chrome — defaults
   // to Room+Sources expanded; persists open/closed across reloads.

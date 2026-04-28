@@ -1,27 +1,45 @@
-// PA Rack Builder panel — minimal first-cut UI.
+// PA Rack Builder — DeviceLAB main content.
 //
 // Three-column layout per Felix Brandt's spec (RACK_BUILDER_DESIGN.md
-// §3) — but rendered as columns inside the new "PA Rack" viewport tab,
-// not in the left side panel. The user picks a rack frame, picks an
-// amplifier from a filtered catalogue, adds amps to slots, then "Place
-// in room" puts the rack into state.rackSystem.racks. Any state change
-// emits 'rack:changed' and the main 3D viewport rebuilds the rack via
-// scene.js's racksGroup.
+// §3): frame + amp picker on the left, builder + 3D preview in the
+// middle, "system overview" of placed racks on the right. The user
+// picks a rack frame, picks an amplifier from a filtered catalogue,
+// adds amps to slots, then "Place in room" pushes the rack into the
+// shared scene autosave so RoomLAB renders it on next visit.
 //
-// Out-of-scope for v1 (deferred to C4 / C5):
-//   - drag-drop placement (current = click-to-add into next free slot)
-//   - per-channel zone assignment (current = no zone wiring)
-//   - validation banner (channels unused, thermal budget etc.)
-//   - 3D preview INSIDE this tab — for v1 the user clicks "Place in
-//     room" then switches to 3D View. C3 of the original spec adds the
-//     isolated rack-scene preview here.
+// State coupling: previously read/wrote RoomLAB's `state.rackSystem`
+// directly because this UI lived inside the RoomLAB viewport. After
+// the DeviceLAB extraction it owns a local `rackState` that mirrors
+// scene rackSystem; on every mutation we patch the cross-Lab
+// autosave (js/shared/autosave.js) so RoomLAB picks up the change on
+// the next page load.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { state } from '../app-state.js';
-import { emit } from './events.js';
-import { buildRackGroup } from '../graphics/rack-render.js';
+import { emit } from '../../shared/events.js';
+import { buildRackGroup } from '../../graphics/rack-render.js';
+import { readAutosave, patchAutosave } from '../../shared/autosave.js';
+
+// DeviceLAB-local mirror of state.rackSystem.racks. Seeded from the
+// shared autosave (so RoomLAB scenes with already-placed racks show
+// up in DeviceLAB's right-hand "System overview"); written back via
+// patchAutosave on every change.
+const rackState = { racks: [] };
+
+function loadRacksFromAutosave() {
+  const auto = readAutosave();
+  rackState.racks = Array.isArray(auto?.rackSystem?.racks)
+    ? JSON.parse(JSON.stringify(auto.rackSystem.racks))
+    : [];
+}
+
+function persistRacks() {
+  // patchAutosave silently no-ops when there's no existing scene
+  // autosave (i.e. user hit DeviceLAB before ever opening RoomLAB).
+  // That's deliberate — we don't want to fabricate a fake project.
+  patchAutosave({ rackSystem: { racks: rackState.racks } });
+}
 
 let _rackCatalogue = null;
 let _ampCatalog = null;
@@ -38,6 +56,10 @@ function escapeHtml(s) {
 export function mountRackPanel({ rackCatalogue, ampCatalog }) {
   _rackCatalogue = rackCatalogue;
   _ampCatalog = ampCatalog;
+  // Pull any rack data the user already placed in RoomLAB so DeviceLAB's
+  // System overview reflects the live scene — they're editing the same
+  // racks, not a separate library.
+  loadRacksFromAutosave();
   const root = document.getElementById('view-rack');
   if (!root) return;
   root.innerHTML = `
@@ -82,15 +104,13 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
   document.getElementById('rack-action-place').addEventListener('click', placeCurrentRack);
   document.getElementById('rack-action-discard').addEventListener('click', discardCurrentRack);
 
-  // Re-render the preview when the user switches into the PA Rack tab —
-  // it may have been hidden while the canvas was created so the
-  // initial sizing was zero. document-level event broadcasts from
-  // setupTabs in main.js.
-  document.addEventListener('viewport:tab-changed', (e) => {
-    if (e.detail?.view === 'rack') {
-      // Defer one frame so the view is visible before resizing.
-      requestAnimationFrame(() => { resizePreview(); updatePreview(); });
-    }
+  // DeviceLAB is the whole page — no viewport-tab visibility flicker
+  // to compensate for. Resize the preview once layout settles, plus
+  // on any window resize so the canvas fills its column cleanly.
+  requestAnimationFrame(() => { resizePreview(); updatePreview(); });
+  window.addEventListener('resize', () => {
+    resizePreview();
+    updatePreview();
   });
 }
 
@@ -411,17 +431,18 @@ function renderRackMid() {
 
 function placeCurrentRack() {
   if (!_currentRack || _currentRack.slots.length === 0) return;
-  if (!Array.isArray(state.rackSystem?.racks)) state.rackSystem = { racks: [] };
-  state.rackSystem.racks.push(JSON.parse(JSON.stringify(_currentRack)));
+  rackState.racks.push(JSON.parse(JSON.stringify(_currentRack)));
   _currentRack = null;
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
   updatePreview();
   renderSystemOverview();
+  // Persist to the cross-Lab autosave so RoomLAB renders the placed
+  // rack in the 3D scene on next visit. emit() is harmless here — no
+  // listeners in DeviceLAB — but kept for future per-Lab subscribers.
+  persistRacks();
   emit('rack:changed');
-  // Switch viewport to 3D View so the user sees the placed rack.
-  document.querySelector('.vp-tab[data-view="3d"]')?.click();
-  showToast('Rack placed in room.');
+  showToast('Rack placed in room. Switch to RoomLAB to see it in 3D.');
 }
 
 function discardCurrentRack() {
@@ -434,7 +455,7 @@ function discardCurrentRack() {
 function renderSystemOverview() {
   const root = document.getElementById('rack-system-list');
   if (!root) return;
-  const racks = state.rackSystem?.racks ?? [];
+  const racks = rackState.racks;
   if (racks.length === 0) {
     root.innerHTML = '<p class="rack-empty">No racks placed in this room yet.</p>';
     return;
@@ -454,8 +475,9 @@ function renderSystemOverview() {
   root.querySelectorAll('.rack-system-remove').forEach(btn => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.dataset.rackIdx, 10);
-      state.rackSystem.racks.splice(idx, 1);
+      rackState.racks.splice(idx, 1);
       renderSystemOverview();
+      persistRacks();
       emit('rack:changed');
     });
   });
