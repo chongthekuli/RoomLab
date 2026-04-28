@@ -1,41 +1,24 @@
 // Shared header navigation — three pill tabs that switch between Labs.
-// Each Lab calls mountHeaderNav() once during boot with its own ID;
-// the matching tab gets aria-current="page" and visual active state.
+// In the SPA shell each tab is a hash-route link (`#/room`, `#/speaker`,
+// `#/device`); the router handles activation by toggling the `.active`
+// class via `data-lab` after each route change.
 //
-// Multi-page architecture (no SPA router) — each tab is a plain <a href>
-// so the browser handles back/refresh natively, middle-click works, and
-// SpeakerLAB never needs to import Three.js just to navigate.
+// Browser-native click behaviour does the work: clicking a tab updates
+// window.location.hash → fires hashchange → router shows the matching
+// `.lab-route` container. Middle-click / Cmd-click open in a new tab
+// the same way they would for any anchor.
 
 const LABS = [
-  {
-    id: 'room',
-    label: 'RoomLAB',
-    href: 'index.html',
-    sublabel: 'Acoustic simulator',
-    enabled: true,
-  },
-  {
-    id: 'speaker',
-    label: 'SpeakerLAB',
-    href: 'speakers.html',
-    sublabel: 'Speaker library',
-    enabled: true,
-  },
-  {
-    id: 'device',
-    label: 'DeviceLAB',
-    href: 'devices.html',
-    sublabel: 'PA equipment',
-    enabled: true,
-  },
+  { id: 'room',    label: 'RoomLAB',    href: '#/room',    sublabel: 'Acoustic simulator' },
+  { id: 'speaker', label: 'SpeakerLAB', href: '#/speaker', sublabel: 'Speaker library' },
+  { id: 'device',  label: 'DeviceLAB',  href: '#/device',  sublabel: 'PA equipment' },
 ];
 
-// Mount the nav into <header id="app-header">. Replaces any existing
-// content in that header (the previous <h1>RoomLAB</h1> placeholder).
-//
-// activeLab must be one of the LABS.id values — the matching tab gets
-// aria-current="page" and the .active class for visual treatment.
-export function mountHeaderNav({ activeLab }) {
+// Mount the nav into <header id="app-header">. activeLab is optional —
+// when omitted (or invalid) the router will set the active state on
+// route-change anyway. Provided as a convenience for callers that
+// know the initial route synchronously.
+export function mountHeaderNav({ activeLab } = {}) {
   const header = document.getElementById('app-header');
   if (!header) return;
 
@@ -43,19 +26,7 @@ export function mountHeaderNav({ activeLab }) {
     const isActive = lab.id === activeLab;
     const classes = ['lab-tab'];
     if (isActive) classes.push('active');
-    if (!lab.enabled) classes.push('disabled');
     const aria = isActive ? ' aria-current="page"' : '';
-    // Disabled tabs render as <span> so they're not navigable. Active
-    // tab still renders as <a> for keyboard a11y but onClick prevents
-    // navigation to the same page.
-    if (!lab.enabled) {
-      return `
-        <span class="${classes.join(' ')}" data-lab="${lab.id}"
-              title="${lab.label} — coming soon" aria-disabled="true">
-          <span class="lab-tab-label">${lab.label}</span>
-          <span class="lab-tab-sub">${lab.sublabel}</span>
-        </span>`;
-    }
     return `
       <a class="${classes.join(' ')}" data-lab="${lab.id}" href="${lab.href}"${aria}>
         <span class="lab-tab-label">${lab.label}</span>
@@ -67,10 +38,4 @@ export function mountHeaderNav({ activeLab }) {
     <div class="app-brand">RoomLAB Suite</div>
     <nav class="lab-nav" aria-label="Lab navigation">${tabs}</nav>
   `;
-
-  // Block navigation when the user clicks the already-active tab —
-  // saves a needless reload and keeps any in-flight unsaved state.
-  header.querySelectorAll('a.lab-tab.active').forEach(a => {
-    a.addEventListener('click', e => e.preventDefault());
-  });
 }

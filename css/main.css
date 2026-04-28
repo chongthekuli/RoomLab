@@ -66,6 +66,16 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   line-height: 1;
 }
 
+/* SPA route containers — only the active one is visible. The router
+   toggles `.active` on `.lab-route[data-route="<id>"]`. Inactive Labs
+   stay in the DOM (display:none), preserving their in-memory state +
+   event listeners so route changes are instant DOM swaps, not
+   re-mounts. RoomLAB triggers a window resize event when becoming
+   active again so the Three.js renderer picks up any size changes
+   that happened while it was hidden. */
+.lab-route { display: none; }
+.lab-route.active { display: block; }
+
 #app-root {
   display: grid;
   grid-template-columns: 300px 1fr 320px;

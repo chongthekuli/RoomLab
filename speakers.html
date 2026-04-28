@@ -4,22 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>SpeakerLAB — RoomLAB Suite</title>
-  <link rel="stylesheet" href="css/main.css?v=171" />
-  <link rel="stylesheet" href="css/theme.css?v=171" />
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-    }
-  }
+  <script>
+    // SpeakerLAB lives inside the SPA shell now. Redirect any legacy
+    // bookmark or external link to the right hash route, preserving
+    // the ?model= deep-link query param so RoomLAB's "View specs"
+    // buttons keep working through the transition.
+    var search = window.location.search || '';
+    window.location.replace('index.html' + search + '#/speaker');
   </script>
+  <meta http-equiv="refresh" content="0; url=index.html#/speaker">
 </head>
-<body class="lab-body lab-speakerlab">
-  <header id="app-header"></header>
-  <main id="speakerlab-root">
-    <div id="view-speaker" class="speakerlab-view"></div>
-  </main>
-  <script type="module" src="js/labs/speakerlab/main.js?v=171"></script>
+<body>
+  <p>Redirecting to <a href="index.html#/speaker">SpeakerLAB</a>…</p>
 </body>
 </html>

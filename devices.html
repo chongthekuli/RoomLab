@@ -4,22 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>DeviceLAB — RoomLAB Suite</title>
-  <link rel="stylesheet" href="css/main.css?v=171" />
-  <link rel="stylesheet" href="css/theme.css?v=171" />
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-    }
-  }
+  <script>
+    // DeviceLAB lives inside the SPA shell now. Redirect any legacy
+    // bookmark or external link to the right hash route. No deep-
+    // link params today, but preserve the search string for forward
+    // compatibility.
+    var search = window.location.search || '';
+    window.location.replace('index.html' + search + '#/device');
   </script>
+  <meta http-equiv="refresh" content="0; url=index.html#/device">
 </head>
-<body class="lab-body lab-devicelab">
-  <header id="app-header"></header>
-  <main id="devicelab-root">
-    <div id="view-rack" class="devicelab-view"></div>
-  </main>
-  <script type="module" src="js/labs/devicelab/main.js?v=171"></script>
+<body>
+  <p>Redirecting to <a href="index.html#/device">DeviceLAB</a>…</p>
 </body>
 </html>

@@ -7,56 +7,56 @@
 // adds amps to slots, then "Place in room" pushes the rack into the
 // shared scene autosave so RoomLAB renders it on next visit.
 //
-// State coupling: previously read/wrote RoomLAB's `state.rackSystem`
-// directly because this UI lived inside the RoomLAB viewport. After
-// the DeviceLAB extraction it owns a local `rackState` that mirrors
-// scene rackSystem; on every mutation we patch the cross-Lab
-// autosave (js/shared/autosave.js) so RoomLAB picks up the change on
-// the next page load.
+// State coupling: writes directly to the shared scene state
+// (js/app-state.js — `state.rackSystem.racks`). emit('rack:changed')
+// fires; RoomLAB's 3D scene rebuilds racksGroup live, so flipping
+// to #/room shows the placed rack without a reload.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { state } from '../../app-state.js';
 import { emit } from '../../shared/events.js';
 import { buildRackGroup } from '../../graphics/rack-render.js';
-import { readAutosave, patchAutosave } from '../../shared/autosave.js';
 import { bindLab } from '../../shared/lab-storage.js';
 
 // DeviceLAB-namespaced localStorage. Persists in-progress UI state
-// across page navigation: the half-built _currentRack and the amp
-// search filter. Without this, leaving DeviceLAB to glance at
-// RoomLAB and coming back wipes the rack you were building.
+// across browser-close → reopen: the half-built _currentRack and
+// the amp search filter. (In-session navigation in the SPA shell no
+// longer wipes anything because the DOM stays in memory.)
 const lab = bindLab('devicelab');
 
-// DeviceLAB-local mirror of state.rackSystem.racks. Seeded from the
-// shared autosave (so RoomLAB scenes with already-placed racks show
-// up in DeviceLAB's right-hand "System overview"); written back via
-// patchAutosave on every change.
-const rackState = { racks: [] };
-
-function loadRacksFromAutosave() {
-  const auto = readAutosave();
-  rackState.racks = Array.isArray(auto?.rackSystem?.racks)
-    ? JSON.parse(JSON.stringify(auto.rackSystem.racks))
-    : [];
+// In the SPA shell DeviceLAB and RoomLAB share the live `state`
+// object directly — no localStorage merge dance, no autosave
+// round-trip. Edits land on state.rackSystem.racks; emit('rack:changed')
+// fires; RoomLAB's scene listens and rebuilds racksGroup so flipping
+// to #/room shows the placed rack instantly.
+function ensureRackSystem() {
+  if (!state.rackSystem || !Array.isArray(state.rackSystem.racks)) {
+    state.rackSystem = { racks: [] };
+  }
+  return state.rackSystem;
 }
 
-// Pulls a human-readable context out of the shared autosave so the
-// banner can answer "which room am I editing for?". Falls back to a
-// generic label if RoomLAB has never run (no autosave yet).
+// Human-readable context for the banner: "Editing racks for: <room>".
+// Reads from the live shared state. Returns a "no scene yet" hint
+// only when RoomLAB hasn't been mounted yet (user hit #/device first
+// in the SPA — possible if a deep link points there).
 function describeSceneContext() {
-  const auto = readAutosave();
-  if (!auto) {
+  const r = state.room ?? {};
+  const hasScene = (state.sources?.length ?? 0) > 0
+    || (state.listeners?.length ?? 0) > 0
+    || (state.zones?.length ?? 0) > 0
+    || Number.isFinite(r.width_m);
+  if (!hasScene) {
     return {
       name: 'No room scene yet',
-      meta: 'Open RoomLAB first to start a scene — racks are tied to the active room.',
+      meta: 'Click RoomLAB to start a scene — racks are tied to the active room.',
     };
   }
-  const r = auto.room ?? {};
-  const proj = (typeof auto.projectName === 'string' && auto.projectName.trim())
-    ? auto.projectName.trim()
+  const proj = (typeof state.projectName === 'string' && state.projectName.trim())
+    ? state.projectName.trim()
     : null;
-  // Room "name" preference order: explicit projectName > shape descriptor > generic.
   let name = proj;
   if (!name) {
     if (r.shape === 'rectangular' && Number.isFinite(r.width_m) && Number.isFinite(r.depth_m)) {
@@ -70,18 +70,11 @@ function describeSceneContext() {
     }
   }
   const counts = [
-    `${(auto.sources ?? []).length} sources`,
-    `${(auto.listeners ?? []).length} listeners`,
-    `${(auto.zones ?? []).length} zones`,
+    `${(state.sources ?? []).length} sources`,
+    `${(state.listeners ?? []).length} listeners`,
+    `${(state.zones ?? []).length} zones`,
   ].join(' · ');
   return { name, meta: counts };
-}
-
-function persistRacks() {
-  // patchAutosave silently no-ops when there's no existing scene
-  // autosave (i.e. user hit DeviceLAB before ever opening RoomLAB).
-  // That's deliberate — we don't want to fabricate a fake project.
-  patchAutosave({ rackSystem: { racks: rackState.racks } });
 }
 
 let _rackCatalogue = null;
@@ -99,10 +92,10 @@ function escapeHtml(s) {
 export function mountRackPanel({ rackCatalogue, ampCatalog }) {
   _rackCatalogue = rackCatalogue;
   _ampCatalog = ampCatalog;
-  // Pull any rack data the user already placed in RoomLAB so DeviceLAB's
-  // System overview reflects the live scene — they're editing the same
-  // racks, not a separate library.
-  loadRacksFromAutosave();
+  // Make sure state.rackSystem exists before anyone reads from it.
+  // RoomLAB sets this up in its mount, but the user may have hit
+  // #/device first — keep DeviceLAB self-sufficient.
+  ensureRackSystem();
   const root = document.getElementById('view-rack');
   if (!root) return;
 
@@ -116,7 +109,7 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
       <span class="rack-ctx-label">Editing racks for</span>
       <span class="rack-ctx-name">${escapeHtml(ctx.name)}</span>
       <span class="rack-ctx-meta">${escapeHtml(ctx.meta)}</span>
-      <a class="rack-ctx-back" href="index.html" title="Open RoomLAB">View room →</a>
+      <a class="rack-ctx-back" href="#/room" title="Open RoomLAB">View room →</a>
     </div>
     <div class="rack-builder">
       <aside class="rack-col-left">
@@ -513,20 +506,17 @@ function renderRackMid() {
 
 function placeCurrentRack() {
   if (!_currentRack || _currentRack.slots.length === 0) return;
-  rackState.racks.push(JSON.parse(JSON.stringify(_currentRack)));
+  ensureRackSystem().racks.push(JSON.parse(JSON.stringify(_currentRack)));
   _currentRack = null;
   persistCurrentRack();   // clear the in-progress slot in lab storage
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
   updatePreview();
   renderSystemOverview();
-  // Persist to the cross-Lab autosave so RoomLAB renders the placed
-  // rack in the 3D scene on next visit. emit() is harmless here — no
-  // listeners in DeviceLAB — but kept for future per-Lab subscribers.
-  persistRacks();
+  // Live shared state — RoomLAB's scene listens for rack:changed and
+  // rebuilds racksGroup, so flipping to #/room shows the placed rack
+  // immediately, no reload.
   emit('rack:changed');
-  // Action-toast version of the handoff: a sticky "View in RoomLAB →"
-  // button so the user actually knows where the rack went.
   showHandoffToast();
 }
 
@@ -541,11 +531,11 @@ function discardCurrentRack() {
 function renderSystemOverview() {
   const root = document.getElementById('rack-system-list');
   if (!root) return;
-  const racks = rackState.racks;
+  const racks = ensureRackSystem().racks;
   if (racks.length === 0) {
     root.innerHTML = `
       <p class="rack-empty">No racks placed in this room yet.</p>
-      <a class="rack-go-roomlab" href="index.html" title="Open RoomLAB to see the room you're designing for">
+      <a class="rack-go-roomlab" href="#/room" title="Open RoomLAB to see the room you're designing for">
         Open RoomLAB →
       </a>
     `;
@@ -554,7 +544,7 @@ function renderSystemOverview() {
   // With placed racks: prepend a clear handoff CTA so the user knows
   // exactly where to look at the rack in 3D context.
   root.innerHTML = `
-    <a class="rack-go-roomlab" href="index.html" title="Open RoomLAB to see these racks placed in the 3D room">
+    <a class="rack-go-roomlab" href="#/room" title="Open RoomLAB to see these racks placed in the 3D room">
       View in RoomLAB →
     </a>
   ` + racks.map((r, i) => {
@@ -572,9 +562,8 @@ function renderSystemOverview() {
   root.querySelectorAll('.rack-system-remove').forEach(btn => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.dataset.rackIdx, 10);
-      rackState.racks.splice(idx, 1);
+      ensureRackSystem().racks.splice(idx, 1);
       renderSystemOverview();
-      persistRacks();
       emit('rack:changed');
     });
   });
@@ -590,7 +579,7 @@ function showHandoffToast() {
   el.className = 'rl-toast rl-toast-ok rl-toast-handoff';
   el.innerHTML = `
     <span class="rl-toast-msg">Rack placed in your room.</span>
-    <a class="rl-toast-action" href="index.html">View in RoomLAB →</a>
+    <a class="rl-toast-action" href="#/room">View in RoomLAB →</a>
   `;
   document.body.appendChild(el);
   void el.offsetHeight;

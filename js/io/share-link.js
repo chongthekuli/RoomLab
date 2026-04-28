@@ -159,6 +159,12 @@ export function buildShareUrl(hash) {
 export function applyHashStateOnLoad() {
   const hash = (typeof window !== 'undefined' ? window.location.hash : '') || '';
   if (!hash || hash === '#') return { applied: false, error: null, warnings: [] };
+  // SPA route hashes (#/room, #/speaker, #/device) live in the same
+  // location.hash as share-link blobs. They look like a base64 string
+  // to the decoder — `/room` happens to be valid base64 padding so
+  // the decoder otherwise tries to parse it as a corrupted payload
+  // and emits a false-positive error banner. Skip cleanly.
+  if (/^#\//.test(hash)) return { applied: false, error: null, warnings: [] };
   try {
     const result = decodeShareLink(hash);
     emit('scene:reset');

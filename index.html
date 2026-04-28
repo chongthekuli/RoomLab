@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RoomLAB</title>
-  <link rel="stylesheet" href="css/main.css?v=171" />
-  <link rel="stylesheet" href="css/theme.css?v=171" />
-  <link rel="stylesheet" href="css/print.css?v=171" media="all" />
+  <title>RoomLAB Suite</title>
+  <link rel="stylesheet" href="css/main.css?v=172" />
+  <link rel="stylesheet" href="css/theme.css?v=172" />
+  <link rel="stylesheet" href="css/print.css?v=172" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -16,50 +16,73 @@
   }
   </script>
 </head>
-<body>
+<body class="lab-body">
   <header id="app-header"></header>
-  <main id="app-root">
-    <aside id="panel-left">
-      <section id="panel-room"><h2>Room</h2></section>
-      <section id="panel-sources"><h2>Sources</h2></section>
-      <section id="panel-listeners"><h2>Listeners</h2></section>
-      <section id="panel-zones"><h2>Audience zones</h2></section>
-      <section id="panel-ambient"><h2>Environment noise</h2></section>
-      <section id="panel-library">
-        <h2>Library</h2>
-        <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files — coming later.</div>
+
+  <!-- SPA: all 3 Labs live in this single page. The router toggles
+       which `.lab-route` is `.active`. Lab modules mount lazily on
+       first visit; subsequent route changes are instant DOM swaps. -->
+
+  <!-- ROOMLAB ROUTE -->
+  <div class="lab-route" data-route="room">
+    <main id="app-root">
+      <aside id="panel-left">
+        <section id="panel-room"><h2>Room</h2></section>
+        <section id="panel-sources"><h2>Sources</h2></section>
+        <section id="panel-listeners"><h2>Listeners</h2></section>
+        <section id="panel-zones"><h2>Audience zones</h2></section>
+        <section id="panel-ambient"><h2>Environment noise</h2></section>
+        <section id="panel-library">
+          <h2>Library</h2>
+          <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files — coming later.</div>
+        </section>
+      </aside>
+      <section id="viewport">
+        <div class="viewport-tabs">
+          <div class="vp-group vp-group-views">
+            <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D</button>
+            <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D</button>
+            <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walk</button>
+          </div>
+          <div class="vp-group vp-group-layers">
+            <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer — shortcut H">Heatmap</button>
+            <button class="vp-toggle" id="toggle-stipa-mode" title="Switch heatmap metric: SPL (dB) ↔ STIPA (IEC 60268-16 speech intelligibility) — shortcut M">STIPA</button>
+            <button class="vp-toggle active" id="toggle-isobars" title="Show/hide contour lines (isobars) — shortcut I">Isobars</button>
+            <button class="vp-toggle" id="toggle-reverb" title="Include statistical reverberant field (Hopkins-Stryker) in heatmap — shortcut R">Reverb field</button>
+          </div>
+          <div class="vp-group vp-group-tools">
+            <button class="vp-toggle" id="toggle-aim-lines" title="Show/hide speaker aim direction indicators — shortcut A"><span class="vp-icon" aria-hidden="true">↗</span><span class="vp-label">Aim lines</span></button>
+            <button class="vp-toggle" id="toggle-rays" title="Show/hide ray-tracing visualisation — samples ray paths and prefers ones that cross a listener so you see what reaches each receiver. Cleared on any scene change. Shortcut Y"><span class="vp-icon" aria-hidden="true">⋰</span><span class="vp-label">Rays</span></button>
+            <button class="vp-toggle" id="toggle-probe" title="Hover the 3D viewport for XYZ and SPL readout — shortcut P"><span class="vp-icon" aria-hidden="true">⊕</span><span class="vp-label">Probe</span></button>
+            <button class="vp-toggle vp-help-btn" id="btn-show-help" title="Keyboard shortcuts — shortcut ?">?</button>
+          </div>
+        </div>
+        <div id="view-2d" class="viewport-view" hidden></div>
+        <div id="view-3d" class="viewport-view">
+          <div class="viewport-loading">Loading 3D view…</div>
+        </div>
       </section>
-    </aside>
-    <section id="viewport">
-      <div class="viewport-tabs">
-        <div class="vp-group vp-group-views">
-          <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D</button>
-          <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D</button>
-          <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walk</button>
-        </div>
-        <div class="vp-group vp-group-layers">
-          <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer — shortcut H">Heatmap</button>
-          <button class="vp-toggle" id="toggle-stipa-mode" title="Switch heatmap metric: SPL (dB) ↔ STIPA (IEC 60268-16 speech intelligibility) — shortcut M">STIPA</button>
-          <button class="vp-toggle active" id="toggle-isobars" title="Show/hide contour lines (isobars) — shortcut I">Isobars</button>
-          <button class="vp-toggle" id="toggle-reverb" title="Include statistical reverberant field (Hopkins-Stryker) in heatmap — shortcut R">Reverb field</button>
-        </div>
-        <div class="vp-group vp-group-tools">
-          <button class="vp-toggle" id="toggle-aim-lines" title="Show/hide speaker aim direction indicators — shortcut A"><span class="vp-icon" aria-hidden="true">↗</span><span class="vp-label">Aim lines</span></button>
-          <button class="vp-toggle" id="toggle-rays" title="Show/hide ray-tracing visualisation — samples ray paths and prefers ones that cross a listener so you see what reaches each receiver. Cleared on any scene change. Shortcut Y"><span class="vp-icon" aria-hidden="true">⋰</span><span class="vp-label">Rays</span></button>
-          <button class="vp-toggle" id="toggle-probe" title="Hover the 3D viewport for XYZ and SPL readout — shortcut P"><span class="vp-icon" aria-hidden="true">⊕</span><span class="vp-label">Probe</span></button>
-          <button class="vp-toggle vp-help-btn" id="btn-show-help" title="Keyboard shortcuts — shortcut ?">?</button>
-        </div>
-      </div>
-      <div id="view-2d" class="viewport-view" hidden></div>
-      <div id="view-3d" class="viewport-view">
-        <div class="viewport-loading">Loading 3D view…</div>
-      </div>
-    </section>
-    <aside id="panel-right">
-      <section id="panel-results"><h2>Results</h2></section>
-      <section id="panel-precision"><h2>Precision Render</h2></section>
-    </aside>
-  </main>
+      <aside id="panel-right">
+        <section id="panel-results"><h2>Results</h2></section>
+        <section id="panel-precision"><h2>Precision Render</h2></section>
+      </aside>
+    </main>
+  </div>
+
+  <!-- SPEAKERLAB ROUTE -->
+  <div class="lab-route" data-route="speaker">
+    <main id="speakerlab-root">
+      <div id="view-speaker" class="speakerlab-view"></div>
+    </main>
+  </div>
+
+  <!-- DEVICELAB ROUTE -->
+  <div class="lab-route" data-route="device">
+    <main id="devicelab-root">
+      <div id="view-rack" class="devicelab-view"></div>
+    </main>
+  </div>
+
   <div id="help-overlay" hidden>
     <div class="help-modal">
       <div class="help-head">
@@ -109,6 +132,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=171"></script>
+  <script type="module" src="js/main.js?v=172"></script>
 </body>
 </html>
