@@ -318,6 +318,13 @@ export async function mount3DViewport({ materials }) {
   on('listener:selected', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
   on('scene:reset', () => {
     invalidateRayViz();
+    // Auto-fit camera to the new room. Without this, a swap from a 60 m
+    // arena to a 4.5 m hi-fi leaves the camera 80 m back and the user
+    // has to scroll-zoom every preset apply. queueRebuild is async (RAF-
+    // coalesced) but frameCameraToRoom only reads state.room dims, so
+    // calling synchronously here is correct — the camera lands the same
+    // frame the rebuild renders.
+    frameCameraToRoom();
     queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP);
   });
   // Master EQ change: heatmap + aim lines depend on per-band SPL; refresh
@@ -1867,12 +1874,30 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
   rebuildBowlStructure(room);
   rebuildMultiLevelStructure(room);
 
-  if (isFirst && controls) {
-    const d3 = Math.max(w, h, d);
-    camera.position.set(cx + d3 * 0.9, h + d3 * 0.5, d + d3 * 0.4);
-    controls.target.set(cx, h * 0.4, cz);
-    controls.update();
-  }
+  if (isFirst) frameCameraToRoom();
+}
+
+// Fit the orbit camera to whatever's in state.room so a preset / template
+// swap, or a project-file load, lands the user looking at the new room
+// from a sensible distance. Without this, switching from a 60-m arena to
+// a 4.5-m hi-fi leaves the camera still 80 m back — the room appears as
+// a tiny dot until the user manually zooms in. Symmetric fail in the
+// other direction. Called on `scene:reset`, NOT on `room:changed` —
+// dragging a width slider should not jump the camera every tick.
+// Also bound to the F shortcut so the user can re-fit after manual
+// dimension edits or a misadventure with the orbit drag.
+export function frameCameraToRoom() {
+  if (!camera || !controls) return;
+  const room = state.room;
+  const w = room.width_m ?? 10;
+  const h = room.height_m ?? 3;
+  const d = room.depth_m ?? 10;
+  const cx = w / 2;
+  const cz = d / 2;
+  const d3 = Math.max(w, h, d);
+  camera.position.set(cx + d3 * 0.9, h + d3 * 0.5, d + d3 * 0.4);
+  controls.target.set(cx, h * 0.4, cz);
+  controls.update();
 }
 
 // Cabinet dimensions in meters by speaker type. Line-array elements are

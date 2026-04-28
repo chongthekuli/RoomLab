@@ -13,7 +13,7 @@ import { mountPrecisionPanel } from './ui/panel-precision.js';
 import { mountWelcomeCard } from './ui/welcome-card.js';
 import { mountSpeakerView } from './ui/speaker-detail.js';
 import { mount2DViewport } from './graphics/room-2d.js';
-import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, toggleRayViz, setWalkthroughMode } from './graphics/scene.js';
+import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, toggleRayViz, frameCameraToRoom, setWalkthroughMode } from './graphics/scene.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -153,6 +153,7 @@ function setupTabs() {
       case 'a': case 'A': click('toggle-aim-lines'); e.preventDefault(); break;
       case 'y': case 'Y': click('toggle-rays'); e.preventDefault(); break;
       case 'p': case 'P': click('toggle-probe'); e.preventDefault(); break;
+      case 'f': case 'F': frameCameraToRoom(); e.preventDefault(); break;
       case '?':           openHelp(); e.preventDefault(); break;
       case 'Escape':      closeTransient(); break;
     }
