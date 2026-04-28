@@ -234,7 +234,21 @@ export function roomPlanVertices(room) {
       return verts;
     }
     case 'custom': {
-      return (room.custom_vertices || []).map(v => ({ x: v.x, y: v.y }));
+      const cv = (room.custom_vertices || [])
+        .filter(v => v && Number.isFinite(v.x) && Number.isFinite(v.y))
+        .map(v => ({ x: v.x, y: v.y }));
+      // While the user is mid-draw (Draw custom room button just
+      // clicked → applyBlankCustomRoom set shape='custom' but
+      // custom_vertices is null), the scene rebuild would crash on
+      // verts[0].x on an empty array. Fall back to the default rect
+      // so the 3D viewport shows a placeholder until the polygon
+      // closes and real vertices arrive.
+      if (cv.length < 3) {
+        const w = room.width_m || 8;
+        const d = room.depth_m || 8;
+        return [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }];
+      }
+      return cv;
     }
     default: {
       const w = room.width_m, d = room.depth_m;

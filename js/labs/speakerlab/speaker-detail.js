@@ -211,8 +211,8 @@ async function render() {
 
     <section class="sv-section">
       <h4>On-axis frequency response</h4>
-      <canvas id="sv-fr" width="720" height="180"></canvas>
-      <div class="sub sv-caption">Relative response at (az 0°, el 0°) across the measured octave bands.</div>
+      <canvas id="sv-fr" width="960" height="240"></canvas>
+      <div class="sub sv-caption">dB SPL @ 1 W / 1 m, log-frequency 20 Hz – 20 kHz, on-axis (az 0°, el 0°). Markers = measured octave bands.</div>
     </section>
 
     <section class="sv-section">
@@ -347,77 +347,170 @@ function renderCatalog() {
 function drawFrCanvas(canvas, onAxis, def) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  const padL = 40, padR = 18, padT = 18, padB = 28;
+
+  // DPR-aware crisp rendering. The canvas's CSS width is 100% of the
+  // section column (often 1300+ px on a wide viewport); without this
+  // scaling step the browser would blit the 960-px bitmap up 1.5–2×
+  // with bilinear interpolation, hence the user's "low resolution"
+  // complaint. Resize the bitmap to match displayed pixels exactly.
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  const cssW = canvas.clientWidth || canvas.width;
+  const cssH = canvas.clientHeight || canvas.height;
+  const targetW = Math.round(cssW * dpr);
+  const targetH = Math.round(cssH * dpr);
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW;
+    canvas.height = targetH;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+
+  const w = cssW, h = cssH;
+  const padL = 44, padR = 20, padT = 18, padB = 32;
   const plotW = w - padL - padR, plotH = h - padT - padB;
   ctx.clearRect(0, 0, w, h);
 
-  // Sensitivity baseline
   const sens = def.acoustic?.sensitivity_db_1w_1m ?? 90;
-  const yMin = sens - 20, yMax = sens + 10;
-  const xMin = Math.log10(100), xMax = Math.log10(20000);
 
-  // grid
+  // Adaptive Y range — bound to the actual data plus a sensible
+  // baseline reference (sens-20 to sens+10) so a flat speaker still
+  // shows breathing room while a real driver with -25 dB rolloff
+  // doesn't get clipped off the bottom. Round outward to nearest
+  // 5 dB for clean grid labels.
+  const dbValues = onAxis.map(p => sens + p.db).filter(Number.isFinite);
+  const dataMin = Math.min(sens - 20, ...dbValues);
+  const dataMax = Math.max(sens + 10, ...dbValues);
+  const yMin = Math.floor((dataMin - 3) / 5) * 5;
+  const yMax = Math.ceil((dataMax + 3) / 5) * 5;
+
+  // Full audio band 20 Hz – 20 kHz on a log axis.
+  const xMin = Math.log10(20), xMax = Math.log10(20000);
+  const xOf = (hz) => padL + ((Math.log10(hz) - xMin) / (xMax - xMin)) * plotW;
+  const yOf = (db) => padT + plotH - ((db - yMin) / (yMax - yMin)) * plotH;
+
+  // Y grid (5 dB rows). Right-aligned labels in the left gutter so
+  // 2-digit and 3-digit values (e.g. 65 vs 105) align cleanly and
+  // don't crowd the leftmost gridline.
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 1;
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
   for (let db = Math.ceil(yMin / 5) * 5; db <= yMax; db += 5) {
-    const y = padT + plotH - ((db - yMin) / (yMax - yMin)) * plotH;
+    const y = yOf(db);
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
-    ctx.fillStyle = 'rgba(200,210,220,0.55)'; ctx.font = '11px sans-serif';
-    ctx.fillText(`${db}`, 4, y + 4);
+    ctx.fillStyle = 'rgba(200,210,220,0.6)';
+    ctx.fillText(`${db}`, padL - 6, y);
   }
-  for (const hz of [100, 500, 1000, 5000, 10000]) {
-    const x = padL + ((Math.log10(hz) - xMin) / (xMax - xMin)) * plotW;
+  // X grid — every octave from 20 Hz to 20 kHz. Labels only on key
+  // anchors so the axis row doesn't crowd. The first / last ticks
+  // are pulled inward (textAlign start/end) so "20" doesn't slip
+  // past the chart's left edge and "20k" stays inside the right
+  // edge — fixes the "20" running into the "Hz" unit.
+  ctx.textBaseline = 'top';
+  const octaves = [20, 31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20000];
+  const labelHz = new Set([20, 50, 100, 500, 1000, 5000, 10000, 20000]);
+  const allTicks = [...octaves, 50, 100];
+  for (const hz of allTicks) {
+    if (hz < 20 || hz > 20000) continue;
+    const x = xOf(hz);
     ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
-    ctx.fillStyle = 'rgba(200,210,220,0.55)';
-    ctx.fillText(hz >= 1000 ? `${hz / 1000}k` : `${hz}`, x - 8, h - 10);
+    if (labelHz.has(hz)) {
+      ctx.fillStyle = 'rgba(200,210,220,0.7)';
+      const txt = hz >= 1000 ? `${hz / 1000}k` : `${hz}`;
+      // Anchor the first/last labels to the chart edge so the
+      // string doesn't bleed past the plot area.
+      if (hz === 20)        ctx.textAlign = 'left';
+      else if (hz === 20000) ctx.textAlign = 'right';
+      else                   ctx.textAlign = 'center';
+      ctx.fillText(txt, x, padT + plotH + 8);
+    }
   }
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
 
-  // curve: sens + onAxis.db (on-axis correction is typically 0 dB, which
-  // shows as a flat line at sensitivity — still useful as sanity check).
-  ctx.strokeStyle = 'var(--data-cyan, #74d0ff)';
+  // Plot border
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.strokeRect(padL, padT, plotW, plotH);
+
+  // Clip to plot area so any out-of-range data point doesn't ink
+  // outside the chart.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(padL, padT, plotW, plotH);
+  ctx.clip();
+
+  // Curve.
   ctx.strokeStyle = '#74d0ff';
   ctx.lineWidth = 2.2;
   ctx.beginPath();
-  onAxis.forEach((p, i) => {
-    const x = padL + ((Math.log10(p.hz) - xMin) / (xMax - xMin)) * plotW;
-    const y = padT + plotH - ((sens + p.db - yMin) / (yMax - yMin)) * plotH;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
+  let started = false;
+  for (const p of onAxis) {
+    const db = sens + p.db;
+    if (!Number.isFinite(p.hz) || !Number.isFinite(db)) continue;
+    const x = xOf(p.hz);
+    const y = yOf(db);
+    if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+  }
   ctx.stroke();
 
-  // dots at each band
+  // Marker dots at each measured band.
   ctx.fillStyle = '#74d0ff';
   for (const p of onAxis) {
-    const x = padL + ((Math.log10(p.hz) - xMin) / (xMax - xMin)) * plotW;
-    const y = padT + plotH - ((sens + p.db - yMin) / (yMax - yMin)) * plotH;
-    ctx.beginPath(); ctx.arc(x, y, 3, 0, 2 * Math.PI); ctx.fill();
+    const db = sens + p.db;
+    if (!Number.isFinite(p.hz) || !Number.isFinite(db)) continue;
+    ctx.beginPath();
+    ctx.arc(xOf(p.hz), yOf(db), 3, 0, 2 * Math.PI);
+    ctx.fill();
   }
 
-  // axis label
-  ctx.fillStyle = 'rgba(200,210,220,0.7)';
-  ctx.fillText('dB SPL', 4, padT);
-  ctx.fillText('Hz', w - 22, h - 10);
+  ctx.restore();
+  // Axis units are conveyed by the section heading + the .sv-caption
+  // subtitle below the canvas — no inline labels to fight tick text.
 }
 
 function drawPolarCanvas(canvas, def, bandKey, plane) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
+
+  // DPR-aware crisp rendering — same fix as the FR chart.
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  const cssW = canvas.clientWidth || canvas.width;
+  const cssH = canvas.clientHeight || canvas.height;
+  const targetW = Math.round(cssW * dpr);
+  const targetH = Math.round(cssH * dpr);
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW;
+    canvas.height = targetH;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+
+  const w = cssW, h = cssH;
   const cx = w / 2, cy = h / 2;
-  const maxR = Math.min(cx, cy) - 22;
+  // Reserve more margin on the right (dB ring labels live there) and
+  // top (the "0°" cardinal label lives there). Without this padding
+  // the right-edge ring labels (-6 / -10 / -15 / -20) collide with
+  // the chart border and the "180°" label dives off the bottom.
+  const maxR = Math.min(cx, cy) - 28;
   ctx.clearRect(0, 0, w, h);
 
-  // Rings
+  // Rings — pull dB labels into the right-edge gutter at one fixed
+  // y per label, vertically separated, so they don't all stack on
+  // the cy line.
   ctx.strokeStyle = 'rgba(255,255,255,0.12)';
   ctx.lineWidth = 1;
+  ctx.font = '10px sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
   for (const db of DB_RINGS) {
     const r = maxR * (1 - db / -20);
     if (r <= 0) continue;
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * Math.PI); ctx.stroke();
-    ctx.fillStyle = 'rgba(200,210,220,0.45)';
-    ctx.font = '10px sans-serif';
-    ctx.fillText(`${db}`, cx + r + 2, cy + 3);
+    ctx.fillStyle = 'rgba(200,210,220,0.55)';
+    // Label sits just inside the ring, slightly above the centre line
+    // so 0 / -6 / -10 / -15 / -20 stack down vertically (one per ring).
+    ctx.fillText(`${db}`, cx + r - 14, cy - 6);
   }
   // Cross-hairs every 30°
   for (let a = 0; a < 360; a += 30) {
@@ -428,13 +521,20 @@ function drawPolarCanvas(canvas, def, bandKey, plane) {
     ctx.stroke();
   }
 
-  // Cardinal labels
-  ctx.fillStyle = 'rgba(200,210,220,0.6)';
+  // Cardinal labels — placed precisely outside the outer ring with
+  // proper text-align/baseline so "−90°" and "180°" don't clip the
+  // canvas edge or overlap the ring labels.
+  ctx.fillStyle = 'rgba(200,210,220,0.7)';
   ctx.font = '11px sans-serif';
-  ctx.fillText('0°', cx - 8, cy - maxR - 6);
-  ctx.fillText('90°', cx + maxR + 4, cy + 4);
-  ctx.fillText('180°', cx - 14, cy + maxR + 14);
-  ctx.fillText('-90°', cx - maxR - 30, cy + 4);
+  ctx.textAlign = 'center';   ctx.textBaseline = 'bottom';
+  ctx.fillText('0°', cx, cy - maxR - 4);
+  ctx.textAlign = 'center';   ctx.textBaseline = 'top';
+  ctx.fillText('180°', cx, cy + maxR + 4);
+  ctx.textAlign = 'left';     ctx.textBaseline = 'middle';
+  ctx.fillText('90°', cx + maxR + 4, cy);
+  ctx.textAlign = 'right';    ctx.textBaseline = 'middle';
+  ctx.fillText('−90°', cx - maxR - 4, cy);
+  ctx.textAlign = 'start';    ctx.textBaseline = 'alphabetic';
 
   // Sample directivity every 2° and draw the pattern
   const grid = def.directivity?.attenuation_db?.[bandKey] || def.directivity?.attenuation_db?.['1000'];
@@ -468,11 +568,16 @@ function drawPolarCanvas(canvas, def, bandKey, plane) {
   ctx.fill();
   ctx.stroke();
 
-  // Frequency badge
-  ctx.fillStyle = 'rgba(200,210,220,0.85)';
+  // Frequency badge — top-right of the canvas. Was bottom-left, but
+  // that line was where "180°" sits, so the two collided every time.
+  ctx.fillStyle = 'rgba(200,210,220,0.9)';
   ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
   const label = bandKey >= 1000 ? `${bandKey / 1000} kHz` : `${bandKey} Hz`;
-  ctx.fillText(label, 8, h - 8);
+  ctx.fillText(label, w - 4, 4);
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
 }
 
 // Waterfall (cumulative spectral decay) — heatmap with frequency on X

@@ -58,7 +58,26 @@ let panActive = false;
 let panStart = null;
 let spaceHeld = false;
 
+// Edge auto-pan — when the cursor lingers within EDGE_PAN_BAND_PX of
+// any canvas border during a draw, the canvas auto-shifts in that
+// direction so the user can chase a large building outside the
+// initially-visible region without manually middle-click-panning. The
+// closer the cursor sits to the edge, the faster the pan.
+const EDGE_PAN_BAND_PX = 60;          // band thickness measured from each border
+const EDGE_PAN_MAX_PX_PER_FRAME = 9;  // peak speed at the very edge
+let edgePanRAF = 0;
+// Snapshot of the latest cursor for the RAF loop to re-sample.
+// `event.currentTarget` is nulled after the handler returns, so we
+// cache the SVG element directly.
+let edgePanSampler = null;            // { svg, clientX, clientY }
+
 export function startDrawCustomShape() {
+  // Build marker — if you see this in DevTools Console you have the
+  // latest room-2d.js with snap-to-grid + edge auto-pan. If you DON'T
+  // see this, your browser is serving a cached copy; do "Empty cache
+  // and hard reload" (Chrome: right-click the reload button) or
+  // toggle DevTools Network → "Disable cache".
+  console.info('[room-2d] draw started — snap-to-grid + edge auto-pan ENABLED (build 2026-04-28b)');
   drawActive = true;
   drawConfig = {
     mode: 'room-shape',
@@ -111,7 +130,14 @@ export function startDrawZone(opts = {}) {
 
 function finishDraw() {
   if (drawVertices.length < 3) return;
-  const verts = drawVertices.map(v => ({ x: v.x, y: v.y }));
+  // Belt-and-braces filter: only finite, real-numbered vertices make
+  // it through. Defends downstream consumers (scene.js
+  // makeFloorCeilingShape, edge wall builder) against any Infinity
+  // / NaN that might have survived the upstream guards.
+  const verts = drawVertices
+    .filter(v => v && Number.isFinite(v.x) && Number.isFinite(v.y))
+    .map(v => ({ x: v.x, y: v.y }));
+  if (verts.length < 3) return;
   const cfg = drawConfig;
   const wasRoomShape = cfg.mode === 'room-shape';
   drawActive = false;
@@ -120,6 +146,7 @@ function finishDraw() {
   drawCursor = null;
   drawCursorNearStart = false;
   drawPan.dx = 0; drawPan.dy = 0;
+  stopEdgePan();
   cfg.onFinish(verts);
   emit('room:changed');
   // Maya §7: after auto-close, scroll the side panel to the height
@@ -135,6 +162,7 @@ function cancelDraw() {
   drawConfig = null;
   drawVertices = [];
   drawCursor = null;
+  stopEdgePan();
   render();
 }
 
@@ -147,7 +175,13 @@ function handleDrawClick(event) {
   if (!drawActive) return;
   if (panActive) return;       // mid-pan release should not place a vertex
   const c = drawCoordsFromEvent(event);
-  if (c.rx < 0 || c.ry < 0) return;
+  // Negative coords were rejected here historically because the room
+  // model assumed a positive-quadrant origin. We now accept anywhere
+  // on the plane — onFinish (above) shifts the polygon so its
+  // bounding-box minX/minY land on (0, 0). Non-finite coords (caused
+  // by transient zero-size SVG during a route swap) are dropped so a
+  // bad vertex can never enter state.
+  if (!c || !Number.isFinite(c.rx) || !Number.isFinite(c.ry)) return;
   // Maya §2: cursor within 0.6 m of vertex 1 (with ≥ 3 placed) commits
   // as a close. The user clicks anywhere inside that radius and the
   // polygon closes — no pixel-perfect accuracy required.
@@ -179,7 +213,15 @@ function handleDrawMove(event) {
     }
     return;
   }
-  drawCursor = drawCoordsFromEvent(event);
+  const c = drawCoordsFromEvent(event);
+  // SVG was detached / not yet laid out → bail; pending raf will re-
+  // sample on the next mousemove once layout is stable.
+  if (!c) return;
+  drawCursor = c;
+  // We no longer cache the SVG element here — `liveDrawSvg()` re-
+  // resolves it each frame inside stepEdgePan, defending against
+  // the post-render() detached-node problem.
+  edgePanSampler = { clientX: event.clientX, clientY: event.clientY };
   // Update near-start flag for visual feedback (Maya §2)
   if (drawConfig.mode === 'room-shape' && drawVertices.length >= 3) {
     const v1 = drawVertices[0];
@@ -189,10 +231,104 @@ function handleDrawMove(event) {
   } else {
     drawCursorNearStart = false;
   }
+  // Edge auto-pan — start the RAF loop the first time the cursor
+  // crosses into the edge band. The loop self-stops when the
+  // cursor leaves the band.
+  maybeStartEdgePan();
   if (!pendingMove) {
     pendingMove = true;
     requestAnimationFrame(() => { pendingMove = false; if (drawActive) render(); });
   }
+}
+
+// Resolve the live draw-mode SVG every frame. After each render() the
+// panel re-writes innerHTML, so any cached SVG reference becomes a
+// detached node whose getBoundingClientRect() returns 0×0 — causing
+// division-by-zero in edgePanDelta and runaway pan deltas. Re-query
+// the live element each tick so we always measure the current SVG.
+function liveDrawSvg() {
+  return document.querySelector('#view-2d svg');
+}
+
+// Compute pan delta (px/frame) for edge auto-pan from a cached
+// { clientX, clientY } sample. Returns { dx, dy } where positive dx
+// pans the canvas RIGHT (cursor near LEFT edge reveals more space to
+// the left). Speed ramps linearly from 0 at the band's inner border
+// to EDGE_PAN_MAX at the actual edge. Returns null if the SVG isn't
+// laid out yet (zero-size rect) — defends against the
+// hidden-route / detached-node edge cases that produced
+// Infinity-scaled pan jumps.
+function edgePanDelta(sampler) {
+  if (!sampler) return null;
+  const svg = liveDrawSvg();
+  if (!svg) return null;
+  const rect = svg.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  const x = sampler.clientX - rect.left;
+  const y = sampler.clientY - rect.top;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  let dx = 0, dy = 0;
+  if (x < EDGE_PAN_BAND_PX) {
+    dx = (1 - x / EDGE_PAN_BAND_PX) * EDGE_PAN_MAX_PX_PER_FRAME;
+  } else if (x > rect.width - EDGE_PAN_BAND_PX) {
+    dx = -((x - (rect.width - EDGE_PAN_BAND_PX)) / EDGE_PAN_BAND_PX) * EDGE_PAN_MAX_PX_PER_FRAME;
+  }
+  if (y < EDGE_PAN_BAND_PX) {
+    dy = (1 - y / EDGE_PAN_BAND_PX) * EDGE_PAN_MAX_PX_PER_FRAME;
+  } else if (y > rect.height - EDGE_PAN_BAND_PX) {
+    dy = -((y - (rect.height - EDGE_PAN_BAND_PX)) / EDGE_PAN_BAND_PX) * EDGE_PAN_MAX_PX_PER_FRAME;
+  }
+  // Final guard: clamp to ±EDGE_PAN_MAX in case some rect quirk produces
+  // out-of-range values; better to under-pan than to teleport the canvas.
+  dx = Math.max(-EDGE_PAN_MAX_PX_PER_FRAME, Math.min(EDGE_PAN_MAX_PX_PER_FRAME, dx));
+  dy = Math.max(-EDGE_PAN_MAX_PX_PER_FRAME, Math.min(EDGE_PAN_MAX_PX_PER_FRAME, dy));
+  return { dx, dy };
+}
+
+function maybeStartEdgePan() {
+  if (panActive) return;   // the user is already manually panning
+  if (edgePanRAF) return;
+  const d = edgePanDelta(edgePanSampler);
+  if (!d || (d.dx === 0 && d.dy === 0)) return;
+  edgePanRAF = requestAnimationFrame(stepEdgePan);
+}
+
+function stepEdgePan() {
+  edgePanRAF = 0;
+  if (!drawActive || !edgePanSampler) return;
+  const d = edgePanDelta(edgePanSampler);
+  if (!d || (d.dx === 0 && d.dy === 0)) return;
+  drawPan.dx += d.dx;
+  drawPan.dy += d.dy;
+  // Recompute the cursor against the new pan offset using the LIVE
+  // SVG (not a cached ref — see liveDrawSvg comment above).
+  const svg = liveDrawSvg();
+  if (svg) {
+    const fakeEvent = {
+      currentTarget: svg,
+      clientX: edgePanSampler.clientX,
+      clientY: edgePanSampler.clientY,
+    };
+    const c = drawCoordsFromEvent(fakeEvent);
+    if (c && Number.isFinite(c.rx) && Number.isFinite(c.ry)) {
+      drawCursor = c;
+      if (drawConfig?.mode === 'room-shape' && drawVertices.length >= 3) {
+        const v1 = drawVertices[0];
+        const dx = drawCursor.rx - v1.x;
+        const dy = drawCursor.ry - v1.y;
+        drawCursorNearStart = Math.sqrt(dx * dx + dy * dy) <= CLOSE_RADIUS_M;
+      }
+    }
+  }
+  render();
+  // Keep the loop alive while the cursor is still in the band.
+  if (drawActive) edgePanRAF = requestAnimationFrame(stepEdgePan);
+}
+
+function stopEdgePan() {
+  if (edgePanRAF) cancelAnimationFrame(edgePanRAF);
+  edgePanRAF = 0;
+  edgePanSampler = null;
 }
 
 function handleDrawDblClick(event) {
@@ -240,14 +376,17 @@ function handleDrawKeyUp(event) {
 
 function drawCoordsFromEvent(event) {
   const svg = event.currentTarget;
+  if (!svg) return null;
   const rect = svg.getBoundingClientRect();
+  // Detached / hidden / not-yet-laid-out SVG → bail out cleanly so we
+  // never produce Infinity or NaN coords downstream.
+  if (rect.width <= 0 || rect.height <= 0) return null;
   if (drawConfig.mode === 'room-shape') {
     const sx = (event.clientX - rect.left) * (CUSTOM_VB_W / rect.width);
     const sy = (event.clientY - rect.top)  * (CUSTOM_VB_H / rect.height);
-    // Account for pan when computing the room-coord under the cursor.
     const rx = (sx - CUSTOM_ORIGIN.x - drawPan.dx) / CUSTOM_SCALE;
     const ry = (sy - CUSTOM_ORIGIN.y - drawPan.dy) / CUSTOM_SCALE;
-    // Maya §3: 0.5 m grid snap — Math.round(x / 0.5) * 0.5
+    if (!Number.isFinite(rx) || !Number.isFinite(ry)) return null;
     const snap = (v) => Math.round(v / SNAP_M) * SNAP_M;
     return { sx, sy, rx: snap(rx), ry: snap(ry) };
   }
@@ -257,6 +396,7 @@ function drawCoordsFromEvent(event) {
   const sy = (event.clientY - rect.top)  * (500 / rect.height);
   const rx = (sx - geom.x0) / geom.scale;
   const ry = (sy - geom.y0) / geom.scale;
+  if (!Number.isFinite(rx) || !Number.isFinite(ry)) return null;
   return { sx, sy, rx: Math.round(rx * 100) / 100, ry: Math.round(ry * 100) / 100 };
 }
 
@@ -403,11 +543,12 @@ function renderDrawOverlay(x0, y0, scale, color) {
   }
   if (drawVertices.length > 0 && drawCursor) {
     const last = drawVertices[drawVertices.length - 1];
-    // Maya §2: when cursor is near vertex 1, the rubber-band line snaps
-    // to vertex 1 (not the cursor) — strong visual signal that the
-    // next click closes the loop.
-    let endX = drawCursor.sx;
-    let endY = drawCursor.sy;
+    // Rubber-band line tracks the SNAPPED grid intersection, not the
+    // raw cursor pixel — same visual feedback the user gets after
+    // committing a vertex. Was using sx/sy directly, which made the
+    // line lag/lead the snap by up to 10 px.
+    let endX = x0 + drawCursor.rx * scale;
+    let endY = y0 + drawCursor.ry * scale;
     if (drawCursorNearStart && drawVertices.length >= 3) {
       const first = drawVertices[0];
       endX = x0 + first.x * scale;
@@ -418,11 +559,10 @@ function renderDrawOverlay(x0, y0, scale, color) {
       const first = drawVertices[0];
       // Maya §2: closing dashed line goes solid + opaque when ready to commit.
       const ready = drawCursorNearStart && drawVertices.length >= 3;
-      const stroke = ready ? color : color;
       const widthPx = ready ? 2.5 : 1;
       const dash = ready ? 'none' : '2,3';
       const opacity = ready ? 1 : 0.4;
-      s += `<line x1="${endX}" y1="${endY}" x2="${x0 + first.x * scale}" y2="${y0 + first.y * scale}" stroke="${stroke}" stroke-width="${widthPx}" stroke-dasharray="${dash}" opacity="${opacity}"/>`;
+      s += `<line x1="${endX}" y1="${endY}" x2="${x0 + first.x * scale}" y2="${y0 + first.y * scale}" stroke="${color}" stroke-width="${widthPx}" stroke-dasharray="${dash}" opacity="${opacity}"/>`;
     }
   }
   // Vertex 1 grows + highlights when cursor is near; other vertices stay regular
@@ -434,11 +574,18 @@ function renderDrawOverlay(x0, y0, scale, color) {
     s += `<circle cx="${sx}" cy="${sy}" r="${r}" fill="${color}" stroke="#fff" stroke-width="${stroke}"/>`;
     s += `<text x="${sx + 12}" y="${sy - 8}" fill="#cce" font-size="11" font-weight="600">${i + 1}</text>`;
   });
-  // Cursor preview — Maya §2: 6 px filled circle at 50% opacity with a
-  // white ring. One decimal coords (snap is 0.5 m).
-  if (drawCursor && drawCursor.rx >= 0 && drawCursor.ry >= 0) {
-    s += `<circle cx="${drawCursor.sx}" cy="${drawCursor.sy}" r="6" fill="#4a8ff0" fill-opacity="0.5" stroke="#ffffff" stroke-width="1.5"/>`;
-    s += `<text x="${drawCursor.sx + 10}" y="${drawCursor.sy - 8}" fill="#ffd000" font-size="10">${drawCursor.rx.toFixed(1)}, ${drawCursor.ry.toFixed(1)} m</text>`;
+  // Cursor preview pinned to the snapped grid intersection so the
+  // user sees exactly where the next click will land. Was using the
+  // raw sx/sy which made the dot drift between grid points. Negative
+  // coordinates are allowed now — the onFinish step shifts the
+  // polygon so its bbox-min lands on the origin, so users can draw
+  // rooms anywhere on the plane (combined with edge-auto-pan they
+  // can chase the cursor across as much canvas as they need).
+  if (drawCursor) {
+    const cx = x0 + drawCursor.rx * scale;
+    const cy = y0 + drawCursor.ry * scale;
+    s += `<circle cx="${cx}" cy="${cy}" r="6" fill="#4a8ff0" fill-opacity="0.5" stroke="#ffffff" stroke-width="1.5"/>`;
+    s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">${drawCursor.rx.toFixed(1)}, ${drawCursor.ry.toFixed(1)} m</text>`;
   }
   return s;
 }
@@ -467,6 +614,11 @@ function wireDrawEvents(vp) {
   svgEl.addEventListener('click', handleDrawClick);
   svgEl.addEventListener('mousemove', handleDrawMove);
   svgEl.addEventListener('dblclick', handleDrawDblClick);
+  // mouseleave halts edge auto-pan when the cursor exits the canvas
+  // (otherwise the RAF loop keeps panning indefinitely on stale
+  // coordinates). It's also the right semantic: no cursor in the
+  // band → no edge-pan.
+  svgEl.addEventListener('mouseleave', stopEdgePan);
   // Pan: middle-button or Space + left-button. Middle-button still
   // gets clicked through, so guard in handleDrawPanStart.
   svgEl.addEventListener('pointerdown', handleDrawPanStart);

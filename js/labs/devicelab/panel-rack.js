@@ -19,6 +19,7 @@ import { state } from '../../app-state.js';
 import { emit } from '../../shared/events.js';
 import { buildRackGroup } from '../../graphics/rack-render.js';
 import { bindLab } from '../../shared/lab-storage.js';
+import { listCustomRooms, updateCustomRoom } from '../../shared/custom-rooms.js';
 
 // DeviceLAB-namespaced localStorage. Persists in-progress UI state
 // across browser-close → reopen: the half-built _currentRack and
@@ -129,6 +130,11 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
         <div class="rack-preview" id="rack-preview"></div>
         <div class="rack-slot-list" id="rack-slot-list"></div>
         <div class="rack-mid-actions">
+          <label class="rack-target-label" for="rack-target-room">Place in:</label>
+          <select id="rack-target-room" class="rack-target-room"
+                  title="Pick which room receives this rack. The current scene shows it live in 3D the moment you click Place. A saved custom room stores the rack inside that room's saved entry — it appears in 3D when you click that room's chip in RoomLAB.">
+            <option value="__current__">Current scene</option>
+          </select>
           <button class="rack-action rack-action-place" id="rack-action-place" disabled>Place in room</button>
           <button class="rack-action rack-action-discard" id="rack-action-discard" disabled>Discard rack</button>
         </div>
@@ -157,6 +163,7 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
   renderAmpList(savedSearch);
   renderRackMid();
   renderSystemOverview();
+  renderTargetRoomSelect();
   mountPreview();
 
   const searchInput = document.getElementById('rack-amp-search');
@@ -176,6 +183,21 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
     resizePreview();
     updatePreview();
   });
+  // The router lazy-mounts DeviceLAB while its container is still
+  // display:none, so the initial mountPreview() reads clientWidth=0
+  // and the WebGL renderer comes up mis-sized → the preview ends up
+  // blank. Force a resize + re-render every time the device route
+  // becomes visible. Also refresh the place-target dropdown so saved
+  // rooms created while the user was on RoomLAB show up here.
+  document.addEventListener('route:change', (e) => {
+    if (e.detail?.to !== 'device') return;
+    requestAnimationFrame(() => {
+      resizePreview();
+      updatePreview();
+      renderTargetRoomSelect();
+      renderSystemOverview();
+    });
+  });
 }
 
 // ---- 3D preview (isolated Three.js scene) ------------------------------
@@ -187,6 +209,7 @@ let _previewRackGroup = null;
 let _previewRAF = 0;
 
 function mountPreview() {
+  console.info('[devicelab] mountPreview — build 2026-04-29a');
   const host = document.getElementById('rack-preview');
   if (!host) return;
   // Renderer with tone mapping so the metallic frame can pick up
@@ -387,9 +410,21 @@ function renderAmpList(filterText) {
 function startNewRack(rackKey) {
   const def = _rackCatalogue?.racks?.[rackKey];
   if (!def) return;
+  // Ask the user for a name up front — pros usually have a labelling
+  // convention (Lobby Amp Rack, FOH Main, BoH Backup) and want it set
+  // before they start dropping amps in. Empty input falls back to a
+  // generic "<U>U rack" label so the workflow isn't blocked.
+  let userLabel = window.prompt(
+    `Name this rack (optional) — e.g. Lobby Amp Rack, FOH Main, BoH Backup`,
+    ''
+  ) || null;
+  if (typeof userLabel === 'string') {
+    userLabel = userLabel.trim();
+    if (userLabel.length === 0) userLabel = null;
+  }
   _currentRack = {
     id: 'R' + Date.now().toString(36),
-    label: `${def.u}U rack`,
+    label: userLabel || `${def.u}U rack`,
     rackModelKey: rackKey,
     position: { x: 0.6, y: 0.6, z: 0 },     // sensible corner default
     yaw_deg: 0,
@@ -504,20 +539,76 @@ function renderRackMid() {
   updatePreview();
 }
 
+// Populate the place-target dropdown with "Current scene" + every
+// saved custom room. Called on mount and after each save mutates the
+// list (place to a saved room → rebuild so its rack count reflects).
+function renderTargetRoomSelect() {
+  const sel = document.getElementById('rack-target-room');
+  if (!sel) return;
+  const previous = sel.value || '__current__';
+  const sceneLabel = (typeof state.projectName === 'string' && state.projectName.trim())
+    ? state.projectName.trim()
+    : 'Untitled scene';
+  const sceneRackCount = (state.rackSystem?.racks ?? []).length;
+  const opts = [
+    `<option value="__current__">Current scene · ${escapeHtml(sceneLabel)} (${sceneRackCount} rack${sceneRackCount === 1 ? '' : 's'})</option>`,
+  ];
+  const savedRooms = listCustomRooms();
+  // Diagnostic — if the dropdown looks empty after creating a custom
+  // room, this log tells you whether the localStorage read came back
+  // empty (storage issue) or returned entries (rendering issue).
+  console.info('[devicelab] dropdown refresh — saved rooms:',
+    savedRooms.length, savedRooms.map(e => e.roomName));
+  for (const entry of savedRooms) {
+    const n = (entry.rackSystem?.racks ?? []).length;
+    const label = entry.roomName || 'Untitled';
+    const proj = entry.projectName ? ` · ${entry.projectName}` : '';
+    opts.push(
+      `<option value="${escapeAttr(entry.id)}">Saved: ${escapeHtml(label)}${escapeHtml(proj)} (${n} rack${n === 1 ? '' : 's'})</option>`
+    );
+  }
+  sel.innerHTML = opts.join('');
+  // Restore previous selection if it still exists, else fall back to current.
+  if ([...sel.options].some(o => o.value === previous)) sel.value = previous;
+  else sel.value = '__current__';
+}
+
 function placeCurrentRack() {
   if (!_currentRack || _currentRack.slots.length === 0) return;
-  ensureRackSystem().racks.push(JSON.parse(JSON.stringify(_currentRack)));
+  const targetEl = document.getElementById('rack-target-room');
+  const target = targetEl?.value || '__current__';
+  const rackCopy = JSON.parse(JSON.stringify(_currentRack));
+
+  if (target === '__current__') {
+    // Live placement: into state.rackSystem so RoomLAB renders it
+    // immediately when the user flips back.
+    ensureRackSystem().racks.push(rackCopy);
+    emit('rack:changed');
+  } else {
+    // Saved-room placement: append to that entry's rackSystem in
+    // localStorage. The rack only appears in 3D once the user clicks
+    // that room's chip in RoomLAB (which loads its rackSystem into
+    // state). No live emit because state.rackSystem isn't touched.
+    const entry = listCustomRooms().find(e => e.id === target);
+    if (entry) {
+      const existingRacks = Array.isArray(entry.rackSystem?.racks) ? entry.rackSystem.racks : [];
+      updateCustomRoom(target, {
+        rackSystem: { racks: [...existingRacks, rackCopy] },
+      });
+    }
+  }
+
   _currentRack = null;
   persistCurrentRack();   // clear the in-progress slot in lab storage
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
   updatePreview();
   renderSystemOverview();
-  // Live shared state — RoomLAB's scene listens for rack:changed and
-  // rebuilds racksGroup, so flipping to #/room shows the placed rack
-  // immediately, no reload.
-  emit('rack:changed');
-  showHandoffToast();
+  renderTargetRoomSelect();
+  // emit('rack:changed') already fired inside the __current__ branch.
+  // No event for saved-room placements — state.rackSystem wasn't
+  // touched, so no live re-render is needed.
+  showHandoffToast(target);
 }
 
 function discardCurrentRack() {
@@ -573,14 +664,26 @@ function renderSystemOverview() {
 // jump to RoomLAB so the user actually sees the rack land in the
 // scene. Secondary path is "Stay" which auto-dismisses after 6 s so
 // nothing clutters the UI permanently if they want to keep building.
-function showHandoffToast() {
+function showHandoffToast(target = '__current__') {
   document.querySelectorAll('.rl-toast').forEach(t => t.remove());
   const el = document.createElement('div');
   el.className = 'rl-toast rl-toast-ok rl-toast-handoff';
-  el.innerHTML = `
-    <span class="rl-toast-msg">Rack placed in your room.</span>
-    <a class="rl-toast-action" href="#/room">View in RoomLAB →</a>
-  `;
+  if (target === '__current__') {
+    // Live placement: rack is already in state, prompt user to view it.
+    el.innerHTML = `
+      <span class="rl-toast-msg">Rack placed in current scene.</span>
+      <a class="rl-toast-action" href="#/room">View in RoomLAB →</a>
+    `;
+  } else {
+    // Saved-room placement: rack lives in that room's saved entry,
+    // user needs to click the chip in RoomLAB to load it.
+    const entry = listCustomRooms().find(e => e.id === target);
+    const name = entry?.roomName || 'Saved room';
+    el.innerHTML = `
+      <span class="rl-toast-msg">Rack saved to <strong>${escapeHtml(name)}</strong>. Click that room's chip in RoomLAB to load it.</span>
+      <a class="rl-toast-action" href="#/room">Open RoomLAB →</a>
+    `;
+  }
   document.body.appendChild(el);
   void el.offsetHeight;
   el.classList.add('show');

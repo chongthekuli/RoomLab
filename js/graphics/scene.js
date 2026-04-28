@@ -1104,29 +1104,28 @@ function initWalkthrough() {
   };
   tpController.onAnimate = applyAvatarAnimation;
 
-  // --- Async GLTF character load (graceful fallback) ---
-  // Kick off loading assets/models/hitman.glb in the background. If it
-  // resolves, swap the procedural primitive avatar for the rigged GLTF +
-  // AnimationMixer. If it 404s / fails to parse / is blocked by CORS,
-  // keep the procedural avatar — scene stays playable either way.
-  loadCharacterRig('assets/models/hitman.glb')
-    .then(rig => {
-      riggedAvatar = rig;
-      // Remove procedural avatar from scene, add rigged root at the same
-      // position / rotation so swap is visually seamless.
-      rig.root.position.copy(avatar.position);
-      rig.root.rotation.copy(avatar.rotation);
-      scene.remove(avatar);
-      scene.add(rig.root);
-      tpController.character = rig.root;
-      shadowsNeedRefresh = true;
-      // eslint-disable-next-line no-console
-      console.info('[walkthrough] loaded rigged character:', rig.clipNames);
-    })
-    .catch(err => {
-      // eslint-disable-next-line no-console
-      console.info('[walkthrough] hitman.glb not available, using procedural avatar:', err?.message ?? err);
-    });
+  // --- Async GLTF character load — disabled until an asset ships ---
+  // The walkthrough's procedural primitive avatar is fully playable; a
+  // rigged-character asset was never bundled. Even a HEAD probe still
+  // prints the 4xx response in DevTools (Chrome logs every non-2xx
+  // regardless of whether the JS ignores it), so the only way to keep
+  // the console clean is to not make the request at all.
+  //
+  // To enable: drop a glTF/GLB rigged biped (Mixamo / Ready-Player-Me /
+  // any .glb with idle / walk / run clips) at `assets/models/hitman.glb`,
+  // then re-enable the load by uncommenting the block below.
+  //
+  // loadCharacterRig('assets/models/hitman.glb')
+  //   .then(rig => {
+  //     riggedAvatar = rig;
+  //     rig.root.position.copy(avatar.position);
+  //     rig.root.rotation.copy(avatar.rotation);
+  //     scene.remove(avatar);
+  //     scene.add(rig.root);
+  //     tpController.character = rig.root;
+  //     shadowsNeedRefresh = true;
+  //   })
+  //   .catch(err => console.info('[walkthrough] rigged avatar unavailable:', err?.message ?? err));
 }
 
 function placeAvatarAtDefault() {

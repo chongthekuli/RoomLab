@@ -5,6 +5,18 @@ import { importDxfFile } from '../physics/dxf-import.js';
 import { saveProjectToDownload, loadProjectFromFile } from '../io/project-file.js';
 import { encodeShareLink, buildShareUrl } from '../io/share-link.js';
 import { triggerPrint } from './print-report.js';
+import { listCustomRooms, saveCustomRoom, getCustomRoomById, deleteCustomRoom, updateCustomRoom } from '../shared/custom-rooms.js';
+
+// Identity of the saved-custom-room entry the user is currently
+// editing (or null when working on a preset / template / freshly-
+// loaded scene). Set when the user starts drawing a new custom
+// room or clicks an existing chip; cleared when they switch to a
+// preset/template/load.
+let activeCustomRoomId = null;
+// Names captured from the two-prompt flow, held until the polygon
+// closes (roomshape:closed) so the new entry gets the right labels.
+let pendingProjectName = null;
+let pendingRoomName = null;
 
 const RECT_SURFACE_LABELS = [
   ['floor',      'Floor'],
@@ -27,16 +39,7 @@ export function mountRoomPanel({ materials }) {
   materialsRef = materials;
   const root = document.getElementById('panel-room');
   root.innerHTML = `
-    <div class="room-head">
-      <h2>Room</h2>
-      <div class="room-head-actions">
-        <button id="btn-save-project" class="btn-save" title="Save the entire project (room, speakers, listeners, zones, EQ, ambient noise) to a .roomlab.json file">💾 Save</button>
-        <button id="btn-load-project" class="btn-load" title="Load a previously saved .roomlab.json project file">📂 Load</button>
-        <button id="btn-share-link" class="btn-share" aria-label="share scene as link" title="copy a URL that opens this exact scene — paste into Slack or email">🔗 Share</button>
-        <button id="btn-print-report" class="btn-print" aria-label="print scene report" title="open the browser print dialog with a one-page design summary (also Ctrl/Cmd-P)">🖨 Print</button>
-        <input type="file" id="file-roomlab" accept=".json,.roomlab.json,application/json" hidden />
-      </div>
-    </div>
+    <h2>Room</h2>
     <div class="picker-row">
       <span class="picker-label" title="Signature pre-built scenes that load with their full geometry, audience, and PA system as authored.">Presets</span>
       <div class="picker-buttons" id="preset-row"></div>
@@ -49,6 +52,7 @@ export function mountRoomPanel({ materials }) {
       <span class="picker-label" title="Draw your own room outline on the 2D floor plan — click to place vertices, click point 1 to close the loop. Snap is 0.5 m.">Custom</span>
       <div class="picker-buttons">
         <button id="btn-draw-custom-room" class="btn-custom-draw" title="Open the 2D floor plan in draw mode. Click to place vertices, click point 1 to close.">✎ Draw custom room</button>
+        <div id="custom-saved-row" class="custom-saved-row"></div>
       </div>
     </div>
     <div class="import-row">
@@ -108,29 +112,39 @@ export function mountRoomPanel({ materials }) {
   // concept 3 …) before drawing — the name flows through save/share/
   // print exports.
   root.querySelector('#btn-draw-custom-room').addEventListener('click', () => {
-    // Native prompt is the right tool here — accessible, keyboard-driven,
-    // works on touch and screen readers, and we're asking for a single
-    // line of text. A custom inline editor adds clicks without value.
-    let name = window.prompt('Project name (optional) — e.g. Hospital Serdang', '') || null;
-    if (typeof name === 'string') {
-      name = name.trim();
-      if (name.length === 0) name = null;
+    // Two prompts so the project (overall design file) and the room
+    // (specific space being drawn) are tracked separately. Both
+    // optional — empty input → null. Project name shows in the top
+    // header pill; room name labels the saved-custom-room chip the
+    // user can click later to return to this geometry.
+    let projName = window.prompt('Project name (optional) — e.g. Hospital Serdang', '') || null;
+    if (typeof projName === 'string') {
+      projName = projName.trim();
+      if (projName.length === 0) projName = null;
     }
-    applyBlankCustomRoom({ projectName: name });
+    let roomName = window.prompt('Room name (optional) — e.g. Lobby, Atrium 3F, Main hall', '') || null;
+    if (typeof roomName === 'string') {
+      roomName = roomName.trim();
+      if (roomName.length === 0) roomName = null;
+    }
+    pendingProjectName = projName;
+    pendingRoomName = roomName;
+    activeCustomRoomId = null;     // a fresh draw starts a new entry
+    applyBlankCustomRoom({ projectName: projName });
     activeTemplateKey = null;
     render();
     emit('scene:reset');     // panels rebuild — the previous scene's data is gone
     emit('room:changed');
-    // Switch viewport to the 2D Floor plan tab — draw mode lives there.
-    // Start the draw flow on the next tick so the tab swap completes.
     document.querySelector('.vp-tab[data-view="2d"]')?.click();
     setTimeout(() => startDrawCustomShape(), 50);
   });
 
-  // Save / Load — save dumps state to a .roomlab.json file via Blob
-  // download; load reads a file back through deserializeProject and
-  // emits scene:reset so every panel rebuilds against the new state.
-  root.querySelector('#btn-save-project').addEventListener('click', () => {
+  // Save / Load / Share / Print buttons live in the top header now
+  // (rendered by js/shared/header-nav.js so they're visible on every
+  // Lab route). Handlers are still bound here because RoomLAB owns
+  // the scene state these actions operate on; the click bindings
+  // attach when RoomLAB mounts.
+  document.getElementById('btn-save-project')?.addEventListener('click', () => {
     try {
       const filename = saveProjectToDownload();
       showStatus(`Saved as ${filename}`, 'ok');
@@ -139,10 +153,7 @@ export function mountRoomPanel({ materials }) {
     }
   });
 
-  // Print — open the browser print dialog with a one-page design summary.
-  // Cmd/Ctrl-P also works (the print-report module listens to beforeprint
-  // regardless of how the dialog was triggered).
-  root.querySelector('#btn-print-report').addEventListener('click', () => {
+  document.getElementById('btn-print-report')?.addEventListener('click', () => {
     try {
       triggerPrint();
     } catch (err) {
@@ -150,12 +161,35 @@ export function mountRoomPanel({ materials }) {
     }
   });
 
-  // After a custom-shape draw closes, scroll the height input into view
-  // and focus + select-all so the user can replace it with one keystroke.
-  // Per Maya's §7: refused a modal "set room height" dialog — modal would
-  // block the user from looking at the floor plan they just drew.
+  // After a custom-shape draw closes:
+  //   1. Persist the custom room to localStorage so the user can come
+  //      back to it later via the chip in the CUSTOM row (the names
+  //      come from the two prompts captured in pendingProjectName /
+  //      pendingRoomName when they clicked Draw custom room).
+  //   2. Scroll the height input into view and focus + select-all so
+  //      the user can replace it with one keystroke. Per Maya's §7:
+  //      refused a modal "set room height" dialog — modal would block
+  //      the user from looking at the floor plan they just drew.
   document.addEventListener('roomshape:closed', () => {
-    // Defer one tick so the panel re-renders to the custom shape first.
+    try {
+      // Deep-clone so the saved entry is independent of further edits.
+      const roomSnapshot = JSON.parse(JSON.stringify(state.room));
+      const rackSnapshot = JSON.parse(JSON.stringify(state.rackSystem ?? { racks: [] }));
+      const entry = saveCustomRoom({
+        projectName: pendingProjectName,
+        roomName: pendingRoomName,
+        room: roomSnapshot,
+        rackSystem: rackSnapshot,
+      });
+      activeCustomRoomId = entry.id;
+      // Re-render the room panel so the new chip appears immediately.
+      render();
+    } catch (err) {
+      console.warn('failed to persist custom room', err);
+    }
+    pendingProjectName = null;
+    pendingRoomName = null;
+
     setTimeout(() => {
       const heightInput = document.querySelector('#shape-params input[data-sf="height_m"]');
       if (heightInput) {
@@ -170,7 +204,7 @@ export function mountRoomPanel({ materials }) {
   // scenes (pavilion-class, ~70 KB encoded) get a "use Save instead"
   // banner. Clipboard write may silently fail on Safari outside a user
   // gesture chain — surface the URL inline as the fallback.
-  root.querySelector('#btn-share-link').addEventListener('click', async () => {
+  document.getElementById('btn-share-link')?.addEventListener('click', async () => {
     const { hash, chars, tooLarge, bytes } = encodeShareLink();
     if (tooLarge) {
       showStatus(`scene too large for a link (${(bytes / 1024).toFixed(1)} KB) — use 💾 Save instead`, 'err');
@@ -186,9 +220,9 @@ export function mountRoomPanel({ materials }) {
       showStatus(`couldn't auto-copy — copy this URL manually:\n${url}`, 'err');
     }
   });
-  const projectFileInput = root.querySelector('#file-roomlab');
-  root.querySelector('#btn-load-project').addEventListener('click', () => projectFileInput.click());
-  projectFileInput.addEventListener('change', async (e) => {
+  const projectFileInput = document.getElementById('file-roomlab');
+  document.getElementById('btn-load-project')?.addEventListener('click', () => projectFileInput?.click());
+  projectFileInput?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     projectFileInput.value = ''; // allow reloading the same file
     if (!file) return;
@@ -301,7 +335,79 @@ function render() {
   renderShapeParams();
   renderCeilingParams();
   renderSurfaceMaterials();
+  renderSavedCustomRooms();
 }
+
+// Render one chip per saved custom room next to the "Draw custom
+// room" button. Click loads the entry; the × button deletes it.
+// The currently-active entry (if any) is highlighted so the user
+// can see at a glance which saved room they're working on.
+function renderSavedCustomRooms() {
+  const host = document.getElementById('custom-saved-row');
+  if (!host) return;
+  const entries = listCustomRooms();
+  if (entries.length === 0) { host.innerHTML = ''; return; }
+  host.innerHTML = entries.map(e => {
+    const isActive = e.id === activeCustomRoomId;
+    const label = escapeHtml(e.roomName || 'Untitled');
+    const proj = e.projectName ? escapeHtml(e.projectName) : '';
+    const tooltip = proj ? `${proj} · ${label}` : label;
+    return `
+      <span class="custom-chip${isActive ? ' active' : ''}" data-cr-id="${e.id}" title="${escapeAttr(tooltip)}">
+        <button class="custom-chip-load" type="button">${label}</button>
+        <button class="custom-chip-delete" type="button" title="Delete this saved custom room" aria-label="Delete">×</button>
+      </span>
+    `;
+  }).join('');
+
+  host.querySelectorAll('.custom-chip-load').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.parentElement?.dataset.crId;
+      if (id) loadCustomRoomById(id);
+    });
+  });
+  host.querySelectorAll('.custom-chip-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.parentElement?.dataset.crId;
+      if (!id) return;
+      if (!window.confirm('Delete this saved custom room?')) return;
+      deleteCustomRoom(id);
+      if (activeCustomRoomId === id) activeCustomRoomId = null;
+      renderSavedCustomRooms();
+    });
+  });
+}
+
+function loadCustomRoomById(id) {
+  const entry = getCustomRoomById(id);
+  if (!entry) return;
+  // Reset the scene first so the previous preset's sources / listeners /
+  // zones don't survive the swap (same discipline as preset / template
+  // switching — see js/state/scene-lifecycle.js).
+  applyBlankCustomRoom({ projectName: entry.projectName ?? null });
+  // Overlay the saved geometry on top of the freshly-blanked room.
+  Object.assign(state.room, JSON.parse(JSON.stringify(entry.room)));
+  // Restore the saved-room's rackSystem so racks placed via DeviceLAB
+  // into this saved entry land in the live scene now. Empty default
+  // when the entry pre-dates the rackSystem-on-saved-rooms feature.
+  state.rackSystem = entry.rackSystem
+    ? JSON.parse(JSON.stringify(entry.rackSystem))
+    : { racks: [] };
+  activeCustomRoomId = entry.id;
+  activeTemplateKey = null;
+  render();
+  emit('scene:reset');
+  emit('room:changed');
+  emit('rack:changed');   // 3D scene rebuilds racksGroup with the loaded set
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
 
 function renderShapeParams() {
   const root = document.getElementById('shape-params');
@@ -528,6 +634,7 @@ function applyPreset(key) {
   applyPresetToState(key);
   // Presets have fixed geometry — no template regen on dim changes.
   activeTemplateKey = null;
+  activeCustomRoomId = null;
   render();
   // scene:reset tells every panel/viewport that state arrays were replaced wholesale.
   // room:changed kept for listeners that only care about room geometry.
@@ -538,6 +645,7 @@ function applyPreset(key) {
 function applyTemplate(key) {
   applyTemplateToState(key);
   activeTemplateKey = key;
+  activeCustomRoomId = null;
   render();
   emit('scene:reset');
   emit('room:changed');
@@ -603,3 +711,29 @@ on('scene:reset', () => {
   // project file dropped from a template still loses the regen behaviour,
   // which is the conservative default.
 });
+
+// Auto-sync the active saved-custom-room entry when the user mutates
+// the live scene. Without this, racks placed via DeviceLAB into the
+// "Current scene" while editing room A would be lost the moment the
+// user clicked another chip — the saved entry's rackSystem would
+// override what's in state. Debounced 300 ms to coalesce bursts.
+let _autoSyncTimer = null;
+function scheduleActiveRoomSync() {
+  if (!activeCustomRoomId) return;
+  if (_autoSyncTimer) clearTimeout(_autoSyncTimer);
+  _autoSyncTimer = setTimeout(() => {
+    _autoSyncTimer = null;
+    if (!activeCustomRoomId) return;
+    try {
+      updateCustomRoom(activeCustomRoomId, {
+        room: JSON.parse(JSON.stringify(state.room)),
+        rackSystem: JSON.parse(JSON.stringify(state.rackSystem ?? { racks: [] })),
+        projectName: state.projectName ?? null,
+      });
+    } catch (err) {
+      console.warn('failed to sync active custom room', err);
+    }
+  }, 300);
+}
+on('rack:changed', scheduleActiveRoomSync);
+on('room:changed', scheduleActiveRoomSync);

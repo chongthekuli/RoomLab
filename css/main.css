@@ -10,17 +10,76 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   border-bottom: 1px solid var(--border);
 }
 #app-header .app-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  white-space: nowrap;
+}
+#app-header .brand-text {
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
-  white-space: nowrap;
 }
+#app-header .project-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg-strong, #e5e7eb);
+  padding: 0.18rem 0.55rem;
+  border-radius: 4px;
+  background: rgba(74, 163, 255, 0.12);
+  border: 1px solid rgba(74, 163, 255, 0.32);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#app-header .project-name[hidden] { display: none; }
 #app-header .lab-nav {
   display: flex;
   gap: 4px;
   align-items: stretch;
+}
+/* Header-action buttons — Save / Load / Share / Print on the far right.
+   Stay compact so they don't squeeze the nav at narrow widths. */
+#app-header .header-actions {
+  display: flex;
+  gap: 0.3rem;
+  margin-left: auto;
+  align-items: center;
+}
+#app-header .header-actions button {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.32rem 0.65rem;
+  font-size: 0.74rem;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  font: inherit;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+#app-header .header-actions button:hover {
+  border-color: #4a515b;
+  color: var(--fg-strong, #fff);
+  background: #2a2f38;
+}
+/* Reset button — same shape as the others but visually distinct so
+   the destructive action signals itself. Compact, icon-only;
+   confirmation dialog is the real safeguard. */
+#app-header .btn-reset {
+  padding: 0.32rem 0.55rem;
+  min-width: 30px;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--muted);
+}
+#app-header .btn-reset:hover {
+  background: rgba(229, 68, 68, 0.18);
+  border-color: rgba(229, 68, 68, 0.55);
+  color: #fca5a5;
 }
 #app-header .lab-tab {
   display: flex;
@@ -950,11 +1009,6 @@ section:first-of-type h2 { margin-top: 0.3rem; }
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
-/* Special case: panel-room's h2 sits inside .room-head (with action
-   buttons on the right). The flex layout there already centres the h2
-   vertically; we just need the chevron + click affordance and the
-   click target shouldn't fight the buttons. */
-.room-head h2.panel-toggle-h2 { margin: 0; padding: 0.2rem 0.3rem; }
 .panel-collapsible.collapsed .panel-body { display: none; }
 .panel-body { /* default expanded layout — nothing to do */ }
 section h3 {
@@ -1041,6 +1095,61 @@ section h3 {
   color: #cfe7ff;
 }
 
+/* Saved-custom-room chips — wrap-flow row alongside the Draw button.
+   Each chip is `<label> <×>`. Active chip gets the accent fill so the
+   user knows which saved room they're currently editing. */
+.custom-saved-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+.custom-saved-row:empty { display: none; }
+.custom-chip {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+}
+.custom-chip:hover { border-color: #4a515b; }
+.custom-chip.active {
+  border-color: var(--accent);
+  background: rgba(74, 163, 255, 0.16);
+}
+.custom-chip-load {
+  background: transparent;
+  border: 0;
+  color: var(--fg-strong, #e5e7eb);
+  padding: 0.28rem 0.55rem;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.custom-chip-delete {
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0 0.45rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.custom-chip-delete:hover {
+  background: rgba(229, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
 /* Picker row: small left-aligned label ("Presets" / "Templates") + a
    wrap-flow row of buttons. Used in #panel-room to split the unified
    picker into signature-Presets vs parametric-Templates. */
@@ -1062,39 +1171,10 @@ section h3 {
 }
 .picker-buttons { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 
-/* Save / Load buttons in the room-panel header. The header itself
-   becomes a flex row so the buttons sit to the right of the "Room"
-   title. */
-.room-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
-}
-.room-head h2 { margin: 0; }
-.room-head-actions { display: flex; gap: 0.3rem; }
-.room-head-actions .btn-save,
-.room-head-actions .btn-load,
-.room-head-actions .btn-share,
-.room-head-actions .btn-print {
-  padding: 0.3rem 0.6rem;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  color: var(--fg-strong);
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: 0.72rem;
-  font-family: inherit;
-  letter-spacing: 0.02em;
-}
-.room-head-actions .btn-save:hover,
-.room-head-actions .btn-load:hover,
-.room-head-actions .btn-share:hover,
-.room-head-actions .btn-print:hover {
-  background: var(--border);
-  border-color: var(--border-strong);
-}
+/* Save / Load / Share / Print live in the top header now (see
+   #app-header .header-actions). The .room-head wrapper is gone
+   from panel-room.js's template; this file kept the .room-head
+   collapsible-h2 override below the panel-collapsible block. */
 
 /* Transient toast — used for "link copied" / "loaded shared scene"
    acks where the import-status banner would be too sticky. Bottom-
@@ -1713,9 +1793,32 @@ section h3 {
 .rack-slot-remove:hover { border-color: #d93a3a; color: #d93a3a; }
 .rack-mid-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 0.4rem;
   padding-top: 0.4rem;
   border-top: 1px solid var(--border);
+}
+.rack-target-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.rack-target-room {
+  flex: 1 1 220px;
+  padding: 0.42rem 0.55rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.78rem;
+}
+.rack-target-room:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.18);
 }
 .rack-action {
   flex: 1;

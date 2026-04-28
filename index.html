@@ -4,9 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RoomLAB Suite</title>
-  <link rel="stylesheet" href="css/main.css?v=173" />
-  <link rel="stylesheet" href="css/theme.css?v=173" />
-  <link rel="stylesheet" href="css/print.css?v=173" media="all" />
+  <!-- Inline empty favicon stops the default /favicon.ico fetch + 404
+       in DevTools Console. Replace with a real .ico/.svg later. -->
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="css/main.css?v=174" />
+  <link rel="stylesheet" href="css/theme.css?v=174" />
+  <link rel="stylesheet" href="css/print.css?v=174" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -24,7 +27,7 @@
        first visit; subsequent route changes are instant DOM swaps. -->
 
   <!-- ROOMLAB ROUTE -->
-  <div class="lab-route" data-route="room">
+  <div class="lab-route" id="route-room" data-route="room">
     <main id="app-root">
       <aside id="panel-left">
         <section id="panel-room"><h2>Room</h2></section>
@@ -70,14 +73,14 @@
   </div>
 
   <!-- SPEAKERLAB ROUTE -->
-  <div class="lab-route" data-route="speaker">
+  <div class="lab-route" id="route-speaker" data-route="speaker">
     <main id="speakerlab-root">
       <div id="view-speaker" class="speakerlab-view"></div>
     </main>
   </div>
 
   <!-- DEVICELAB ROUTE -->
-  <div class="lab-route" data-route="device">
+  <div class="lab-route" id="route-device" data-route="device">
     <main id="devicelab-root">
       <div id="view-rack" class="devicelab-view"></div>
     </main>
@@ -132,6 +135,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=173"></script>
+  <script type="module" src="js/main.js?v=174"></script>
 </body>
 </html>
