@@ -18,6 +18,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { state } from '../app-state.js';
 import { emit } from './events.js';
 import { buildRackGroup } from '../graphics/rack-render.js';
@@ -104,34 +105,53 @@ let _previewRAF = 0;
 function mountPreview() {
   const host = document.getElementById('rack-preview');
   if (!host) return;
-  // Renderer
+  // Renderer with tone mapping so the metallic frame can pick up
+  // highlights from the IBL environment without clipping to white.
   _previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   _previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   _previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  _previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  _previewRenderer.toneMappingExposure = 1.15;
   host.appendChild(_previewRenderer.domElement);
 
-  // Scene + camera
+  // Scene + camera. Lighter background — the previous #14171b was
+  // near-black and high-metalness materials had nothing to reflect, so
+  // the rack appeared as a black silhouette.
   _previewScene = new THREE.Scene();
-  _previewScene.background = new THREE.Color(0x14171b);
+  _previewScene.background = new THREE.Color(0x222934);
   _previewCamera = new THREE.PerspectiveCamera(35, 1, 0.05, 30);
   _previewCamera.position.set(1.6, 1.2, 2.0);
 
-  // Lighting — three-light archviz, scaled small for the rack preview
-  const hemi = new THREE.HemisphereLight(0xb8c8e0, 0x2a2620, 0.55);
+  // IBL — RoomEnvironment baked once into a PMREM texture. Without
+  // this, MeshStandardMaterials with metalness > 0.5 (our brushed
+  // steel) read as black because direct lights only contribute a
+  // fraction of the BRDF in metallic regimes. Same approach as
+  // scene.js for the main viewport.
+  const pmrem = new THREE.PMREMGenerator(_previewRenderer);
+  _previewScene.environment = pmrem.fromScene(new RoomEnvironment(_previewRenderer), 0.04).texture;
+
+  // Three-light archviz on top of IBL — IBL handles ambient fill;
+  // the directional key gives the rack a clear shadow side.
+  const hemi = new THREE.HemisphereLight(0xc4d2e6, 0x2c2924, 0.55);
   _previewScene.add(hemi);
-  const key = new THREE.DirectionalLight(0xfff4e0, 0.95);
+  const key = new THREE.DirectionalLight(0xfff4e0, 1.20);
   key.position.set(2.5, 4, 2.5);
   _previewScene.add(key);
-  const fill = new THREE.DirectionalLight(0xa8c0d8, 0.30);
+  const fill = new THREE.DirectionalLight(0xa8c0d8, 0.45);
   fill.position.set(-2, 2.5, -1.5);
   _previewScene.add(fill);
-  const ambient = new THREE.AmbientLight(0xffffff, 0.18);
-  _previewScene.add(ambient);
+  // Subtle uplight from below so the castors and base plate aren't
+  // lost in self-shadow. Real install racks live on a polished floor;
+  // the bounce light is part of how they read.
+  const uplight = new THREE.DirectionalLight(0xfae3c0, 0.18);
+  uplight.position.set(0, -2, 1);
+  _previewScene.add(uplight);
 
-  // Floor — subtle so the rack reads grounded
+  // Floor — slightly more reflective than before so the rack picks
+  // up a faint contact reflection at the castors.
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(6, 6),
-    new THREE.MeshStandardMaterial({ color: 0x1c2026, roughness: 0.85, metalness: 0.05 }),
+    new THREE.MeshStandardMaterial({ color: 0x252c36, roughness: 0.62, metalness: 0.18 }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = 0;
