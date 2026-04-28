@@ -1636,14 +1636,28 @@ function colorForAlpha(alpha) {
   return 0x3a9e5a;
 }
 
-function makeFloorCeilingShape(room) {
-  // 2D THREE.Shape in room's (x, y) state coords, centered on origin
+// 2D THREE.Shape in state coords, centred on origin. `flipY` lets the
+// caller pick the right sign for whichever rotation the resulting mesh
+// will use:
+//
+//   floor uses rotation.x = -π/2  (normal +Y; local Y → world -Z) → flipY = true
+//   ceiling uses rotation.x = +π/2 (normal -Y; local Y → world +Z) → flipY = false
+//
+// The same `planShape` was previously used for BOTH floor and ceiling,
+// which works for symmetric polygons (rectangle, regular polygon) but
+// for irregular shapes (user-drawn triangle, L-shape) the ceiling
+// renders mirrored along the Y axis vs the floor, so walls match the
+// floor outline but the ceiling sits on the wrong side. Caught when
+// the user reported a triangular custom room with walls + ceiling
+// "not aligned properly".
+function makeFloorCeilingShape(room, flipY = true) {
   const verts = roomPlanVertices(room);
   const cx = room.width_m / 2, cy = room.depth_m / 2;
+  const ySign = flipY ? -1 : 1;
   const shape = new THREE.Shape();
-  shape.moveTo(verts[0].x - cx, -(verts[0].y - cy));
+  shape.moveTo(verts[0].x - cx, ySign * (verts[0].y - cy));
   for (let i = 1; i < verts.length; i++) {
-    shape.lineTo(verts[i].x - cx, -(verts[i].y - cy));
+    shape.lineTo(verts[i].x - cx, ySign * (verts[i].y - cy));
   }
   shape.closePath();
   return shape;
@@ -1734,9 +1748,12 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     roomGroup.add(edges);
     box.dispose();
   } else {
-    // Polygon or round: use ShapeGeometry for floor/ceiling (plan shape)
-    const planShape = makeFloorCeilingShape(room);
-    const floorGeo = new THREE.ShapeGeometry(planShape);
+    // Polygon or round: use ShapeGeometry for floor/ceiling (plan shape).
+    // Floor + ceiling need DIFFERENT shapes — see makeFloorCeilingShape
+    // header. Floor's rotation.x = -π/2 maps local Y → world -Z (so the
+    // shape Y must be flipped for state-Y to land at world +Z); ceiling's
+    // rotation.x = +π/2 maps local Y → world +Z directly (no flip).
+    const floorGeo = new THREE.ShapeGeometry(makeFloorCeilingShape(room, true));
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(cx, 0.001, cz);
@@ -1745,7 +1762,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     roomGroup.add(floor);
 
     if (room.ceiling_type !== 'dome') {
-      const ceilGeo = new THREE.ShapeGeometry(planShape);
+      const ceilGeo = new THREE.ShapeGeometry(makeFloorCeilingShape(room, false));
       const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
       ceiling.rotation.x = Math.PI / 2;
       ceiling.position.set(cx, h - 0.001, cz);
