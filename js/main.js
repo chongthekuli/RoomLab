@@ -13,7 +13,8 @@ import { mountPrecisionPanel } from './ui/panel-precision.js';
 import { mountWelcomeCard } from './ui/welcome-card.js';
 import { mountSpeakerView } from './ui/speaker-detail.js';
 import { mount2DViewport } from './graphics/room-2d.js';
-import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, toggleRayViz, frameCameraToRoom, setWalkthroughMode } from './graphics/scene.js';
+import { mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe, toggleReverbField, toggleHeatmapMode, toggleRayViz, frameCameraToRoom, setRackCatalogues, setWalkthroughMode } from './graphics/scene.js';
+import { mountRackPanel } from './ui/panel-rack.js';
 
 function setupTabs() {
   const tabs = document.querySelectorAll('.vp-tab');
@@ -146,6 +147,7 @@ function setupTabs() {
       case '1': clickTab('2d'); e.preventDefault(); break;
       case '2': clickTab('3d'); e.preventDefault(); break;
       case '3': clickTab('walk'); e.preventDefault(); break;
+      case '5': clickTab('rack'); e.preventDefault(); break;
       case 'h': case 'H': click('toggle-heatmaps'); e.preventDefault(); break;
       case 'i': case 'I': click('toggle-isobars'); e.preventDefault(); break;
       case 'm': case 'M': click('toggle-stipa-mode'); e.preventDefault(); break;
@@ -160,9 +162,22 @@ function setupTabs() {
   });
 }
 
+async function loadJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Failed to load ${url}: ${r.status}`);
+  return r.json();
+}
+
 async function boot() {
   const materials = await loadMaterials();
   await Promise.all(SPEAKER_CATALOG.map(c => loadLoudspeaker(c.url)));
+
+  // Load PA-rack-builder catalogues (Felix + Carmen).
+  const [rackCatalogue, ampCatalog] = await Promise.all([
+    loadJSON('data/racks/catalogue.json').catch(e => { console.warn('rack catalogue missing', e); return null; }),
+    loadJSON('data/amplifiers/catalog.json').catch(e => { console.warn('amp catalogue missing', e); return null; }),
+  ]);
+  setRackCatalogues({ rackCatalogue, ampCatalog });
 
   // Pristine state → apply default preset
   if (state.sources.length === 0 && state.listeners.length === 0 && state.zones.length === 0) {
@@ -178,6 +193,7 @@ async function boot() {
   mountResultsPanel({ materials });
   mountPrecisionPanel({ materials });
   mountSpeakerView();
+  mountRackPanel({ rackCatalogue, ampCatalog });
 
   // "View specs" buttons on Source cards dispatch this synthetic event —
   // switch to the Speaker viewport tab so the user sees the detail view.

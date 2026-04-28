@@ -1231,6 +1231,192 @@ section h3 {
   color: var(--fg-strong);
 }
 
+/* PA Rack Builder — three-column layout inside the #view-rack viewport. */
+.rack-builder {
+  display: grid;
+  grid-template-columns: 320px 1fr 280px;
+  gap: 0.75rem;
+  height: 100%;
+  padding: 0.6rem;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.rack-col-left, .rack-col-mid, .rack-col-right {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.6rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.rack-builder h3 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0.2rem 0 0.3rem 0;
+}
+.rack-frame-list, .rack-amp-list, .rack-system-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.rack-frame-tile, .rack-amp-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.45rem 0.55rem;
+  background: var(--bg-elev-2, #1c1f24);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-strong);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.78rem;
+}
+.rack-frame-tile:hover, .rack-amp-tile:hover {
+  border-color: var(--border-strong);
+  background: var(--border);
+}
+.rack-frame-tile strong, .rack-amp-tile strong {
+  font-size: 0.84rem;
+  color: var(--fg-strong);
+}
+.rack-amp-tile-spec, .rack-amp-tile-cat {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.rack-amp-tile:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.rack-amp-filter input {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-elev-2, #1c1f24);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-strong);
+  font-family: inherit;
+  font-size: 0.78rem;
+}
+.rack-mid-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.4rem;
+}
+.rack-mid-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.rack-mid-summary {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.rack-slot-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.rack-slot {
+  display: grid;
+  grid-template-columns: 60px 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-elev-2, #1c1f24);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.rack-slot-u {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: center;
+}
+.rack-slot-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.rack-slot-body strong { font-size: 0.82rem; color: var(--fg-strong); }
+.rack-slot-body span { font-size: 0.7rem; color: var(--muted); }
+.rack-slot-remove {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.rack-slot-remove:hover { border-color: #d93a3a; color: #d93a3a; }
+.rack-mid-actions {
+  display: flex;
+  gap: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+.rack-action {
+  flex: 1;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2, #1c1f24);
+  color: var(--fg-strong);
+  font-family: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.rack-action-place {
+  background: rgba(74, 163, 255, 0.18);
+  border-color: rgba(74, 163, 255, 0.5);
+  color: #aac8ff;
+}
+.rack-action-place:hover:not(:disabled) {
+  background: rgba(74, 163, 255, 0.28);
+  border-color: #4aa3ff;
+}
+.rack-action:disabled { opacity: 0.4; cursor: not-allowed; }
+.rack-system-item {
+  position: relative;
+  padding: 0.5rem 0.6rem;
+  background: var(--bg-elev-2, #1c1f24);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+}
+.rack-system-item .pr-mute { font-size: 0.7rem; color: var(--muted); }
+.rack-system-remove {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-family: inherit;
+}
+.rack-system-remove:hover { border-color: #d93a3a; color: #d93a3a; }
+.rack-empty {
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-style: italic;
+  margin: 0.3rem 0;
+}
+
 /* Master EQ — 10-band graphic EQ at top of Sources panel. Vertical sliders,
    compact so 10 fit in the left-rail width. Bypass + Flatten in header. */
 .eq-section {

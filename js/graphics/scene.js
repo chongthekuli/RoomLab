@@ -11,6 +11,7 @@ import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, 
 import { on, emit } from '../ui/events.js';
 import { recordRayPaths, buildLineSegmentIndex } from '../physics/ray-viz.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
+import { buildRackGroup } from './rack-render.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
 import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
@@ -22,6 +23,9 @@ let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
 let aimLinesGroup, audienceGroup;
+let racksGroup = null;
+let _rackCatalogue = null;
+let _ampCatalog = null;
 let rayGroup = null;
 let _rayPathsCache = null;       // last recorded { pathData, pathOffsets, colorData, stats }
 let _rayBuildToken = 0;          // increments on every (re)build to detect stale work
@@ -143,6 +147,13 @@ export function toggleProbe(force) {
   if (probeMarker) probeMarker.visible = false;
   if (probeTooltip) probeTooltip.classList.toggle('hidden', !next);
   if (container) container.style.cursor = next ? 'crosshair' : '';
+}
+
+// PA equipment racks — caller (main.js) hands us the catalogues at boot
+// so rebuildRacks doesn't need to fetch on every rebuild.
+export function setRackCatalogues({ rackCatalogue, ampCatalog }) {
+  _rackCatalogue = rackCatalogue;
+  _ampCatalog = ampCatalog;
 }
 
 // Ray-viz toggle. Off by default — when the user clicks ON for the
@@ -290,6 +301,7 @@ export async function mount3DViewport({ materials }) {
   const REBUILD_HEATMAP = 1 << 4;
   const REBUILD_AIM = 1 << 5;
   const REBUILD_ROOM_FULL = 1 << 6;
+  const REBUILD_RACKS = 1 << 7;
   const queueRebuild = (flags) => {
     _pendingRebuild = (_pendingRebuild ?? 0) | flags;
     if (_rebuildRAF) return;
@@ -304,6 +316,7 @@ export async function mount3DViewport({ materials }) {
       if (f & REBUILD_ZONES) rebuildZones();
       if (f & REBUILD_HEATMAP) rebuildHeatmap();
       if (f & REBUILD_AIM) rebuildAimLines();
+      if (f & REBUILD_RACKS) rebuildRacks();
     });
   };
 
@@ -325,8 +338,10 @@ export async function mount3DViewport({ materials }) {
     // calling synchronously here is correct — the camera lands the same
     // frame the rebuild renders.
     frameCameraToRoom();
-    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP);
+    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_RACKS);
   });
+  // Rack-builder edits — user added/removed an amp or moved a rack.
+  on('rack:changed', () => queueRebuild(REBUILD_RACKS));
   // Master EQ change: heatmap + aim lines depend on per-band SPL; refresh
   // both. Zone/listener panels don't need re-render (state.zones is
   // unchanged) so we skip them.
@@ -2378,6 +2393,32 @@ const _aimRaycaster = new THREE.Raycaster();
 // from its acoustic center along its aim vector and terminate the line at
 // the first hit with room geometry (walls, floor, dome, bowl concrete).
 // Lines extend up to 120 m if nothing is in the path.
+// Rebuild every PA equipment rack from state.rackSystem.racks. The
+// `setRackCatalogues({ rackCatalogue, ampCatalog })` call from main.js
+// must have already run before any rebuild reaches this — racks render
+// as empty frames if the catalogue is missing (graceful degrade).
+function rebuildRacks() {
+  if (!racksGroup) {
+    racksGroup = new THREE.Group();
+    racksGroup.name = 'racks';
+    scene.add(racksGroup);
+  } else {
+    disposeGroup(racksGroup);
+  }
+  const racks = state.rackSystem?.racks ?? [];
+  if (racks.length === 0 || !_rackCatalogue) return;
+  const ampList = Array.isArray(_ampCatalog) ? _ampCatalog : [];
+  for (const rack of racks) {
+    const g = buildRackGroup(rack, ampList, _rackCatalogue);
+    // Coordinate swap from state to Three.js. State (x, y, z) where
+    // z = up; Three (x, y_up, z_depth). Same convention used everywhere
+    // else in scene.js.
+    g.position.set(rack.position?.x ?? 0, rack.position?.z ?? 0, rack.position?.y ?? 0);
+    g.rotation.y = ((rack.yaw_deg ?? 0) * Math.PI) / 180;
+    racksGroup.add(g);
+  }
+}
+
 function rebuildAimLines() {
   if (!aimLinesGroup) {
     aimLinesGroup = new THREE.Group();

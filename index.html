@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RoomLAB</title>
-  <link rel="stylesheet" href="css/main.css?v=153" />
-  <link rel="stylesheet" href="css/theme.css?v=153" />
-  <link rel="stylesheet" href="css/print.css?v=153" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=154" />
+  <link rel="stylesheet" href="css/theme.css?v=154" />
+  <link rel="stylesheet" href="css/print.css?v=154" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -37,6 +37,7 @@
           <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D View</button>
           <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walkthrough</button>
           <button class="vp-tab" data-view="speaker" title="Selected loudspeaker: full specs + polar patterns — shortcut 4">Speaker</button>
+          <button class="vp-tab" data-view="rack" title="PA Rack Builder — assemble amplifier rack and place in room — shortcut 5">PA Rack</button>
         </div>
         <div class="vp-group vp-group-layers">
           <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer — shortcut H">Heatmap</button>
@@ -56,6 +57,7 @@
         <div class="viewport-loading">Loading 3D view…</div>
       </div>
       <div id="view-speaker" class="viewport-view" hidden></div>
+      <div id="view-rack" class="viewport-view" hidden></div>
     </section>
     <aside id="panel-right">
       <section id="panel-results"><h2>Results</h2></section>
@@ -111,6 +113,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=153"></script>
+  <script type="module" src="js/main.js?v=154"></script>
 </body>
 </html>
