@@ -45,6 +45,12 @@ export function mountRoomPanel({ materials }) {
       <span class="picker-label" title="Parametric room shapes — pick a starting layout and edit the dimensions below to whatever size you need. The speakers and listener auto-scale with the room.">Templates</span>
       <div class="picker-buttons" id="template-row"></div>
     </div>
+    <div class="picker-row">
+      <span class="picker-label" title="Draw your own room outline on the 2D floor plan — click to place vertices, click point 1 to close the loop. Snap is 0.5 m.">Custom</span>
+      <div class="picker-buttons">
+        <button id="btn-draw-custom-room" class="btn-custom-draw" title="Open the 2D floor plan in draw mode. Click to place vertices, click point 1 to close.">✎ Draw custom room</button>
+      </div>
+    </div>
     <div class="import-row">
       <button id="btn-import-dxf" class="btn-import" title="Import room outline from a DXF file (DWG must be converted first)">⇪ Import DXF…</button>
       <input type="file" id="file-dxf" accept=".dxf,.dwg" hidden />
@@ -93,6 +99,28 @@ export function mountRoomPanel({ materials }) {
     btn.addEventListener('click', () => applyTemplate(key));
     templateRow.appendChild(btn);
   }
+
+  // Custom row — single button entry to the draw-custom-room flow.
+  // Clears any previous custom geometry so the user starts fresh,
+  // switches to the 2D floor-plan tab, and kicks off draw mode.
+  // (User reported the existing 3-step path — open shape dropdown,
+  //  pick Custom, see L-shape seed, click Draw — was undiscoverable.)
+  root.querySelector('#btn-draw-custom-room').addEventListener('click', () => {
+    state.room.shape = 'custom';
+    state.room.custom_vertices = null;        // clear any previous draw
+    state.room.surfaces.edges = null;
+    state.room.width_m = 10;
+    state.room.depth_m = 10;
+    state.room.height_m = state.room.height_m || 3;
+    activeTemplateKey = null;
+    render();
+    emit('room:changed');
+    // Switch viewport to the 2D Floor plan tab — the draw mode lives
+    // in that viewport. Then start the draw flow on the next tick so
+    // the tab swap completes first.
+    document.querySelector('.vp-tab[data-view="2d"]')?.click();
+    setTimeout(() => startDrawCustomShape(), 50);
+  });
 
   // Save / Load — save dumps state to a .roomlab.json file via Blob
   // download; load reads a file back through deserializeProject and

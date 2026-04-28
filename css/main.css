@@ -806,6 +806,26 @@ section h3 {
   border-color: var(--border-strong);
 }
 
+/* Custom-draw entry button — accent treatment so the "draw your own
+   room" entry point reads as a deliberate action, not a third class
+   of preset / template. */
+.btn-custom-draw {
+  padding: 0.32rem 0.7rem;
+  border: 1px dashed rgba(116, 208, 255, 0.5);
+  background: rgba(116, 208, 255, 0.08);
+  color: var(--data-cyan, #74d0ff);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-family: inherit;
+  letter-spacing: 0.02em;
+}
+.btn-custom-draw:hover {
+  background: rgba(116, 208, 255, 0.18);
+  border-color: var(--data-cyan, #74d0ff);
+  color: #cfe7ff;
+}
+
 /* Picker row: small left-aligned label ("Presets" / "Templates") + a
    wrap-flow row of buttons. Used in #panel-room to split the unified
    picker into signature-Presets vs parametric-Templates. */
