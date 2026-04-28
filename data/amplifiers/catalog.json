@@ -3,10 +3,14 @@
     "id": "qd2025",
     "model": "QD2025",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/qd2000",
-    "category": ["voice-alarm", "70V/100V line", "Class-D"],
+    "category": [
+      "voice-alarm",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
-      "rackUnits": 1,
+      "rackUnits": 2,
       "width_mm": null,
       "height_mm": null,
       "depth_mm": null,
@@ -21,8 +25,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "Phoenix 3-pin"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "Phoenix 3-pin"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "High-efficiency Class D amplifiers from 250W to 1000W with auto fault sensing, RS485 remote monitoring, and smart features for centralized or decentralized PA systems.",
     "priceTier": null
@@ -31,10 +42,14 @@
     "id": "qd2050",
     "model": "QD2050",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/qd2000",
-    "category": ["voice-alarm", "70V/100V line", "Class-D"],
+    "category": [
+      "voice-alarm",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
-      "rackUnits": 1,
+      "rackUnits": 2,
       "width_mm": null,
       "height_mm": null,
       "depth_mm": null,
@@ -49,8 +64,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "Phoenix 3-pin"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "Phoenix 3-pin"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "High-efficiency Class D amplifiers from 250W to 1000W with auto fault sensing, RS485 remote monitoring, and smart features for centralized or decentralized PA systems.",
     "priceTier": null
@@ -59,10 +81,14 @@
     "id": "qd2075",
     "model": "QD2075",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/qd2000",
-    "category": ["voice-alarm", "70V/100V line", "Class-D"],
+    "category": [
+      "voice-alarm",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
-      "rackUnits": 1,
+      "rackUnits": 2,
       "width_mm": null,
       "height_mm": null,
       "depth_mm": null,
@@ -77,8 +103,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "Phoenix 3-pin"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "Phoenix 3-pin"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "High-efficiency Class D amplifiers from 250W to 1000W with auto fault sensing, RS485 remote monitoring, and smart features for centralized or decentralized PA systems.",
     "priceTier": null
@@ -87,10 +120,14 @@
     "id": "qd2100",
     "model": "QD2100",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/qd2000",
-    "category": ["voice-alarm", "70V/100V line", "Class-D"],
+    "category": [
+      "voice-alarm",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
-      "rackUnits": 1,
+      "rackUnits": 2,
       "width_mm": null,
       "height_mm": null,
       "depth_mm": null,
@@ -105,8 +142,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "Phoenix 3-pin"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "Phoenix 3-pin"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "High-efficiency Class D amplifiers from 250W to 1000W with auto fault sensing, RS485 remote monitoring, and smart features for centralized or decentralized PA systems.",
     "priceTier": null
@@ -115,7 +159,11 @@
     "id": "qp2125",
     "model": "QP2125",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/qp2000",
-    "category": ["voice-alarm", "70V/100V line", "Class-AB"],
+    "category": [
+      "voice-alarm",
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -133,8 +181,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "Phoenix 3-pin"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "Phoenix 3-pin"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Durable range of Class AB amplifiers (125W to 500W) with auto fault detection, standby relay, and RS485 remote control for reliable PA system performance.",
     "priceTier": null
@@ -143,7 +198,11 @@
     "id": "qp2250",
     "model": "QP2250",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/qp2000",
-    "category": ["voice-alarm", "70V/100V line", "Class-AB"],
+    "category": [
+      "voice-alarm",
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -161,8 +220,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "Phoenix 3-pin"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "Phoenix 3-pin"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Durable range of Class AB amplifiers (125W to 500W) with auto fault detection, standby relay, and RS485 remote control for reliable PA system performance.",
     "priceTier": null
@@ -171,7 +237,11 @@
     "id": "qp2375",
     "model": "QP2375",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/qp2000",
-    "category": ["voice-alarm", "70V/100V line", "Class-AB"],
+    "category": [
+      "voice-alarm",
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -189,8 +259,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "Phoenix 3-pin"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "Phoenix 3-pin"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Durable range of Class AB amplifiers (125W to 500W) with auto fault detection, standby relay, and RS485 remote control for reliable PA system performance.",
     "priceTier": null
@@ -199,7 +276,11 @@
     "id": "qp2500",
     "model": "QP2500",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/qp2000",
-    "category": ["voice-alarm", "70V/100V line", "Class-AB"],
+    "category": [
+      "voice-alarm",
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -217,8 +298,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "Phoenix 3-pin"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "Phoenix 3-pin"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Durable range of Class AB amplifiers (125W to 500W) with auto fault detection, standby relay, and RS485 remote control for reliable PA system performance.",
     "priceTier": null
@@ -227,7 +315,10 @@
     "id": "pa2120",
     "model": "PA2120",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/pa2000",
-    "category": ["70V/100V line", "Class-AB"],
+    "category": [
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -245,8 +336,14 @@
       "thd_pct": null,
       "snr_db": 70
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Rack mount amplifiers for commercial paging, ideal for paging, BGM, and emergency systems.",
     "priceTier": null
@@ -255,7 +352,10 @@
     "id": "pa2240",
     "model": "PA2240",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/pa2000",
-    "category": ["70V/100V line", "Class-AB"],
+    "category": [
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -273,8 +373,14 @@
       "thd_pct": null,
       "snr_db": 70
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Rack mount amplifiers for commercial paging, ideal for paging, BGM, and emergency systems.",
     "priceTier": null
@@ -283,7 +389,10 @@
     "id": "pa2360",
     "model": "PA2360",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/pa2000",
-    "category": ["70V/100V line", "Class-AB"],
+    "category": [
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -301,8 +410,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Rack mount amplifiers for commercial paging, ideal for paging, BGM, and emergency systems.",
     "priceTier": null
@@ -311,7 +426,10 @@
     "id": "pa2480",
     "model": "PA2480",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/pa2000",
-    "category": ["70V/100V line", "Class-AB"],
+    "category": [
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -329,8 +447,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Rack mount amplifiers for commercial paging, ideal for paging, BGM, and emergency systems.",
     "priceTier": null
@@ -339,7 +463,10 @@
     "id": "pa2600",
     "model": "PA2600",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/pa2000",
-    "category": ["70V/100V line", "Class-AB"],
+    "category": [
+      "70V/100V line",
+      "Class-AB"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -357,8 +484,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Rack mount amplifiers for commercial paging, ideal for paging, BGM, and emergency systems.",
     "priceTier": null
@@ -367,7 +500,10 @@
     "id": "dp2240",
     "model": "DP2240",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/dp2240-dp2500",
-    "category": ["70V/100V line", "Class-D"],
+    "category": [
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 1,
@@ -385,8 +521,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Compact, high-efficiency Class D power amplifiers designed for 100V line public address systems, housed in a slim 1U transformer-less chassis.",
     "priceTier": null
@@ -395,7 +537,10 @@
     "id": "dp2500",
     "model": "DP2500",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/dp2240-dp2500",
-    "category": ["70V/100V line", "Class-D"],
+    "category": [
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 1,
@@ -413,8 +558,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Compact, high-efficiency Class D power amplifiers designed for 100V line public address systems, housed in a slim 1U transformer-less chassis.",
     "priceTier": null
@@ -423,7 +574,10 @@
     "id": "dp4240",
     "model": "DP4240",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/dp4240",
-    "category": ["70V/100V line", "Class-D"],
+    "category": [
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 1,
@@ -441,8 +595,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Compact 4 x 240W Class D power amplifier designed for 100V line public address systems, built in a slim 1U transformer-less chassis for multi-zone installations.",
     "priceTier": null
@@ -451,7 +611,10 @@
     "id": "dp2212",
     "model": "DP2212",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/dp2212-dp2406",
-    "category": ["70V/100V line", "Class-D"],
+    "category": [
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 1,
@@ -469,8 +632,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Class D multi-channel amplifiers designed for matrix systems, delivering efficient performance, space savings, and reduced setup costs.",
     "priceTier": null
@@ -479,7 +648,10 @@
     "id": "dp2406",
     "model": "DP2406",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/dp2212-dp2406",
-    "category": ["70V/100V line", "Class-D"],
+    "category": [
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -497,8 +669,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Most suitable for application in Matrix paging setup, where multiple channels of amplifiers are required.",
     "priceTier": null
@@ -507,7 +685,11 @@
     "id": "ma2060",
     "model": "MA2060",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/ma2000",
-    "category": ["mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -525,8 +707,16 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced phone jack", "RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced phone jack",
+      "RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Newly enhanced range of Class D mixing amplifiers offering improved sound quality, lower heat output, and a compact, lightweight design; ideal for boutiques, showrooms, offices, prayer halls, and meeting rooms.",
     "priceTier": null
@@ -535,7 +725,11 @@
     "id": "ma2120",
     "model": "MA2120",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/ma2000",
-    "category": ["mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -553,8 +747,16 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced phone jack", "RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced phone jack",
+      "RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Newly enhanced range of Class D mixing amplifiers offering improved sound quality, lower heat output, and a compact, lightweight design; ideal for boutiques, showrooms, offices, prayer halls, and meeting rooms.",
     "priceTier": null
@@ -563,7 +765,11 @@
     "id": "ma2024",
     "model": "MA2024",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/ma2000",
-    "category": ["mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -581,8 +787,16 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced phone jack", "RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced phone jack",
+      "RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Newly enhanced range of Class D mixing amplifiers offering improved sound quality, lower heat output, and a compact, lightweight design; ideal for boutiques, showrooms, offices, prayer halls, and meeting rooms.",
     "priceTier": null
@@ -591,7 +805,11 @@
     "id": "ma2036",
     "model": "MA2036",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/ma2000",
-    "category": ["mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -609,8 +827,16 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced phone jack", "RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced phone jack",
+      "RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Newly enhanced range of Class D mixing amplifiers offering improved sound quality, lower heat output, and a compact, lightweight design; ideal for boutiques, showrooms, offices, prayer halls, and meeting rooms.",
     "priceTier": null
@@ -619,7 +845,12 @@
     "id": "ma2060p",
     "model": "MA2060P",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/ma2000",
-    "category": ["mixer-amplifier", "background-music", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "background-music",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -637,8 +868,20 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced phone jack", "RCA", "USB", "SD Card", "FM tuner", "Bluetooth"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced phone jack",
+      "RCA",
+      "USB",
+      "SD Card",
+      "FM tuner",
+      "Bluetooth"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "MA2000P series with built-in media player (USB, SD Card, AM/FM tuner, Bluetooth) for boutiques, showrooms, offices, prayer halls, and meeting rooms.",
     "priceTier": null
@@ -647,7 +890,12 @@
     "id": "ma2120p",
     "model": "MA2120P",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/ma2000",
-    "category": ["mixer-amplifier", "background-music", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "background-music",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -665,8 +913,20 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced phone jack", "RCA", "USB", "SD Card", "FM tuner", "Bluetooth"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced phone jack",
+      "RCA",
+      "USB",
+      "SD Card",
+      "FM tuner",
+      "Bluetooth"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "MA2000P series with built-in media player (USB, SD Card, AM/FM tuner, Bluetooth) for boutiques, showrooms, offices, prayer halls, and meeting rooms.",
     "priceTier": null
@@ -675,7 +935,12 @@
     "id": "ma2024p",
     "model": "MA2024P",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/ma2000",
-    "category": ["mixer-amplifier", "background-music", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "background-music",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -693,8 +958,20 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced phone jack", "RCA", "USB", "SD Card", "FM tuner", "Bluetooth"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced phone jack",
+      "RCA",
+      "USB",
+      "SD Card",
+      "FM tuner",
+      "Bluetooth"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "MA2000P series with built-in media player (USB, SD Card, AM/FM tuner, Bluetooth) for boutiques, showrooms, offices, prayer halls, and meeting rooms.",
     "priceTier": null
@@ -703,7 +980,12 @@
     "id": "ma2036p",
     "model": "MA2036P",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/ma2000",
-    "category": ["mixer-amplifier", "background-music", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "background-music",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -721,8 +1003,20 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced phone jack", "RCA", "USB", "SD Card", "FM tuner", "Bluetooth"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced phone jack",
+      "RCA",
+      "USB",
+      "SD Card",
+      "FM tuner",
+      "Bluetooth"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "MA2000P series with built-in media player (USB, SD Card, AM/FM tuner, Bluetooth) for boutiques, showrooms, offices, prayer halls, and meeting rooms.",
     "priceTier": null
@@ -731,7 +1025,11 @@
     "id": "mc2106",
     "model": "MC2106",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/mc2000",
-    "category": ["mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -749,8 +1047,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["unbalanced phone jack", "RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "unbalanced phone jack",
+      "RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Range of basic Class D mixing amplifiers designed for small-scale PA setups where speaker zoning and 24V backup are not required; ideal for meeting rooms, boutiques, retail outlets, prayer halls, and showrooms.",
     "priceTier": null
@@ -759,7 +1064,11 @@
     "id": "mc2112",
     "model": "MC2112",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/mc2000",
-    "category": ["mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -777,8 +1086,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["unbalanced phone jack", "RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "unbalanced phone jack",
+      "RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Range of basic Class D mixing amplifiers designed for small-scale PA setups where speaker zoning and 24V backup are not required; ideal for meeting rooms, boutiques, retail outlets, prayer halls, and showrooms.",
     "priceTier": null
@@ -787,7 +1103,11 @@
     "id": "mc2024",
     "model": "MC2024",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/mc2000",
-    "category": ["mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -805,8 +1125,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["unbalanced phone jack", "RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "unbalanced phone jack",
+      "RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Range of basic Class D mixing amplifiers designed for small-scale PA setups where speaker zoning and 24V backup are not required; ideal for meeting rooms, boutiques, retail outlets, prayer halls, and showrooms.",
     "priceTier": null
@@ -815,7 +1142,11 @@
     "id": "mc2036",
     "model": "MC2036",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/mc2000",
-    "category": ["mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": 2,
@@ -833,8 +1164,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["unbalanced phone jack", "RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "unbalanced phone jack",
+      "RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Range of basic Class D mixing amplifiers designed for small-scale PA setups where speaker zoning and 24V backup are not required; ideal for meeting rooms, boutiques, retail outlets, prayer halls, and showrooms.",
     "priceTier": null
@@ -843,7 +1181,10 @@
     "id": "pa320",
     "model": "PA320",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/pa320",
-    "category": ["low-impedance", "Class-D"],
+    "category": [
+      "low-impedance",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "desktop",
       "rackUnits": null,
@@ -861,8 +1202,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["unbalanced RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "unbalanced RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Compact 20W mini amplifier for 8 Ohm speakers, perfect for localized audio setups such as hotel bathrooms, counters, and remote speaker zones.",
     "priceTier": null
@@ -871,7 +1218,10 @@
     "id": "pa322",
     "model": "PA322",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/pa322",
-    "category": ["low-impedance", "Class-D"],
+    "category": [
+      "low-impedance",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "desktop",
       "rackUnits": null,
@@ -889,8 +1239,15 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["unbalanced RCA", "balanced line"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "unbalanced RCA",
+      "balanced line"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Compact 20W mini amplifier with dual input, emergency override, and remote control - perfect for localized audio in hotel bathrooms, lounges, and classrooms; delivers clear and reliable sound at 4 or 8 Ohms for one or two speakers.",
     "priceTier": null
@@ -899,7 +1256,10 @@
     "id": "pa330",
     "model": "PA330",
     "productUrl": "https://www.ampereselectronics.com/amplifiers/pa330",
-    "category": ["70V/100V line", "Class-D"],
+    "category": [
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "desktop",
       "rackUnits": null,
@@ -917,8 +1277,14 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["unbalanced RCA"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "unbalanced RCA"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "Compact 30W mini amplifier with RCA input and volume control for 100V speaker systems, perfect for decentralized PA setups in resorts, chalets, or pole-mounted installations; remote amplifier in a decentralised PA system.",
     "priceTier": null
@@ -927,7 +1293,12 @@
     "id": "evm8810",
     "model": "EVM8810",
     "productUrl": "https://www.ampereselectronics.com/voice-alarm/evm8810",
-    "category": ["voice-alarm", "mixer-amplifier", "70V/100V line", "Class-D"],
+    "category": [
+      "voice-alarm",
+      "mixer-amplifier",
+      "70V/100V line",
+      "Class-D"
+    ],
     "formFactor": {
       "type": "rack-mount",
       "rackUnits": null,
@@ -945,8 +1316,20 @@
       "thd_pct": null,
       "snr_db": null
     },
-    "inputs": ["balanced XLR", "unbalanced RCA", "emergency mic", "USB", "SD Card", "FM tuner", "Bluetooth"],
-    "network": { "dante": false, "aes67": false, "snmp": false },
+    "inputs": [
+      "balanced XLR",
+      "unbalanced RCA",
+      "emergency mic",
+      "USB",
+      "SD Card",
+      "FM tuner",
+      "Bluetooth"
+    ],
+    "network": {
+      "dante": false,
+      "aes67": false,
+      "snmp": false
+    },
     "compliance": [],
     "intendedUse": "1000W, 100V 8-zone Voice Alarm Controller with BGM, paging, voice evacuation, media player, emergency mic, siren tone generator, and pre-recorded messages.",
     "priceTier": null

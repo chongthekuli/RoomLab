@@ -16,8 +16,11 @@
 //     room" then switches to 3D View. C3 of the original spec adds the
 //     isolated rack-scene preview here.
 
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { state } from '../app-state.js';
 import { emit } from './events.js';
+import { buildRackGroup } from '../graphics/rack-render.js';
 
 let _rackCatalogue = null;
 let _ampCatalog = null;
@@ -52,12 +55,13 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
           <span class="rack-mid-title" id="rack-mid-title">No rack selected</span>
           <span class="rack-mid-summary" id="rack-mid-summary"></span>
         </div>
+        <div class="rack-preview" id="rack-preview"></div>
         <div class="rack-slot-list" id="rack-slot-list"></div>
         <div class="rack-mid-actions">
           <button class="rack-action rack-action-place" id="rack-action-place" disabled>Place in room</button>
           <button class="rack-action rack-action-discard" id="rack-action-discard" disabled>Discard rack</button>
         </div>
-      </aside>
+      </section>
       <aside class="rack-col-right">
         <h3>System overview</h3>
         <div class="rack-system-list" id="rack-system-list"></div>
@@ -69,12 +73,141 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
   renderAmpList('');
   renderRackMid();
   renderSystemOverview();
+  mountPreview();
 
   document.getElementById('rack-amp-search').addEventListener('input', (e) => {
     renderAmpList(e.target.value);
   });
   document.getElementById('rack-action-place').addEventListener('click', placeCurrentRack);
   document.getElementById('rack-action-discard').addEventListener('click', discardCurrentRack);
+
+  // Re-render the preview when the user switches into the PA Rack tab —
+  // it may have been hidden while the canvas was created so the
+  // initial sizing was zero. document-level event broadcasts from
+  // setupTabs in main.js.
+  document.addEventListener('viewport:tab-changed', (e) => {
+    if (e.detail?.view === 'rack') {
+      // Defer one frame so the view is visible before resizing.
+      requestAnimationFrame(() => { resizePreview(); updatePreview(); });
+    }
+  });
+}
+
+// ---- 3D preview (isolated Three.js scene) ------------------------------
+let _previewScene = null;
+let _previewCamera = null;
+let _previewRenderer = null;
+let _previewControls = null;
+let _previewRackGroup = null;
+let _previewRAF = 0;
+
+function mountPreview() {
+  const host = document.getElementById('rack-preview');
+  if (!host) return;
+  // Renderer
+  _previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  _previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  _previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  host.appendChild(_previewRenderer.domElement);
+
+  // Scene + camera
+  _previewScene = new THREE.Scene();
+  _previewScene.background = new THREE.Color(0x14171b);
+  _previewCamera = new THREE.PerspectiveCamera(35, 1, 0.05, 30);
+  _previewCamera.position.set(1.6, 1.2, 2.0);
+
+  // Lighting — three-light archviz, scaled small for the rack preview
+  const hemi = new THREE.HemisphereLight(0xb8c8e0, 0x2a2620, 0.55);
+  _previewScene.add(hemi);
+  const key = new THREE.DirectionalLight(0xfff4e0, 0.95);
+  key.position.set(2.5, 4, 2.5);
+  _previewScene.add(key);
+  const fill = new THREE.DirectionalLight(0xa8c0d8, 0.30);
+  fill.position.set(-2, 2.5, -1.5);
+  _previewScene.add(fill);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.18);
+  _previewScene.add(ambient);
+
+  // Floor — subtle so the rack reads grounded
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(6, 6),
+    new THREE.MeshStandardMaterial({ color: 0x1c2026, roughness: 0.85, metalness: 0.05 }),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  _previewScene.add(floor);
+
+  // Controls
+  _previewControls = new OrbitControls(_previewCamera, _previewRenderer.domElement);
+  _previewControls.enableDamping = true;
+  _previewControls.dampingFactor = 0.08;
+  _previewControls.minDistance = 0.5;
+  _previewControls.maxDistance = 6;
+  _previewControls.target.set(0, 0.8, 0);
+
+  resizePreview();
+  window.addEventListener('resize', resizePreview);
+  // ResizeObserver picks up panel-column resize from CSS too
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(resizePreview).observe(host);
+  }
+
+  // Animation loop — only ticks while the tab is visible to save cycles
+  const tick = () => {
+    _previewRAF = requestAnimationFrame(tick);
+    if (!host.offsetParent) return; // hidden tab
+    _previewControls?.update();
+    _previewRenderer?.render(_previewScene, _previewCamera);
+  };
+  tick();
+
+  // Initial empty placeholder — render the floor on its own
+  updatePreview();
+}
+
+function resizePreview() {
+  const host = document.getElementById('rack-preview');
+  if (!host || !_previewRenderer || !_previewCamera) return;
+  const w = host.clientWidth || 1;
+  const h = host.clientHeight || 1;
+  if (w <= 1 || h <= 1) return;
+  _previewRenderer.setSize(w, h, false);
+  _previewCamera.aspect = w / h;
+  _previewCamera.updateProjectionMatrix();
+}
+
+function disposeRackGroup(group) {
+  group.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (m.map && !m.map.userData?.shared) m.map.dispose?.();
+        m.dispose?.();
+      }
+    }
+  });
+}
+
+function updatePreview() {
+  if (!_previewScene) return;
+  // Dispose old group
+  if (_previewRackGroup) {
+    _previewScene.remove(_previewRackGroup);
+    disposeRackGroup(_previewRackGroup);
+    _previewRackGroup = null;
+  }
+  if (!_currentRack || !_rackCatalogue) return;
+  _previewRackGroup = buildRackGroup(_currentRack, _ampCatalog || [], _rackCatalogue);
+  _previewScene.add(_previewRackGroup);
+  // Frame the camera to the rack height
+  const def = _rackCatalogue.racks[_currentRack.rackModelKey];
+  const outerH = (def?.outer_h_mm ?? 1248) / 1000;
+  _previewControls.target.set(0, outerH * 0.4, 0);
+  // Position camera at a slight 3/4 angle, distance proportional to height
+  const dist = Math.max(2.0, outerH * 1.5);
+  _previewCamera.position.set(dist * 0.7, outerH * 0.65, dist * 0.85);
+  _previewControls.update();
 }
 
 // In-progress rack the user is currently building. Lives outside state
@@ -152,6 +285,7 @@ function startNewRack(rackKey) {
   };
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
+  updatePreview();
 }
 
 function findFreeSlot(uHeight) {
@@ -249,6 +383,10 @@ function renderRackMid() {
   });
   placeBtn.disabled = _currentRack.slots.length === 0;
   discardBtn.disabled = false;
+
+  // Keep the 3D preview in sync — every renderRackMid call follows a
+  // state mutation (addAmpToRack, removeSlot, startNewRack, place, discard).
+  updatePreview();
 }
 
 function placeCurrentRack() {
@@ -258,6 +396,7 @@ function placeCurrentRack() {
   _currentRack = null;
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
+  updatePreview();
   renderSystemOverview();
   emit('rack:changed');
   // Switch viewport to 3D View so the user sees the placed rack.
@@ -269,6 +408,7 @@ function discardCurrentRack() {
   _currentRack = null;
   renderRackMid();
   renderAmpList(document.getElementById('rack-amp-search').value);
+  updatePreview();
 }
 
 function renderSystemOverview() {
