@@ -12,6 +12,19 @@ export function airAbsorptionAt(freq_hz) { return airAbsorptionDbPerM(freq_hz); 
 
 export const WALL_TRANSMISSION_LOSS_DB = 30;
 
+// Defensive cap: a real driver cannot accept more than its rated input
+// power without burning out. The Sources panel clamps user input to the
+// model's max_input_watts, but legacy saved projects (created before
+// that UI clamp shipped) may still carry over-rated values. This helper
+// is the engine-side floor — every physics reader of `power_watts`
+// goes through it so no over-rated value can leak into the SPL math.
+export function effectivePowerWatts(speakerDef, watts) {
+  const w = Math.max(1e-6, watts ?? 1);
+  const cap = speakerDef?.electrical?.max_input_watts;
+  if (Number.isFinite(cap) && cap > 0) return Math.min(w, cap);
+  return w;
+}
+
 // Speed of sound in dry air as a function of temperature (°C). Default
 // 20 °C → 343.2 m/s. Over 30 m at 4 kHz a ±2 °C swing shifts phase by ~1.5
 // wavelengths, so we wire this to a configurable constant for coherent
@@ -141,7 +154,8 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
   // Master EQ is a pre-speaker signal gain — adds directly to the SPL at
   // every listener position, per-frequency. When eq is bypassed the caller
   // passes 0. Typical professional-PA range is ±12 dB.
-  let spl_db = sens + 10 * Math.log10(speakerState.power_watts) - 20 * Math.log10(clampedR) + attn + eqGainDb;
+  const effW = effectivePowerWatts(speakerDef, speakerState.power_watts);
+  let spl_db = sens + 10 * Math.log10(effW) - 20 * Math.log10(clampedR) + attn + eqGainDb;
   // Air absorption (ISO 9613-1) — negligible at 1 kHz short range, significant
   // at 4+ kHz / long range. Pre-scaled α (dB / m) × distance.
   if (airAbsorption) {
@@ -165,7 +179,8 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
 function approxSoundPowerLevel(speakerDef, power_watts) {
   const sens = speakerDef.acoustic.sensitivity_db_1w_1m;
   const DI = speakerDef.acoustic.directivity_index_db ?? 3;  // default mild Q
-  return sens + 10 * Math.log10(power_watts) + 11 - DI;
+  const effW = effectivePowerWatts(speakerDef, power_watts);
+  return sens + 10 * Math.log10(effW) + 11 - DI;
 }
 
 /**

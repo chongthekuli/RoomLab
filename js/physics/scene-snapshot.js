@@ -93,7 +93,13 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     srcAims[i * 3 + 1] = Math.cos(yawRad) * cp;
     srcAims[i * 3 + 2] = Math.sin(pitchRad);
 
-    const P = Math.max(1e-6, src.power_watts ?? 1);
+    const def = getLoudspeakerDef?.(src.modelUrl);
+    let P = Math.max(1e-6, src.power_watts ?? 1);
+    // Defensive cap: never let physics see more than the rated max.
+    // The Sources panel clamps on input; this catches legacy saved
+    // projects that carry over-rated values.
+    const cap = def?.electrical?.max_input_watts;
+    if (Number.isFinite(cap) && cap > 0) P = Math.min(P, cap);
     srcPowers[i] = P;
     srcModelUrls.push(src.modelUrl);
     srcGroupIds.push(src.groupId ?? null);
@@ -103,7 +109,6 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     // in CALCULATIONS.md §11). When loudspeaker JSONs eventually carry
     // `sensitivity_db_per_band` / `directivity_index_db_per_band`, this
     // loop uses them and the downstream engines see proper HF roll-off.
-    const def = getLoudspeakerDef?.(src.modelUrl);
     const a = def?.acoustic ?? {};
     const sensScalar = a.sensitivity_db_1w_1m ?? 90;
     const sensPerBand = Array.isArray(a.sensitivity_db_per_band) && a.sensitivity_db_per_band.length === BANDS

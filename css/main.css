@@ -768,6 +768,13 @@ section h3 {
   color: var(--fg);
 }
 .field-group .unit { color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.field-group .rated-cap {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: italic;
+  margin-left: 0.35rem;
+  white-space: nowrap;
+}
 .field-group input,
 .field-group select {
   padding: 0.32rem 0.45rem;

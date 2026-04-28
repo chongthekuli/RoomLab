@@ -88,7 +88,13 @@ export function precomputeSTIPAContext({ sources, getSpeakerDef, room, materials
     if (!def) continue;
     const sens = def.acoustic.sensitivity_db_1w_1m;
     const DI = def.acoustic.directivity_index_db ?? 3;
-    const p10 = 10 * Math.log10(Math.max(1e-6, src.power_watts || 1));
+    // Cap at the speaker's rated max input — defensive against legacy
+    // saved projects that pre-date the UI clamp on Sources panel.
+    const cap = def.electrical?.max_input_watts;
+    const watts = Number.isFinite(cap) && cap > 0
+      ? Math.min(Math.max(1e-6, src.power_watts || 1), cap)
+      : Math.max(1e-6, src.power_watts || 1);
+    const p10 = 10 * Math.log10(watts);
     sourceCtx.push({
       src, def, sens, DI, p10,
       L_w: sens + p10 + 11 - DI,   // flat-across-bands approximation

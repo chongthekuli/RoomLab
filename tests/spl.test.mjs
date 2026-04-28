@@ -616,5 +616,43 @@ import { eqGainAt } from '../js/app-state.js';
   assertClose(eqGainAt(bypassed, 1000), 0, 0.001, 'eqGainAt returns 0 when EQ bypassed');
 }
 
+// --- Rated-power cap regression ---
+// A driver cannot accept more than its electrical.max_input_watts.
+// The Sources panel clamps user input, but the engine is the floor of
+// last resort: legacy saved projects with over-rated power values must
+// still produce SPL identical to a project at exactly the cap.
+{
+  const ratedSpeaker = {
+    acoustic: { sensitivity_db_1w_1m: 90, directivity_index_db: 6 },
+    electrical: { max_input_watts: 30 },
+    directivity: {
+      azimuth_deg: [-180, 0, 180],
+      elevation_deg: [-90, 0, 90],
+      attenuation_db: { '1000': [[-20,-20,-20],[0,0,0],[-20,-20,-20]] },
+    },
+  };
+  const at30W  = computeDirectSPL({
+    speakerDef: ratedSpeaker, speakerState: { ...baseState, power_watts: 30 },
+    listenerPos: { x: 0, y: 1, z: 0 },
+  }).spl_db;
+  const at600W = computeDirectSPL({
+    speakerDef: ratedSpeaker, speakerState: { ...baseState, power_watts: 600 },
+    listenerPos: { x: 0, y: 1, z: 0 },
+  }).spl_db;
+  assertClose(at600W, at30W, 1e-6,
+    'Over-rated 600W on 30W-rated speaker is capped to rated max (no extra dB)');
+
+  const noCap = {
+    ...ratedSpeaker,
+    electrical: undefined,   // unknown — treat as Infinity
+  };
+  const at600WNoCap = computeDirectSPL({
+    speakerDef: noCap, speakerState: { ...baseState, power_watts: 600 },
+    listenerPos: { x: 0, y: 1, z: 0 },
+  }).spl_db;
+  assertClose(at600WNoCap, at30W + 10 * Math.log10(600 / 30), 0.01,
+    'Speaker without max_input_watts is not capped (full power applies)');
+}
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll SPL tests passed.');

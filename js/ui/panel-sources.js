@@ -1,7 +1,25 @@
 import { state, SPEAKER_GROUPS, groupById, expandSources } from '../app-state.js';
 import { emit, on } from './events.js';
+import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 
 let catalogRef;
+
+// Speaker-rated max input power. Drivers blow up if you pump more than
+// the manufacturer's rated wattage into them — the simulator must
+// reflect that, so power inputs cap at the speaker's max_input_watts.
+// Falls back to Infinity if the speaker JSON hasn't loaded yet (every
+// shipped catalogue file specifies it; this is just defensive).
+function getMaxWatts(modelUrl) {
+  const def = getCachedLoudspeaker(modelUrl);
+  const m = def?.electrical?.max_input_watts;
+  return Number.isFinite(m) && m > 0 ? m : Infinity;
+}
+
+function clampPower(watts, modelUrl) {
+  const w = parseFloat(watts);
+  if (!Number.isFinite(w)) return null;
+  return Math.max(0.1, Math.min(w, getMaxWatts(modelUrl)));
+}
 
 export function mountSourcesPanel({ speakerCatalog }) {
   catalogRef = speakerCatalog;
@@ -115,7 +133,7 @@ function addSource() {
       z: Math.min(state.room.height_m - 0.3, 2.5),
     },
     aim: { yaw: 0, pitch: -15, roll: 0 },
-    power_watts: 100,
+    power_watts: Math.min(100, getMaxWatts(defaultModel)),
   });
   render();
   emit('source:changed');
@@ -141,7 +159,7 @@ function addLineArray() {
     topTilt_deg: -5,
     splayAnglesDeg: [2, 3, 5, 8],   // 5 elements, progressive J
     elementSpacing_m: 0.42,
-    power_watts_each: 500,
+    power_watts_each: Math.min(500, getMaxWatts(lineArrayModel)),
     groupId: null,
   });
   render();
@@ -237,7 +255,7 @@ function renderSpeakerCard(src, i) {
         <label>Pitch <input type="number" data-f="pitch" value="${src.aim.pitch}" step="5" /><span class="unit">°</span></label>
       </div>
       <div class="field-group">
-        <label>Input power <input type="number" data-f="watts" value="${src.power_watts}" min="0.1" step="10" /><span class="unit">W</span></label>
+        <label>Input power <input type="number" data-f="watts" value="${src.power_watts}" min="0.1" step="10"${Number.isFinite(getMaxWatts(src.modelUrl)) ? ` max="${getMaxWatts(src.modelUrl)}"` : ''} title="Capped at the speaker's rated max input power" /><span class="unit">W</span>${Number.isFinite(getMaxWatts(src.modelUrl)) ? `<span class="rated-cap">rated max ${getMaxWatts(src.modelUrl)} W</span>` : ''}</label>
       </div>
     </div>
   `;
@@ -299,7 +317,7 @@ function renderLineArrayCard(src, i) {
       </label>
       <div class="splay-preview"><span class="sub">Cumulative pitch: ${perElement.join(' · ')}</span></div>
       <div class="field-group">
-        <label>Power / element <input type="number" data-f="wattsEach" value="${src.power_watts_each}" min="1" step="50" /><span class="unit">W</span></label>
+        <label>Power / element <input type="number" data-f="wattsEach" value="${src.power_watts_each}" min="1" step="50"${Number.isFinite(getMaxWatts(src.modelUrl)) ? ` max="${getMaxWatts(src.modelUrl)}"` : ''} title="Each element capped at the rated max input power per box" /><span class="unit">W</span>${Number.isFinite(getMaxWatts(src.modelUrl)) ? `<span class="rated-cap">rated max ${getMaxWatts(src.modelUrl)} W / element</span>` : ''}</label>
       </div>
     </div>
   `;
@@ -314,9 +332,20 @@ function updateSource(idx, field, value) {
     case 'z': src.position.z = parseFloat(value); break;
     case 'yaw': src.aim.yaw = parseFloat(value); break;
     case 'pitch': src.aim.pitch = parseFloat(value); break;
-    case 'watts': src.power_watts = parseFloat(value); break;
+    case 'watts': {
+      const clamped = clampPower(value, src.modelUrl);
+      if (clamped == null) return;
+      const wasClamped = clamped !== parseFloat(value);
+      src.power_watts = clamped;
+      if (wasClamped) render();   // redraw input to show the snapped value
+      break;
+    }
     case 'model':
       src.modelUrl = value;
+      // New model may have a lower rated max — clamp existing power down so
+      // we don't silently keep an over-rated value across swaps.
+      src.power_watts = Math.min(src.power_watts, getMaxWatts(value));
+      render();
       emit('source:model_changed', { idx, url: value });
       return;
     case 'groupId':
@@ -338,7 +367,14 @@ function updateLineArray(idx, field, value) {
     case 'baseYaw': src.baseYaw_deg = parseFloat(value); break;
     case 'topTilt': src.topTilt_deg = parseFloat(value); render(); break;
     case 'spacing': src.elementSpacing_m = parseFloat(value); break;
-    case 'wattsEach': src.power_watts_each = parseFloat(value); break;
+    case 'wattsEach': {
+      const clamped = clampPower(value, src.modelUrl);
+      if (clamped == null) return;
+      const wasClamped = clamped !== parseFloat(value);
+      src.power_watts_each = clamped;
+      if (wasClamped) render();
+      break;
+    }
     case 'elementCount': {
       const n = Math.max(1, Math.min(24, parseInt(value, 10) || 1));
       const curSplays = src.splayAnglesDeg ?? [];
@@ -363,6 +399,10 @@ function updateLineArray(idx, field, value) {
     }
     case 'model':
       src.modelUrl = value;
+      // Same clamp logic as single sources — keep per-element power
+      // within the new model's rated max on swap.
+      src.power_watts_each = Math.min(src.power_watts_each, getMaxWatts(value));
+      render();
       emit('source:model_changed', { idx, url: value });
       return;
     case 'groupId':
