@@ -1831,14 +1831,26 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
         const m = new THREE.Mesh(geo, edgeMat);
 
         // Edge direction in the floor (XZ) plane, normalised.
-        const edgeDirX = ex / edgeLen;
-        const edgeDirZ = ey / edgeLen;
-        // Inward normal candidates — 90° rotation of the edge in the
-        // horizontal plane. Two choices; pick the one whose dot product
-        // with (centroid - midpoint) is positive (i.e. points inward).
+        let edgeDirX = ex / edgeLen;
+        let edgeDirZ = ey / edgeLen;
+        // 90° CCW rotation of edge direction → inward normal for a
+        // CCW-wound polygon in state-Y-down coords. For a CW polygon
+        // (e.g. user drew the triangle's second point with smaller Y
+        // than the first), the same formula gives the OUTWARD normal.
+        // We must flip BOTH the edge direction AND the normal so the
+        // resulting basis (basisX × basisY = basisZ) stays right-handed
+        // (determinant +1). Flipping ONLY the normal makes the basis
+        // a reflection (det -1); Three.js's setFromRotationMatrix
+        // returns garbage on reflections — that was the
+        // direction-dependent misalignment bug.
         let nx = -edgeDirZ, nz = edgeDirX;
         const toCx = cx - midX, toCz = cz - midZ;
-        if (nx * toCx + nz * toCz < 0) { nx = -nx; nz = -nz; }
+        if (nx * toCx + nz * toCz < 0) {
+          edgeDirX = -edgeDirX;
+          edgeDirZ = -edgeDirZ;
+          nx = -nx;
+          nz = -nz;
+        }
         _basisX.set(edgeDirX, 0, edgeDirZ);
         _basisZ.set(nx, 0, nz);
         _basisMat.makeBasis(_basisX, _basisY, _basisZ);
