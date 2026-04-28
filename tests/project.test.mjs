@@ -114,6 +114,46 @@ try {
   assert(/formatVersion/.test(err.message), 'Missing formatVersion rejected');
 }
 
+// 5b. PA equipment rack round-trip — populate state.rackSystem with a
+//     33U rack holding 4 amps and verify byte-equal restore.
+applyTemplateToState('hifi');
+state.rackSystem = {
+  racks: [{
+    id: 'R1',
+    label: 'Main rack',
+    rackModelKey: 'open-frame-33u',
+    position: { x: 1.0, y: 0.6, z: 0 },
+    yaw_deg: 0,
+    slots: [
+      { uStart: 2, uHeight: 1, amplifierId: 'qd2050',  label: 'Zone A', channelAssignments: [{ ch: 1, zoneId: 'Z1', tap_w: 100 }] },
+      { uStart: 3, uHeight: 1, amplifierId: 'qd2050',  label: 'Zone B', channelAssignments: [{ ch: 1, zoneId: 'Z2', tap_w: 100 }] },
+      { uStart: 5, uHeight: 1, amplifierId: 'pa2240',  label: 'BGM',    channelAssignments: [
+        { ch: 1, zoneId: 'Z3', tap_w: 60 },
+        { ch: 2, zoneId: 'Z4', tap_w: 60 },
+        { ch: 3, zoneId: null, tap_w: 0 },
+        { ch: 4, zoneId: null, tap_w: 0 },
+      ]},
+      { uStart: 7, uHeight: 1, amplifierId: 'evm8810', label: 'Voice-alarm controller', channelAssignments: [] },
+    ],
+  }],
+};
+{
+  const { ok } = roundTripSnapshot('hifi + populated 33U rack');
+  assert(ok, 'Round-trip clean: hifi + populated 33U rack (4 amps, channel-to-zone assigned)');
+}
+
+// 5c. Reset on preset/template swap — applying a fresh preset clears
+//     the rack so the previous scene's rack doesn't leak.
+state.rackSystem = { racks: [{ id: 'R1', rackModelKey: 'open-frame-12u', slots: [] }] };
+applyTemplateToState('studio');
+assert(state.rackSystem.racks.length === 0,
+  `applyTemplateToState resets rackSystem.racks to [] (got ${state.rackSystem.racks.length})`);
+
+state.rackSystem = { racks: [{ id: 'R1', rackModelKey: 'open-frame-12u', slots: [] }] };
+applyPresetToState('auditorium');
+assert(state.rackSystem.racks.length === 0,
+  `applyPresetToState resets rackSystem.racks to [] (got ${state.rackSystem.racks.length})`);
+
 // 6. Empty arrays serialize as arrays, not undefined.
 applyTemplateToState('hifi');
 state.zones = [];

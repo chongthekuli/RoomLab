@@ -245,6 +245,13 @@ export const state = {
       precision: { lastRun: null, inProgress: false, staleAt: null, cancellable: false },
     },
   },
+  // PA equipment racks placed in the room — populated by the PA Rack
+  // Builder (panel-rack.js). One rack = a 19" open-frame with U-numbered
+  // slots, each slot holding an amplifier from data/amplifiers/catalog.json.
+  // Per Felix Brandt's spec (RACK_BUILDER_DESIGN.md §2). Optional field —
+  // empty by default; preset apply / template apply / project load reset
+  // it to []. Round-trips via the existing schema-v1.
+  rackSystem: { racks: [] },
   display: {
     showHeatmaps: true, showAimLines: false, showIsobars: true, isobarStep_db: 3,
     // Ray-path visualisation — debug overlay that traces ~200 sample
@@ -396,6 +403,13 @@ export function applyPresetToState(key) {
   state.selectedListenerId = state.listeners[0]?.id ?? null;
   state.selectedSpeakerUrl = null;
 
+  // PA racks reset on every preset apply — the previous scene's rack
+  // doesn't belong in the new room. (Default-rack-per-preset population
+  // is a Phase-C5 feature; until then, presets land empty.)
+  state.rackSystem = Array.isArray(p.rackSystem?.racks)
+    ? { racks: p.rackSystem.racks.map(deepClone) }
+    : { racks: [] };
+
   // --- 4. Invalidate derived caches -----------------------------------
   // Heatmaps, the zone SPL grids, and any cached precision render were
   // computed against the OLD scene and no longer mean anything once the
@@ -451,6 +465,9 @@ export function applyTemplateToState(key, dimsOverride) {
   state.selectedZoneId     = state.zones[0]?.id ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
   state.selectedSpeakerUrl = null;
+  // Templates don't carry a default rack — user assembles one via the
+  // PA Rack Builder. Reset to empty so a previous scene's rack is gone.
+  state.rackSystem = { racks: [] };
 
   if (state.results) {
     state.results.splGrid = null;
@@ -501,6 +518,7 @@ export function serializeProject(src = state) {
       ambientNoise:     deepClone(src.physics?.ambientNoise ?? { preset: 'nc-35', per_band: [60, 52, 45, 40, 36, 34, 33] }),
       eq:               deepClone(src.physics?.eq ?? { enabled: false, bands: [] }),
     },
+    rackSystem: deepClone(src.rackSystem ?? { racks: [] }),
   };
 }
 
@@ -595,6 +613,14 @@ export function deserializeProject(obj) {
       state.results.engines.precision.staleAt = null;
       state.results.engines.precision.inProgress = false;
     }
+  }
+
+  // --- PA equipment racks — accept the saved value or default to empty.
+  // Optional field; older v1 files won't have it.
+  if (obj.rackSystem && typeof obj.rackSystem === 'object' && Array.isArray(obj.rackSystem.racks)) {
+    state.rackSystem = deepClone(obj.rackSystem);
+  } else {
+    state.rackSystem = { racks: [] };
   }
 
   return { warnings };

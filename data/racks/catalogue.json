@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "_notes": "Open-frame 19\" AV-install racks per Felix Brandt's spec (RACK_BUILDER_DESIGN.md §1). 4-post frames only; no doors, no side panels. Outer width 600 mm fits standard 19\" rails (482.6 mm) plus 40 mm posts each side. 1 U = 44.45 mm. Castors add 100 mm to outer height when fitted.",
+  "racks": {
+    "open-frame-12u": {
+      "label": "12U open-frame",
+      "u": 12,
+      "outer_w_mm": 600,
+      "outer_d_mm": 600,
+      "outer_h_mm": 714,
+      "weight_kg": 22,
+      "post_section_mm": 40,
+      "frame_top_mm": 40,
+      "frame_bottom_mm": 40,
+      "castor_h_mm": 100,
+      "castors": true
+    },
+    "open-frame-18u": {
+      "label": "18U open-frame",
+      "u": 18,
+      "outer_w_mm": 600,
+      "outer_d_mm": 800,
+      "outer_h_mm": 981,
+      "weight_kg": 28,
+      "post_section_mm": 40,
+      "frame_top_mm": 40,
+      "frame_bottom_mm": 40,
+      "castor_h_mm": 100,
+      "castors": true
+    },
+    "open-frame-24u": {
+      "label": "24U open-frame",
+      "u": 24,
+      "outer_w_mm": 600,
+      "outer_d_mm": 800,
+      "outer_h_mm": 1248,
+      "weight_kg": 34,
+      "post_section_mm": 40,
+      "frame_top_mm": 40,
+      "frame_bottom_mm": 40,
+      "castor_h_mm": 100,
+      "castors": true
+    },
+    "open-frame-33u": {
+      "label": "33U open-frame",
+      "u": 33,
+      "outer_w_mm": 600,
+      "outer_d_mm": 1000,
+      "outer_h_mm": 1648,
+      "weight_kg": 46,
+      "post_section_mm": 40,
+      "frame_top_mm": 40,
+      "frame_bottom_mm": 40,
+      "castor_h_mm": 100,
+      "castors": true
+    },
+    "open-frame-42u": {
+      "label": "42U open-frame",
+      "u": 42,
+      "outer_w_mm": 600,
+      "outer_d_mm": 1000,
+      "outer_h_mm": 2049,
+      "weight_kg": 58,
+      "post_section_mm": 40,
+      "frame_top_mm": 40,
+      "frame_bottom_mm": 40,
+      "castor_h_mm": 0,
+      "castors": false
+    }
+  }
+}

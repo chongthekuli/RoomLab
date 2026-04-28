@@ -170,6 +170,7 @@ applyPresetToState('auditorium');
   const allowedTopKeys = new Set([
     'formatVersion', 'meta', 'room', 'sources', 'selectedSpeakerUrl',
     'listeners', 'selectedListenerId', 'zones', 'selectedZoneId', 'physics',
+    'rackSystem', // PA equipment racks (Felix Brandt's RACK_BUILDER_DESIGN spec)
   ]);
   const present = Object.keys(parsed);
   const unexpected = present.filter(k => !allowedTopKeys.has(k));
