@@ -96,8 +96,157 @@ export function triangulateScene(scene, opts = {}) {
 
   triangulateZones(scene, tris);
   triangulateScoreboard(scene, tris);
+  triangulateStandaloneEnclosures(scene, tris);
+  triangulateWallSegments(scene, tris);
 
   return finalizeBuffer(tris);
+}
+
+// --- Standalone enclosures (broken-out sub-rooms) ---------------------
+// Each enclosure has a polygon (in parent coords, transform already
+// baked), its own elevation_m + height_m, and a surfaces block with
+// per-edge wall slots. Produced when the user clicks "Break to merge"
+// on a placed sub-room; lives on state.room.standaloneEnclosures[].
+//
+// Without this, a listener placed INSIDE a merged enclosure had no
+// surrounding walls in the BVH — every ray escaped, late reverberation
+// went to zero, STI returned 1.0 ("excellent" — physically wrong).
+//
+// Walls that carry a system 'merge_cut' opening are SKIPPED here: those
+// are the seam between parent + enclosure (or enclosure + enclosure),
+// and the canonical shared wall is rendered separately by
+// triangulateWallSegments. Skipping avoids two coincident triangle
+// faces in the BVH (would cause z-fighting in raycast tie-breaks).
+function triangulateStandaloneEnclosures(scene, tris) {
+  const list = scene.room?.standaloneEnclosures;
+  if (!Array.isArray(list) || list.length === 0) return;
+  for (let ei = 0; ei < list.length; ei++) {
+    const enc = list[ei];
+    if (!enc || !Array.isArray(enc.polygon) || enc.polygon.length < 3) continue;
+    const verts = enc.polygon;
+    const h = Number.isFinite(enc.height_m) ? enc.height_m : 3;
+    if (h <= 0) continue;
+    const elev = Number.isFinite(enc.elevation_m) ? enc.elevation_m : 0;
+    const S = enc.surfaces ?? {};
+    const floorMat   = materialIdxFor(scene, S.floor);
+    const ceilingMat = materialIdxFor(scene, S.ceiling);
+
+    // Centroid for inward-normal computation on each edge.
+    let cx = 0, cy = 0;
+    for (const v of verts) { cx += v.x; cy += v.y; }
+    cx /= verts.length; cy /= verts.length;
+
+    // Floor: fan-triangulate from vertex 0 at world z = elev.
+    const v0 = [verts[0].x, verts[0].y, elev];
+    for (let i = 1; i < verts.length - 1; i++) {
+      const v1 = [verts[i].x, verts[i].y, elev];
+      const v2 = [verts[i + 1].x, verts[i + 1].y, elev];
+      pushTri(tris, v0, v1, v2, [0, 0, 1], floorMat, TAG_FLOOR, `enc${ei}_floor`);
+    }
+    // Ceiling: same fan, top elevation, reversed winding for -z normal.
+    // (An enclosure is always treated as enclosed even if the parent is
+    // outdoor — a hut in a park still has a roof.)
+    const ceilZ = elev + h;
+    const v0c = [verts[0].x, verts[0].y, ceilZ];
+    for (let i = 1; i < verts.length - 1; i++) {
+      const v1 = [verts[i].x, verts[i].y, ceilZ];
+      const v2 = [verts[i + 1].x, verts[i + 1].y, ceilZ];
+      pushTri(tris, v0c, v2, v1, [0, 0, -1], ceilingMat, TAG_CEILING, `enc${ei}_ceiling`);
+    }
+    // Walls: one quad per polygon edge. Each wall is split around any
+    // OPEN openings (state==='open' / materialId==='open-air' user doors
+    // and windows, plus the system 'merge_cut' rectangles produced by
+    // break-to-merge). Closed user openings stay as wall material — first-
+    // order STI is dominated by whether a direct path exists, not by the
+    // door's α difference vs the wall.
+    const edges = Array.isArray(S.edges) ? S.edges : [];
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i], b = verts[(i + 1) % verts.length];
+      const slot = edges[i];
+      const matId = (typeof slot === 'string') ? slot
+        : (slot?.materialId ?? S.walls ?? 'gypsum-board');
+      if (matId === 'open-air') continue;
+      const matIdx = materialIdxFor(scene, matId);
+      const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+      let nx = cx - midX, ny = cy - midY;
+      const nLen = Math.hypot(nx, ny);
+      if (nLen > 1e-9) { nx /= nLen; ny /= nLen; }
+      const openings = (slot && typeof slot === 'object') ? slot.openings : null;
+      const quads = wallQuadsAfterOpenings(a, b, elev, h, openings);
+      for (let qi = 0; qi < quads.length; qi++) {
+        const q = quads[qi];
+        pushQuad(tris,
+          [q.a.x, q.a.y, q.z0], [q.b.x, q.b.y, q.z0],
+          [q.b.x, q.b.y, q.z1], [q.a.x, q.a.y, q.z1],
+          [nx, ny, 0], matIdx, TAG_WALL, `enc${ei}_wall_${i}_p${qi}`);
+      }
+      // Closed user openings (state !== 'open') deserve their own quad
+      // with the door/window material so the tracer sees the correct
+      // absorption at that rectangle. Open ones we already cut out above.
+      pushClosedOpeningQuads(tris, scene, a, b, elev, h, openings, [nx, ny, 0],
+        `enc${ei}_wall_${i}_op`);
+    }
+  }
+}
+
+// --- Shared wall segments (canonical merged walls) --------------------
+// Each entry from state.room.wallSegments[] is a quad sitting between
+// the parent + the enclosure(s) it joins. Material is the merged-wall
+// material the user chose in the Shared walls panel section. Normal
+// orientation isn't structurally meaningful (no "interior" — it's
+// shared) so we use the 90° CCW from edge direction; with two-sided
+// hits in the BVH the ray sees both faces correctly.
+//
+// User-added doors/windows on a shared wall MUST be subtracted from the
+// wall mesh when open (state==='open' / materialId==='open-air'), or the
+// tracer treats the wall as continuously solid and STI for a listener
+// across the door comes out identical to STI with the door closed —
+// physically wrong (an open door is a direct LOS path).
+function triangulateWallSegments(scene, tris) {
+  const list = scene.room?.wallSegments;
+  if (!Array.isArray(list) || list.length === 0) return;
+  for (let si = 0; si < list.length; si++) {
+    const seg = list[si];
+    if (!seg) continue;
+    const x1 = Number(seg.x1), y1 = Number(seg.y1);
+    const x2 = Number(seg.x2), y2 = Number(seg.y2);
+    if (!Number.isFinite(x1) || !Number.isFinite(y1)
+        || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
+    const ex = x2 - x1, ey = y2 - y1;
+    const len = Math.hypot(ex, ey);
+    if (len < 1e-3) continue;
+    const h = Number.isFinite(seg.height_m) ? seg.height_m : 3;
+    if (h <= 0) continue;
+    const elev = Number.isFinite(seg.elevation_m) ? seg.elevation_m : 0;
+    const matId = typeof seg.materialId === 'string' ? seg.materialId : 'gypsum-board';
+    if (matId === 'open-air') continue;
+    const matIdx = materialIdxFor(scene, matId);
+    // Normal: 90° CCW from edge direction (in floor plane).
+    const nx = -ey / len, ny = ex / len;
+    const a = { x: x1, y: y1 }, b = { x: x2, y: y2 };
+    const quads = wallQuadsAfterOpenings(a, b, elev, h, seg.openings);
+    for (let qi = 0; qi < quads.length; qi++) {
+      const q = quads[qi];
+      pushQuad(tris,
+        [q.a.x, q.a.y, q.z0], [q.b.x, q.b.y, q.z0],
+        [q.b.x, q.b.y, q.z1], [q.a.x, q.a.y, q.z1],
+        [nx, ny, 0], matIdx, TAG_WALL, `wseg_${seg.id ?? si}_p${qi}`);
+    }
+    pushClosedOpeningQuads(tris, scene, a, b, elev, h, seg.openings, [nx, ny, 0],
+      `wseg_${seg.id ?? si}_op`);
+  }
+}
+
+// True iff an opening should be CUT OUT of the wall mesh — i.e. the
+// tracer should see daylight through that rectangle. System merge_cut
+// (break-to-merge seams), open-air material (user picked "Open wall"
+// for the door material), and explicitly state==='open' all qualify.
+function isOpeningCutThrough(op) {
+  if (!op) return false;
+  if (op.system === 'merge_cut') return true;
+  if (op.materialId === 'open-air') return true;
+  if (op.state === 'open') return true;
+  return false;
 }
 
 // --- Rectangular room shell -------------------------------------------
@@ -280,7 +429,12 @@ function triangulateDomeCap(tris, cx, cy, a, baseZ, rise_m, matIdx, latBands, lo
 // --- Custom-vertex room -----------------------------------------------
 // User-drawn 2D polygon footprint extruded to room.height_m. Floor is
 // fan-triangulated from vertex 0 (assumes convex — same assumption as
-// the rest of the codebase). Walls per edge.
+// the rest of the codebase). Walls per edge — each edge reads its slot
+// from S.edges[i] for material + system merge_cut openings, so the seam
+// between parent + a merged enclosure renders ONCE (the wallSegments[]
+// quad provides the canonical surface; the parent skips that vertical
+// slice). Without this, rays at the seam see two coincident reflectors
+// and the BVH tie-break is non-deterministic.
 
 function triangulateCustomRoom(scene, tris) {
   const room = scene.room;
@@ -288,9 +442,11 @@ function triangulateCustomRoom(scene, tris) {
   if (!Array.isArray(verts) || verts.length < 3) return;
   const h = room.height_m;
   const S = room.surfaces || {};
+  const isOutdoor = room.enclosure === 'outdoor';
   const floorMat   = materialIdxFor(scene, S.floor);
   const ceilingMat = materialIdxFor(scene, S.ceiling);
-  const wallMat    = materialIdxFor(scene, S.walls ?? S.wall_north);
+  const fallbackWallMat = S.walls ?? S.wall_north;
+  const edges = Array.isArray(S.edges) ? S.edges : [];
 
   // Centroid (for inward-normal computation).
   let cx = 0, cy = 0;
@@ -304,23 +460,140 @@ function triangulateCustomRoom(scene, tris) {
     const v2 = [verts[i + 1].x, verts[i + 1].y, 0];
     pushTri(tris, v0, v1, v2, [0, 0, 1], floorMat, TAG_FLOOR, 'floor');
   }
-  // Ceiling: same fan, reversed winding for -z normal.
-  const v0c = [verts[0].x, verts[0].y, h];
-  for (let i = 1; i < verts.length - 1; i++) {
-    const v1 = [verts[i].x, verts[i].y, h];
-    const v2 = [verts[i + 1].x, verts[i + 1].y, h];
-    pushTri(tris, v0c, v2, v1, [0, 0, -1], ceilingMat, TAG_CEILING, 'ceiling');
+  // Ceiling: same fan, reversed winding for -z normal. Skipped for
+  // outdoor parents (no roof — rays going up should escape the BVH, not
+  // bounce off a phantom ceiling and return as late reverb).
+  if (!isOutdoor) {
+    const v0c = [verts[0].x, verts[0].y, h];
+    for (let i = 1; i < verts.length - 1; i++) {
+      const v1 = [verts[i].x, verts[i].y, h];
+      const v2 = [verts[i + 1].x, verts[i + 1].y, h];
+      pushTri(tris, v0c, v2, v1, [0, 0, -1], ceilingMat, TAG_CEILING, 'ceiling');
+    }
   }
-  // Walls.
+  // Walls — per-edge slot. Each wall is split around its open openings
+  // (cut clean through) and gets a small quad per closed opening with
+  // the door/window material (so the absorption step at that rectangle
+  // matches the panel material rather than the wall material).
   for (let i = 0; i < verts.length; i++) {
     const a = verts[i], b = verts[(i + 1) % verts.length];
+    const slot = edges[i];
+    const matId = (typeof slot === 'string') ? slot
+      : (slot?.materialId ?? fallbackWallMat ?? 'gypsum-board');
+    if (matId === 'open-air') continue;     // open wall — no reflector
+    const matIdx = materialIdxFor(scene, matId);
     const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
     let nx = cx - midX, ny = cy - midY;
     const nLen = Math.hypot(nx, ny);
     if (nLen > 1e-9) { nx /= nLen; ny /= nLen; }
+    const openings = (slot && typeof slot === 'object') ? slot.openings : null;
+    const quads = wallQuadsAfterOpenings(a, b, 0, h, openings);
+    for (let qi = 0; qi < quads.length; qi++) {
+      const q = quads[qi];
+      pushQuad(tris,
+        [q.a.x, q.a.y, q.z0], [q.b.x, q.b.y, q.z0],
+        [q.b.x, q.b.y, q.z1], [q.a.x, q.a.y, q.z1],
+        [nx, ny, 0], matIdx, TAG_WALL, `wall_${i}_p${qi}`);
+    }
+    pushClosedOpeningQuads(tris, scene, a, b, 0, h, openings, [nx, ny, 0],
+      `wall_${i}_op`);
+  }
+}
+
+// Subtract OPEN openings (system merge_cut + user openings whose state
+// is 'open' or whose material is 'open-air') from a wall mesh. Returns
+// a list of remaining rectangles as { a:{x,y}, b:{x,y}, z0, z1 } in
+// WORLD coordinates, ready to push as quads.
+//
+// Inputs:
+//   v1, v2     — wall endpoint xy (z is implied by elev)
+//   elev       — world z of wall bottom
+//   height     — wall height (top is at elev + height)
+//   openings   — array of opening descriptors, fields: x_m (along-wall
+//                from v1), z_m (up from wall bottom — LOCAL not world),
+//                width_m, height_m, plus state/system/materialId tags
+//
+// Closed openings (state !== 'open' and material !== 'open-air' and
+// not system) are LEFT IN the wall mesh — caller emits a separate quad
+// at the opening rectangle with the door/window material, so the tracer
+// applies the correct absorption coefficient there.
+function wallQuadsAfterOpenings(v1, v2, elev, height, openings) {
+  const dx = v2.x - v1.x, dy = v2.y - v1.y;
+  const wallW = Math.hypot(dx, dy);
+  if (wallW < 1e-3 || height < 1e-3) return [];
+  const ux = dx / wallW, uy = dy / wallW;
+  // Local-coord rectangles. Start with the full wall.
+  let rects = [{ x0: 0, z0: 0, x1: wallW, z1: height }];
+  if (Array.isArray(openings)) {
+    for (const op of openings) {
+      if (!isOpeningCutThrough(op)) continue;
+      const ow = Number(op.width_m) || 0;
+      const oh = Number(op.height_m) || 0;
+      if (ow < 1e-3 || oh < 1e-3) continue;
+      const ox0 = Math.max(0, Number(op.x_m) || 0);
+      const oz0 = Math.max(0, Number(op.z_m) || 0);
+      const ox1 = Math.min(wallW, ox0 + ow);
+      const oz1 = Math.min(height, oz0 + oh);
+      if (ox1 - ox0 < 1e-3 || oz1 - oz0 < 1e-3) continue;
+      const next = [];
+      for (const r of rects) {
+        // No overlap → keep this rect intact.
+        if (ox1 <= r.x0 + 1e-9 || ox0 >= r.x1 - 1e-9
+            || oz1 <= r.z0 + 1e-9 || oz0 >= r.z1 - 1e-9) {
+          next.push(r);
+          continue;
+        }
+        const ix0 = Math.max(ox0, r.x0), ix1 = Math.min(ox1, r.x1);
+        const iz0 = Math.max(oz0, r.z0), iz1 = Math.min(oz1, r.z1);
+        // Below the cut.
+        if (iz0 - r.z0 > 1e-3) next.push({ x0: r.x0, z0: r.z0, x1: r.x1, z1: iz0 });
+        // Above the cut.
+        if (r.z1 - iz1 > 1e-3) next.push({ x0: r.x0, z0: iz1, x1: r.x1, z1: r.z1 });
+        // Left strip at the cut height.
+        if (ix0 - r.x0 > 1e-3) next.push({ x0: r.x0, z0: iz0, x1: ix0, z1: iz1 });
+        // Right strip at the cut height.
+        if (r.x1 - ix1 > 1e-3) next.push({ x0: ix1, z0: iz0, x1: r.x1, z1: iz1 });
+      }
+      rects = next;
+    }
+  }
+  return rects.map(r => ({
+    a: { x: v1.x + ux * r.x0, y: v1.y + uy * r.x0 },
+    b: { x: v1.x + ux * r.x1, y: v1.y + uy * r.x1 },
+    z0: elev + r.z0,
+    z1: elev + r.z1,
+  }));
+}
+
+// Emit a quad per CLOSED user opening so the tracer sees the door /
+// window material at that rectangle instead of the surrounding wall
+// material. Closed = not cut-through (opening has a solid pane: door,
+// window, etc). Skipped silently when no openings or all are open.
+function pushClosedOpeningQuads(tris, scene, v1, v2, elev, height, openings, normal, sourceTag) {
+  if (!Array.isArray(openings) || openings.length === 0) return;
+  const dx = v2.x - v1.x, dy = v2.y - v1.y;
+  const wallW = Math.hypot(dx, dy);
+  if (wallW < 1e-3) return;
+  const ux = dx / wallW, uy = dy / wallW;
+  let opi = 0;
+  for (const op of openings) {
+    if (isOpeningCutThrough(op)) { opi++; continue; }
+    const ow = Number(op.width_m) || 0;
+    const oh = Number(op.height_m) || 0;
+    if (ow < 1e-3 || oh < 1e-3) { opi++; continue; }
+    const ox0 = Math.max(0, Number(op.x_m) || 0);
+    const oz0 = Math.max(0, Number(op.z_m) || 0);
+    const ox1 = Math.min(wallW, ox0 + ow);
+    const oz1 = Math.min(height, oz0 + oh);
+    if (ox1 - ox0 < 1e-3 || oz1 - oz0 < 1e-3) { opi++; continue; }
+    const matIdx = materialIdxFor(scene, op.materialId || 'glass-window');
     pushQuad(tris,
-      [a.x, a.y, 0], [b.x, b.y, 0], [b.x, b.y, h], [a.x, a.y, h],
-      [nx, ny, 0], wallMat, TAG_WALL, `wall_${i}`);
+      [v1.x + ux * ox0, v1.y + uy * ox0, elev + oz0],
+      [v1.x + ux * ox1, v1.y + uy * ox1, elev + oz0],
+      [v1.x + ux * ox1, v1.y + uy * ox1, elev + oz1],
+      [v1.x + ux * ox0, v1.y + uy * ox0, elev + oz1],
+      normal, matIdx, TAG_WALL, `${sourceTag}_${opi}`);
+    opi++;
   }
 }
 

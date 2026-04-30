@@ -203,6 +203,41 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     custom_vertices: Array.isArray(srcRoom.custom_vertices)
       ? Object.freeze(srcRoom.custom_vertices.map(v => Object.freeze({ x: v.x, y: v.y })))
       : null,
+    // Indoor / outdoor flag — outdoor parent rooms have no roof, so the
+    // precision tracer must NOT triangulate the parent ceiling (rays
+    // escaping upward should leave the room, not bounce off a phantom).
+    enclosure: srcRoom.enclosure === 'outdoor' ? 'outdoor' : 'indoor',
+    // Broken-out sub-rooms produced by Place + Break-to-merge. Each is
+    // an independent mini-room with its own polygon, height, elevation,
+    // and surfaces (floor / ceiling / per-edge). The precision tracer
+    // triangulates each one as if it were a small custom room — without
+    // this, a listener INSIDE a merged enclosure has no surrounding walls
+    // in the BVH and STI returns 1.0 (no late reverberation). Snapshot
+    // shape mirrors panel-room.js's break-to-merge writer; deep-frozen.
+    standaloneEnclosures: Array.isArray(srcRoom.standaloneEnclosures)
+      ? Object.freeze(srcRoom.standaloneEnclosures.map(enc => Object.freeze({
+          id: enc.id,
+          label: enc.label,
+          polygon: Object.freeze((enc.polygon ?? []).map(v =>
+            Object.freeze({ x: v.x, y: v.y }))),
+          height_m: Number.isFinite(enc.height_m) ? enc.height_m : 3,
+          elevation_m: Number.isFinite(enc.elevation_m) ? enc.elevation_m : 0,
+          surfaces: Object.freeze(JSON.parse(JSON.stringify(enc.surfaces ?? {}))),
+        })))
+      : Object.freeze([]),
+    // Canonical shared walls produced by the wall-overlap split — one
+    // entry per merged seam between parent + enclosure or enclosure +
+    // enclosure. Triangulated as a single quad each.
+    wallSegments: Array.isArray(srcRoom.wallSegments)
+      ? Object.freeze(srcRoom.wallSegments.map(seg => Object.freeze({
+          id: seg.id,
+          x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2,
+          elevation_m: Number.isFinite(seg.elevation_m) ? seg.elevation_m : 0,
+          height_m: Number.isFinite(seg.height_m) ? seg.height_m : 3,
+          materialId: typeof seg.materialId === 'string' ? seg.materialId : 'gypsum-board',
+          openings: Object.freeze(JSON.parse(JSON.stringify(seg.openings ?? []))),
+        })))
+      : Object.freeze([]),
   });
 
   // --- Physics flags — snapshot the toggle state at build time. -------
