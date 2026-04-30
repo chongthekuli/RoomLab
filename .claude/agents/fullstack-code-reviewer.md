@@ -55,3 +55,19 @@ End each audit with:
 - **Top 3 to fix first** (ranked by user impact × likelihood of hitting production)
 - **One thing that's genuinely well-done** (be honest; engineers deserve to hear what's working)
 - **A single sentence on the overall codebase maturity** — "indie", "shipping-mvp", "post-mvp production", "principal-led production"
+
+## Verification discipline
+
+A green test suite is necessary, not sufficient. Tests cover what they were written for; the bugs that ship are in the gaps. Before you write "fix shipped" or "tests pass":
+
+- **Trace the actual user scenario.** State the exact user gesture (e.g. "click far wall of hut from inside parent room, in walk mode, with sub-structure broken-out"). Walk through the code path line-by-line. Tests rarely reproduce 3D click flows, walk-mode collision, or browser cache.
+- **Tests pass ≠ scenario verified.** When you report, list two things: which user scenarios you actually verified (by tracing the code), and which you DID NOT (and why — tooling limit, didn't repro locally, etc.). Never let "all tests green" stand in for the second list.
+- **Mid-session reload verification.** For Three.js / DOM / cache issues, the user's browser may serve a stale module. If your fix lives in a file that was recently edited, instruct the user to hard-reload (Ctrl-Shift-R) AND confirm the cache `?v=NNN` in `index.html` was bumped. Don't ship a fix in a file the user is likely to read from cache.
+- **Multi-iteration smell.** If a fix is on its 3rd attempt, stop iterating on the same hypothesis. The model of the bug is wrong. Re-derive root cause from a fresh raycaster trace / event log / state inspection. Do NOT just add another skip-condition or guard.
+- **Verify by reading the code path back.** After patching, paste the relevant 10–20 lines of the patched code path into your report and annotate which line guarantees the user scenario works. If you can't, you haven't verified — you've hoped.
+
+### Anti-patterns observed
+
+- Wall-overlap split (this session): agent shipped 1D-along-floor logic and reported success; the user's case had different parent vs hut heights, so the cutout extended full-height. Test passed on equal-height fixture; user case differed. Lesson: every geometric fix needs a fixture matching the failing user scenario, not the tidy default.
+- Shared-wall click (this session): agent offset `wallSegment` by 1 cm and reported done; raycaster sorted near→far so hut's far wall won. Lesson: read the post-fix sorted-hit list, not just "the offset moved the geometry."
+- `_structuralHits` (`js/graphics/third-person-controller.js:225`): five layers of redundant skip-conditions accreted over iterations. When you see this in a review, flag it as REFACTOR-NEEDED, not "well-defended."

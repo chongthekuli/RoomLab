@@ -225,11 +225,58 @@ export class ThirdPersonController {
   _structuralHits(raycaster) {
     const group = this._collidablesGetter();
     if (!group) return [];
+    // One-time build marker so user can verify the latest collision-filter
+    // is loaded (via DevTools console). If "Disable cache" was off in
+    // DevTools and the browser served a stale third-person-controller.js,
+    // this log won't appear with the build tag — that's the diagnostic.
+    if (!ThirdPersonController._buildLogged) {
+      ThirdPersonController._buildLogged = true;
+      console.info('[walk-collision] filter build 2026-04-30 v204 — open-air walls + open openings + opacity-0 + Line/LineSegments');
+    }
     const hits = raycaster.intersectObject(group, true);
-    return hits.filter(h => {
-      const tag = h.object.userData?.tag ?? '';
-      return !tag.startsWith('heatmap_') && tag !== 'walk_avatar';
-    });
+    const kept = [];
+    for (const h of hits) {
+      const obj = h.object;
+      // Skip Line / LineSegments wireframes outright — Three's Line
+      // raycaster uses a 1 m threshold by default which can spuriously
+      // block movement near room corners.
+      if (obj.isLine || obj.isLineSegments) continue;
+      const ud = obj.userData ?? {};
+      // Explicit walk-through flag — set in scene.js wherever an open-air
+      // wall, open door / window, or open enclosure edge is created.
+      if (ud.no_walk_collide === true) continue;
+      // Skip non-solid display layers and the avatar's own meshes.
+      const tag = ud.tag ?? '';
+      if (tag.startsWith('heatmap_') || tag === 'walk_avatar') continue;
+      // Belt-and-braces: catch the open-air case via material id too.
+      if (ud.acoustic_material === 'open-air') continue;
+      // Defence-in-depth: any mesh rendered FULLY TRANSPARENT (opacity 0)
+      // is by intent invisible / walk-through.
+      const objMat = obj.material;
+      if (objMat && !Array.isArray(objMat)
+          && objMat.transparent === true
+          && (objMat.opacity ?? 1) <= 0.001) continue;
+      kept.push(h);
+    }
+    // Diagnostic — once per pageload, log a sample blocking hit so the
+    // user can copy from DevTools and we can see exactly what's blocking.
+    // Throttled hard so we don't spam during a long sprint, but a SINGLE
+    // line per stuck-frame is invaluable when "still blocked" reports
+    // come in. Set window.__rl_walk_debug = false to silence.
+    if (kept.length > 0 && typeof window !== 'undefined' && window.__rl_walk_debug !== false) {
+      const now = Date.now();
+      if (!ThirdPersonController._lastBlockLog || now - ThirdPersonController._lastBlockLog > 1500) {
+        ThirdPersonController._lastBlockLog = now;
+        const h = kept[0];
+        const ud = h.object.userData ?? {};
+        const matId = ud.acoustic_material ?? '(none)';
+        const tag = ud.tag ?? '(none)';
+        const surf = ud.surface_id ?? '(none)';
+        const opc = h.object.material?.opacity;
+        console.info(`[walk-collision] blocked by surface_id=${surf} tag=${tag} material=${matId} opacity=${opc} (set window.__rl_walk_debug=false to silence)`);
+      }
+    }
+    return kept;
   }
 
   _canMoveTo(newX, newZ) {

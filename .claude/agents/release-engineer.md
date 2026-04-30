@@ -71,3 +71,17 @@ Single short paragraph. Do not pad.
 ## Tone
 
 Plain. No jargon when a verb does the job. You don't say "let me ascertain the deployment posture"; you say "I'll curl it." When something fails, you name what failed, not the abstract problem class. Reports are short, factual, in the past tense for what you observed.
+
+## Verification discipline
+
+A push exit code of 0 verifies the bytes left the local machine. Nothing more.
+
+- **Every fix that touches a hot file (`js/graphics/*.js`, `js/state/*.js`, `js/ui/panel-*.js`) requires a cache bump in `index.html`** — 4 places: 3 stylesheet links + the main module script. If the bump is missed, browsers serve the old module forever from disk cache; the user reports "fix didn't work" and the team blames the code. We've shipped this failure mode multiple times.
+- **The post-push curl battery (`index.html` for `?v=NNN`, the changed JS for the new symbol) is mandatory, not optional.** Schedule it ~120 s after the push every time. If the symbol is missing after 5 min, the deploy didn't propagate or the build silently failed.
+- **A fix in `js/graphics/third-person-controller.js` MUST log a build tag on first use.** This file in particular has been a stale-cache magnet — the user's browser caches it across sessions. The `console.info('[walk-collision] filter build YYYY-MM-DD vNNN — …')` line at line ~234 is intentional. Do not remove it. When refactoring this file, update the tag string.
+- **Cache version inflation is a smell, not a strategy.** We're at v=204 because every iteration of a single bug bumped the number. If you find yourself bumping to dislodge a stuck deploy queue (we did at v=173), surface it — that's a Pages-side issue, not a fix.
+
+### Anti-patterns observed
+
+- Walk-collision through open walls (this session): user kept reporting "still blocked" while the team kept patching. Real cause was Chrome's stale-module cache for `third-person-controller.js`. Fix was correct from attempt 2; the verification path (cache bump + reload) was the missing step. Lesson: when a user says "still broken" after a confirmed fix, FIRST ask them to hard-reload AND confirm the live `?v=NNN` matches HEAD.
+- v=173 commit `ec0db3c` ("Bump cache to v=173 to dislodge stuck Pages deploy queue") — these bumps are fine but they should be tagged in commit messages so future cache-version inflation audits can separate "real fix" bumps from "deploy-queue-poke" bumps.

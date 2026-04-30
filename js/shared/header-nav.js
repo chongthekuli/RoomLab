@@ -16,7 +16,8 @@
 // changes the scene) — pulls from `state.projectName`.
 
 import { state } from '../app-state.js';
-import { on } from './events.js';
+import { on, emit } from './events.js';
+import { listProjects, latestRoomInProject } from './custom-rooms.js';
 
 const LABS = [
   { id: 'room',    label: 'RoomLAB',    href: '#/room',    sublabel: 'Acoustic simulator' },
@@ -43,7 +44,7 @@ export function mountHeaderNav({ activeLab } = {}) {
   header.innerHTML = `
     <div class="app-brand">
       <span class="brand-text">RoomLAB Suite</span>
-      <span class="project-name" id="header-project-name" hidden></span>
+      <span class="project-slot" id="header-project-slot" hidden></span>
     </div>
     <nav class="lab-nav" aria-label="Lab navigation">${tabs}</nav>
     <div class="header-actions">
@@ -61,9 +62,12 @@ export function mountHeaderNav({ activeLab } = {}) {
   // panel-room.js (which only mounts when RoomLAB is visited).
   document.getElementById('btn-reset-data')?.addEventListener('click', resetAllData);
 
-  syncProjectName();
-  on('scene:reset', syncProjectName);
-  on('room:changed', syncProjectName);
+  syncProjectSlot();
+  on('scene:reset', syncProjectSlot);
+  on('room:changed', syncProjectSlot);
+  // Saved-room library mutates → projects list changes → header may need
+  // to add or drop the dropdown.
+  on('projects:changed', syncProjectSlot);
 }
 
 // Wipe every `roomlab.*` localStorage key and reload. Other site
@@ -95,17 +99,77 @@ function resetAllData() {
   location.reload();
 }
 
-function syncProjectName() {
-  const el = document.getElementById('header-project-name');
-  if (!el) return;
-  const name = (typeof state.projectName === 'string' && state.projectName.trim())
+// Render the project slot in the brand area. Three modes:
+//   0 projects  → slot hidden entirely (just shows "RoomLAB Suite")
+//   1 project   → static label showing the project name (current behaviour)
+//   2+ projects → dropdown button; click reveals the project list, picking
+//                 one loads its most recent saved room into the live scene.
+function syncProjectSlot() {
+  const slot = document.getElementById('header-project-slot');
+  if (!slot) return;
+  const projects = listProjects();
+  const activeName = (typeof state.projectName === 'string' && state.projectName.trim())
     ? state.projectName.trim()
     : null;
-  if (name) {
-    el.textContent = name;
-    el.hidden = false;
-  } else {
-    el.textContent = '';
-    el.hidden = true;
+
+  // Filter "(Unfiled)" out of the dropdown count — it's the catch-all for
+  // rooms saved without a project, not a real project the user picked.
+  const realProjects = projects.filter(p => p.name !== '(Unfiled)');
+
+  if (realProjects.length === 0 && !activeName) {
+    slot.hidden = true; slot.innerHTML = '';
+    return;
   }
+  slot.hidden = false;
+
+  if (realProjects.length < 2) {
+    // Single (or zero with active live name) → static pill, no dropdown.
+    slot.innerHTML = `<span class="project-name">${escapeHtml(activeName ?? realProjects[0].name)}</span>`;
+    return;
+  }
+
+  // 2+ projects → dropdown. The active one is highlighted, others
+  // selectable. Native <details><summary> gives us click-toggle + Esc-
+  // close + outside-click-close for free without bringing in a popover
+  // library, and is keyboard-accessible by default.
+  const itemsHtml = realProjects.map(p => {
+    const isActive = (p.name === activeName);
+    const cls = 'project-dd-item' + (isActive ? ' active' : '');
+    return `
+      <button type="button" class="${cls}" data-proj="${escapeAttr(p.name)}">
+        <span class="project-dd-name">${escapeHtml(p.name)}</span>
+        <span class="project-dd-count">${p.rooms.length} room${p.rooms.length === 1 ? '' : 's'}</span>
+      </button>`;
+  }).join('');
+  slot.innerHTML = `
+    <details class="project-dd">
+      <summary class="project-dd-summary">
+        <span class="project-name">${escapeHtml(activeName ?? realProjects[0].name)}</span>
+        <span class="project-dd-arrow" aria-hidden="true">▾</span>
+      </summary>
+      <div class="project-dd-menu" role="menu">${itemsHtml}</div>
+    </details>
+  `;
+
+  // Project switch — load the latest saved room of the picked project
+  // into the live scene. We delegate the actual load to RoomLAB by
+  // emitting an event panel-room.js listens to (it already owns the
+  // load-from-saved-id path). Falls back gracefully when RoomLAB hasn't
+  // mounted yet — the event listener simply doesn't exist.
+  slot.querySelectorAll('.project-dd-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const projName = btn.dataset.proj;
+      const entry = latestRoomInProject(projName);
+      if (!entry) return;
+      slot.querySelector('details')?.removeAttribute('open');
+      emit('project:switch', { projectName: projName, customRoomId: entry.id });
+    });
+  });
 }
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }

@@ -192,6 +192,48 @@ export const state = {
     // structural columns, and escalator ramps. Built for the Pavilion 2
     // Bukit Jalil preset.
     multiLevelStructure: null,
+    // Sub-structures — saved custom rooms placed inside this room. Each
+    // entry holds a deep snapshot of the source room geometry so deleting
+    // the original library entry never breaks the placement. Phase 1:
+    // VISUAL ONLY (rendered in 3D + 2D plan, not merged into roomSurfaces
+    // for acoustics). Phase 2 — pending Dr. Chen's review — will fold the
+    // sub-room walls/floor/ceiling into RT60 + SPL math, with transmission
+    // loss between parent and sub. See rebuildSubStructures in scene.js.
+    //
+    // Shape per entry:
+    //   { id, sourceRoomId, sourceRoomName, position: { x_m, y_m },
+    //     elevation_m, rotation_deg, sourceRoom: <full room snapshot> }
+    subStructures: [],
+    // Standalone enclosures — independent editable wall structures
+    // produced by Break-to-merge from a placed sub-structure. Each
+    // enclosure is a self-contained custom polygon with its own
+    // floor / ceiling / per-edge wall materials (same wall-slot
+    // schema as room.surfaces.edges, openings included).
+    //
+    // Shape per entry:
+    //   { id, label, polygon: [{x,y}, ...] (PARENT-state coords, transform
+    //     baked in), height_m, elevation_m,
+    //     surfaces: { floor, ceiling, edges: [slot, ...] } }
+    //
+    // Phase 1 (Dr. Chen audit gate): VISUAL ONLY. roomSurfaces() does NOT
+    // include these surfaces yet — same coupled-room physics deferral as
+    // subStructures. See rebuildStandaloneEnclosures in scene.js.
+    standaloneEnclosures: [],
+    // Shared wall segments — produced by break-to-merge when an enclosure
+    // wall is collinear with a parent wall. Each entry is an INDEPENDENT
+    // editable wall surface that doesn't belong to any polygon's edge
+    // ring. Both the parent's overlapped sub-edge AND the enclosure's
+    // overlapped sub-edge are set to 'open-air' so they don't double-
+    // render; this entry is the canonical surface.
+    //
+    // Shape per entry:
+    //   { id, x1, y1, x2, y2, elevation_m, height_m, materialId,
+    //     openings: [...], sourceLabel }
+    //
+    // Phase 1 (Dr. Chen audit gate): VISUAL ONLY. roomSurfaces() does NOT
+    // include these segments yet — same physics deferral as subStructures
+    // and standaloneEnclosures. See rebuildWallSegments in scene.js.
+    wallSegments: [],
     surfaces: {
       floor: 'wood-floor',
       ceiling: 'acoustic-tile',
@@ -212,6 +254,10 @@ export const state = {
   // Speaker being examined in the Speaker viewport tab. Holds the modelUrl
   // of the selected catalogue entry; null when no speaker is under review.
   selectedSpeakerUrl: null,
+  // Sub-structure currently selected in the 3D viewport (click-to-select).
+  // Mirrors `selectedSpeakerUrl` / `selectedListenerId` discipline. The
+  // chip in the Room panel reflects this; resetSceneState clears it.
+  selectedSubStructureId: null,
   listeners: [],
   selectedListenerId: null,
   zones: [],
@@ -325,6 +371,14 @@ function deepClone(x) { return JSON.parse(JSON.stringify(x)); }
 // multiLevelStructure, etc.) leaking through the next one.
 const DEFAULT_ROOM_STATE = {
   shape: 'rectangular',
+  // Indoor (default) means there's a ceiling/roof and the room is an
+  // enclosed volume — Sabine / Eyring apply. 'outdoor' means no roof:
+  // ceiling is forced to α = 1.0 in roomSurfaces() so reverberant energy
+  // escapes upward, the 3D viewport skips the ceiling mesh, and the
+  // acoustic numbers should be read as "fenced courtyard with no roof"
+  // (Dr. Chen flag: a real free-field outdoor model would use direct +
+  // ground-bounce only — this is a Sabine-with-open-top approximation).
+  enclosure: 'indoor',
   polygon_sides: 16,
   polygon_radius_m: 10,
   round_radius_m: 2.5,
@@ -336,6 +390,18 @@ const DEFAULT_ROOM_STATE = {
   custom_vertices: null,
   stadiumStructure: null,
   multiLevelStructure: null,
+  // See state.room.subStructures comment above. Default-empty so a
+  // preset/template/blank-custom apply starts with no sub-rooms; the
+  // canonical reset path picks this up automatically.
+  subStructures: [],
+  // See state.room.standaloneEnclosures comment above. Default-empty
+  // so every preset/template/blank-custom apply starts with no broken-
+  // out enclosures.
+  standaloneEnclosures: [],
+  // See state.room.wallSegments comment above. Default-empty so every
+  // preset/template/blank-custom apply starts with no shared segments.
+  // resetSceneState picks this up via the Object.assign() defaults pass.
+  wallSegments: [],
   surfaces: {
     floor: 'wood-floor',
     ceiling: 'gypsum-board',
@@ -546,6 +612,40 @@ export function deserializeProject(obj) {
     if (r.multiLevelStructure && typeof r.multiLevelStructure === 'object') {
       state.room.multiLevelStructure = deepClone(r.multiLevelStructure);
     }
+    // Sub-structures (Phase 1: visual only). Each entry is self-contained —
+    // sourceRoom is a full snapshot captured at placement time, so the
+    // placement survives even if the saved library entry was later deleted.
+    if (Array.isArray(r.subStructures)) {
+      state.room.subStructures = r.subStructures
+        .filter(s => s && typeof s === 'object' && s.sourceRoom && typeof s.sourceRoom === 'object')
+        .map(deepClone);
+    }
+    // Standalone enclosures (Phase 1: visual only). Filter out malformed
+    // entries — the polygon must have ≥3 vertices, height/elevation must
+    // be finite, and surfaces must be an object. Same defensive shape as
+    // subStructures: a hand-edited JSON with a half-formed entry should
+    // not crash the rebuild.
+    if (Array.isArray(r.standaloneEnclosures)) {
+      state.room.standaloneEnclosures = r.standaloneEnclosures
+        .filter(e => e && typeof e === 'object'
+          && Array.isArray(e.polygon) && e.polygon.length >= 3
+          && Number.isFinite(e.height_m) && e.height_m > 0
+          && e.surfaces && typeof e.surfaces === 'object')
+        .map(deepClone);
+    }
+    // Shared wall segments — produced by break-to-merge overlap split.
+    // Filter out entries missing endpoints / height — same defensive
+    // shape as subStructures + standaloneEnclosures so a hand-edited
+    // file with a half-formed entry doesn't crash the rebuild.
+    if (Array.isArray(r.wallSegments)) {
+      state.room.wallSegments = r.wallSegments
+        .filter(s => s && typeof s === 'object'
+          && Number.isFinite(s.x1) && Number.isFinite(s.y1)
+          && Number.isFinite(s.x2) && Number.isFinite(s.y2)
+          && Number.isFinite(s.height_m) && s.height_m > 0
+          && typeof s.materialId === 'string')
+        .map(deepClone);
+    }
     if (r.surfaces && typeof r.surfaces === 'object') {
       Object.assign(state.room.surfaces, deepClone(r.surfaces));
     }
@@ -572,6 +672,12 @@ export function deserializeProject(obj) {
   state.selectedSpeakerUrl = typeof obj.selectedSpeakerUrl === 'string' ? obj.selectedSpeakerUrl : null;
   state.selectedListenerId = ('selectedListenerId' in obj) ? obj.selectedListenerId : (state.listeners[0]?.id ?? null);
   state.selectedZoneId     = ('selectedZoneId'     in obj) ? obj.selectedZoneId     : (state.zones[0]?.id     ?? null);
+  // Sub-structure selection isn't persisted across save/load (the user's
+  // last selection is a UI affordance, not part of the design). Reset it
+  // here so a stale id from a long-saved file doesn't highlight a sub
+  // that no longer exists. resetSceneState already cleared it; this is
+  // defensive in case the canonical reset's contract drifts later.
+  state.selectedSubStructureId = null;
 
   // --- Physics + ambient + EQ — overlay scalars; arrays full replace ---
   if (obj.physics && typeof obj.physics === 'object') {

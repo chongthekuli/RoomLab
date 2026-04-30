@@ -139,5 +139,25 @@ assertEq(isInsideRoom3D({ x: 3, y: 3, z: 3.6 }, domeRound), false, 'Above dome a
 // Speaker near wall, z above wall but dome is thin here → outside
 assertEq(isInsideRoom3D({ x: 5.9, y: 3, z: 2.7 }, domeRound), false, 'Near wall, above wall height = outside (dome very low there)');
 
+// --- Outdoor mode: ceiling check is disabled (no roof) ----------------------
+// Without this branch a tall outdoor speaker (e.g. on a 6 m pole in a park)
+// would render red and the heatmap would refuse to compute outdoor
+// listener cells.
+const outdoorRect = {
+  shape: 'rectangular',
+  width_m: 10, height_m: 3, depth_m: 10,
+  enclosure: 'outdoor', ceiling_type: 'flat',
+  surfaces: { floor: 'f', ceiling: 'c', wall_north: 'w', wall_south: 'w', wall_east: 'w', wall_west: 'w' },
+};
+assertEq(isInsideRoom3D({ x: 5, y: 5, z: 8 }, outdoorRect), true,
+  'Outdoor: speaker at z=8 m above 3 m wall is INSIDE (no ceiling cap)');
+assertEq(isInsideRoom3D({ x: 5, y: 5, z: 1.2 }, outdoorRect), true,
+  'Outdoor: listener at ear height is INSIDE');
+assertEq(isInsideRoom3D({ x: 50, y: 50, z: 1.2 }, outdoorRect), false,
+  'Outdoor: position off the footprint is still OUTSIDE');
+const indoorEquivalent = { ...outdoorRect, enclosure: 'indoor' };
+assertEq(isInsideRoom3D({ x: 5, y: 5, z: 8 }, indoorEquivalent), false,
+  'Indoor regression: tall speaker above 3 m ceiling is OUTSIDE');
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll room-shape tests passed.');

@@ -14,7 +14,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { buildRackGroup } from './rack-render.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
-import { roomPlanVertices, domeGeometry, isInsideRoom3D } from '../physics/room-shape.js';
+import { roomPlanVertices, domeGeometry, isInsideRoom3D, normalizeWallSlot } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { loadCharacterRig } from './character-loader.js';
@@ -350,6 +350,10 @@ export async function mount3DViewport({ materials }) {
     if (audienceGroup)    disposeGroup(audienceGroup);
     if (aimLinesGroup)    disposeGroup(aimLinesGroup);
     if (racksGroup)       disposeGroup(racksGroup);
+    // Drop any placement ghost left over from a cancelled-but-not-cleared
+    // session — preset/template/load wipes the scene; the ghost cannot
+    // outlive its parent room.
+    clearPlacementGhost();
 
     // Auto-fit camera to the new room. Without this, a swap from a 60 m
     // arena to a 4.5 m hi-fi leaves the camera 80 m back and the user
@@ -538,6 +542,18 @@ function initProbeTool() {
   // Click-to-inspect: tapping a loudspeaker cabinet in 3D opens the
   // Speaker workbench focused on that model.
   renderer.domElement.addEventListener('click', onSpeakerClick);
+  // Click-to-pulse: tapping a wall / floor / ceiling pulses the matching
+  // material picker in the Room panel. Registered after onSpeakerClick so
+  // a speaker hit (closer than the wall) takes priority — onSurfaceClick
+  // bails internally when a speaker is the nearer hit.
+  renderer.domElement.addEventListener('click', onSurfaceClick);
+  // Click-to-select: tapping a placed sub-room picks it as a single unit.
+  // Registered AFTER the surface click so sub-structure selection runs
+  // independently — the pulse + sub-selection can both fire when the user
+  // clicks a sub's wall (the wall pulse is harmless and gives extra
+  // affordance). Internal speaker priority + walk/probe early-out matches
+  // onSurfaceClick.
+  renderer.domElement.addEventListener('click', onSubStructureClick);
   // Hover-highlight + click-to-pivot on speakers.
   renderer.domElement.addEventListener('pointermove', onSpeakerHoverMove);
   renderer.domElement.addEventListener('pointerdown', onSpeakerPointerDown);
@@ -652,6 +668,285 @@ function onSpeakerClick(e) {
     return;
   }
 }
+
+// ---- Surface click → side-panel pulse ---------------------------------
+// Maya's spec (CUSTOM_ROOM_DESIGN.md §6): clicking a wall / floor / ceiling
+// in the 3D viewport pulses the matching material picker in the Room panel
+// rather than opening a popover. We raycast roomGroup, filter heatmap +
+// zone overlays, read userData.surface_id, and emit `surface:picked`. The
+// panel scrolls to the matching <select>, pulses an amber outline, and
+// programmatically focuses the dropdown so picking a material is one click.
+//
+// Speaker priority: if a speaker mesh is closer to the camera than the wall,
+// the speaker click handler already fired (registered earlier on the same
+// element) and we bail. Probe / walk modes get explicit early-out flags.
+const _surfaceClickRay = new THREE.Raycaster();
+const _surfaceClickNdc = { x: 0, y: 0 };
+function onSurfaceClick(e) {
+  if (walkMode || probeActive) return;
+  if (e.button !== 0) return;
+  if (!roomGroup) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  _surfaceClickNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  _surfaceClickNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  _surfaceClickRay.setFromCamera(_surfaceClickNdc, activeCamera || camera);
+
+  // Closest valid room hit (skip heatmap layers, zone overlays, untagged
+  // helper meshes). Hits arrive sorted near→far from intersectObject.
+  //
+  // Wall-segment priority: a shared wall (tag='wall_segment') is the
+  // CANONICAL surface for an overlap region. From inside the parent
+  // room the hut's far wall sits in front of the merged wall, but the
+  // user's intent when clicking the merged region is the merged wall.
+  // First pass picks any wall_segment along the ray; second pass falls
+  // back to the nearest hit with a real surface_id. Every other
+  // interaction (parent walls, enclosure walls, floor, ceiling) is
+  // unchanged because pass 2 sees the same hit list.
+  const roomHits = _surfaceClickRay.intersectObject(roomGroup, true);
+  let bestRoomDist = Infinity;
+  let bestSurfId = null;
+  // Pass 1 — any wall_segment hit wins, regardless of distance.
+  for (const h of roomHits) {
+    if (h.object.userData?.tag !== 'wall_segment') continue;
+    const surfId = h.object.userData?.surface_id;
+    if (!surfId) continue;
+    bestRoomDist = h.distance;
+    bestSurfId = surfId;
+    break;
+  }
+  // Pass 2 — nearest non-wallSegment hit, original behaviour.
+  if (!bestSurfId) {
+    for (const h of roomHits) {
+      const tag = h.object.userData?.tag ?? '';
+      if (tag.startsWith('heatmap_')) continue;
+      if (h.object.userData?.zone_id) continue;
+      const surfId = h.object.userData?.surface_id;
+      if (!surfId) continue;
+      bestRoomDist = h.distance;
+      bestSurfId = surfId;
+      break;
+    }
+  }
+  if (!bestSurfId) return;
+
+  // If a speaker (or rack, listener marker) is between the camera and the
+  // wall, the click was about that speaker — bail. onSpeakerClick already
+  // ran and handled it.
+  if (sourcesGroup) {
+    const sHits = _surfaceClickRay.intersectObject(sourcesGroup, true);
+    for (const h of sHits) {
+      if (h.object.userData?.speakerModelUrl && h.distance < bestRoomDist) return;
+    }
+  }
+  emit('surface:picked', { surface_id: bestSurfId });
+}
+
+// ---- Surface hover from side-panel ------------------------------------
+// Reverse direction: hovering a wall row in the Room panel emissive-boosts
+// the matching mesh in 3D so the user can scan a long wall list and see
+// which is which. Mutates material.emissive on every matching mesh in
+// roomGroup; restored when surface_id is null (pointerleave) or another
+// row is hovered. Cheap — no raycast, just a tree walk on roomGroup.
+let _hoveredSurfaceId = null;
+const _hoveredSurfaceMeshes = [];
+const _surfaceHoverColor = new THREE.Color(0xffd000);
+const _surfaceHoverBoost = 0.55;
+function setSurfaceHoverHighlight(surfaceId) {
+  if (_hoveredSurfaceId === surfaceId) return;
+  // Restore previously highlighted meshes first.
+  for (const m of _hoveredSurfaceMeshes) {
+    const store = m.userData;
+    if (store._surfOrigEmissiveHex !== undefined && m.material?.emissive) {
+      m.material.emissive.setHex(store._surfOrigEmissiveHex);
+      m.material.emissiveIntensity = store._surfOrigEmissiveIntensity ?? 1;
+      m.material.needsUpdate = true;
+      delete store._surfOrigEmissiveHex;
+      delete store._surfOrigEmissiveIntensity;
+    }
+  }
+  _hoveredSurfaceMeshes.length = 0;
+  _hoveredSurfaceId = surfaceId;
+  if (!surfaceId || !roomGroup) return;
+  roomGroup.traverse(m => {
+    if (!m.isMesh || m.userData?.surface_id !== surfaceId) return;
+    if (!m.material || !m.material.emissive) return;
+    const store = m.userData;
+    store._surfOrigEmissiveHex = m.material.emissive.getHex();
+    store._surfOrigEmissiveIntensity = m.material.emissiveIntensity ?? 1;
+    m.material.emissive.copy(_surfaceHoverColor);
+    m.material.emissiveIntensity = (store._surfOrigEmissiveIntensity ?? 1) + _surfaceHoverBoost;
+    m.material.needsUpdate = true;
+    _hoveredSurfaceMeshes.push(m);
+  });
+}
+on('surface:hover', ({ surface_id } = {}) => {
+  setSurfaceHoverHighlight(surface_id ?? null);
+});
+// Room rebuilds discard the meshes we cached references to — clear stale
+// highlights so subsequent setSurfaceHoverHighlight() calls don't try to
+// touch disposed materials.
+on('room:changed', () => {
+  _hoveredSurfaceMeshes.length = 0;
+  _hoveredSurfaceId = null;
+});
+
+// ---- Sub-structure click-to-select ------------------------------------
+// Clicking a placed sub-room in the 3D viewport selects it as a single
+// unit. We raycast roomGroup, walk up the parent chain to the Group with
+// userData.tag === 'sub_structure', read userData.sub_id, and update
+// state.selectedSubStructureId. Speaker hits beat sub hits when closer
+// (same priority rule onSurfaceClick uses for walls). Click-empty in
+// 3D deselects so the user can dismiss without going through the chip.
+//
+// Highlight: emissive boost on every Mesh in the sub-structure Group,
+// matching the speaker pattern (setSpeakerHighlight). Tracks the boosted
+// meshes so we can restore on deselect / reselect / room-rebuild.
+const _subClickRay = new THREE.Raycaster();
+const _subClickNdc = { x: 0, y: 0 };
+const _subHighlightColor = new THREE.Color(0x4aa3ff);  // ghost-blue (matches sub fill)
+const _subHighlightBoost = 0.6;
+const _subHighlightedMeshes = [];
+let _highlightedSubId = null;
+
+function findSubStructureGroup(obj) {
+  // Walk up from a hit mesh until we find the Group tagged 'sub_structure'.
+  let o = obj;
+  while (o && o !== roomGroup) {
+    if (o.userData?.tag === 'sub_structure' && typeof o.userData?.sub_id === 'string') return o;
+    o = o.parent;
+  }
+  return null;
+}
+
+function clearSubStructureHighlight() {
+  for (const m of _subHighlightedMeshes) {
+    const store = m.userData;
+    if (store._subOrigEmissiveHex !== undefined && m.material?.emissive) {
+      m.material.emissive.setHex(store._subOrigEmissiveHex);
+      m.material.emissiveIntensity = store._subOrigEmissiveIntensity ?? 1;
+      m.material.needsUpdate = true;
+      delete store._subOrigEmissiveHex;
+      delete store._subOrigEmissiveIntensity;
+    }
+  }
+  _subHighlightedMeshes.length = 0;
+  _highlightedSubId = null;
+}
+
+function applySubStructureHighlight(subId) {
+  // Sub meshes use MeshBasicMaterial (see buildSubStructureGroup). Basic
+  // materials have no .emissive — they'd stay un-highlighted. To get a
+  // visible selection cue we boost the material .opacity instead AND add
+  // a contrasting tint via the .color stash. Matches the speaker pattern's
+  // intent (visual contrast on selection) without forcing a material swap.
+  if (!roomGroup) return;
+  clearSubStructureHighlight();
+  if (!subId) return;
+  roomGroup.traverse(o => {
+    if (!o.isMesh) return;
+    let p = o;
+    let inSelectedSub = false;
+    while (p && p !== roomGroup) {
+      if (p.userData?.tag === 'sub_structure' && p.userData?.sub_id === subId) {
+        inSelectedSub = true; break;
+      }
+      p = p.parent;
+    }
+    if (!inSelectedSub) return;
+    if (!o.material) return;
+    const mat = o.material;
+    const store = o.userData;
+    if (mat.emissive) {
+      // Standard material — emissive boost (same as speaker).
+      store._subOrigEmissiveHex = mat.emissive.getHex();
+      store._subOrigEmissiveIntensity = mat.emissiveIntensity ?? 1;
+      mat.emissive.copy(_subHighlightColor);
+      mat.emissiveIntensity = (store._subOrigEmissiveIntensity ?? 1) + _subHighlightBoost;
+    } else if (mat.color) {
+      // Basic material — bump opacity and tint the color toward ghost-blue.
+      store._subOrigEmissiveHex = mat.color.getHex();
+      store._subOrigEmissiveIntensity = mat.opacity ?? 1;
+      mat.color.copy(_subHighlightColor);
+      mat.opacity = Math.min(1, (store._subOrigEmissiveIntensity ?? 0.22) + 0.25);
+    } else {
+      return;
+    }
+    mat.needsUpdate = true;
+    _subHighlightedMeshes.push(o);
+  });
+  _highlightedSubId = subId;
+}
+
+function onSubStructureClick(e) {
+  if (walkMode || probeActive || !roomGroup) return;
+  if (e.button !== 0) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  _subClickNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  _subClickNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  _subClickRay.setFromCamera(_subClickNdc, activeCamera || camera);
+
+  // Speaker priority: if a speaker is closer than any sub-structure hit,
+  // bail — onSpeakerClick already handled the click.
+  let speakerDist = Infinity;
+  if (sourcesGroup) {
+    const sHits = _subClickRay.intersectObject(sourcesGroup, true);
+    for (const h of sHits) {
+      if (h.object.userData?.speakerModelUrl) { speakerDist = h.distance; break; }
+    }
+  }
+
+  const roomHits = _subClickRay.intersectObject(roomGroup, true);
+  let pickedSubId = null;
+  let pickedDist = Infinity;
+  for (const h of roomHits) {
+    const tag = h.object.userData?.tag ?? '';
+    if (tag.startsWith('heatmap_')) continue;
+    const subGroup = findSubStructureGroup(h.object);
+    if (!subGroup) continue;
+    if (h.distance < speakerDist) {
+      pickedSubId = subGroup.userData.sub_id;
+      pickedDist = h.distance;
+    }
+    break;
+  }
+
+  // If user clicked through to a non-sub surface that's CLOSER than any
+  // sub hit, that's a click-empty (or a parent-wall click) — clear sub
+  // selection so users can dismiss without going to the chip. The
+  // surface-pulse path (onSurfaceClick) keeps running independently.
+  if (pickedSubId === null) {
+    if (state.selectedSubStructureId != null) {
+      state.selectedSubStructureId = null;
+      clearSubStructureHighlight();
+      emit('sub_structure:selected', { id: null });
+    }
+    return;
+  }
+
+  // New selection. Toggle off if clicking the already-selected sub.
+  const next = (pickedSubId === state.selectedSubStructureId) ? null : pickedSubId;
+  state.selectedSubStructureId = next;
+  if (next) applySubStructureHighlight(next);
+  else clearSubStructureHighlight();
+  emit('sub_structure:selected', { id: next });
+}
+
+// Restore highlight after a room-rebuild discards the meshes we cached.
+on('room:changed', () => {
+  _subHighlightedMeshes.length = 0;
+  _highlightedSubId = null;
+  if (state.selectedSubStructureId) {
+    // Defer until after the rebuild lands new meshes — queueRebuild is
+    // RAF-coalesced, so wait one frame.
+    requestAnimationFrame(() => {
+      if (state.selectedSubStructureId) applySubStructureHighlight(state.selectedSubStructureId);
+    });
+  }
+});
+on('scene:reset', () => {
+  _subHighlightedMeshes.length = 0;
+  _highlightedSubId = null;
+});
 
 function onProbeMouseMove(e) {
   if (!probeActive || walkMode) return;
@@ -1682,7 +1977,15 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
   const shape = room.shape ?? 'rectangular';
   const cx = w / 2, cz = d / 2;
 
-  const wallsMatId = surfaces.walls ?? surfaces.wall_north ?? 'gypsum-board';
+  // Wall slots may now be either string (legacy) or { materialId, openings }
+  // (PR2). Normalise here so downstream PlaneGeometry/cylinder code keeps
+  // a plain material-id string. Polygon / round shapes share a single
+  // 'walls' slot that the panel doesn't expose openings on; the normaliser
+  // ignores any openings that snuck in via a JSON edit so nothing breaks.
+  const wallsMatId = normalizeWallSlot(
+    surfaces.walls ?? surfaces.wall_north,
+    'gypsum-board',
+  ).materialId;
 
   // Each surface gets its own textured MeshStandardMaterial. Texture tiling
   // is computed from the surface's real-world dimensions so planks, tiles,
@@ -1690,6 +1993,22 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
   // stay slightly translucent so the user can still see the interior from
   // outside; the floor is nearly opaque.
   const buildSurfaceMat = (materialId, widthM, heightM, { opacity = 0.6, doubleSide = true } = {}) => {
+    // 'open-air' is a synthetic boundary material (α = 1.0) used when the
+    // user marks a wall as open / no enclosure. Render as fully transparent
+    // — the room's wireframe outlines mark where the wall used to be.
+    // Mesh stays in the scene at opacity 0 so it's still raycastable: the
+    // user can click the empty boundary in 3D to switch the wall back to a
+    // solid material via the surface-picker pulse in the side panel.
+    if (materialId === 'open-air') {
+      return new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        side: doubleSide ? THREE.DoubleSide : THREE.FrontSide,
+        depthWrite: false,
+        depthTest: false,
+      });
+    }
     const tex = getMaterialTexture(materialId, widthM, heightM);
     const palette = getMaterialPalette(materialId);
     return new THREE.MeshStandardMaterial({
@@ -1706,6 +2025,80 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
   const ceilMat  = buildSurfaceMat(surfaces.ceiling, w, d, { opacity: 0.55 });
   const wallsMat = buildSurfaceMat(wallsMatId, (w + d), h, { opacity: 0.55 });
 
+  // PR2: walls can carry doors / windows. When the wall slot is an object
+  // with a non-empty openings[], cut rectangular holes out of the wall
+  // mesh (ShapeGeometry) and render each opening as its own child mesh
+  // at the hole's position with the opening's material. State === 'open'
+  // resolves to the open-air material (invisible plane that still
+  // raycasts) so the user can switch it back. UV is remapped to [0,1] over
+  // the wall's bbox so buildSurfaceMat's per-meter tile density matches
+  // the original PlaneGeometry walls.
+  const buildWallGeoWithHoles = (ww, wh, openings) => {
+    if (!openings || openings.length === 0) return new THREE.PlaneGeometry(ww, wh);
+    const shape = new THREE.Shape();
+    const hw = ww / 2, hh = wh / 2;
+    shape.moveTo(-hw, -hh);
+    shape.lineTo( hw, -hh);
+    shape.lineTo( hw,  hh);
+    shape.lineTo(-hw,  hh);
+    shape.lineTo(-hw, -hh);
+    for (const op of openings) {
+      const ow = Number(op?.width_m), oh = Number(op?.height_m);
+      if (!Number.isFinite(ow) || !Number.isFinite(oh) || ow <= 0 || oh <= 0) continue;
+      const ox = Number(op.x_m) || 0, oz = Number(op.z_m) || 0;
+      const x0 = ox - hw, y0 = oz - hh;
+      const hole = new THREE.Path();
+      hole.moveTo(x0,      y0);
+      hole.lineTo(x0 + ow, y0);
+      hole.lineTo(x0 + ow, y0 + oh);
+      hole.lineTo(x0,      y0 + oh);
+      hole.lineTo(x0,      y0);
+      shape.holes.push(hole);
+    }
+    const geo = new THREE.ShapeGeometry(shape);
+    const pos = geo.attributes.position;
+    const uv = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      uv[i * 2]     = (pos.getX(i) + hw) / ww;
+      uv[i * 2 + 1] = (pos.getY(i) + hh) / wh;
+    }
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    return geo;
+  };
+
+  // Build + attach an opening child mesh to its parent wall. Local-space
+  // position centres the opening on its (x_m + w/2, z_m + h/2) wall-local
+  // coords, with a 1 mm forward offset so its quad doesn't z-fight with
+  // the hole's edges in the parent wall mesh.
+  //
+  // SYSTEM merge_cut openings (auto-generated by break-to-merge to mark
+  // the overlap rectangle on a wall) do NOT get a child mesh: the wall
+  // already has the hole punched in its ShapeGeometry, and the canonical
+  // shared wall renders independently as a wallSegment. Without this
+  // skip, the system-opening mesh would intercept surface-click rays at
+  // the hole and route them to a panel row that doesn't exist (system
+  // openings are filtered from the user-facing openings list), so the
+  // click would silently fail and the merged wall couldn't be selected.
+  const attachOpeningMesh = (wallMesh, op, ww, wh, opIdx, baseSurfaceId) => {
+    if (op?.system) return;
+    const ow = Number(op?.width_m), oh = Number(op?.height_m);
+    if (!Number.isFinite(ow) || !Number.isFinite(oh) || ow <= 0 || oh <= 0) return;
+    const isOpen = op?.state === 'open';
+    const matId = isOpen ? 'open-air' : (op?.materialId || 'glass-window');
+    const opGeo = new THREE.PlaneGeometry(ow, oh);
+    const opMat = buildSurfaceMat(matId, ow, oh, { opacity: isOpen ? 0 : 0.85 });
+    const opMesh = new THREE.Mesh(opGeo, opMat);
+    const offsetX = (Number(op.x_m) || 0) + ow / 2 - ww / 2;
+    const offsetY = (Number(op.z_m) || 0) + oh / 2 - wh / 2;
+    opMesh.position.set(offsetX, offsetY, 0.001);
+    opMesh.userData.tag = `opening_${op.kind || 'opening'}`;
+    opMesh.userData.opening_id = op.id || `${baseSurfaceId}_op_${opIdx}`;
+    opMesh.userData.acoustic_material = matId;
+    opMesh.userData.surface_id = `${baseSurfaceId}_op_${opIdx}`;
+    if (isOpen) opMesh.userData.no_walk_collide = true;   // open doors / windows are walk-through
+    wallMesh.add(opMesh);
+  };
+
   if (shape === 'rectangular') {
     // Floor + ceiling as rectangular planes
     const floorGeo = new THREE.PlaneGeometry(w, d);
@@ -1716,7 +2109,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     floor.userData.surface_id = 'floor';
     roomGroup.add(floor);
 
-    if (room.ceiling_type !== 'dome') {
+    if (room.ceiling_type !== 'dome' && room.enclosure !== 'outdoor') {
       const ceilGeo = new THREE.PlaneGeometry(w, d);
       const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
       ceiling.rotation.x = Math.PI / 2;
@@ -1726,22 +2119,32 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       roomGroup.add(ceiling);
     }
 
-    // 4 walls (per-material)
+    // 4 walls (per-material).
     const wallOpts = [
+      // [ww, wh, pos, rot, slot, surfaceKey]
       [w, h, [cx, h/2, 0],   [0, Math.PI, 0],    surfaces.wall_north, 'wall_north'],
       [w, h, [cx, h/2, d],   [0, 0, 0],          surfaces.wall_south, 'wall_south'],
       [d, h, [w,  h/2, cz],  [0, -Math.PI/2, 0], surfaces.wall_east,  'wall_east'],
       [d, h, [0,  h/2, cz],  [0, Math.PI/2, 0],  surfaces.wall_west,  'wall_west'],
     ];
-    for (const [ww, wh, pos, rot, surfId, surfaceKey] of wallOpts) {
-      const geo = new THREE.PlaneGeometry(ww, wh);
+    for (const [ww, wh, pos, rot, slot, surfaceKey] of wallOpts) {
+      const { materialId: surfId, openings } = normalizeWallSlot(slot);
+      const geo = buildWallGeoWithHoles(ww, wh, openings);
       const mat = buildSurfaceMat(surfId, ww, wh, { opacity: 0.55 });
       const m = new THREE.Mesh(geo, mat);
       m.position.set(...pos);
       m.rotation.set(...rot);
       m.userData.acoustic_material = surfId;
       m.userData.surface_id = surfaceKey;
+      // Walk-mode collision flag — any wall whose material is "Open wall
+      // (no boundary)" must NOT block the avatar. We set this explicitly
+      // here so the third-person controller's collision filter has an
+      // unambiguous signal independent of the material/opacity heuristics.
+      if (surfId === 'open-air') m.userData.no_walk_collide = true;
       roomGroup.add(m);
+      for (let oi = 0; oi < openings.length; oi++) {
+        attachOpeningMesh(m, openings[oi], ww, wh, oi, surfaceKey);
+      }
     }
 
     // Wireframe edges for shoebox
@@ -1767,7 +2170,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     floor.userData.surface_id = 'floor';
     roomGroup.add(floor);
 
-    if (room.ceiling_type !== 'dome') {
+    if (room.ceiling_type !== 'dome' && room.enclosure !== 'outdoor') {
       const ceilGeo = new THREE.ShapeGeometry(makeFloorCeilingShape(room, false));
       const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
       ceiling.rotation.x = Math.PI / 2;
@@ -1831,8 +2234,8 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
         if (edgeLen < 0.01) continue;
         const midX = (v1.x + v2.x) / 2;
         const midZ = (v1.y + v2.y) / 2;
-        const edgeSurfId = edges[i] ?? 'gypsum-board';
-        const geo = new THREE.PlaneGeometry(edgeLen, h);
+        const { materialId: edgeSurfId, openings } = normalizeWallSlot(edges[i]);
+        const geo = buildWallGeoWithHoles(edgeLen, h, openings);
         const edgeMat = buildSurfaceMat(edgeSurfId, edgeLen, h, { opacity: 0.55 });
         const m = new THREE.Mesh(geo, edgeMat);
 
@@ -1865,7 +2268,11 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
         m.quaternion.setFromRotationMatrix(_basisMat);
         m.userData.acoustic_material = edgeSurfId;
         m.userData.surface_id = `edge_${i}`;
+        if (edgeSurfId === 'open-air') m.userData.no_walk_collide = true;
         roomGroup.add(m);
+        for (let oi = 0; oi < openings.length; oi++) {
+          attachOpeningMesh(m, openings[oi], edgeLen, h, oi, `edge_${i}`);
+        }
       }
       const bottom = verts.map(v => new THREE.Vector3(v.x, 0, v.y));
       bottom.push(bottom[0]);
@@ -1931,6 +2338,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
         m.userData.acoustic_material = wallsMatId;
         m.userData.surface_id = 'walls';
         m.userData.tag = inVom ? 'wall_above_tunnel' : 'wall';
+        if (wallsMatId === 'open-air') m.userData.no_walk_collide = true;
         roomGroup.add(m);
       }
 
@@ -1961,9 +2369,9 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     }
   }
 
-  // Dome cap (any shape)
+  // Dome cap (any shape) — also skipped when outdoor (no roof at all).
   const dome = domeGeometry(room);
-  if (dome) {
+  if (dome && room.enclosure !== 'outdoor') {
     const { sphereRadius, rise, thetaMax } = dome;
     const capGeo = new THREE.SphereGeometry(sphereRadius, 48, 24, 0, Math.PI * 2, 0, thetaMax);
     const cap = new THREE.Mesh(capGeo, ceilMat);
@@ -1988,7 +2396,527 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
   rebuildBowlStructure(room);
   rebuildMultiLevelStructure(room);
 
+  // Sub-structures (saved rooms placed into this room). Phase 1 = visual
+  // only; the meshes go into roomGroup so aim raycasts terminate on them
+  // and the heatmap probe / surface-click flow can hit them. Phase 2
+  // (acoustic merging) lives next to this call — see header on
+  // rebuildSubStructures.
+  rebuildSubStructures(room);
+
+  // Standalone enclosures (broken-out from a sub-structure into editable
+  // walls). Phase 1: VISUAL ONLY — same Dr. Chen audit gate as
+  // sub-structures. Walls/floor/ceiling render as proper textured meshes
+  // with surface_id tags so the Room panel's click-to-pulse and material-
+  // picker flows work the same way they do on parent walls. The hooks
+  // we'd flip in Phase 2 — adding their surface-areas into roomSurfaces()
+  // and accounting for transmission loss — live in physics/room-shape.js
+  // (see roomSurfaces) NOT here. This function only deals with rendering.
+  rebuildStandaloneEnclosures(room, {
+    buildWallGeoWithHoles, attachOpeningMesh, buildSurfaceMat,
+  });
+
+  // Shared wall segments — produced by break-to-merge overlap split.
+  // Each entry is an INDEPENDENT wall surface (not owned by any
+  // polygon's edge ring). Phase 1: VISUAL ONLY — same Dr. Chen audit
+  // gate as standaloneEnclosures and subStructures. Goes into roomGroup
+  // so the aim raycaster picks it up automatically; click-pulse + hover
+  // resolve via userData.surface_id = `wseg_${seg.id}` (matches the row
+  // id set by renderSharedWallSegmentSection in panel-room.js).
+  rebuildWallSegments(room, {
+    buildWallGeoWithHoles, attachOpeningMesh, buildSurfaceMat,
+  });
+
   if (isFirst) frameCameraToRoom();
+}
+
+// Render placed sub-structures (saved rooms imported into the parent
+// room as visual elements). PHASE 1 — VISUAL ONLY: the sub-room walls,
+// floor, ceiling render at the chosen offset/rotation and become aim-
+// raycast targets, but they are NOT folded into roomSurfaces() for the
+// RT60 / Hopkins-Stryker / STIPA math.
+//
+// PHASE 2 (DEFERRED, pending Dr. Chen review): acoustic merging. Each
+// sub-room creates an interior compartment whose surfaces should add to
+// the parent's total absorption budget (with a transmission-loss term
+// for sound passing between parent and sub through any open boundary).
+// Sabine + Eyring assume a single diffuse field, which is wrong the
+// moment the room is partitioned — the next person here should NOT
+// just sum surfaces; that overstates absorption and underestimates RT60.
+// The right model is coupled-room reverberation (see e.g. Bradley & Wang
+// 2009, "Sound fields in coupled rooms") which is the tracked Phase 2
+// task on Dr. Chen's audit list.
+//
+// Each sub-structure renders in a child Group whose:
+//   position = (sub.position.x_m, sub.elevation_m, sub.position.y_m)  [three coords]
+//   rotation around the local Y axis = sub.rotation_deg
+// The sub-room is built in its own LOCAL coordinate frame (origin at
+// sub-room's bbox 0,0,0) so the parent transform places it correctly.
+// Meshes carry userData.tag = 'sub_structure' so future code can filter
+// them in/out of physics surface lists in one place.
+function rebuildSubStructures(parentRoom, opts = {}) {
+  if (!roomGroup) return;
+  const { ghostOnly = false } = opts;
+  const subs = Array.isArray(parentRoom.subStructures) ? parentRoom.subStructures : [];
+  for (const sub of subs) {
+    if (!sub || !sub.sourceRoom) continue;
+    const g = buildSubStructureGroup(sub.sourceRoom, {
+      ghost: ghostOnly,
+      label: sub.sourceRoomName ?? 'Sub-room',
+    });
+    if (!g) continue;
+    const px = sub.position?.x_m ?? 0;
+    const py = sub.position?.y_m ?? 0;
+    const elev = sub.elevation_m ?? 0;
+    g.position.set(px, elev, py);
+    g.rotation.y = ((sub.rotation_deg ?? 0) * Math.PI) / 180;
+    g.userData.tag = 'sub_structure';
+    g.userData.sub_id = sub.id;
+    roomGroup.add(g);
+  }
+}
+
+// Build a single sub-room as a child Group, in LOCAL coordinates. Caller
+// places + rotates the group via group.position / group.rotation.y.
+// Walls / floor / ceiling are simple LineSegments outlines + translucent
+// fill so the sub-room reads as "ghost geometry" rather than fighting
+// the parent's textured walls for visual attention. ghost=true (used by
+// the placement preview controller) renders even more transparent +
+// adds a coloured tint so the user knows it isn't committed yet.
+function buildSubStructureGroup(sourceRoom, { ghost = false, label = 'Sub-room' } = {}) {
+  if (!sourceRoom) return null;
+  const w = sourceRoom.width_m ?? 5;
+  const h = sourceRoom.height_m ?? 3;
+  const d = sourceRoom.depth_m ?? 5;
+  if (!(w > 0 && h > 0 && d > 0)) return null;
+  const g = new THREE.Group();
+
+  const fillColor = ghost ? 0x4aa3ff : 0xb6c2d6;
+  const lineColor = ghost ? 0x7fc7ff : 0x8a93a3;
+  const fillOpacity = ghost ? 0.18 : 0.22;
+
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: fillColor,
+    transparent: true,
+    opacity: fillOpacity,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const lineMat = new THREE.LineBasicMaterial({
+    color: lineColor,
+    transparent: true,
+    opacity: ghost ? 0.95 : 0.85,
+  });
+
+  // Floor
+  const floorGeo = new THREE.PlaneGeometry(w, d);
+  const floor = new THREE.Mesh(floorGeo, fillMat.clone());
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(w / 2, 0.01, d / 2);
+  floor.userData.tag = 'sub_structure_surface';
+  floor.userData.surface_id = 'floor';
+  g.add(floor);
+
+  // Ceiling (always a flat cap regardless of source ceiling_type — the
+  // dome rise is a v2 nicety; for a placed hut a flat lid is enough to
+  // visually communicate the volume).
+  if (sourceRoom.enclosure !== 'outdoor') {
+    const ceilGeo = new THREE.PlaneGeometry(w, d);
+    const ceiling = new THREE.Mesh(ceilGeo, fillMat.clone());
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.set(w / 2, h - 0.01, d / 2);
+    ceiling.userData.tag = 'sub_structure_surface';
+    ceiling.userData.surface_id = 'ceiling';
+    g.add(ceiling);
+  }
+
+  // Walls — choose between rectangular four-wall and custom-polygon
+  // edges based on the source room shape. Polygon / round shapes fall
+  // through to the bbox four-wall rendering as a simplification (the
+  // sub-room geometry is already a snapshot, and the bbox fills the
+  // same volume with negligible visual loss at the placement scale).
+  const shape = sourceRoom.shape ?? 'rectangular';
+  if (shape === 'custom' && Array.isArray(sourceRoom.custom_vertices) && sourceRoom.custom_vertices.length >= 3) {
+    const verts = sourceRoom.custom_vertices;
+    for (let i = 0; i < verts.length; i++) {
+      const v1 = verts[i];
+      const v2 = verts[(i + 1) % verts.length];
+      const ex = v2.x - v1.x, ey = v2.y - v1.y;
+      const len = Math.sqrt(ex * ex + ey * ey);
+      if (len < 0.01) continue;
+      const wallGeo = new THREE.PlaneGeometry(len, h);
+      const wall = new THREE.Mesh(wallGeo, fillMat.clone());
+      const midX = (v1.x + v2.x) / 2;
+      const midZ = (v1.y + v2.y) / 2;
+      wall.position.set(midX, h / 2, midZ);
+      // Face the wall along the edge direction. The custom polygon
+      // wall in the parent rebuildRoom uses a manual basis matrix; for
+      // a sub-room ghost we can use lookAt against an inward point
+      // (bbox centre), which is sufficient for visual indication.
+      wall.lookAt(w / 2, h / 2, d / 2);
+      wall.userData.tag = 'sub_structure_surface';
+      wall.userData.surface_id = `edge_${i}`;
+      g.add(wall);
+    }
+    // Outline rings.
+    const bottom = verts.map(v => new THREE.Vector3(v.x, 0, v.y));
+    bottom.push(bottom[0]);
+    const top = verts.map(v => new THREE.Vector3(v.x, h, v.y));
+    top.push(top[0]);
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(bottom), lineMat));
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(top), lineMat));
+    for (let i = 0; i < verts.length; i++) {
+      const pts = [
+        new THREE.Vector3(verts[i].x, 0, verts[i].y),
+        new THREE.Vector3(verts[i].x, h, verts[i].y),
+      ];
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+    }
+  } else {
+    // 4 walls of the bbox
+    const wallSpecs = [
+      // [ww, wh, pos, rot]
+      [w, h, [w / 2, h / 2, 0],   [0, Math.PI, 0]],
+      [w, h, [w / 2, h / 2, d],   [0, 0, 0]],
+      [d, h, [w,     h / 2, d / 2], [0, -Math.PI / 2, 0]],
+      [d, h, [0,     h / 2, d / 2], [0,  Math.PI / 2, 0]],
+    ];
+    for (const [ww, wh, pos, rot] of wallSpecs) {
+      const wg = new THREE.PlaneGeometry(ww, wh);
+      const wall = new THREE.Mesh(wg, fillMat.clone());
+      wall.position.set(...pos);
+      wall.rotation.set(...rot);
+      wall.userData.tag = 'sub_structure_surface';
+      g.add(wall);
+    }
+    const box = new THREE.BoxGeometry(w, h, d);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(box), lineMat);
+    edges.position.set(w / 2, h / 2, d / 2);
+    g.add(edges);
+    box.dispose();
+  }
+
+  return g;
+}
+
+// Render standalone enclosures — independent editable wall structures
+// produced by Break-to-merge. PHASE 1: VISUAL ONLY (Dr. Chen audit
+// gate). roomSurfaces() does NOT include these surfaces yet; coupled-
+// room reverberation Phase 2 lives next to rebuildSubStructures' header.
+//
+// Each enclosure has:
+//   polygon[]  — vertices in PARENT-state coords (transform already
+//                baked from the source sub-structure's position+rotation
+//                during break-to-merge in panel-room.js).
+//   height_m   — wall height
+//   elevation_m— floor offset above the parent's floor (kept for editing,
+//                same convention as the source sub-structure).
+//   surfaces   — { floor, ceiling, edges: [slot...] }
+//
+// Wall mesh tagging: surface_id = `enclosure_${i}_edge_${j}`, floor =
+// `enclosure_${i}_floor`, ceiling = `enclosure_${i}_ceiling`. The
+// existing surface-pulse + hover system reads userData.surface_id, so
+// click-to-pulse from 3D into the per-enclosure section in panel-room.js
+// is automatic.
+//
+// Wall builders (buildWallGeoWithHoles, attachOpeningMesh, buildSurfaceMat)
+// are passed in from the caller because they're locals inside rebuildRoom
+// where buildSurfaceMat closes over the loaded textures cache. Having the
+// caller hand them down is cheaper than re-defining the builders here and
+// keeps the wall geometry path identical to the parent's custom-edge code.
+function rebuildStandaloneEnclosures(parentRoom, helpers = {}) {
+  if (!roomGroup) return;
+  const list = Array.isArray(parentRoom.standaloneEnclosures) ? parentRoom.standaloneEnclosures : [];
+  if (list.length === 0) return;
+  const { buildWallGeoWithHoles, attachOpeningMesh, buildSurfaceMat } = helpers;
+  if (typeof buildWallGeoWithHoles !== 'function'
+      || typeof attachOpeningMesh !== 'function'
+      || typeof buildSurfaceMat !== 'function') return;
+
+  const _basisX = new THREE.Vector3();
+  const _basisY = new THREE.Vector3(0, 1, 0);
+  const _basisZ = new THREE.Vector3();
+  const _basisMat = new THREE.Matrix4();
+
+  for (let ei = 0; ei < list.length; ei++) {
+    const enc = list[ei];
+    if (!enc || !Array.isArray(enc.polygon) || enc.polygon.length < 3) continue;
+    const verts = enc.polygon;
+    const h = Number.isFinite(enc.height_m) ? enc.height_m : 3;
+    if (h <= 0) continue;
+    const elev = Number.isFinite(enc.elevation_m) ? enc.elevation_m : 0;
+    const surfaces = enc.surfaces || {};
+    const edgeSlots = Array.isArray(surfaces.edges) ? surfaces.edges : [];
+
+    // Bbox + centroid for centroid-relative inward-normal test (used to
+    // pick the wall's outward face). For a degenerate self-intersecting
+    // polygon the centroid may not be inside, but the flip-on-negative
+    // dot heuristic still keeps the wall's local X aligned with the edge.
+    let cx = 0, cz = 0;
+    for (const v of verts) { cx += v.x; cz += v.y; }
+    cx /= verts.length; cz /= verts.length;
+
+    const group = new THREE.Group();
+    group.userData.tag = 'standalone_enclosure';
+    group.userData.enclosure_idx = ei;
+    group.userData.enclosure_id = enc.id;
+    // The polygon is already in parent coords — only elevation needs
+    // applying (lift the whole enclosure off the floor).
+    group.position.set(0, elev, 0);
+
+    // Floor + ceiling shapes — the polygon is in state coords (state.y
+    // maps to world.z). PlaneGeometry's local XY plane needs different
+    // Y-sign treatment for floor vs ceiling because the two meshes
+    // rotate opposite directions:
+    //   floor.rotation.x = -π/2  → local Y maps to world -Z (needs flip)
+    //   ceiling.rotation.x = +π/2 → local Y maps to world +Z (no flip)
+    // Without the floor flip, the enclosure's floor mirrors across the
+    // Z axis and appears at the wrong world position (the bug that caused
+    // a stray floor square outside the parent room after break-to-merge).
+    const floorShape = new THREE.Shape();
+    floorShape.moveTo(verts[0].x, -verts[0].y);
+    for (let i = 1; i < verts.length; i++) floorShape.lineTo(verts[i].x, -verts[i].y);
+    floorShape.lineTo(verts[0].x, -verts[0].y);
+    const ceilShape = new THREE.Shape();
+    ceilShape.moveTo(verts[0].x, verts[0].y);
+    for (let i = 1; i < verts.length; i++) ceilShape.lineTo(verts[i].x, verts[i].y);
+    ceilShape.lineTo(verts[0].x, verts[0].y);
+
+    // Floor — slight elevation bump (y = elev + 0.003) so when an
+    // enclosure overlaps the parent's floor, this floor renders ON TOP
+    // of the parent's. Parent floor sits at y=0.001; we use 0.003 (after
+    // the group's elevation translate) so the visual layering is
+    // unambiguous and matches the user's mental model: "the placed room
+    // is master; what it covers is hidden."
+    const floorMatId = surfaces.floor || 'wood-floor';
+    const floorGeo = new THREE.ShapeGeometry(floorShape);
+    const floorMat = buildSurfaceMat(floorMatId, 1, 1, { opacity: 0.95 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, 0.003, 0);
+    floor.userData.acoustic_material = floorMatId;
+    floor.userData.surface_id = `enclosure_${ei}_floor`;
+    group.add(floor);
+
+    // Ceiling — flat cap (dome rise is a Phase-2 nicety).
+    const ceilMatId = surfaces.ceiling || 'gypsum-board';
+    const ceilGeo = new THREE.ShapeGeometry(ceilShape);
+    const ceilMat = buildSurfaceMat(ceilMatId, 1, 1, { opacity: 0.55 });
+    const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.set(0, h - 0.002, 0);
+    ceiling.userData.acoustic_material = ceilMatId;
+    ceiling.userData.surface_id = `enclosure_${ei}_ceiling`;
+    group.add(ceiling);
+
+    // Walls — one per polygon edge, mirroring the parent's custom-edge
+    // path so openings (doors / windows) work identically. Re-uses
+    // buildWallGeoWithHoles + attachOpeningMesh + normalizeWallSlot.
+    const n = verts.length;
+    for (let i = 0; i < n; i++) {
+      const v1 = verts[i];
+      const v2 = verts[(i + 1) % n];
+      const ex = v2.x - v1.x, ey = v2.y - v1.y;
+      const edgeLen = Math.sqrt(ex * ex + ey * ey);
+      if (edgeLen < 0.01) continue;
+      const midX = (v1.x + v2.x) / 2;
+      const midZ = (v1.y + v2.y) / 2;
+      const { materialId: edgeSurfId, openings } = normalizeWallSlot(edgeSlots[i]);
+      const geo = buildWallGeoWithHoles(edgeLen, h, openings);
+      const edgeMat = buildSurfaceMat(edgeSurfId, edgeLen, h, { opacity: 0.55 });
+      const m = new THREE.Mesh(geo, edgeMat);
+
+      let edgeDirX = ex / edgeLen;
+      let edgeDirZ = ey / edgeLen;
+      let nx = -edgeDirZ, nz = edgeDirX;
+      const toCx = cx - midX, toCz = cz - midZ;
+      if (nx * toCx + nz * toCz < 0) {
+        edgeDirX = -edgeDirX;
+        edgeDirZ = -edgeDirZ;
+        nx = -nx;
+        nz = -nz;
+      }
+      _basisX.set(edgeDirX, 0, edgeDirZ);
+      _basisZ.set(nx, 0, nz);
+      _basisMat.makeBasis(_basisX, _basisY, _basisZ);
+
+      m.position.set(midX, h / 2, midZ);
+      m.quaternion.setFromRotationMatrix(_basisMat);
+      m.userData.acoustic_material = edgeSurfId;
+      m.userData.surface_id = `enclosure_${ei}_edge_${i}`;
+      if (edgeSurfId === 'open-air') m.userData.no_walk_collide = true;
+      group.add(m);
+      for (let oi = 0; oi < openings.length; oi++) {
+        attachOpeningMesh(m, openings[oi], edgeLen, h, oi, `enclosure_${ei}_edge_${i}`);
+      }
+    }
+
+    // Wireframe rings + verticals so the enclosure outline reads against
+    // a busy parent scene.
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xa0a8b4 });
+    const bottomPts = verts.map(v => new THREE.Vector3(v.x, 0, v.y));
+    bottomPts.push(bottomPts[0]);
+    const topPts = verts.map(v => new THREE.Vector3(v.x, h, v.y));
+    topPts.push(topPts[0]);
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(bottomPts), lineMat));
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(topPts), lineMat));
+    for (let i = 0; i < n; i++) {
+      const pts = [
+        new THREE.Vector3(verts[i].x, 0, verts[i].y),
+        new THREE.Vector3(verts[i].x, h, verts[i].y),
+      ];
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+    }
+
+    roomGroup.add(group);
+  }
+}
+
+// Render shared wall segments — entries in state.room.wallSegments[]
+// produced by the break-to-merge overlap split. Each segment is a
+// standalone wall in PARENT-state coords with its own material slot
+// + openings list. PHASE 1: VISUAL ONLY (Dr. Chen audit gate before
+// any acoustic accounting). Phase 2 lives in physics/room-shape.js
+// next to multi-level interior surfaces (NOT here — this function
+// only deals with rendering).
+//
+// The outward normal flip is symmetric: a shared wall has no
+// "inside" or "outside" — it sits between the parent room and the
+// enclosure. Rendering uses DoubleSide so both faces are visible no
+// matter which side the camera is on, and we pick an arbitrary
+// (right-hand-rule consistent) basis. The userData.surface_id is
+// `wseg_${seg.id}` so the click-pulse system in panel-room.js
+// resolves the row by matching this id verbatim.
+//
+// Wall builders (buildWallGeoWithHoles, attachOpeningMesh,
+// buildSurfaceMat) come in from rebuildRoom — same plumbing as
+// rebuildStandaloneEnclosures, same reason (closes over textures).
+function rebuildWallSegments(parentRoom, helpers = {}) {
+  if (!roomGroup) return;
+  const list = Array.isArray(parentRoom.wallSegments) ? parentRoom.wallSegments : [];
+  if (list.length === 0) return;
+  const { buildWallGeoWithHoles, attachOpeningMesh, buildSurfaceMat } = helpers;
+  if (typeof buildWallGeoWithHoles !== 'function'
+      || typeof attachOpeningMesh !== 'function'
+      || typeof buildSurfaceMat !== 'function') return;
+
+  const _basisX = new THREE.Vector3();
+  const _basisY = new THREE.Vector3(0, 1, 0);
+  const _basisZ = new THREE.Vector3();
+  const _basisMat = new THREE.Matrix4();
+
+  for (const seg of list) {
+    if (!seg || typeof seg !== 'object') continue;
+    const x1 = Number(seg.x1), y1 = Number(seg.y1);
+    const x2 = Number(seg.x2), y2 = Number(seg.y2);
+    if (!Number.isFinite(x1) || !Number.isFinite(y1)
+        || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
+    const ex = x2 - x1, ey = y2 - y1;
+    const edgeLen = Math.sqrt(ex * ex + ey * ey);
+    if (edgeLen < 0.01) continue;
+    const h = Number.isFinite(seg.height_m) ? seg.height_m : (parentRoom.height_m ?? 3);
+    if (h <= 0) continue;
+    const elev = Number.isFinite(seg.elevation_m) ? seg.elevation_m : 0;
+    const matId = typeof seg.materialId === 'string' ? seg.materialId : 'gypsum-board';
+    const openings = Array.isArray(seg.openings) ? seg.openings : [];
+
+    const midX = (x1 + x2) / 2;
+    const midZ = (y1 + y2) / 2;
+    const edgeDirX = ex / edgeLen;
+    const edgeDirZ = ey / edgeLen;
+    // 90° CCW from edge direction in the floor (XZ) plane. There's no
+    // "interior" reference for a shared wall, so pick this basis and
+    // rely on DoubleSide rendering for both faces to stay visible.
+    const nx = -edgeDirZ, nz = edgeDirX;
+    _basisX.set(edgeDirX, 0, edgeDirZ);
+    _basisZ.set(nx, 0, nz);
+    _basisMat.makeBasis(_basisX, _basisY, _basisZ);
+
+    // Offset 1 cm along the wall normal so the wallSegment is NOT
+    // coincident with the parent wall (or another enclosure wall) sharing
+    // the same plane. Coincident planes give Three.js's raycaster a
+    // non-deterministic tie-break — the wallSegment was losing the tie,
+    // so clicking the merged region pulsed the parent's hole-edge instead
+    // (which has no panel row → silent failure). 1 cm is below visual-
+    // perception threshold at any reasonable camera distance and stops
+    // the z-fight cleanly.
+    const NORMAL_OFFSET_M = 0.01;
+    const geo = buildWallGeoWithHoles(edgeLen, h, openings);
+    const wallMat = buildSurfaceMat(matId, edgeLen, h, { opacity: 0.55 });
+    const m = new THREE.Mesh(geo, wallMat);
+    m.position.set(
+      midX + nx * NORMAL_OFFSET_M,
+      elev + h / 2,
+      midZ + nz * NORMAL_OFFSET_M,
+    );
+    m.quaternion.setFromRotationMatrix(_basisMat);
+    m.userData.acoustic_material = matId;
+    m.userData.surface_id = `wseg_${seg.id}`;
+    m.userData.tag = 'wall_segment';
+    if (matId === 'open-air') m.userData.no_walk_collide = true;
+    roomGroup.add(m);
+    for (let oi = 0; oi < openings.length; oi++) {
+      attachOpeningMesh(m, openings[oi], edgeLen, h, oi, `wseg_${seg.id}`);
+    }
+  }
+}
+
+// Module-level placement-preview group + controller plumbing. The Place-
+// Room controller (js/graphics/place-room-controller.js) renders a ghost
+// of the source sub-room while the user moves it, then commits via
+// state.room.subStructures push + room:changed event for the real
+// rebuild path. Keeping the ghost separate from roomGroup lets us update
+// it 60 fps without tearing down + rebuilding the entire room.
+let placementGhostGroup = null;
+let placementGhostInfo = null; // { sourceRoom, sourceRoomName }
+
+function clearPlacementGhost() {
+  if (placementGhostGroup) {
+    disposeGroup(placementGhostGroup);
+    placementGhostGroup.parent?.remove(placementGhostGroup);
+    placementGhostGroup = null;
+  }
+  placementGhostInfo = null;
+}
+
+function setPlacementGhost(sourceRoom, sourceRoomName, transform) {
+  if (!scene) return;
+  if (!placementGhostGroup || placementGhostInfo?.sourceRoom !== sourceRoom) {
+    clearPlacementGhost();
+    const g = buildSubStructureGroup(sourceRoom, { ghost: true, label: sourceRoomName });
+    if (!g) return;
+    g.userData.tag = 'sub_structure_ghost';
+    placementGhostGroup = g;
+    placementGhostInfo = { sourceRoom, sourceRoomName };
+    scene.add(g);
+  }
+  if (transform) {
+    placementGhostGroup.position.set(
+      transform.position.x_m,
+      transform.elevation_m,
+      transform.position.y_m,
+    );
+    placementGhostGroup.rotation.y = ((transform.rotation_deg ?? 0) * Math.PI) / 180;
+  }
+}
+
+// Public API for the placement controller. Returns the renderer DOM
+// element + camera + scene refs the controller needs to attach mouse
+// events and screen-to-world raycasts. Returns null until the 3D viewport
+// has finished mounting.
+//
+// setOrbitEnabled — placement mode disables OrbitControls so dragging
+// the cursor doesn't pan/rotate the camera at the same time as moving
+// the ghost. Caller flips it off before enabling, on after disposing.
+export function getPlacementBindings() {
+  if (!camera || !renderer || !scene) return null;
+  return {
+    domElement: renderer.domElement,
+    camera,
+    scene,
+    setGhost: setPlacementGhost,
+    clearGhost: clearPlacementGhost,
+    setOrbitEnabled: (on) => { if (controls) controls.enabled = !!on; },
+  };
 }
 
 // Fit the orbit camera to whatever's in state.room so a preset / template
@@ -2518,6 +3446,74 @@ function rebuildRacks() {
   }
 }
 
+// 2D ray-vs-polygon-edges first hit. Each polygon vertex is { x, y } in
+// state plan coords (state-y maps to world-z). Used as the room-footprint
+// clamp for aim lines so they never project past the perimeter even when
+// the ray exits over the wall top in outdoor / no-roof rooms.
+function polygonRayExitT(originX, originZ, dirX, dirZ, polyVerts) {
+  if (!polyVerts || polyVerts.length < 3) return Infinity;
+  let bestT = Infinity;
+  const n = polyVerts.length;
+  for (let i = 0; i < n; i++) {
+    const a = polyVerts[i];
+    const b = polyVerts[(i + 1) % n];
+    const sdx = b.x - a.x;
+    const sdz = b.y - a.y;
+    const denom = dirX * sdz - dirZ * sdx;
+    if (Math.abs(denom) < 1e-9) continue;     // parallel
+    const ex = a.x - originX;
+    const ez = a.y - originZ;
+    const t = (ex * sdz - ez * sdx) / denom;
+    const u = (ex * dirZ - ez * dirX) / denom;
+    if (t > 1e-4 && u >= -1e-6 && u <= 1 + 1e-6 && t < bestT) bestT = t;
+  }
+  return bestT;
+}
+
+// 2D point-in-polygon (ray cast on +X). Polygon vertices are { x, y } in
+// state coords — caller supplies the point in the same frame.
+function pointInPolygon2D(px, py, verts) {
+  let inside = false;
+  for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+    const xi = verts[i].x, yi = verts[i].y;
+    const xj = verts[j].x, yj = verts[j].y;
+    if (((yi > py) !== (yj > py)) &&
+        (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Where does the aim ray first cross an audience-zone surface plane?
+// For each zone we treat its elevation as a horizontal plane and check
+// that the ray's intersection with that plane lies inside the zone's
+// polygon. This terminates aim arrows on the AUDIENCE TIER even when the
+// geometric ray flies above tier-height meshes (the most common arena
+// case: a high line-array element aimed nearly horizontally toward the
+// far audience — the geometric ray would otherwise sail over every tier
+// and only stop at the perimeter wall on the opposite side).
+//
+// Origin is in WORLD coords (x, y, z). Direction is normalised world.
+// State zone polygon vertices are (x, y) in state coords where state-y
+// maps to world-z. Zone elevation_m is world-y.
+function audienceZoneTerminusT(originX, originY, originZ, dirX, dirY, dirZ, zones) {
+  if (!zones || zones.length === 0) return Infinity;
+  if (Math.abs(dirY) < 1e-6) return Infinity;   // ray runs parallel to every tier plane
+  let bestT = Infinity;
+  for (const zone of zones) {
+    if (!zone || !Array.isArray(zone.vertices) || zone.vertices.length < 3) continue;
+    const elev = (zone.elevation_m ?? 0) + 0.01;   // tier surface; +1 cm offset matches zone heatmap layer
+    const t = (elev - originY) / dirY;
+    if (t < 1e-4 || t >= bestT) continue;
+    const cx = originX + t * dirX;
+    const cz = originZ + t * dirZ;
+    // state x = world x; state y = world z.
+    if (pointInPolygon2D(cx, cz, zone.vertices)) bestT = t;
+  }
+  return bestT;
+}
+
 function rebuildAimLines() {
   if (!aimLinesGroup) {
     aimLinesGroup = new THREE.Group();
@@ -2527,15 +3523,101 @@ function rebuildAimLines() {
   }
   if (!roomGroup) return;
   const MAX_AIM_LEN = 200;
-  const FALLBACK_LEN = 30;  // used when nothing is hit within MAX_AIM_LEN
+  const FALLBACK_LEN = 6;   // tight fallback so a ray that misses every
+                            // candidate (open-sky / over-the-wall aim)
+                            // shows a short stub direction indicator
+                            // rather than streaking across the whole room
 
-  // Cast against room geometry AND zone geometry — with a vomitory-gapped
-  // bowl (4 sectors + end caps), a ray aimed exactly through a sector
-  // boundary can numerically miss every triangle if we only test roomGroup.
-  // zonesGroup carries the audience-zone planes which cover those gaps
-  // at seating height, so they act as a natural fallback target.
-  const targets = [roomGroup];
-  if (zonesGroup) targets.push(zonesGroup);
+  // Cast against room geometry AND every group whose meshes are real
+  // surfaces a sound ray could land on:
+  //   roomGroup    — walls, floor, ceiling, plus the LatheGeometry bowl
+  //   zonesGroup   — audience-zone planes (cover bowl gaps at seat height)
+  //   heatmapGroup — bowl-conforming SPL heatmap. CRITICAL: when the user
+  //                  toggles heatmap OFF, heatmapGroup.visible flips to
+  //                  false. Three.js Raycaster.intersectObjects() respects
+  //                  .visible — invisible meshes are silently skipped, so
+  //                  the smooth-bowl heatmap layer becomes a raycast HOLE
+  //                  exactly where seating tiers should stop the arrow.
+  //                  This was the primary failure mode for the Sport Arena
+  //                  shoot-through report. We work around it below by
+  //                  walking targets manually with traverseAll() and
+  //                  invoking mesh.raycast() directly, ignoring .visible.
+  //   audienceGroup — seated figures on every tier (InstancedMesh).
+  const targetGroups = [roomGroup];
+  if (zonesGroup)    targetGroups.push(zonesGroup);
+  if (heatmapGroup)  targetGroups.push(heatmapGroup);
+  if (audienceGroup) targetGroups.push(audienceGroup);
+
+  // Tags we actively skip when picking the first hit. Line / contour /
+  // helper tags only — meshes that ARE the audible surface (heatmap_layer,
+  // heatmap_court, audience_body/head, stadium*, walls, floor, ceiling)
+  // all qualify as valid aim termini.
+  const SKIP_AIM_TAGS = new Set([
+    'heatmap_contour', 'ray-viz-lines', 'walk_avatar',
+  ]);
+
+  // Collect every candidate mesh ONCE per rebuild. We walk descendants
+  // ourselves (instead of letting intersectObjects(targets, true) do it)
+  // because:
+  //   1. .visible=false on a parent group propagates and silently hides
+  //      every descendant from the raycaster — heatmapGroup with
+  //      showHeatmaps=off was the smoking gun.
+  //   2. Some meshes use side: THREE.FrontSide. For aim termination we
+  //      want hits on either side (think wall-back-face, lathe sector
+  //      with reversed winding). We force DoubleSide for the raycast and
+  //      restore the original side after.
+  //   3. We want zero ambiguity about which meshes are NOT in the target
+  //      list — sourcesGroup, aimLinesGroup, listenersGroup, racksGroup
+  //      are excluded by NOT being added to targetGroups, period.
+  const candidateMeshes = [];
+  const traverseAll = (obj) => {
+    if (obj.isMesh) {
+      const tag = obj.userData?.tag ?? '';
+      if (!SKIP_AIM_TAGS.has(tag) && obj.geometry) {
+        candidateMeshes.push(obj);
+      }
+    }
+    if (obj.children) {
+      for (const c of obj.children) traverseAll(c);
+    }
+  };
+  for (const g of targetGroups) traverseAll(g);
+
+  // Footprint polygon for the wall-line clamp — computed once per rebuild
+  // so each aim line just runs a polygon ray-cast against it.
+  const footprintVerts = roomPlanVertices(state.room);
+
+  // Per-mesh raycast helper that bypasses .visible and forces DoubleSide.
+  // mesh.raycast() pushes results into the array argument; we reuse a
+  // scratch array per ray to avoid per-frame GC churn.
+  const _aimHitScratch = [];
+  const castAgainstMesh = (mesh, raycaster, out) => {
+    const wasVisible = mesh.visible;
+    // matrixWorld is read by mesh.raycast — we need it current even if the
+    // mesh sat under an invisible parent. Group.updateWorldMatrix walks
+    // upward, so this is cheap.
+    if (!wasVisible) {
+      mesh.visible = true;
+      mesh.updateWorldMatrix(true, false);
+    }
+    let savedSide = null;
+    const mat = mesh.material;
+    if (mat && !Array.isArray(mat) && mat.side !== THREE.DoubleSide) {
+      savedSide = mat.side;
+      mat.side = THREE.DoubleSide;
+    } else if (Array.isArray(mat)) {
+      savedSide = mat.map(m => m.side);
+      mat.forEach(m => { if (m) m.side = THREE.DoubleSide; });
+    }
+    try {
+      mesh.raycast(raycaster, out);
+    } catch (_) { /* defensive: bad geometry on a single mesh shouldn't drop the whole aim system */ }
+    if (savedSide !== null) {
+      if (Array.isArray(mat)) mat.forEach((m, i) => { if (m) m.side = savedSide[i]; });
+      else mat.side = savedSide;
+    }
+    if (!wasVisible) mesh.visible = wasVisible;
+  };
 
   for (const src of expandSources(state.sources)) {
     const groupHex = src.groupId ? colorForGroup(src.groupId) : null;
@@ -2553,27 +3635,58 @@ function rebuildAimLines() {
 
     _aimRaycaster.set(originWorld, dirWorld);
     _aimRaycaster.far = MAX_AIM_LEN;
-    const hits = _aimRaycaster.intersectObjects(targets, true);
-    // First valid hit (skip heatmap layers and audience-zone heatmap
-    // overlays that sit just above the floor).
+    _aimRaycaster.near = 0;
+
+    // Manual gather — see traverseAll comment for why we don't use
+    // intersectObjects.
+    _aimHitScratch.length = 0;
+    for (const m of candidateMeshes) {
+      castAgainstMesh(m, _aimRaycaster, _aimHitScratch);
+    }
+    // intersectObjects sorts by distance for us; we have to do it ourselves.
+    _aimHitScratch.sort((a, b) => a.distance - b.distance);
+
+    // First valid hit. The skip-tag filter has already pruned helper meshes
+    // above; the only thing left to filter here is hits with non-positive
+    // distance (degenerate when the speaker sits exactly on a face).
     let dist = -1;
-    for (const h of hits) {
-      const tag = h.object.userData?.tag ?? '';
-      if (tag.startsWith('heatmap_')) continue;
-      dist = h.distance;
-      break;
+    for (const h of _aimHitScratch) {
+      if (h.distance > 1e-4) { dist = h.distance; break; }
     }
 
-    // Fallback when nothing was hit — cast the ray to the ground plane
-    // (y=0). If it's horizontal or rising, clamp at FALLBACK_LEN so the
-    // line still has a clear terminus instead of drifting to infinity.
-    if (dist <= 0) {
-      if (dirWorld.y < -1e-3) {
-        const t = -originWorld.y / dirWorld.y;
-        dist = Math.min(t, MAX_AIM_LEN);
-      } else {
-        dist = FALLBACK_LEN;
-      }
+    // Footprint clamp — find where the ray crosses ANY wall line (in the
+    // 2D plan, with each wall extended vertically to infinity). This
+    // covers the outdoor / no-roof case where the ray sails over the wall
+    // mesh and would otherwise project far past the modelled space, and
+    // it's also a defence-in-depth clamp for indoor when raycast geometry
+    // is degenerate (e.g. a corner-grazing aim that misses every triangle).
+    const tFootprint = polygonRayExitT(
+      originWorld.x, originWorld.z, dirWorld.x, dirWorld.z, footprintVerts,
+    );
+    // Floor projection — when the ray heads downward, the y=0 plane is
+    // also a candidate terminus.
+    const tFloor = (dirWorld.y < -1e-3) ? -originWorld.y / dirWorld.y : Infinity;
+    // Audience zone tier projection — terminates the arrow at the audience
+    // SURFACE for arena-style scenes where a high line-array aimed nearly
+    // horizontally would otherwise sail over every tier mesh and stop only
+    // at the perimeter wall. Treats each zone as a horizontal tier plane;
+    // if the ray crosses the plane within the zone's polygon, that's a
+    // valid termination distance.
+    const tZone = audienceZoneTerminusT(
+      originWorld.x, originWorld.y, originWorld.z,
+      dirWorld.x,    dirWorld.y,    dirWorld.z,
+      state.zones,
+    );
+
+    if (dist > 0) {
+      // Hit a real surface; still clamp to the closer of the wall-line
+      // crossing, floor projection, or audience-zone tier projection so
+      // we always favour the FIRST physically meaningful target.
+      dist = Math.min(dist, tFootprint, tFloor, tZone, MAX_AIM_LEN);
+    } else {
+      // No raycast hit — pick the closest of footprint / floor / zone / cap.
+      dist = Math.min(tFootprint, tFloor, tZone, MAX_AIM_LEN);
+      if (!Number.isFinite(dist) || dist <= 0) dist = FALLBACK_LEN;
     }
 
     const end = originWorld.clone().addScaledVector(dirWorld, dist);
@@ -4247,15 +5360,23 @@ function rebuildHeatmap() {
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearFilter;
 
-  const { width_m: w, depth_m: d } = state.room;
-  const geo = new THREE.PlaneGeometry(w, d);
+  // Heatmap plane uses the EFFECTIVE bounds of the grid — when an
+  // enclosure has been merged in past the parent's bbox, computeSPLGrid
+  // returns originX_m / originY_m + cellW_m × cellsX as the actual
+  // covered area. Falls back to (0,0,room.width × room.depth) for the
+  // common case where the parent fully contains all enclosures.
+  const planeW = (splResult.cellW_m ?? 0) * cellsX || state.room.width_m;
+  const planeD = (splResult.cellD_m ?? 0) * cellsY || state.room.depth_m;
+  const ox = splResult.originX_m ?? 0;
+  const oy = splResult.originY_m ?? 0;
+  const geo = new THREE.PlaneGeometry(planeW, planeD);
   const mat = new THREE.MeshBasicMaterial({
     map: tex, transparent: true, opacity: 0.78,
     side: THREE.DoubleSide, depthWrite: false, alphaTest: 0.01,
   });
   heatmapMesh = new THREE.Mesh(geo, mat);
   heatmapMesh.rotation.x = -Math.PI / 2;
-  heatmapMesh.position.set(w/2, ear, d/2);
+  heatmapMesh.position.set(ox + planeW / 2, ear, oy + planeD / 2);
   heatmapMesh.visible = state.display.showHeatmaps;
   scene.add(heatmapMesh);
   updateSPLLegend();

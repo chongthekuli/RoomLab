@@ -52,6 +52,11 @@ export function resetSceneState({ state, defaultRoomState, deepClone, projectNam
   state.selectedZoneId     = null;
   state.selectedListenerId = null;
   state.selectedSpeakerUrl = null;
+  // Sub-structure selection — visual click-to-select on placed sub-rooms
+  // (see js/graphics/scene.js onSubStructureClick). Reset here so a swap
+  // never leaves the chip row in panel-room.js highlighting a sub from
+  // the previous scene.
+  state.selectedSubStructureId = null;
 
   state.rackSystem = { racks: [] };
   state.projectName = projectName;

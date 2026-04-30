@@ -80,6 +80,24 @@
       "name": "Smooth painted plaster on solid backing (premium mall soffit)",
       "absorption": [0.013, 0.015, 0.02, 0.03, 0.04, 0.05, 0.05],
       "scattering": [0.05, 0.05, 0.05, 0.08, 0.10, 0.12, 0.12]
+    },
+    {
+      "id": "open-air",
+      "name": "Open wall (no boundary)",
+      "absorption": [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00],
+      "scattering": [0.50, 0.50, 0.50, 0.50, 0.50, 0.50, 0.50]
+    },
+    {
+      "id": "door-solid-wood",
+      "name": "Solid wood door",
+      "absorption": [0.14, 0.10, 0.06, 0.08, 0.10, 0.10, 0.10],
+      "scattering": [0.05, 0.05, 0.05, 0.10, 0.10, 0.15, 0.15]
+    },
+    {
+      "id": "door-hollow-core",
+      "name": "Hollow core door",
+      "absorption": [0.30, 0.20, 0.14, 0.10, 0.08, 0.05, 0.05],
+      "scattering": [0.05, 0.05, 0.05, 0.10, 0.10, 0.15, 0.15]
     }
   ]
 }

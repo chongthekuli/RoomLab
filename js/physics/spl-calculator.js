@@ -1,5 +1,5 @@
 import { interpolateAttenuation } from './loudspeaker.js';
-import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea } from './room-shape.js';
+import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea, roomEffectiveBounds } from './room-shape.js';
 import { computeRT60Band } from './rt60.js';
 import {
   AIR_ABSORPTION_DB_PER_M as AIR_ABS_TABLE,
@@ -421,16 +421,27 @@ export function computeSPLGrid({
   const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
   const cellsX = gridSize;
   const cellsY = gridSize;
-  const cellW_m = room.width_m / cellsX;
-  const cellD_m = room.depth_m / cellsY;
+  // Sample over the union of the parent footprint AND every broken-out
+  // enclosure — a hut placed adjacent to the parent (so its interior
+  // sits past room.width_m or before x=0) was being missed by the grid
+  // because the grid origin/extent assumed (0,0)..(width_m, depth_m).
+  // originX/Y get returned alongside cellW_m/cellD_m so the heatmap
+  // renderer can place the cells at the correct world coords.
+  const bounds = roomEffectiveBounds(room);
+  const totalW = Math.max(1e-3, bounds.maxX - bounds.minX);
+  const totalD = Math.max(1e-3, bounds.maxY - bounds.minY);
+  const cellW_m = totalW / cellsX;
+  const cellD_m = totalD / cellsY;
+  const originX_m = bounds.minX;
+  const originY_m = bounds.minY;
   const grid = [];
   let minVal = Infinity, maxVal = -Infinity, sum = 0, count = 0;
 
   for (let j = 0; j < cellsY; j++) {
     const row = [];
     for (let i = 0; i < cellsX; i++) {
-      const x = (i + 0.5) * cellW_m;
-      const y = (j + 0.5) * cellD_m;
+      const x = originX_m + (i + 0.5) * cellW_m;
+      const y = originY_m + (j + 0.5) * cellD_m;
       const listenerPos = { x, y, z: earHeight_m };
       if (!isInsideRoom3D(listenerPos, room)) {
         row.push(-Infinity);
@@ -456,6 +467,10 @@ export function computeSPLGrid({
   const hasResults = count > 0;
   return {
     grid, cellsX, cellsY, cellW_m, cellD_m,
+    // Origin of the (0,0) cell in state coords. Defaults to (0,0) for
+    // legacy callers that were ignoring it; new callers that care about
+    // post-merge geometry use these to position the heatmap cells.
+    originX_m, originY_m,
     metric: useSTI ? 'sti' : 'spl',
     minSPL_db: hasResults ? minVal : 0,
     maxSPL_db: hasResults ? maxVal : 0,

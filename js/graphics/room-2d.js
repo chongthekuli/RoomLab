@@ -693,6 +693,9 @@ function renderNormal(vp) {
   const zonesSvg = renderZones(state.zones, state.selectedZoneId, x0, y0, pxW, pxD, state.room, false);
   const speakerSvg = flatSources.length > 0 ? renderSpeakersSVG(flatSources, x0, y0, pxW, pxD, state.room) : '';
   const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room) : '';
+  const subSvg = renderSubStructures(state.room.subStructures, x0, y0, pxW, pxD, state.room);
+  const encSvg = renderStandaloneEnclosures(state.room.standaloneEnclosures, x0, y0, pxW, pxD, state.room);
+  const wsegSvg = renderSharedWallSegments(state.room.wallSegments, x0, y0, pxW, pxD, state.room);
 
   const shapeLbl = shape === 'rectangular'
     ? `${w} m wide · ${d} m deep`
@@ -713,6 +716,9 @@ function renderNormal(vp) {
         ${roomOutline.walls}
         ${roomOutline.labels}
         ${zonesSvg}
+        ${subSvg}
+        ${encSvg}
+        ${wsegSvg}
         ${listenerSvg}
         ${speakerSvg}
         ${renderOriginCrosshair(x0, y0, '#7a89a0')}
@@ -748,6 +754,106 @@ function renderZones(zones, selectedId, x0, y0, pxW, pxD, room, isDrawBackdrop) 
   return s;
 }
 
+// Render placed sub-structures (saved rooms placed inside this one) as
+// translucent outlines on the floor plan. Phase 1 = visual only; matches
+// the 3D viewport's ghost-blue colour scheme so the user can recognise
+// them at a glance.
+//
+// Each sub is positioned at parent-state coords (sub.position.x_m,
+// sub.position.y_m); rotation is around the sub's local origin (0,0).
+// We rotate each footprint vertex around (0,0) then translate to the
+// placement point, then map to SVG pixel coords.
+function renderSubStructures(subs, x0, y0, pxW, pxD, parentRoom) {
+  if (!Array.isArray(subs) || subs.length === 0) return '';
+  let out = '';
+  for (const sub of subs) {
+    const src = sub.sourceRoom;
+    if (!src) continue;
+    const w = src.width_m ?? 5;
+    const d = src.depth_m ?? 5;
+    if (!(w > 0 && d > 0)) continue;
+    // Footprint in source-local coords. For custom shapes, walk the
+    // polygon; otherwise the bbox.
+    let local;
+    if (src.shape === 'custom' && Array.isArray(src.custom_vertices) && src.custom_vertices.length >= 3) {
+      local = src.custom_vertices.map(v => ({ x: v.x, y: v.y }));
+    } else {
+      local = [
+        { x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d },
+      ];
+    }
+    const rotRad = ((sub.rotation_deg ?? 0) * Math.PI) / 180;
+    const cosR = Math.cos(rotRad), sinR = Math.sin(rotRad);
+    const px = sub.position?.x_m ?? 0;
+    const py = sub.position?.y_m ?? 0;
+    const points = local.map(p => {
+      // Rotate around source-local origin then translate to placement.
+      const rx = p.x * cosR - p.y * sinR + px;
+      const ry = p.x * sinR + p.y * cosR + py;
+      const sx = x0 + (rx / parentRoom.width_m) * pxW;
+      const sy = y0 + (ry / parentRoom.depth_m) * pxD;
+      return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+    }).join(' ');
+    const labelX = x0 + (px / parentRoom.width_m) * pxW;
+    const labelY = y0 + (py / parentRoom.depth_m) * pxD;
+    const lbl = (sub.sourceRoomName || 'Sub-room').replace(/[<>&]/g, '');
+    out += `<polygon points="${points}" fill="#4aa3ff" fill-opacity="0.18" stroke="#7fc7ff" stroke-width="1.5" stroke-dasharray="4,3" />`;
+    out += `<text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#7fc7ff">${lbl}</text>`;
+  }
+  return out;
+}
+
+// Render standalone enclosures (broken-out from a sub-structure into
+// editable walls) as solid-stroked outlines on the floor plan. Polygon
+// is already in PARENT-state coords (transform baked at break time —
+// see panel-room.js break-to-merge). Phase 1 = visual only; uses the
+// same ghost-blue palette as sub-structures for visual continuity, but
+// with a SOLID stroke (vs. dashed) to signal "these are now real
+// editable walls, not a placement ghost".
+function renderStandaloneEnclosures(encs, x0, y0, pxW, pxD, parentRoom) {
+  if (!Array.isArray(encs) || encs.length === 0) return '';
+  let out = '';
+  for (const enc of encs) {
+    if (!enc || !Array.isArray(enc.polygon) || enc.polygon.length < 3) continue;
+    const points = enc.polygon.map(p => {
+      const sx = x0 + (p.x / parentRoom.width_m) * pxW;
+      const sy = y0 + (p.y / parentRoom.depth_m) * pxD;
+      return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+    }).join(' ');
+    let lcx = 0, lcy = 0;
+    for (const p of enc.polygon) { lcx += p.x; lcy += p.y; }
+    lcx /= enc.polygon.length; lcy /= enc.polygon.length;
+    const labelX = x0 + (lcx / parentRoom.width_m) * pxW;
+    const labelY = y0 + (lcy / parentRoom.depth_m) * pxD;
+    const lbl = (enc.label || 'Enclosure').replace(/[<>&]/g, '');
+    out += `<polygon points="${points}" fill="#4aa3ff" fill-opacity="0.10" stroke="#7fc7ff" stroke-width="1.8" />`;
+    out += `<text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#7fc7ff">${lbl}</text>`;
+  }
+  return out;
+}
+
+// Render shared wall segments on the 2D plan — produced by break-to-merge
+// overlap split. Each entry is in PARENT-state coords; we map each
+// endpoint to SVG pixels and stroke a single highlighted line. Colour
+// is amber to distinguish from sub/enclosure ghost-blue and zone fills,
+// reflecting the "shared between two structures" semantics. Phase 1 =
+// visual only (acoustic gate at Dr. Chen).
+function renderSharedWallSegments(segs, x0, y0, pxW, pxD, parentRoom) {
+  if (!Array.isArray(segs) || segs.length === 0) return '';
+  let out = '';
+  for (const seg of segs) {
+    if (!seg || typeof seg !== 'object') continue;
+    if (!Number.isFinite(seg.x1) || !Number.isFinite(seg.y1)
+        || !Number.isFinite(seg.x2) || !Number.isFinite(seg.y2)) continue;
+    const ax = x0 + (seg.x1 / parentRoom.width_m) * pxW;
+    const ay = y0 + (seg.y1 / parentRoom.depth_m) * pxD;
+    const bx = x0 + (seg.x2 / parentRoom.width_m) * pxW;
+    const by = y0 + (seg.y2 / parentRoom.depth_m) * pxD;
+    out += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#f59e0b" stroke-width="6" stroke-linecap="round" stroke-opacity="0.85" />`;
+  }
+  return out;
+}
+
 function renderClipPath(room, x0, y0, pxW, pxD) {
   const verts = roomPlanVertices(room);
   if (verts.length === 0) return '';
@@ -759,6 +865,15 @@ function renderClipPath(room, x0, y0, pxW, pxD) {
   return `<clipPath id="room-clip"><polygon points="${points}" /></clipPath>`;
 }
 
+// Wall slots may be either a string (legacy: material id only) or an
+// object { materialId, openings } (PR2 schema). The 2D plan only needs
+// the material id for label + colour, so unwrap here at every read site.
+function matIdOf(slot) {
+  if (typeof slot === 'string') return slot;
+  if (slot && typeof slot === 'object' && typeof slot.materialId === 'string') return slot.materialId;
+  return 'gypsum-board';
+}
+
 function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
   const shape = room.shape ?? 'rectangular';
   const verts = roomPlanVertices(room);
@@ -768,8 +883,8 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
   }));
 
   if (shape === 'rectangular') {
-    const wN = surfaces.wall_north, wS = surfaces.wall_south;
-    const wE = surfaces.wall_east,  wW = surfaces.wall_west;
+    const wN = matIdOf(surfaces.wall_north), wS = matIdOf(surfaces.wall_south);
+    const wE = matIdOf(surfaces.wall_east),  wW = matIdOf(surfaces.wall_west);
     const floorFill = `<rect x="${x0}" y="${y0}" width="${pxW}" height="${pxD}" fill="${colorFor(alphaOf(surfaces.floor))}" fill-opacity="0.15" rx="2" />`;
     const walls = `
       <line x1="${x0}" y1="${y0}" x2="${x0 + pxW}" y2="${y0}" stroke="${colorFor(alphaOf(wN))}" stroke-width="8" stroke-linecap="round" />
@@ -794,7 +909,7 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
     let walls = '';
     for (let i = 0; i < svgPts.length; i++) {
       const a = svgPts[i], b = svgPts[(i + 1) % svgPts.length];
-      const mat = edges[i] ?? 'gypsum-board';
+      const mat = matIdOf(edges[i]);
       walls += `<line x1="${a.sx.toFixed(1)}" y1="${a.sy.toFixed(1)}" x2="${b.sx.toFixed(1)}" y2="${b.sy.toFixed(1)}" stroke="${colorFor(alphaOf(mat))}" stroke-width="8" stroke-linecap="round" />`;
       const midX = (a.sx + b.sx) / 2, midY = (a.sy + b.sy) / 2;
       walls += `<circle cx="${midX.toFixed(1)}" cy="${midY.toFixed(1)}" r="8" fill="#0e1116" stroke="${colorFor(alphaOf(mat))}" stroke-width="1" />`;
@@ -803,7 +918,7 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
     return { floorFill, walls, labels: '' };
   }
 
-  const wallsMat = surfaces.walls ?? surfaces.wall_north ?? 'gypsum-board';
+  const wallsMat = matIdOf(surfaces.walls ?? surfaces.wall_north);
   const walls = `<polygon points="${pointsAttr}" fill="none" stroke="${colorFor(alphaOf(wallsMat))}" stroke-width="8" stroke-linejoin="round" />`;
   const centerX = svgPts.reduce((s, p) => s + p.sx, 0) / svgPts.length;
   const topY = Math.min(...svgPts.map(p => p.sy));

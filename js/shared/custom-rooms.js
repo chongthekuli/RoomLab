@@ -36,6 +36,46 @@ export function listCustomRooms() {
   return readAll();
 }
 
+// Group saved custom rooms by their projectName. Rooms without a project
+// name are bucketed under '(Unfiled)' so the user can still see them in
+// the project picker. Returned newest-project-first based on the most
+// recent room's savedAt timestamp.
+//   [ { name, rooms: [entry...], lastSavedAt } ]
+export function listProjects() {
+  const all = readAll();
+  const byName = new Map();
+  for (const e of all) {
+    const key = (typeof e.projectName === 'string' && e.projectName.trim())
+      ? e.projectName.trim()
+      : '(Unfiled)';
+    if (!byName.has(key)) byName.set(key, { name: key, rooms: [], lastSavedAt: e.savedAt });
+    const proj = byName.get(key);
+    proj.rooms.push(e);
+    if ((e.savedAt ?? '') > (proj.lastSavedAt ?? '')) proj.lastSavedAt = e.savedAt;
+  }
+  return [...byName.values()].sort((a, b) => (b.lastSavedAt ?? '').localeCompare(a.lastSavedAt ?? ''));
+}
+
+// Most recent saved room for a given projectName. Used by the header
+// project dropdown to pick which room to load when switching projects.
+// Pass '(Unfiled)' to fetch the latest no-project room. Returns null if
+// no rooms match.
+export function latestRoomInProject(projectName) {
+  const all = readAll();
+  const target = (typeof projectName === 'string' && projectName.trim())
+    ? projectName.trim()
+    : null;
+  const matches = all.filter(e => {
+    const en = (typeof e.projectName === 'string' && e.projectName.trim())
+      ? e.projectName.trim()
+      : null;
+    return en === target;
+  });
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => (b.savedAt ?? '').localeCompare(a.savedAt ?? ''));
+  return matches[0];
+}
+
 // Save a new entry to the front of the list. `room` is a deep-clone
 // of state.room (caller's responsibility to clone — we don't want to
 // pull deepClone in here). Returns the saved entry.

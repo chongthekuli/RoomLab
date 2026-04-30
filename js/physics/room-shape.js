@@ -2,6 +2,50 @@ function getShape(room) {
   return room.shape ?? 'rectangular';
 }
 
+// Wall-slot schema. Each slot in `room.surfaces` (wall_north/south/east/west,
+// edges[i], or the shared 'walls') is either:
+//   - a STRING (legacy): just the material ID, no openings.
+//   - an OBJECT (new):   { materialId, openings: [{ kind, x_m, z_m,
+//                          width_m, height_m, materialId, state }, ... ] }
+// Both are accepted at every read site so old saved scenes / preset
+// authoring code keep working with no migration step. Writers (UI,
+// panel-room, scene save) use whichever form they generated; the
+// normaliser smooths over the difference.
+//
+// Openings:
+//   kind:       'door' | 'window'
+//   x_m, z_m:   bottom-left corner in WALL-LOCAL coords. x along wall from
+//               its first vertex (v1), z is height from floor.
+//   width_m, height_m:   opening dimensions
+//   materialId: solid material when state === 'closed' (e.g. door-solid-
+//               wood, glass-window). Ignored when state === 'open' — the
+//               opening reads as α = 1.0 (open boundary).
+//   state:      'open' | 'closed'
+export function normalizeWallSlot(slot, fallbackMaterialId = 'gypsum-board') {
+  if (typeof slot === 'string') {
+    return { materialId: slot, openings: [] };
+  }
+  if (slot && typeof slot === 'object') {
+    return {
+      materialId: typeof slot.materialId === 'string' ? slot.materialId : fallbackMaterialId,
+      openings: Array.isArray(slot.openings) ? slot.openings : [],
+    };
+  }
+  return { materialId: fallbackMaterialId, openings: [] };
+}
+
+// Total area of openings on a single wall (m²). Skips openings missing or
+// invalid dimensions so a half-edited entry can't make a wall's effective
+// area go negative.
+function openingsArea(openings) {
+  let a = 0;
+  for (const op of openings || []) {
+    const w = Number(op?.width_m), h = Number(op?.height_m);
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) a += w * h;
+  }
+  return a;
+}
+
 export function baseArea(room) {
   switch (getShape(room)) {
     case 'polygon': {
@@ -269,7 +313,49 @@ function pointInPolygon(x, y, verts) {
   return inside;
 }
 
-export function isInsideRoom(x, y, room) {
+// Bounding rectangle of the parent footprint UNIONED with every
+// standaloneEnclosure polygon. The heatmap grid sizes itself from this
+// — without it, an enclosure that extends past the parent's bbox would
+// be invisible to the heatmap (the grid stops at width_m / depth_m).
+// Returns { minX, minY, maxX, maxY } in state-plane coords.
+export function roomEffectiveBounds(room) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const parentVerts = roomPlanVertices(room);
+  if (Array.isArray(parentVerts)) {
+    for (const v of parentVerts) {
+      if (!Number.isFinite(v?.x) || !Number.isFinite(v?.y)) continue;
+      if (v.x < minX) minX = v.x;
+      if (v.x > maxX) maxX = v.x;
+      if (v.y < minY) minY = v.y;
+      if (v.y > maxY) maxY = v.y;
+    }
+  }
+  const encs = room?.standaloneEnclosures;
+  if (Array.isArray(encs)) {
+    for (const enc of encs) {
+      if (!Array.isArray(enc?.polygon)) continue;
+      for (const v of enc.polygon) {
+        if (!Number.isFinite(v?.x) || !Number.isFinite(v?.y)) continue;
+        if (v.x < minX) minX = v.x;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.y > maxY) maxY = v.y;
+      }
+    }
+  }
+  if (!Number.isFinite(minX)) {
+    return { minX: 0, minY: 0,
+             maxX: room?.width_m ?? 10, maxY: room?.depth_m ?? 10 };
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+// Parent footprint only — does NOT include broken-out enclosures. Use
+// when you specifically need the parent polygon's containment (e.g. the
+// 2D plan SVG for the parent outline). Most callers want isInsideRoom()
+// which unions in standaloneEnclosures so post-merge geometry is
+// fully addressable by speakers / listeners / heatmap / raycasters.
+export function isInsideParentFootprint(x, y, room) {
   switch (getShape(room)) {
     case 'round': {
       const r = room.round_radius_m ?? 3;
@@ -282,6 +368,25 @@ export function isInsideRoom(x, y, room) {
     default:
       return x >= 0 && x <= room.width_m && y >= 0 && y <= room.depth_m;
   }
+}
+
+// Total room footprint = parent ∪ every standalone enclosure produced by
+// break-to-merge. After merging Room B into Room A, Room B's interior
+// lives in state.room.standaloneEnclosures[i].polygon (parent coords,
+// transform already baked) — not in the parent's own custom_vertices.
+// Without this union, a speaker placed in the merged Room B was being
+// flagged "outside the room", the heatmap grid skipped its cells, and
+// raycasters thought the wall belonged to the void.
+export function isInsideRoom(x, y, room) {
+  if (isInsideParentFootprint(x, y, room)) return true;
+  const encs = room?.standaloneEnclosures;
+  if (Array.isArray(encs)) {
+    for (const enc of encs) {
+      if (!Array.isArray(enc?.polygon) || enc.polygon.length < 3) continue;
+      if (pointInPolygon(x, y, enc.polygon)) return true;
+    }
+  }
+  return false;
 }
 
 export function maxCeilingHeightAt(x, y, room) {
@@ -299,10 +404,33 @@ export function maxCeilingHeightAt(x, y, room) {
 }
 
 export function isInsideRoom3D(pos, room) {
-  if (!isInsideRoom(pos.x, pos.y, room)) return false;
-  if (pos.z < 0) return false;
-  if (pos.z > maxCeilingHeightAt(pos.x, pos.y, room)) return false;
-  return true;
+  // Parent footprint first — keeps the original rectangular-/polygon-/
+  // custom-shape height check fast for the common case.
+  if (isInsideParentFootprint(pos.x, pos.y, room)) {
+    if (pos.z < 0) return false;
+    // Outdoor: no roof, so a speaker / listener at any height above the
+    // floor is valid. Without this skip, a speaker hung above the wall-
+    // height value (e.g. on a tall pole in a park) would be flagged
+    // out-of-room and the heatmap would refuse to render outdoor listeners.
+    if (room.enclosure !== 'outdoor' && pos.z > maxCeilingHeightAt(pos.x, pos.y, room)) return false;
+    return true;
+  }
+  // Enclosure paths (broken-out sub-rooms). Each enclosure has its own
+  // elevation_m + height_m so a speaker on a 1 m platform in a 2 m hut
+  // attached to the parent is correctly inside [1, 3] in world Z.
+  const encs = room?.standaloneEnclosures;
+  if (Array.isArray(encs)) {
+    for (const enc of encs) {
+      if (!Array.isArray(enc?.polygon) || enc.polygon.length < 3) continue;
+      if (!pointInPolygon(pos.x, pos.y, enc.polygon)) continue;
+      const elev = Number.isFinite(enc.elevation_m) ? enc.elevation_m : 0;
+      const h = Number.isFinite(enc.height_m) ? enc.height_m : 3;
+      if (pos.z < elev) continue;
+      if (room.enclosure !== 'outdoor' && pos.z > elev + h) continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 // Shoelace polygon area (2D).
@@ -363,43 +491,86 @@ export function roomEffectiveSurfaces(room, zones = []) {
   return out;
 }
 
+// Build a wall surface entry plus zero or more opening entries from a
+// raw wall slot. The wall's area is reduced by the total opening area so
+// the wall material doesn't double-count regions where there's actually a
+// door or window. Each opening contributes its own surface — α = 1.0
+// when the opening is 'open' (boundary acts like an open wall), or the
+// opening's own material when 'closed'.
+//
+// Returns an array of { id, area_m2, materialId } entries, with the
+// wall first so existing index-based callers keep working.
+function expandWallWithOpenings(rawSlot, baseId, totalArea, fallbackMatId) {
+  const { materialId, openings } = normalizeWallSlot(rawSlot, fallbackMatId);
+  const opArea = openingsArea(openings);
+  const out = [{
+    id: baseId,
+    area_m2: Math.max(0, totalArea - opArea),
+    materialId,
+  }];
+  let opi = 0;
+  for (const op of openings || []) {
+    const w = Number(op?.width_m), h = Number(op?.height_m);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) continue;
+    const isOpen = op?.state === 'open';
+    out.push({
+      id: `${baseId}_op_${opi}`,
+      area_m2: w * h,
+      materialId: isOpen ? 'open-air' : (op?.materialId || 'glass-window'),
+    });
+    opi++;
+  }
+  return out;
+}
+
 export function roomSurfaces(room) {
   const shape = getShape(room);
   const b = baseArea(room);
   const wallH = room.height_m;
   const floor = { id: 'floor', area_m2: b, materialId: room.surfaces.floor };
-  const ceiling = { id: 'ceiling', area_m2: ceilingArea(room), materialId: room.surfaces.ceiling };
+  // Outdoor enclosure: there's no roof, so the ceiling slot is forced to
+  // α = 1.0 ('open-air') regardless of the user's stored material choice.
+  // Walls remain user-controlled — the user can choose to keep walls
+  // (e.g. a fenced courtyard or a perimeter pavilion structure) or set
+  // every wall slot to 'open-air' for a fully open footprint. Stored
+  // ceiling material is preserved on disk so flipping back to indoor
+  // restores it; only live acoustic accounting is overridden.
+  const isOutdoor = room.enclosure === 'outdoor';
+  const ceiling = {
+    id: 'ceiling',
+    area_m2: ceilingArea(room),
+    materialId: isOutdoor ? 'open-air' : room.surfaces.ceiling,
+  };
 
   let result;
   if (shape === 'rectangular') {
     const { width_m: w, depth_m: d, surfaces: s } = room;
-    result = [
-      floor, ceiling,
-      { id: 'wall_north', area_m2: w * wallH, materialId: s.wall_north },
-      { id: 'wall_south', area_m2: w * wallH, materialId: s.wall_south },
-      { id: 'wall_east',  area_m2: d * wallH, materialId: s.wall_east },
-      { id: 'wall_west',  area_m2: d * wallH, materialId: s.wall_west },
-    ];
+    result = [floor, ceiling];
+    result.push(...expandWallWithOpenings(s.wall_north, 'wall_north', w * wallH, 'gypsum-board'));
+    result.push(...expandWallWithOpenings(s.wall_south, 'wall_south', w * wallH, 'gypsum-board'));
+    result.push(...expandWallWithOpenings(s.wall_east,  'wall_east',  d * wallH, 'gypsum-board'));
+    result.push(...expandWallWithOpenings(s.wall_west,  'wall_west',  d * wallH, 'gypsum-board'));
   } else if (shape === 'custom') {
     const v = room.custom_vertices || [];
     const edges = room.surfaces.edges || [];
     result = [floor, ceiling];
+    const fallback = (typeof room.surfaces.walls === 'string')
+      ? room.surfaces.walls
+      : 'gypsum-board';
     for (let i = 0; i < v.length; i++) {
       const j = (i + 1) % v.length;
       const dx = v[j].x - v[i].x, dy = v[j].y - v[i].y;
       const len = Math.sqrt(dx * dx + dy * dy);
-      result.push({
-        id: `edge_${i}`,
-        area_m2: len * wallH,
-        materialId: edges[i] ?? room.surfaces.walls ?? 'gypsum-board',
-      });
+      result.push(...expandWallWithOpenings(edges[i], `edge_${i}`, len * wallH, fallback));
     }
   } else {
-    const wallsMat = room.surfaces.walls ?? room.surfaces.wall_north ?? 'gypsum-board';
-    result = [
-      floor, ceiling,
-      { id: 'walls', area_m2: wallPerimeter(room) * wallH, materialId: wallsMat },
-    ];
+    const fallback = (typeof room.surfaces.wall_north === 'string')
+      ? room.surfaces.wall_north
+      : 'gypsum-board';
+    result = [floor, ceiling];
+    result.push(...expandWallWithOpenings(
+      room.surfaces.walls, 'walls', wallPerimeter(room) * wallH, fallback,
+    ));
   }
 
   // Append interior fixtures from multiLevelStructure (mall presets). Each
