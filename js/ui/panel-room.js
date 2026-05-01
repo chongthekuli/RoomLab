@@ -1431,7 +1431,10 @@ function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
   }
   const openings = visible.map(v => v.op);
 
-  // Header row — add buttons.
+  // Header row — summary text only. The "+ Door" / "+ Window" buttons live
+  // on their own row below so a long material dropdown can't push them off
+  // the right edge of the sidebar (sidebar is overflow-x: hidden, so anything
+  // wider than the column was getting clipped before this split).
   const hdr = document.createElement('div');
   hdr.className = 'openings-hdr';
   const summary = document.createElement('span');
@@ -1443,6 +1446,12 @@ function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
     : 'No openings';
   summary.textContent = summaryText;
   hdr.appendChild(summary);
+  block.appendChild(hdr);
+
+  // Actions row — add buttons sit below the summary so they stay reachable
+  // on a narrow sidebar. Compact, left-aligned, same visual weight as before.
+  const actions = document.createElement('div');
+  actions.className = 'openings-actions';
   const addDoor = document.createElement('button');
   addDoor.type = 'button';
   addDoor.className = 'btn-add-opening';
@@ -1455,7 +1464,7 @@ function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
     emit('room:changed');
     renderSurfaceMaterials();
   });
-  hdr.appendChild(addDoor);
+  actions.appendChild(addDoor);
   const addWin = document.createElement('button');
   addWin.type = 'button';
   addWin.className = 'btn-add-opening';
@@ -1468,8 +1477,8 @@ function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
     emit('room:changed');
     renderSurfaceMaterials();
   });
-  hdr.appendChild(addWin);
-  block.appendChild(hdr);
+  actions.appendChild(addWin);
+  block.appendChild(actions);
 
   // One row per VISIBLE opening — the row's idx points at the entry's
   // index in the underlying slot.openings (not the filtered list) so

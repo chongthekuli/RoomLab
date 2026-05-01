@@ -145,13 +145,17 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-3) var(--space-4);
+  min-width: 0;
 }
 #panel-right {
   background: var(--bg-panel);
   border-left: 1px solid var(--border);
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-3) var(--space-4);
+  min-width: 0;
 }
 #viewport {
   position: relative;
@@ -2019,16 +2023,26 @@ section h3 {
    material picker plus an inline list of doors and windows on that
    wall. Walls without openings just show the picker; the openings
    block appears below it once the user clicks "+ Door" or "+ Window". */
-.wall-row { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
-.wall-mat-row { display: flex; align-items: center; gap: 6px; }
+.wall-row { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; min-width: 0; }
+.wall-mat-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* Long material names ("Heavy plate glass with damping…") would otherwise
+   stretch the select to its intrinsic content width and blow out the sidebar.
+   Clamp the select to the row's available space and let the option text
+   ellipsis inside the closed control. */
+.wall-mat-row > select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 .openings-block {
   margin-left: 10px;
   padding: 4px 6px;
   border-left: 2px solid var(--border, #2a2f38);
   display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
 }
-.openings-hdr { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.openings-summary { font-size: 11px; color: var(--text-muted, #8a93a3); flex: 1; }
+.openings-hdr { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.openings-summary { font-size: 11px; color: var(--text-muted, #8a93a3); flex: 1; min-width: 0; }
+/* "+ Door" / "+ Window" sit on their own row below the summary so a wide
+   material dropdown above can't push them off the right edge of the sidebar.
+   Compact, left-aligned, same button styling as before. */
+.openings-actions { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .btn-add-opening {
   font-size: 11px; padding: 2px 8px; border-radius: 3px;
   background: var(--bg-elev, #1c2028); border: 1px solid var(--border, #2a2f38);
