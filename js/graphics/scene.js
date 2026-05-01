@@ -727,7 +727,13 @@ function onSurfaceClick(e) {
       break;
     }
   }
-  if (!bestSurfId) return;
+  // Click-empty (no wall hit at all) — drop selection so users can dismiss
+  // a sticky highlight without going through the panel. Matches the
+  // sub-structure click-empty pattern at onSubStructureClick.
+  if (!bestSurfId) {
+    if (_selectedSurfaceId) setSurfaceSelectionHighlight(null);
+    return;
+  }
 
   // If a speaker (or rack, listener marker) is between the camera and the
   // wall, the click was about that speaker — bail. onSpeakerClick already
@@ -738,7 +744,10 @@ function onSurfaceClick(e) {
       if (h.object.userData?.speakerModelUrl && h.distance < bestRoomDist) return;
     }
   }
-  emit('surface:picked', { surface_id: bestSurfId });
+  // Toggle: clicking the already-selected wall deselects it.
+  const next = (bestSurfId === _selectedSurfaceId) ? null : bestSurfId;
+  setSurfaceSelectionHighlight(next);
+  if (next) emit('surface:picked', { surface_id: next });
 }
 
 // ---- Surface hover from side-panel ------------------------------------
@@ -753,7 +762,11 @@ const _surfaceHoverColor = new THREE.Color(0xffd000);
 const _surfaceHoverBoost = 0.55;
 function setSurfaceHoverHighlight(surfaceId) {
   if (_hoveredSurfaceId === surfaceId) return;
-  // Restore previously highlighted meshes first.
+  // Restore previously highlighted meshes — but if a mesh also belongs to
+  // the currently SELECTED surface, restore to the selection cyan instead
+  // of the bare original emissive (so leaving hover doesn't visually
+  // deselect the wall).
+  const prevHoveredId = _hoveredSurfaceId;
   for (const m of _hoveredSurfaceMeshes) {
     const store = m.userData;
     if (store._surfOrigEmissiveHex !== undefined && m.material?.emissive) {
@@ -765,8 +778,17 @@ function setSurfaceHoverHighlight(surfaceId) {
     }
   }
   _hoveredSurfaceMeshes.length = 0;
+  // If we just unhovered the selected wall, repaint its selection tint.
+  if (prevHoveredId && prevHoveredId === _selectedSurfaceId) {
+    _applySurfaceSelectionMaterial(_selectedSurfaceId);
+  }
   _hoveredSurfaceId = surfaceId;
   if (!surfaceId || !roomGroup) return;
+  // If the hover target is also the selected wall, strip the selection
+  // emissive first so the hover stash captures the bare original (otherwise
+  // hover-out would restore to "cyan tint" which is fine, but the stash
+  // tracker would point at cyan, breaking the next selection clear).
+  if (surfaceId === _selectedSurfaceId) _clearSurfaceSelectionMaterial();
   roomGroup.traverse(m => {
     if (!m.isMesh || m.userData?.surface_id !== surfaceId) return;
     if (!m.material || !m.material.emissive) return;
@@ -788,6 +810,142 @@ on('surface:hover', ({ surface_id } = {}) => {
 on('room:changed', () => {
   _hoveredSurfaceMeshes.length = 0;
   _hoveredSurfaceId = null;
+});
+
+// ---- Surface click-to-select (sticky highlight) -----------------------
+// Cyan (0x00d4ff) is the colour-wheel opposite of the warm-gold hover, so
+// the two layers stay distinguishable when stacked. The edge overlay lives
+// in its own scene-level group with depthTest=false so it draws on top of
+// the floor heatmap and stays visible on every wall material.
+const _selectionColor = new THREE.Color(0x00d4ff);
+const _selectionBoost = 0.7;
+const _selectedSurfaceMeshes = [];
+let _selectedSurfaceId = null;
+let _selectionEdgeGroup = null;
+const _selectionEdgeLines = [];
+
+function _ensureSelectionEdgeGroup() {
+  if (_selectionEdgeGroup || !scene) return;
+  _selectionEdgeGroup = new THREE.Group();
+  _selectionEdgeGroup.name = 'surfaceSelectionEdges';
+  _selectionEdgeGroup.renderOrder = 999;
+  scene.add(_selectionEdgeGroup);
+}
+
+function _disposeSelectionEdges() {
+  for (const line of _selectionEdgeLines) {
+    line.parent?.remove(line);
+    line.geometry?.dispose();
+    line.material?.dispose();
+  }
+  _selectionEdgeLines.length = 0;
+}
+
+function _clearSurfaceSelectionMaterial() {
+  for (const m of _selectedSurfaceMeshes) {
+    const store = m.userData;
+    if (store._selSurfOrigEmissiveHex !== undefined && m.material?.emissive) {
+      m.material.emissive.setHex(store._selSurfOrigEmissiveHex);
+      m.material.emissiveIntensity = store._selSurfOrigEmissiveIntensity ?? 1;
+      m.material.needsUpdate = true;
+      delete store._selSurfOrigEmissiveHex;
+      delete store._selSurfOrigEmissiveIntensity;
+    }
+  }
+  _selectedSurfaceMeshes.length = 0;
+}
+
+function _applySurfaceSelectionMaterial(surfaceId) {
+  if (!surfaceId || !roomGroup) return;
+  roomGroup.traverse(m => {
+    if (!m.isMesh || m.userData?.surface_id !== surfaceId) return;
+    if (!m.material || !m.material.emissive) {
+      _selectedSurfaceMeshes.push(m);
+      return;
+    }
+    // Skip stash if hover is currently overriding the emissive on this mesh
+    // — hover-out path will re-apply selection.
+    if (m.userData._surfOrigEmissiveHex === undefined) {
+      m.userData._selSurfOrigEmissiveHex = m.material.emissive.getHex();
+      m.userData._selSurfOrigEmissiveIntensity = m.material.emissiveIntensity ?? 1;
+      m.material.emissive.copy(_selectionColor);
+      m.material.emissiveIntensity = (m.userData._selSurfOrigEmissiveIntensity ?? 1) + _selectionBoost;
+      m.material.needsUpdate = true;
+    }
+    _selectedSurfaceMeshes.push(m);
+  });
+}
+
+function _buildSelectionEdgesFor(surfaceId) {
+  _disposeSelectionEdges();
+  if (!surfaceId || !roomGroup) return;
+  _ensureSelectionEdgeGroup();
+  if (!_selectionEdgeGroup) return;
+  roomGroup.traverse(m => {
+    if (!m.isMesh || m.userData?.surface_id !== surfaceId) return;
+    if (!m.geometry) return;
+    const edgesGeo = new THREE.EdgesGeometry(m.geometry, 12);
+    const mat = new THREE.LineBasicMaterial({
+      color: _selectionColor,
+      transparent: true,
+      opacity: 1,
+      depthTest: false,
+      depthWrite: false,
+      linewidth: 1,
+    });
+    const line = new THREE.LineSegments(edgesGeo, mat);
+    line.renderOrder = 999;
+    m.updateWorldMatrix(true, false);
+    line.applyMatrix4(m.matrixWorld);
+    _selectionEdgeGroup.add(line);
+    _selectionEdgeLines.push(line);
+  });
+}
+
+export function setSurfaceSelectionHighlight(surfaceId) {
+  if (_selectedSurfaceId === surfaceId) return;
+  _clearSurfaceSelectionMaterial();
+  _disposeSelectionEdges();
+  _selectedSurfaceId = surfaceId ?? null;
+  state.selectedSurfaceId = _selectedSurfaceId;
+  if (!_selectedSurfaceId) return;
+  _applySurfaceSelectionMaterial(_selectedSurfaceId);
+  _buildSelectionEdgesFor(_selectedSurfaceId);
+}
+
+// Slow sine pulse (1.5 s period) on the edge-line opacity, driven from
+// animate(). Range 0.55–1.0 — visible without being seizure-bait.
+function _tickSurfaceSelectionPulse(ts) {
+  if (_selectionEdgeLines.length === 0) return;
+  const phase = ((ts || performance.now()) / 1500) * Math.PI * 2;
+  const opacity = 0.775 + Math.sin(phase) * 0.225;
+  for (const line of _selectionEdgeLines) {
+    if (line.material) line.material.opacity = opacity;
+  }
+}
+
+// Re-resolve mesh references after a room rebuild discards the old ones.
+on('room:changed', () => {
+  _selectedSurfaceMeshes.length = 0;
+  _disposeSelectionEdges();
+  if (_selectedSurfaceId) {
+    requestAnimationFrame(() => {
+      if (!_selectedSurfaceId) return;
+      _applySurfaceSelectionMaterial(_selectedSurfaceId);
+      _buildSelectionEdgesFor(_selectedSurfaceId);
+    });
+  }
+});
+on('scene:reset', () => {
+  _selectedSurfaceMeshes.length = 0;
+  _disposeSelectionEdges();
+  _selectedSurfaceId = null;
+  state.selectedSurfaceId = null;
+});
+
+// Esc / global cancel — drop surface selection along with other transient UI.
+document.addEventListener('ui:cancel', () => {
+  if (_selectedSurfaceId) setSurfaceSelectionHighlight(null);
 });
 
 // ---- Sub-structure click-to-select ------------------------------------
@@ -5585,6 +5743,7 @@ function animate(ts) {
   requestAnimationFrame(animate);
   if (!renderer || !scene || !activeCamera) return;
   if (shadowsNeedRefresh) { applyShadowFlags(); shadowsNeedRefresh = false; }
+  _tickSurfaceSelectionPulse(ts);
   if (walkMode && tpController) {
     const now = ts || performance.now();
     const dt = Math.min(0.1, (now - tpLastTs) / 1000);

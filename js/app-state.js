@@ -258,6 +258,10 @@ export const state = {
   // Mirrors `selectedSpeakerUrl` / `selectedListenerId` discipline. The
   // chip in the Room panel reflects this; resetSceneState clears it.
   selectedSubStructureId: null,
+  // Surface (wall / floor / ceiling / wall_segment) currently selected
+  // in the 3D viewport. Drives the cyan emissive + edge-outline highlight
+  // owned by setSurfaceSelectionHighlight in scene.js.
+  selectedSurfaceId: null,
   listeners: [],
   selectedListenerId: null,
   zones: [],
@@ -678,6 +682,7 @@ export function deserializeProject(obj) {
   // that no longer exists. resetSceneState already cleared it; this is
   // defensive in case the canonical reset's contract drifts later.
   state.selectedSubStructureId = null;
+  state.selectedSurfaceId = null;
 
   // --- Physics + ambient + EQ — overlay scalars; arrays full replace ---
   if (obj.physics && typeof obj.physics === 'object') {

@@ -57,6 +57,7 @@ export function resetSceneState({ state, defaultRoomState, deepClone, projectNam
   // never leaves the chip row in panel-room.js highlighting a sub from
   // the previous scene.
   state.selectedSubStructureId = null;
+  state.selectedSurfaceId = null;
 
   state.rackSystem = { racks: [] };
   state.projectName = projectName;
