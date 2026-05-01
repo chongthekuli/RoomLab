@@ -1298,111 +1298,167 @@ function drawFrequencyResponse(canvas, sources, listenerPos) {
 // avatarParts captures the swinging groups so tickWalkthrough() can drive
 // their rotation.x without walking the scene graph every frame.
 function buildSuitedManAvatar() {
-  // Palette — John Wick style: entirely black suit, black shirt, black tie,
-  // pale skin, long dark hair, stubble/beard.
-  const SKIN      = 0xd9b798;   // paler, slightly warm
-  const SKIN_SHAD = 0xb89378;
-  const LIP       = 0x7a4a3a;
-  const SUIT      = 0x0d0e12;   // near-black with faint blue
-  const SUIT_DARK = 0x050609;   // shadow detail
-  const SHIRT     = 0x1a1a1e;   // black button-down visible in the V
-  const TIE       = 0x08080a;
-  const PANTS     = 0x0a0b10;
-  const SHOE      = 0x070707;
-  const HAIR      = 0x1a120a;   // very dark brown
-  const BEARD     = 0x24180e;   // slightly lighter stubble tone
+  const SKIN      = 0xd9b798;
+  const STUBBLE   = 0x3a2c20;
+  const SUIT      = 0x0a0b10;
+  const SUIT_HI   = 0x121319;
+  const LAPEL     = 0x05060a;
+  const SHIRT     = 0x18181c;
+  const TIE       = 0x05050a;
+  const PANTS     = 0x080911;
+  const SHOE      = 0x050505;
+  const HAIR      = 0x120a06;
 
   const mat = (color, opts = {}) => new THREE.MeshStandardMaterial({
-    color, roughness: opts.r ?? 0.78, metalness: opts.m ?? 0.04,
+    color,
+    roughness: opts.r ?? 0.78,
+    metalness: opts.m ?? 0.04,
   });
-  const mesh = (geo, m, pos) => {
+  const suitMat = mat(SUIT, { r: 0.62, m: 0.06 });
+  const suitHiMat = mat(SUIT_HI, { r: 0.55, m: 0.08 });
+  const lapelMat = mat(LAPEL, { r: 0.45, m: 0.10 });
+  const shirtMat = mat(SHIRT, { r: 0.55, m: 0.05 });
+  const tieMat = mat(TIE, { r: 0.40, m: 0.15 });
+  const pantsMat = mat(PANTS, { r: 0.70, m: 0.05 });
+  const shoeMat = mat(SHOE, { r: 0.22, m: 0.30 });
+  const skinMat = mat(SKIN, { r: 0.55, m: 0.02 });
+  const hairMat = mat(HAIR, { r: 0.65, m: 0.05 });
+  const stubbleMat = mat(STUBBLE, { r: 0.85, m: 0.0 });
+
+  const mesh = (geo, m, pos, rot) => {
     const x = new THREE.Mesh(geo, m);
     if (pos) x.position.set(pos[0], pos[1], pos[2]);
+    if (rot) x.rotation.set(rot[0] ?? 0, rot[1] ?? 0, rot[2] ?? 0);
+    x.castShadow = true;
+    x.receiveShadow = true;
     return x;
   };
 
   const root = new THREE.Group();
-  // --- Rig hierarchy ---
-  //   root
-  //     legL, legR        (hip-pivot groups attached to the root/pelvis level)
-  //     spine             (Group pivoting at the waist, y=0.92 m)
-  //       body            (upper torso, head, tie, shirt, neck, pelvis band)
-  //       armL, armR      (shoulder-pivot groups, attached to the spine so
-  //                        arms lean + tilt WITH the torso — previous bug had
-  //                        only body leaning and arms/head detaching)
-  // Legs stay at root so stride rotations happen at the hip independent of
-  // upper-body sway. Spine carries torso tilt + turn-lean.
-  const parts = { armL: null, armR: null, legL: null, legR: null, body: new THREE.Group(), spine: new THREE.Group() };
-  parts.spine.position.set(0, 0.92, 0);    // waist pivot
-  // body stays at root-frame coordinates internally but lives inside spine,
-  // so we offset body.position.y to cancel spine.position and keep the
-  // existing absolute positions of head/torso/etc. unchanged.
+  const parts = {
+    armL: null, armR: null, legL: null, legR: null,
+    body: new THREE.Group(),
+    spine: new THREE.Group(),
+  };
+  parts.spine.position.set(0, 0.92, 0);
   parts.body.position.y = -0.92;
   parts.spine.add(parts.body);
   root.add(parts.spine);
 
-  // --- Head group — tailor-mannequin style: smooth egg + minimal hair cap.
-  // Previous versions tried to model eyes / nose / beard / ears with
-  // primitives; the result was always uncanny-valley. Abstract works better:
-  // no face features, smooth pale egg, slim dark hair dome — reads as "a
-  // person" without pretending to be photoreal.
+  // --- Head: cranium + jaw, slicked-back hair wedge, beard layer ---
   const headG = new THREE.Group();
   headG.position.set(0, 1.54, 0);
 
-  const head = mesh(new THREE.SphereGeometry(0.115, 28, 24), mat(SKIN, { r: 0.48 }), [0, 0.13, 0]);
-  head.scale.set(0.96, 1.15, 0.96);
-  headG.add(head);
+  // Cranium — egg-shaped, slightly elongated front-back.
+  const cranium = mesh(new THREE.SphereGeometry(0.115, 28, 24), skinMat, [0, 0.13, 0]);
+  cranium.scale.set(0.96, 1.12, 1.02);
+  headG.add(cranium);
 
-  // Hair — a single low dome covering the top of the skull. No nape, no
-  // locks, no bangs. One surface, one material.
-  const hairMat = mat(HAIR, { r: 0.82, m: 0.03 });
-  const hairCap = mesh(
-    new THREE.SphereGeometry(0.122, 28, 16, 0, Math.PI * 2, 0, Math.PI * 0.50),
+  // Jaw — narrower lower oval pulled forward to break the perfect-egg silhouette.
+  const jaw = mesh(new THREE.SphereGeometry(0.085, 22, 18), skinMat, [0, 0.06, 0.012]);
+  jaw.scale.set(0.85, 0.78, 0.95);
+  headG.add(jaw);
+
+  // Stubble / short beard — covers the lower jaw + chin, slightly oversized
+  // so it reads as a layer when seen against the skin tone behind it.
+  const beard = mesh(new THREE.SphereGeometry(0.087, 22, 18), stubbleMat, [0, 0.055, 0.012]);
+  beard.scale.set(0.88, 0.62, 0.98);
+  headG.add(beard);
+
+  // Hair — slicked-back wedge: a half-sphere offset BACKWARD, then squashed
+  // forward-low to suggest combed-back volume. Reads as "dark hair pulled
+  // back" rather than "swim cap".
+  const hair = mesh(
+    new THREE.SphereGeometry(0.123, 28, 18, 0, Math.PI * 2, 0, Math.PI * 0.55),
     hairMat,
-    [0, 0.16, -0.002]
+    [0, 0.155, -0.018],
   );
-  hairCap.scale.set(1.0, 0.75, 1.04);
-  headG.add(hairCap);
+  hair.scale.set(1.02, 0.92, 1.10);
+  headG.add(hair);
+
+  // Sideburn hint — short tapered hair strips on each side at temple level,
+  // catches the eye when the camera is behind/above.
+  for (const sx of [-1, 1]) {
+    const burn = mesh(new THREE.BoxGeometry(0.018, 0.055, 0.040), hairMat,
+      [sx * 0.108, 0.135, -0.005]);
+    headG.add(burn);
+  }
 
   parts.body.add(headG);
 
-  // --- Neck -----------------------------------------------------------------
-  parts.body.add(mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.08, 14), mat(SKIN), [0, 1.50, 0]));
+  // --- Neck ---
+  parts.body.add(mesh(new THREE.CylinderGeometry(0.046, 0.052, 0.085, 14), skinMat, [0, 1.498, 0]));
 
-  // --- Torso — single tapered jacket, no tie / no lapels / no buttons.
-  // Read as "person in dark suit" in silhouette; detail at primitive-level
-  // always looks wrong. Clean shape + material = better than fussy layers.
-  const jacketGeo = new THREE.CylinderGeometry(0.17, 0.14, 0.56, 20);
-  const jacket = mesh(jacketGeo, mat(SUIT, { r: 0.72, m: 0.04 }), [0, 1.17, 0]);
-  jacket.scale.z = 0.7;
+  // --- Torso: jacket as a tapered V, with separate shoulder caps that round
+  // out the silhouette so the upper body doesn't look like a cylinder ---
+  const jacket = mesh(new THREE.CylinderGeometry(0.18, 0.145, 0.56, 22), suitMat, [0, 1.17, 0]);
+  jacket.scale.set(1.0, 1.0, 0.72);
   parts.body.add(jacket);
 
-  // --- Pelvis (visible band at top of pants) — narrowed to match the
-  // tapered torso so there's no sudden bulge at the waist.
-  const pelvis = mesh(new THREE.CylinderGeometry(0.16, 0.17, 0.12, 14), mat(PANTS), [0, 0.86, 0]);
-  pelvis.scale.z = 0.7;
-  parts.body.add(pelvis);
-  // Belt — thin dark band around the waist.
-  const belt = mesh(new THREE.CylinderGeometry(0.172, 0.172, 0.028, 14), mat(0x050505, { r: 0.3, m: 0.3 }), [0, 0.925, 0]);
-  belt.scale.z = 0.7;
-  parts.body.add(belt);
+  // Shoulder caps — half-spheres at each shoulder. Adds visible roundness
+  // where the arm meets the jacket; without these the cylinder looks naked.
+  for (const sx of [-1, 1]) {
+    const cap = mesh(
+      new THREE.SphereGeometry(0.085, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      suitHiMat,
+      [sx * 0.165, 1.42, 0],
+    );
+    cap.scale.set(1.05, 0.85, 0.95);
+    parts.body.add(cap);
+  }
 
-  // --- Arm factory — nested pivots: shoulder → elbow → (forearm + hand) ----
-  // Bending the elbow is rotation on arm.elbow.rotation.x. The forearm group
-  // is positioned at the elbow joint (y=-0.26 below shoulder), so rotating
-  // it around X swings the forearm downward/backward naturally.
+  // Shirt V — visible triangle of dark shirt at the chest opening between
+  // the lapels. A thin flat box angled forward.
+  const shirtV = mesh(new THREE.BoxGeometry(0.080, 0.18, 0.012), shirtMat,
+    [0, 1.32, 0.108], [0.15, 0, 0]);
+  parts.body.add(shirtV);
+
+  // Tie — narrow strip running from collar to mid-chest. Slightly wider at
+  // the bottom (hint of a tie knot + blade).
+  const tieKnot = mesh(new THREE.BoxGeometry(0.034, 0.030, 0.014), tieMat,
+    [0, 1.41, 0.116]);
+  parts.body.add(tieKnot);
+  const tieBlade = mesh(new THREE.BoxGeometry(0.030, 0.20, 0.011), tieMat,
+    [0, 1.30, 0.112], [0.15, 0, 0]);
+  parts.body.add(tieBlade);
+
+  // Lapels — two angled flat boxes flanking the shirt-V. Each is rotated
+  // outward around Y so the inner edges form a V-notch typical of a 2-button
+  // suit. This is the single biggest "is wearing a suit" cue at distance.
+  for (const sx of [-1, 1]) {
+    const lapel = mesh(new THREE.BoxGeometry(0.075, 0.30, 0.014), lapelMat,
+      [sx * 0.052, 1.30, 0.106], [0.10, sx * 0.18, sx * -0.18]);
+    parts.body.add(lapel);
+  }
+
+  // Pelvis band + belt — visible at the waist break.
+  const pelvis = mesh(new THREE.CylinderGeometry(0.16, 0.17, 0.13, 16), pantsMat, [0, 0.86, 0]);
+  pelvis.scale.z = 0.72;
+  parts.body.add(pelvis);
+  const belt = mesh(new THREE.CylinderGeometry(0.174, 0.174, 0.026, 18), mat(0x050505, { r: 0.25, m: 0.35 }),
+    [0, 0.928, 0]);
+  belt.scale.z = 0.72;
+  parts.body.add(belt);
+  // Belt buckle — small flat reflective square front-center.
+  const buckle = mesh(new THREE.BoxGeometry(0.040, 0.024, 0.006), mat(0x2a2a2e, { r: 0.30, m: 0.65 }),
+    [0, 0.928, 0.130]);
+  parts.body.add(buckle);
+
+  // --- Arm factory: shoulder → elbow → forearm/hand. Cuff at wrist. ---
   const makeArm = (sign) => {
     const arm = new THREE.Group();
     arm.position.set(sign * 0.20, 1.42, 0);
-    // Single tapered upper-arm cylinder — no shoulder-cap sphere bump.
-    arm.add(mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.27, 14), mat(SUIT, { r: 0.78 }), [0, -0.135, 0]));
-    // Elbow group — rotation pivot only, no visible sphere.
+    // Upper sleeve.
+    arm.add(mesh(new THREE.CylinderGeometry(0.058, 0.046, 0.27, 14), suitMat, [0, -0.135, 0]));
     const elbow = new THREE.Group();
     elbow.position.set(0, -0.27, 0);
     arm.add(elbow);
-    elbow.add(mesh(new THREE.CylinderGeometry(0.045, 0.04, 0.26, 14), mat(SUIT, { r: 0.8 }), [0, -0.13, 0]));
-    // Hand — simple flattened oval. No thumb, no palm separation.
-    const hand = mesh(new THREE.SphereGeometry(0.048, 14, 12), mat(SKIN, { r: 0.6 }), [0, -0.29, 0]);
+    // Forearm sleeve.
+    elbow.add(mesh(new THREE.CylinderGeometry(0.046, 0.040, 0.24, 14), suitMat, [0, -0.12, 0]));
+    // Cuff — thin shirt-color band peeking past the sleeve.
+    elbow.add(mesh(new THREE.CylinderGeometry(0.041, 0.041, 0.018, 14), shirtMat, [0, -0.245, 0]));
+    // Hand — flattened oval.
+    const hand = mesh(new THREE.SphereGeometry(0.048, 14, 12), skinMat, [0, -0.29, 0]);
     hand.scale.set(0.65, 1.25, 0.55);
     elbow.add(hand);
     arm.userData.elbow = elbow;
@@ -1410,30 +1466,24 @@ function buildSuitedManAvatar() {
   };
   parts.armL = makeArm(-1);
   parts.armR = makeArm( 1);
-  // Shoulder anchor was (sign*0.23, 1.42, 0) in root frame; subtract 0.92 so
-  // the world position is unchanged when the arms live inside the spine.
   parts.armL.position.y -= 0.92;
   parts.armR.position.y -= 0.92;
   parts.spine.add(parts.armL, parts.armR);
 
-  // --- Leg factory — nested pivots: hip → knee → (shin + shoe) --------------
-  // Bending the knee is rotation on leg.knee.rotation.x. The shin group sits
-  // at y=-0.42 below the hip, so rotating it around X folds the lower leg
-  // (essential for crouching without the shoe sinking into the floor).
+  // --- Leg factory: hip → knee → shin/shoe. Cuff hint at ankle. ---
   const makeLeg = (sign) => {
     const leg = new THREE.Group();
-    leg.position.set(sign * 0.11, 0.86, 0); // hip anchor
-    // Thigh — attached to hip pivot.
-    // Thigh tapers slightly down toward knee.
-    leg.add(mesh(new THREE.CylinderGeometry(0.075, 0.062, 0.42, 14), mat(PANTS), [0, -0.21, 0]));
+    leg.position.set(sign * 0.11, 0.86, 0);
+    leg.add(mesh(new THREE.CylinderGeometry(0.078, 0.064, 0.42, 14), pantsMat, [0, -0.21, 0]));
     const knee = new THREE.Group();
     knee.position.set(0, -0.42, 0);
     leg.add(knee);
-    // Shin — no sphere at the knee joint.
-    knee.add(mesh(new THREE.CylinderGeometry(0.058, 0.048, 0.40, 14), mat(PANTS), [0, -0.22, 0]));
-    // Shoe — one rounded flattened ellipsoid, no toe cap / no heel bits.
-    const shoe = mesh(new THREE.SphereGeometry(0.095, 16, 12), mat(SHOE, { r: 0.3, m: 0.3 }), [0, -0.44, 0.035]);
-    shoe.scale.set(0.58, 0.45, 1.35);
+    knee.add(mesh(new THREE.CylinderGeometry(0.060, 0.052, 0.40, 14), pantsMat, [0, -0.22, 0]));
+    // Pant cuff break — thin band at ankle.
+    knee.add(mesh(new THREE.CylinderGeometry(0.054, 0.054, 0.024, 14), pantsMat, [0, -0.418, 0]));
+    // Shoe — flattened ellipsoid, lower to the ground, shinier than fabric.
+    const shoe = mesh(new THREE.SphereGeometry(0.095, 18, 12), shoeMat, [0, -0.452, 0.035]);
+    shoe.scale.set(0.60, 0.42, 1.40);
     knee.add(shoe);
     leg.userData.knee = knee;
     return leg;
@@ -1441,6 +1491,12 @@ function buildSuitedManAvatar() {
   parts.legL = makeLeg(-1);
   parts.legR = makeLeg( 1);
   root.add(parts.legL, parts.legR);
+
+  // Ensure shadow flags are set on every mesh (the helper sets them per-mesh
+  // already, but groups added later via traverse-style code might miss them).
+  root.traverse(o => {
+    if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+  });
 
   root.visible = false;
   root.userData.tag = 'walk_avatar';
@@ -1557,28 +1613,30 @@ function initWalkthrough() {
   };
   tpController.onAnimate = applyAvatarAnimation;
 
-  // --- Async GLTF character load — disabled until an asset ships ---
-  // The walkthrough's procedural primitive avatar is fully playable; a
-  // rigged-character asset was never bundled. Even a HEAD probe still
-  // prints the 4xx response in DevTools (Chrome logs every non-2xx
-  // regardless of whether the JS ignores it), so the only way to keep
-  // the console clean is to not make the request at all.
-  //
-  // To enable: drop a glTF/GLB rigged biped (Mixamo / Ready-Player-Me /
-  // any .glb with idle / walk / run clips) at `assets/models/hitman.glb`,
-  // then re-enable the load by uncommenting the block below.
-  //
-  // loadCharacterRig('assets/models/hitman.glb')
-  //   .then(rig => {
-  //     riggedAvatar = rig;
-  //     rig.root.position.copy(avatar.position);
-  //     rig.root.rotation.copy(avatar.rotation);
-  //     scene.remove(avatar);
-  //     scene.add(rig.root);
-  //     tpController.character = rig.root;
-  //     shadowsNeedRefresh = true;
-  //   })
-  //   .catch(err => console.info('[walkthrough] rigged avatar unavailable:', err?.message ?? err));
+  // Async GLTF character upgrade — if assets/models/hitman.glb exists, swap
+  // the procedural avatar for the rigged model + AnimationMixer fast path.
+  // If the file is missing, the loader rejects and we keep the procedural
+  // avatar (fully playable). HEAD-probe-first to avoid the noisy 4xx in
+  // DevTools when no asset is shipped.
+  fetch('assets/models/hitman.glb', { method: 'HEAD' })
+    .then(res => {
+      if (!res.ok) throw new Error('no-asset');
+      return loadCharacterRig('assets/models/hitman.glb');
+    })
+    .then(rig => {
+      riggedAvatar = rig;
+      rig.root.position.copy(avatar.position);
+      rig.root.rotation.copy(avatar.rotation);
+      scene.remove(avatar);
+      scene.add(rig.root);
+      tpController.character = rig.root;
+      shadowsNeedRefresh = true;
+    })
+    .catch(err => {
+      if (err?.message !== 'no-asset') {
+        console.info('[walkthrough] rigged avatar unavailable:', err?.message ?? err);
+      }
+    });
 }
 
 function placeAvatarAtDefault() {
