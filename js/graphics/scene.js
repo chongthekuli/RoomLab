@@ -3896,7 +3896,7 @@ function rebuildZones() { shadowsNeedRefresh = true;
       // Matches EASE/Odeon convention of a separate visualization plane above
       // the structural geometry.
       const mat = new THREE.MeshBasicMaterial({
-        map: heatmapTex, transparent: true, opacity: 0.75,
+        map: heatmapTex, transparent: true, opacity: 0.95,
         side: THREE.DoubleSide, depthWrite: false,
       });
       const mesh = new THREE.Mesh(geo, mat);
@@ -5274,7 +5274,7 @@ function zoneHeatmapTexture(splInfo) {
       img.data[idx + 0] = r;
       img.data[idx + 1] = g;
       img.data[idx + 2] = b;
-      img.data[idx + 3] = 210;
+      img.data[idx + 3] = 240;
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -5351,7 +5351,9 @@ function rebuildHeatmap() {
       img.data[idx + 0] = r;
       img.data[idx + 1] = g;
       img.data[idx + 2] = b;
-      img.data[idx + 3] = 190;
+      // Near-opaque per-pixel alpha. Stays < 255 so the floor grid still
+      // shows through faintly — depth cue helps the user read elevation.
+      img.data[idx + 3] = 240;
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -5371,7 +5373,7 @@ function rebuildHeatmap() {
   const oy = splResult.originY_m ?? 0;
   const geo = new THREE.PlaneGeometry(planeW, planeD);
   const mat = new THREE.MeshBasicMaterial({
-    map: tex, transparent: true, opacity: 0.78,
+    map: tex, transparent: true, opacity: 0.95,
     side: THREE.DoubleSide, depthWrite: false, alphaTest: 0.01,
   });
   heatmapMesh = new THREE.Mesh(geo, mat);
@@ -5447,7 +5449,7 @@ function updateSPLLegend() {
     // Gradient matches stiColorRGB: red (bad) → orange (poor) → yellow
     // (fair) → green (good) → teal (excellent). Top of bar = 1.00.
     if (bar) bar.style.background = 'linear-gradient(to top, ' +
-      '#aa1e1e 0%, #e67828 30%, #e6c832 45%, #6ec85a 60%, #28aa82 75%, #148ca0 100%)';
+      '#d21414 0%, #ff8214 30%, #ffd700 45%, #3cd23c 60%, #00c896 75%, #00aadc 100%)';
     // STI ticks are FIXED at the IEC 60268-16 rating-band boundaries —
     // these are the values the user actually needs to read off the
     // colour ("where does 'good' start") regardless of the data range.
@@ -5459,7 +5461,7 @@ function updateSPLLegend() {
   } else {
     if (title) title.textContent = 'SPL';
     if (bar) bar.style.background = 'linear-gradient(to top, ' +
-      '#1a1a4a 0%, #0066cc 25%, #00cc66 50%, #ffcc00 75%, #ff3300 100%)';
+      '#1428b4 0%, #008ce6 25%, #1edc50 50%, #ffd700 75%, #f01e1e 100%)';
     // SPL ticks are dynamic — choose 5 dB step for narrow ranges, 10 dB
     // for wider, snap to multiples. Cap at 7 ticks to avoid label
     // collision on the 180 px bar.
@@ -5487,23 +5489,29 @@ function updateSPLLegend() {
 
 function splColorRGB(spl_db) {
   const t = Math.max(0, Math.min(1, (spl_db - 60) / 50));
-  if (t < 0.25) return interpRGB([26, 26, 74], [0, 102, 204], t / 0.25);
-  if (t < 0.50) return interpRGB([0, 102, 204], [0, 204, 102], (t - 0.25) / 0.25);
-  if (t < 0.75) return interpRGB([0, 204, 102], [255, 204, 0], (t - 0.50) / 0.25);
-  return interpRGB([255, 204, 0], [255, 51, 0], (t - 0.75) / 0.25);
+  // Punchier 4-stop ramp: deep saturated blue → cyan-green → yellow →
+  // pure red. Dull navy at the low end was washed out under the heatmap's
+  // own alpha; pushing every stop closer to a primary keeps cells legible
+  // even in a bright 3D viewport with HDR + bloom.
+  if (t < 0.25) return interpRGB([ 20,  40, 180], [  0, 140, 230], t / 0.25);
+  if (t < 0.50) return interpRGB([  0, 140, 230], [ 30, 220,  80], (t - 0.25) / 0.25);
+  if (t < 0.75) return interpRGB([ 30, 220,  80], [255, 215,   0], (t - 0.50) / 0.25);
+  return interpRGB([255, 215, 0], [240, 30, 30], (t - 0.75) / 0.25);
 }
 
 // STIPA color palette mapped to the IEC 60268-16 5-tier rating bands.
 // Red (bad) → orange (poor) → yellow (fair) → green (good) → teal (excellent).
 // Legend ticks at 0.00 / 0.30 / 0.45 / 0.60 / 0.75 / 1.00 match the rating
 // boundaries so the user can read off "poor vs fair" from the colour alone.
+// Saturation matches the SPL ramp so the two metrics read with the same
+// visual weight when toggling between them.
 function stiColorRGB(sti) {
   const t = Math.max(0, Math.min(1, sti));
-  if (t < 0.30) return interpRGB([170,  30,  30], [230, 120,  40], t / 0.30);           // bad → poor
-  if (t < 0.45) return interpRGB([230, 120,  40], [230, 200,  50], (t - 0.30) / 0.15);  // poor → fair
-  if (t < 0.60) return interpRGB([230, 200,  50], [110, 200,  90], (t - 0.45) / 0.15);  // fair → good
-  if (t < 0.75) return interpRGB([110, 200,  90], [ 40, 170, 130], (t - 0.60) / 0.15);  // good → excellent
-  return interpRGB([40, 170, 130], [20, 140, 170], (t - 0.75) / 0.25);                  // excellent → top
+  if (t < 0.30) return interpRGB([210,  20,  20], [255, 130,  20], t / 0.30);           // bad → poor
+  if (t < 0.45) return interpRGB([255, 130,  20], [255, 215,   0], (t - 0.30) / 0.15);  // poor → fair
+  if (t < 0.60) return interpRGB([255, 215,   0], [ 60, 210,  60], (t - 0.45) / 0.15);  // fair → good
+  if (t < 0.75) return interpRGB([ 60, 210,  60], [  0, 200, 150], (t - 0.60) / 0.15);  // good → excellent
+  return interpRGB([0, 200, 150], [0, 170, 220], (t - 0.75) / 0.25);                    // excellent → top
 }
 
 function interpRGB(a, b, t) {
