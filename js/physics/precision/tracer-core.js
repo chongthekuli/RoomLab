@@ -70,6 +70,42 @@ function sampleUnitSphere(rng, out) {
   out[2] = z;
 }
 
+// Importance-sample a raised-cosine lobe D(θ) ∝ ((1+cosθ)/2)^n around
+// the aim vector (ax, ay, az). Equal energy per ray. Closed-form CDF
+// inverse: cos θ = 2·u^(1/(n+1)) − 1, u ∈ [0,1] uniform. Marginal density
+// over the sphere is (n+1)·((1+cosθ)/2)^n / (4π) so ∫dΩ = 1 and the
+// emitted total power equals L_w by construction. n=0 reduces to the
+// uniform-sphere sampler. Uses Frisvad's branch-minimal basis (same
+// pattern as sampleCosineHemisphere) to avoid a divide-by-zero at the
+// south-pole aim.
+function sampleRaisedCosineLobe(ax, ay, az, n, rng, out) {
+  if (n <= 0) {
+    sampleUnitSphere(rng, out);
+    return;
+  }
+  const u1 = rng();
+  const u2 = rng();
+  const cosTheta = 2 * Math.pow(u1, 1 / (n + 1)) - 1;
+  const sinTheta = Math.sqrt(Math.max(0, 1 - cosTheta * cosTheta));
+  const phi = 2 * Math.PI * u2;
+  const lx = sinTheta * Math.cos(phi);
+  const ly = sinTheta * Math.sin(phi);
+  const lz = cosTheta;
+  let tx, ty, tz, bx, by, bz;
+  if (az < -0.9999) {
+    tx = 0;  ty = -1; tz = 0;
+    bx = -1; by = 0;  bz = 0;
+  } else {
+    const a = 1 / (1 + az);
+    const cross = -ax * ay * a;
+    tx = 1 - ax * ax * a;  ty = cross;            tz = -ax;
+    bx = cross;            by = 1 - ay * ay * a;  bz = -ay;
+  }
+  out[0] = lx * tx + ly * bx + lz * ax;
+  out[1] = lx * ty + ly * by + lz * ay;
+  out[2] = lx * tz + ly * bz + lz * az;
+}
+
 // Cosine-weighted hemisphere sample around an arbitrary normal, for
 // Lambertian scatter. Uses Frisvad's 2012 branch-minimal orthonormal-
 // basis construction to avoid the sqrt + divide in the classical
@@ -219,6 +255,8 @@ export function traceRays(scene, bvh, opts = {}) {
 
   const srcPos = scene.sources.positions;
   const srcLw = scene.sources.L_w;
+  const srcAims = scene.sources.aims;
+  const srcDirN = scene.sources.directivityN;
   const recPos = scene.receivers.positions;
   const recR = scene.receivers.radii;
 
@@ -243,10 +281,17 @@ export function traceRays(scene, bvh, opts = {}) {
     const ox0 = srcPos[sIdx * 3 + 0];
     const oy0 = srcPos[sIdx * 3 + 1];
     const oz0 = srcPos[sIdx * 3 + 2];
+    // Lobe exponent + aim vector, hoisted out of the inner ray loop.
+    // Snapshot was built with directivityN populated; missing field falls
+    // back to omni so older snapshots in flight don't crash.
+    const lobeN = srcDirN ? srcDirN[sIdx] : 0;
+    const aimX = srcAims ? srcAims[sIdx * 3 + 0] : 0;
+    const aimY = srcAims ? srcAims[sIdx * 3 + 1] : 1;
+    const aimZ = srcAims ? srcAims[sIdx * 3 + 2] : 0;
 
     for (let ri = 0; ri < raysPerSource; ri++) {
       // Fresh direction + energy for each ray.
-      sampleUnitSphere(rng, dir);
+      sampleRaisedCosineLobe(aimX, aimY, aimZ, lobeN, rng, dir);
       let dx = dir[0], dy = dir[1], dz = dir[2];
       let ox = ox0, oy = oy0, oz = oz0;
       for (let k = 0; k < B; k++) energy[k] = initialEnergy[k];

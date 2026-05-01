@@ -34,6 +34,44 @@ const DEFAULT_SCATTERING = 0.10;
 const DEFAULT_RECEIVER_RADIUS_M = 0.5;
 const DEFAULT_EAR_HEIGHT_M = 1.2;
 
+// Default raised-cosine exponent when neither nominal_dispersion_deg nor
+// directivity_index_db is on the loudspeaker JSON. n=1 = cardioid =
+// Q=2 = DI=3.01 dB. Soft default that gives audible directivity without
+// being aggressive; user-visible only when a custom-imported speaker JSON
+// strips both fields.
+const DEFAULT_LOBE_N = 1;
+// Numerical floor: never let n drive the on-axis weight beyond ~120 (≈
+// pencil-beam horn, DI≈21 dB). Catches absurd JSON values without
+// hardcoding domain knowledge in the tracer.
+const MAX_LOBE_N = 120;
+
+/**
+ * solveLobeExponent — derive the raised-cosine lobe exponent n from the
+ * speaker's parametric data. See the comment in buildPhysicsScene where
+ * srcDirectivityN is allocated for the rationale and priority order.
+ */
+export function solveLobeExponent(acoustic) {
+  if (!acoustic) return DEFAULT_LOBE_N;
+  const disp = acoustic.nominal_dispersion_deg;
+  if (Number.isFinite(disp) && disp > 0) {
+    if (disp >= 340) return 0;            // ~omni — caller flagged it
+    const half = (disp / 2) * Math.PI / 180;
+    const c = (1 + Math.cos(half)) / 2;
+    if (c > 0 && c < 1) {
+      const n = Math.log(0.25) / Math.log(c);
+      if (Number.isFinite(n) && n >= 0) return Math.min(n, MAX_LOBE_N);
+    }
+    return 0;
+  }
+  const DI = acoustic.directivity_index_db;
+  if (Number.isFinite(DI)) {
+    const n = Math.pow(10, DI / 10) - 1;
+    if (n <= 0) return 0;
+    return Math.min(n, MAX_LOBE_N);
+  }
+  return DEFAULT_LOBE_N;
+}
+
 /**
  * Build a frozen PhysicsScene snapshot from the mutable state.
  *
@@ -76,6 +114,15 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
   const srcAims = new Float32Array(S * 3);
   const srcPowers = new Float32Array(S);
   const srcLwPerBand = new Float32Array(S * BANDS);
+  // Per-source raised-cosine-lobe exponent. D(θ) ∝ ((1+cosθ)/2)^n. n=0 is
+  // omni, n=1 is cardioid (DI≈3 dB), higher n is narrower. Used by the
+  // precision tracer for directivity-weighted ray emission. Derivation:
+  //   1) prefer nominal_dispersion_deg → n s.t. D(α/2) = 0.25 (-6 dB):
+  //        n = ln(0.25) / ln((1+cos(α/2))/2)
+  //   2) else use directivity_index_db → n = 10^(DI/10) − 1 (since the
+  //      normalized lobe has Q = n+1 exactly).
+  //   3) else fall back to n = 1 (cardioid; "no measured polar" default).
+  const srcDirectivityN = new Float32Array(S);
   const srcModelUrls = [];
   const srcGroupIds = [];
 
@@ -122,6 +169,7 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
       const DI = DIperBand ? DIperBand[k] : DI_scalar;
       srcLwPerBand[i * BANDS + k] = sens + p10 + 11 - DI;
     }
+    srcDirectivityN[i] = solveLobeExponent(a);
   }
 
   // --- Receivers — listeners as volumetric spheres. -------------------
@@ -270,6 +318,7 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
       aims: srcAims,
       powers: srcPowers,
       L_w: srcLwPerBand,
+      directivityN: srcDirectivityN,
       modelUrls: Object.freeze([...srcModelUrls]),
       groupIds: Object.freeze([...srcGroupIds]),
     }),
