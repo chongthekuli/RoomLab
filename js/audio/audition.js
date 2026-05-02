@@ -38,7 +38,10 @@ let _activeChain = null;          // { source, convolver, gain }
 let _samplePromise = null;
 let _saturatorCurve = null;
 
-const DEFAULT_GAIN = 0.6;
+// Phase 9.7 — master gain trimmed 0.6 → 0.5. Combined with the
+// DC-blocking HPF below, gives ~3 dB more headroom before the
+// WaveShaper saturator engages.
+const DEFAULT_GAIN = 0.5;
 const SAMPLE_URL = 'assets/audio/testing-1-2-3.mp3';
 
 // Phase 9.2 — soft-saturator WaveShaper curve. Replaces the Phase 7.1
@@ -192,25 +195,44 @@ function buildStereoIRPair(histogram, shape, bucketDtMs, receiverIdx, sampleRate
   const bucketDtSec = bucketDtMs / 1000;
   const samplesPerBucket = Math.max(1, Math.round(bucketDtSec * sampleRate));
 
-  // Energy per bucket + peak (for truncation only).
-  const bucketEnergy = new Float32Array(T);
+  // PER-BAND truncation at -40 dB of EACH band's own peak. Phase 9.7 —
+  // the previous broadband -60 dB cutoff kept LF-only buckets in the
+  // late tail of carpet rooms (where 125 Hz energy lingers but every
+  // other band has decayed to silence). Those late-LF buckets fed the
+  // velvet-noise → biquad bandpass → 1+ s of 125 Hz tonal ringing →
+  // audible "low-frequency crack" on speech transients. -40 dB per
+  // band is the perceptual masking threshold (real reverb below this
+  // level is masked by foreground speech). Each band gets its own
+  // last-useful index; the IR length = max across bands.
   const recOff = receiverIdx * B * T;
-  let peakEnergy = 0;
-  for (let b = 0; b < T; b++) {
-    let energy = 0;
-    for (let band = 0; band < B; band++) {
-      energy += histogram[recOff + band * T + b];
+  const bandEnergyArrays = new Array(B);
+  const bandLastUseful = new Array(B).fill(-1);
+  let anyEnergy = false;
+  for (let band = 0; band < B; band++) {
+    const arr = new Float32Array(T);
+    let peak = 0;
+    for (let b = 0; b < T; b++) {
+      const e = histogram[recOff + band * T + b];
+      arr[b] = e;
+      if (e > peak) peak = e;
     }
-    bucketEnergy[b] = energy;
-    if (energy > peakEnergy) peakEnergy = energy;
+    bandEnergyArrays[band] = arr;
+    if (peak <= 0) continue;
+    anyEnergy = true;
+    const cutoff = peak * 1e-4;     // -40 dB per band
+    let lu = T - 1;
+    while (lu > 0 && arr[lu] < cutoff) lu--;
+    bandLastUseful[band] = lu;
   }
-  if (peakEnergy <= 0) {
+  if (!anyEnergy) {
     const empty = new Float32Array(samplesPerBucket);
     return { earlyL: empty, earlyR: empty, lateL: empty, lateR: empty };
   }
-  const cutoff = peakEnergy * 1e-6;
-  let lastUseful = T - 1;
-  while (lastUseful > 0 && bucketEnergy[lastUseful] < cutoff) lastUseful--;
+  // Keep up to the longest band's tail.
+  let lastUseful = 0;
+  for (let band = 0; band < B; band++) {
+    if (bandLastUseful[band] > lastUseful) lastUseful = bandLastUseful[band];
+  }
   const usefulBuckets = lastUseful + 1;
   const mixingBucket = Math.min(usefulBuckets, Math.ceil(MIXING_TIME_MS / bucketDtMs));
   const totalSamples = usefulBuckets * samplesPerBucket;
@@ -227,15 +249,22 @@ function buildStereoIRPair(histogram, shape, bucketDtMs, receiverIdx, sampleRate
   for (let bandIdx = 0; bandIdx < nBands; bandIdx++) {
     const cf = BAND_CENTERS_HZ[bandIdx];
     const Nv = bandIdx <= VELVET_LF_BAND_INDEX ? NvLF : NvBroadband;
+    const bandLastUsefulIdx = bandLastUseful[bandIdx];
+    if (bandLastUsefulIdx < 0) continue;     // band has no energy at all
     const bandEarlyL = new Float32Array(totalSamples);
     const bandEarlyR = new Float32Array(totalSamples);
     const bandLateL = new Float32Array(totalSamples);
     const bandLateR = new Float32Array(totalSamples);
-    const bandOff = recOff + bandIdx * T;
+    const bandArr = bandEnergyArrays[bandIdx];
     let bandHasEnergy = false;
 
-    for (let b = 0; b < usefulBuckets; b++) {
-      const E = histogram[bandOff + b];
+    // Iterate only up to THIS band's truncation point — beyond it the
+    // band's energy is below -40 dB and its tail wouldn't be audible
+    // anyway, but velvet-noise + biquad would synthesise a 1+ s tonal
+    // ring that IS audible because of phase-coherent accumulation.
+    const bandLastBucket = Math.min(usefulBuckets, bandLastUsefulIdx + 1);
+    for (let b = 0; b < bandLastBucket; b++) {
+      const E = bandArr[b];
       if (E <= 0) continue;
       bandHasEnergy = true;
       const amp = Math.sqrt(E / Nv);
@@ -381,6 +410,18 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   source.buffer = sample;
   source.loop = true;
 
+  // Phase 9.7 — subsonic high-pass on the source. The MP3 sample carries
+  // 30–60 Hz residual content (TTS / phone-recording rumble + MP3 codec
+  // pre-echo) that no real speaker would reproduce but a Web Audio
+  // convolver dutifully convolves with the LF-heavy IR of a carpeted
+  // room — producing audible sub-bass artefacts on transients. 60 Hz
+  // 2nd-order Butterworth HPF kills it without touching speech
+  // fundamentals (male voice ~80 Hz minimum). Q = 0.707 = no resonance.
+  const hpf = ctx.createBiquadFilter();
+  hpf.type = 'highpass';
+  hpf.frequency.value = 60;
+  hpf.Q.value = 0.707;
+
   // HRTF panner positioned at the L_w-weighted source centroid relative
   // to the listener. Only feeds the EARLY convolver — late reverb stays
   // direction-neutral because real diffuse fields arrive from all
@@ -431,12 +472,13 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const gain = ctx.createGain();
   gain.gain.value = DEFAULT_GAIN;
 
-  // Path A: source → HRTF → early IR convolver → mixer
-  source.connect(panner);
+  // Path A: source → HPF → HRTF → early IR convolver → mixer
+  source.connect(hpf);
+  hpf.connect(panner);
   panner.connect(earlyConv);
   earlyConv.connect(mixer);
-  // Path B: source → late IR convolver → mixer (no HRTF, no panner)
-  source.connect(lateConv);
+  // Path B: source → HPF → late IR convolver → mixer (no HRTF, no panner)
+  hpf.connect(lateConv);
   lateConv.connect(mixer);
   // Common downstream: slow compressor → soft-saturator → gain → out
   mixer.connect(compressor);
@@ -446,7 +488,7 @@ export async function startAudition({ precisionResult, receiverIdx }) {
 
   source.start();
 
-  _activeChain = { source, panner, earlyConv, lateConv, mixer, compressor, limiter, gain, mode: 'convolved' };
+  _activeChain = { source, hpf, panner, earlyConv, lateConv, mixer, compressor, limiter, gain, mode: 'convolved' };
 }
 
 // Compute the dominant source's position relative to the given listener,
@@ -483,10 +525,11 @@ function sourceCentroidRelative(precisionResult, receiverIdx) {
 // mutually exclusive; only one is ever live.
 export function stopAudition() {
   if (!_activeChain) return;
-  const { source, panner, convolver, earlyConv, lateConv, mixer, compressor, limiter, gain } = _activeChain;
+  const { source, hpf, panner, convolver, earlyConv, lateConv, mixer, compressor, limiter, gain } = _activeChain;
   try { source.stop(); } catch (_) { /* already stopped */ }
   try {
     source.disconnect();
+    if (hpf) hpf.disconnect();
     if (panner) panner.disconnect();
     if (convolver) convolver.disconnect();
     if (earlyConv) earlyConv.disconnect();
