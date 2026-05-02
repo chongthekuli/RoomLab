@@ -44,22 +44,32 @@ let _saturatorCurve = null;
 const DEFAULT_GAIN = 0.5;
 const SAMPLE_URL = 'assets/audio/testing-1-2-3.mp3';
 
-// Phase 9.2 — soft-saturator WaveShaper curve. Replaces the Phase 7.1
-// DynamicsCompressorNode which pumped audibly on LF-heavy IRs (Web
-// Audio's compressor at 50 ms release breathes within the bass-cycle
-// accumulation period of any room with significant 125 Hz tail, audible
-// as "low-frequency distortion"). WaveShaper is sample-by-sample
-// instantaneous → zero pumping. Curve is tanh(drive·x)/drive — soft
-// knee, monotonic, ~1 % THD at -3 dBFS (below the audibility threshold
-// for speech per Toole §4.3). Per Reiss & McPherson, *Audio Effects*,
-// §6.2.4. The proper fix is a multiband AudioWorklet limiter (Phase 10);
-// this is the same-day replacement that already eliminates the dominant
-// pumping artefact.
-function buildSoftSaturatorCurve(drive = 1.5, samples = 8192) {
+// Phase 9.8 — hard-knee soft-clip curve, linear below -3 dBFS. Previous
+// tanh-everywhere curve compressed at all amplitudes, colouring even
+// normal-level speech. Now linear identity for |x| < 0.7 (no THD on
+// material that doesn't need limiting) with a tanh transition to the
+// ±1.0 boundary above. Combined with the new RMS target of 0.12 (which
+// keeps peaks at typical speech crest factor below the threshold) the
+// saturator is effectively transparent on normal content and only
+// engages on rare transient excursions.
+function buildSoftSaturatorCurve(threshold = 0.7, samples = 8192) {
   const curve = new Float32Array(samples);
+  // Pick `k` so the slope at the threshold matches identity (no kink):
+  // d/dx(threshold + (1-threshold)·tanh(k·(x-threshold))) at x=threshold
+  // = (1-threshold)·k. Identity slope is 1, so k = 1/(1-threshold).
+  const k = 1 / (1 - threshold);
   for (let i = 0; i < samples; i++) {
     const x = (i / (samples - 1)) * 2 - 1;     // [-1, 1]
-    curve[i] = Math.tanh(drive * x) / Math.tanh(drive);
+    const ax = Math.abs(x);
+    let y;
+    if (ax < threshold) {
+      y = x;     // linear identity below threshold
+    } else {
+      const sign = x < 0 ? -1 : 1;
+      // Smooth soft-clip from threshold to ±1 via tanh.
+      y = sign * (threshold + (1 - threshold) * Math.tanh(k * (ax - threshold)));
+    }
+    curve[i] = y;
   }
   return curve;
 }
@@ -339,7 +349,12 @@ function buildStereoIRPair(histogram, shape, bucketDtMs, receiverIdx, sampleRate
 // level across rooms. The user can always crank the master gain if they
 // want a long-tail room to feel proportionally louder.
 const TYPICAL_INPUT_RMS = 0.25;
-const OUTPUT_RMS_TARGET = 0.18;
+// Phase 9.8 — lowered 0.18 → 0.12. Without the compressor in the chain,
+// peaks rely entirely on the WaveShaper for boundary safety. Speech has
+// a 4–6× crest factor; targeting RMS 0.12 keeps typical peaks at 0.7
+// (right at the saturator threshold, no THD added) and worst-case 0.85
+// (still safely in the soft-clip region, not the hard boundary).
+const OUTPUT_RMS_TARGET = 0.12;
 
 function normaliseIR(ir) {
   if (ir.length === 0) return ir;
@@ -451,20 +466,16 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const mixer = ctx.createGain();
   mixer.gain.value = 1.0;
 
-  // Two-stage safety. Now that normaliseIR targets a consistent
-  // output_RMS ≈ 0.18, the compressor only needs to catch occasional
-  // peaks (transient + late-tail buildup) — not actively reduce signal
-  // level. Threshold -3 dB + 2:1 ratio + 200 ms release = transparent
-  // for typical content, gently bends down the rare > -3 dB spike. The
-  // WaveShaper soft-saturator catches anything that slips past for the
-  // final ±1 boundary safety. No pumping at LF because the compressor
-  // sees signal at its threshold only on transients now, not sustained.
-  const compressor = ctx.createDynamicsCompressor();
-  compressor.threshold.value = -3;
-  compressor.knee.value = 6;
-  compressor.ratio.value = 2;
-  compressor.attack.value = 0.005;
-  compressor.release.value = 0.200;
+  // Phase 9.8 — DynamicsCompressor REMOVED from the chain. Even at
+  // 200 ms release / 2:1 ratio it pumped audibly on LF-heavy content
+  // (release window > 25 cycles of 125 Hz means each speech transient
+  // triggered gain reduction that breathed for 200 ms before recovery,
+  // perceived as LF distortion). The proper fix is a multiband
+  // AudioWorklet limiter (Phase 10 backlog). Until then we rely on:
+  //   1. Dynamic IR-length-aware RMS normalisation (target 0.12 RMS)
+  //      to keep typical peaks at 0.7 = right at saturator threshold
+  //   2. WaveShaper hard-knee soft-clip for the rare 0.7–1.0 transient
+  // No envelope follower in the chain → no pumping, period.
   const limiter = ctx.createWaveShaper();
   limiter.curve = _saturatorCurve;
   limiter.oversample = '4x';
@@ -480,15 +491,14 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   // Path B: source → HPF → late IR convolver → mixer (no HRTF, no panner)
   hpf.connect(lateConv);
   lateConv.connect(mixer);
-  // Common downstream: slow compressor → soft-saturator → gain → out
-  mixer.connect(compressor);
-  compressor.connect(limiter);
+  // Common downstream: soft-clip saturator → gain → out (NO compressor).
+  mixer.connect(limiter);
   limiter.connect(gain);
   gain.connect(ctx.destination);
 
   source.start();
 
-  _activeChain = { source, hpf, panner, earlyConv, lateConv, mixer, compressor, limiter, gain, mode: 'convolved' };
+  _activeChain = { source, hpf, panner, earlyConv, lateConv, mixer, limiter, gain, mode: 'convolved' };
 }
 
 // Compute the dominant source's position relative to the given listener,
@@ -525,7 +535,7 @@ function sourceCentroidRelative(precisionResult, receiverIdx) {
 // mutually exclusive; only one is ever live.
 export function stopAudition() {
   if (!_activeChain) return;
-  const { source, hpf, panner, convolver, earlyConv, lateConv, mixer, compressor, limiter, gain } = _activeChain;
+  const { source, hpf, panner, convolver, earlyConv, lateConv, mixer, limiter, gain } = _activeChain;
   try { source.stop(); } catch (_) { /* already stopped */ }
   try {
     source.disconnect();
@@ -535,7 +545,6 @@ export function stopAudition() {
     if (earlyConv) earlyConv.disconnect();
     if (lateConv) lateConv.disconnect();
     if (mixer) mixer.disconnect();
-    if (compressor) compressor.disconnect();
     if (limiter) limiter.disconnect();
     gain.disconnect();
   } catch (_) { /* ignore */ }
