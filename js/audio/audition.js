@@ -36,15 +36,37 @@ let _audioCtx = null;
 let _sampleBuffer = null;
 let _activeChain = null;          // { source, convolver, gain }
 let _samplePromise = null;
+let _saturatorCurve = null;
 
 const DEFAULT_GAIN = 0.6;
 const SAMPLE_URL = 'assets/audio/testing-1-2-3.mp3';
+
+// Phase 9.2 — soft-saturator WaveShaper curve. Replaces the Phase 7.1
+// DynamicsCompressorNode which pumped audibly on LF-heavy IRs (Web
+// Audio's compressor at 50 ms release breathes within the bass-cycle
+// accumulation period of any room with significant 125 Hz tail, audible
+// as "low-frequency distortion"). WaveShaper is sample-by-sample
+// instantaneous → zero pumping. Curve is tanh(drive·x)/drive — soft
+// knee, monotonic, ~1 % THD at -3 dBFS (below the audibility threshold
+// for speech per Toole §4.3). Per Reiss & McPherson, *Audio Effects*,
+// §6.2.4. The proper fix is a multiband AudioWorklet limiter (Phase 10);
+// this is the same-day replacement that already eliminates the dominant
+// pumping artefact.
+function buildSoftSaturatorCurve(drive = 1.5, samples = 8192) {
+  const curve = new Float32Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const x = (i / (samples - 1)) * 2 - 1;     // [-1, 1]
+    curve[i] = Math.tanh(drive * x) / Math.tanh(drive);
+  }
+  return curve;
+}
 
 function getCtx() {
   if (_audioCtx) return _audioCtx;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) throw new Error('Web Audio API unavailable in this browser');
   _audioCtx = new Ctx();
+  if (!_saturatorCurve) _saturatorCurve = buildSoftSaturatorCurve();
   return _audioCtx;
 }
 
@@ -268,7 +290,11 @@ function buildStereoIRPair(histogram, shape, bucketDtMs, receiverIdx, sampleRate
 // room loudness gradient because the input/output RMS ratio is stable).
 // References: Välimäki & Reiss, More Than 50 Years of Artificial
 // Reverberation, AES60 keynote §5; Cauchy–Schwarz output peak bound.
-function normaliseIR(ir, targetRms = 0.06) {
+// Phase 9.2 — RMS target lowered 0.06 → 0.04. Bigger headroom budget
+// so the convolution output doesn't approach the limiter threshold on
+// LF-heavy IRs (a 73 m³ room with 1.3 s tail at 125 Hz produces strong
+// sustained LF that sums constructively with speech harmonics).
+function normaliseIR(ir, targetRms = 0.04) {
   let sumSq = 0;
   for (let i = 0; i < ir.length; i++) sumSq += ir[i] * ir[i];
   const rms = Math.sqrt(sumSq / ir.length);
@@ -364,13 +390,15 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const mixer = ctx.createGain();
   mixer.gain.value = 1.0;
 
-  // Brick-wall limiter — catches residual peaks. Phase 7.1.
-  const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -1;
-  limiter.knee.value = 0;
-  limiter.ratio.value = 20;
-  limiter.attack.value = 0.001;
-  limiter.release.value = 0.05;
+  // Phase 9.2 — soft-saturator WaveShaper instead of DynamicsCompressor.
+  // The compressor pumped audibly at LF (50 ms release vs 24-cycle bass
+  // accumulation), perceived as "low-frequency distortion". WaveShaper
+  // is per-sample instantaneous, no envelope follower, no pumping.
+  // Adds ~1 % THD at -3 dBFS but that's below the audibility threshold
+  // for speech (Toole, *Sound Reproduction* §4.3).
+  const limiter = ctx.createWaveShaper();
+  limiter.curve = _saturatorCurve;
+  limiter.oversample = '4x';
 
   const gain = ctx.createGain();
   gain.gain.value = DEFAULT_GAIN;

@@ -3037,6 +3037,31 @@ section h3 {
   border-radius: 3px;
   line-height: 1.4;
 }
+
+.treatment-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px 0;
+  padding: 6px 8px;
+  background: rgba(74, 163, 255, 0.04);
+  border-radius: 4px;
+}
+.treatment-preset-label {
+  font-size: 11px;
+  color: var(--muted-dim, #8a93a3);
+  white-space: nowrap;
+}
+.treatment-preset-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  padding: 3px 6px;
+  background: var(--bg-elev, #1c2028);
+  border: 1px solid var(--border, #2a2f38);
+  border-radius: 3px;
+  color: #cdd2db;
+}
 .audition-controls {
   display: flex;
   align-items: center;

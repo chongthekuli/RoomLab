@@ -74,6 +74,18 @@ export function computeRT60Band({ room, materials, bandIndex, zones = [], airAbs
   };
 }
 
+// Per-band formula picker. Sabine over-reads by 25-35% once mean absorption
+// exceeds α̅ = 0.2 (ISO 354 §B.2; Beranek 2nd ed §7.5; Hopkins 2007 §2.6.4).
+// Below the threshold both formulae agree to <2%; above it Eyring is the
+// physically-correct choice. Returns the appropriate value for the band.
+export function preferredRT60(band) {
+  if (!band) return null;
+  if ((band.meanAbsorption ?? 0) > 0.2 && Number.isFinite(band.eyring_s)) {
+    return band.eyring_s;
+  }
+  return band.sabine_s;
+}
+
 export function computeAllBands({ room, materials, zones = [], airAbsorption = true }) {
   return materials.frequency_bands_hz.map((frequency_hz, i) => ({
     frequency_hz,

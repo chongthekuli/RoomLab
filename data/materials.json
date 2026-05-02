@@ -24,6 +24,41 @@
       "_source": "Cox & D'Antonio, Acoustic Absorbers and Diffusers 2nd ed. table A.1 (thick pile carpet on foam underlay) — typical residential carpet, much higher absorption above 250 Hz than the bare-glue case"
     },
     {
+      "id": "bass-trap-broadband-corner",
+      "name": "Broadband corner bass trap (200mm rockwool)",
+      "absorption": [0.85, 0.95, 0.95, 0.85, 0.75, 0.70, 0.65],
+      "scattering": [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.35],
+      "_source": "Cox & D'Antonio 2nd ed. table A.4 (corner-mounted 200mm porous, 50mm gap to wall) + Everest & Pohlmann Master Handbook 5th ed. fig 18.7 — broadband, doesn't need tuning"
+    },
+    {
+      "id": "bass-trap-membrane-80hz",
+      "name": "Membrane absorber tuned 80 Hz",
+      "absorption": [0.55, 0.70, 0.30, 0.15, 0.12, 0.10, 0.08],
+      "scattering": [0.05, 0.05, 0.10, 0.15, 0.15, 0.20, 0.20],
+      "_source": "Cox & D'Antonio 2nd ed. §8.4.2 + table 8.3 — narrow-band 5kg/m² panel + 100mm damped cavity, peak 80–100 Hz, secondary peak 250 Hz typical"
+    },
+    {
+      "id": "bass-trap-helmholtz-125hz",
+      "name": "Perforated panel Helmholtz 125 Hz",
+      "absorption": [0.80, 0.45, 0.20, 0.12, 0.08, 0.06, 0.05],
+      "scattering": [0.10, 0.10, 0.15, 0.20, 0.20, 0.25, 0.25],
+      "_source": "Cox & D'Antonio 2nd ed. §7.3 + ISO 354 archives — 12mm perforated panel 8% open area, 100mm damped cavity, narrow-band 80–160 Hz peak"
+    },
+    {
+      "id": "ceiling-cloud-200mm",
+      "name": "Ceiling cloud 200mm rockwool, 100mm gap",
+      "absorption": [0.65, 0.95, 1.00, 1.00, 1.00, 0.95, 0.90],
+      "scattering": [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.35],
+      "_source": "Beranek 2nd ed. table 7-3 (200mm porous absorber suspended) — broadband, near-perfect above 250 Hz, useful in bands carpet covers poorly"
+    },
+    {
+      "id": "diffuser-qrd",
+      "name": "QRD quadratic-residue diffuser (200mm wells)",
+      "absorption": [0.10, 0.15, 0.20, 0.20, 0.18, 0.15, 0.12],
+      "scattering": [0.30, 0.50, 0.85, 0.95, 0.90, 0.80, 0.70],
+      "_source": "Cox & D'Antonio 2nd ed. §9.3 + ISO 17497-1 — Schroeder QRD, prime 13, well depth 200mm, Lambertian above f0 = c/(2N·d_max). Low absorption, high scattering — preserves energy but redirects it diffusely"
+    },
+    {
       "id": "acoustic-tile",
       "name": "Acoustic ceiling tile 20mm",
       "absorption": [0.20, 0.40, 0.55, 0.65, 0.70, 0.70, 0.70],

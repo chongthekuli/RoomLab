@@ -1,6 +1,6 @@
 import { state, earHeightFor, getSelectedListener, POSTURE_LABELS, groupById, SPEAKER_GROUPS, expandSources } from '../app-state.js';
 import { on } from './events.js';
-import { computeAllBands } from '../physics/rt60.js';
+import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
 import { computeListenerBreakdown, computeRoomConstant } from '../physics/spl-calculator.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
@@ -164,7 +164,11 @@ function renderRT60() {
   const bands = computeAllBands({ room: state.room, materials: materialsRef, zones: state.zones });
   const f500 = bands.find(b => b.frequency_hz === 500);
   const f1k  = bands.find(b => b.frequency_hz === 1000);
-  const mid = ((f500?.sabine_s ?? 0) + (f1k?.sabine_s ?? 0)) / 2;
+  // Headline mid-band RT60 — prefer Eyring when α̅ > 0.2 (ISO 354 §B.2,
+  // Beranek 2nd ed §7.5). Sabine over-reads by 25-35% in absorbed rooms;
+  // a carpeted listening room at α̅(500)≈0.5 gets Sabine 0.19 s vs
+  // Eyring 0.14 s. The headline reads honestly now.
+  const mid = ((preferredRT60(f500) ?? 0) + (preferredRT60(f1k) ?? 0)) / 2;
   const rating = ratingFor(mid);
   // α̅ varies per band (gypsum α=0.29 at 125 Hz vs 0.04 at 1k), so the meta
   // line must use the same mid-band average the headline RT60 is built from —

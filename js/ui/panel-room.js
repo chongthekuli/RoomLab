@@ -92,6 +92,7 @@ export function mountRoomPanel({ materials }) {
     </div>
     <div id="ceiling-params"></div>
     <h3>Surface materials</h3>
+    <div id="treatment-preset-row" class="treatment-preset-row"></div>
     <div id="surface-materials"></div>
   `;
 
@@ -1180,7 +1181,94 @@ const DEFAULT_WINDOW  = { kind: 'window', width_m: 1.5, height_m: 1.2, x_m: 0.5,
 let _opIdCounter = 1;
 function newOpeningId() { return 'op-' + (_opIdCounter++).toString(36) + Math.random().toString(36).slice(2, 5); }
 
+// Room Treatment preset — sets all surfaces (floor, ceiling, walls/edges)
+// to a sensible material combination representing common acoustic
+// realities. Per Dr. Chen's audit, the user expectation that "carpet =
+// quiet room" is wrong; bass treatment is needed too. Five presets span
+// untreated → studio → anechoic so users can hit physically-correct
+// references and learn the relationship between treatment and decay
+// without picking individual materials.
+const TREATMENT_PRESETS = {
+  untreated: {
+    label: 'Untreated (bare)',
+    desc: 'Painted concrete walls + ceiling, wood floor — typical empty domestic space. T60(125) ≈ 1–2 s.',
+    floor: 'wood-floor', ceiling: 'concrete-painted', walls: 'concrete-painted',
+  },
+  'soft-furnished': {
+    label: 'Soft-furnished domestic',
+    desc: 'Plasterboard walls + ceiling, carpet on underlay — typical lived-in lounge. T60(125) ≈ 0.6–1.0 s.',
+    floor: 'carpet-heavy-underlay', ceiling: 'gypsum-board', walls: 'gypsum-board',
+  },
+  'hifi-treated': {
+    label: 'HiFi listening room (carpet + corner traps)',
+    desc: 'Plasterboard walls with broadband corner bass traps, acoustic-tile ceiling, carpet floor. T60(125) ≈ 0.4–0.6 s.',
+    floor: 'carpet-heavy-underlay', ceiling: 'acoustic-tile', walls: 'bass-trap-broadband-corner',
+  },
+  'studio-control-room': {
+    label: 'Studio control room',
+    desc: 'Broadband bass traps on walls, 200 mm ceiling cloud, carpet floor. T60(125) ≈ 0.2–0.3 s — canonical pro mixing room.',
+    floor: 'carpet-heavy-underlay', ceiling: 'ceiling-cloud-200mm', walls: 'bass-trap-broadband-corner',
+  },
+  'anechoic-approximation': {
+    label: 'Anechoic approximation',
+    desc: 'Open-air on five surfaces, carpet floor. T60 → 0 — for reference only; not physically achievable in a real room.',
+    floor: 'carpet-heavy-underlay', ceiling: 'open-air', walls: 'open-air',
+  },
+};
+
+function applyTreatmentPreset(presetKey) {
+  const p = TREATMENT_PRESETS[presetKey];
+  if (!p) return;
+  state.room.surfaces.floor = p.floor;
+  state.room.surfaces.ceiling = p.ceiling;
+  // Walls — handle every shape variant.
+  if (state.room.shape === 'rectangular') {
+    state.room.surfaces.wall_north = p.walls;
+    state.room.surfaces.wall_south = p.walls;
+    state.room.surfaces.wall_east = p.walls;
+    state.room.surfaces.wall_west = p.walls;
+  } else if (state.room.shape === 'custom') {
+    const n = (state.room.custom_vertices || []).length;
+    state.room.surfaces.edges = Array.from({ length: n }, () => p.walls);
+  } else {
+    state.room.surfaces.walls = p.walls;
+  }
+  emit('room:changed');
+  renderSurfaceMaterials();
+}
+
+function renderTreatmentPresetRow() {
+  const root = document.getElementById('treatment-preset-row');
+  if (!root) return;
+  root.innerHTML = '';
+  const label = document.createElement('span');
+  label.className = 'treatment-preset-label';
+  label.textContent = 'Treatment preset:';
+  const sel = document.createElement('select');
+  sel.className = 'treatment-preset-select';
+  // Custom = no preset matches the current state, just placeholder.
+  const opt0 = document.createElement('option');
+  opt0.value = '';
+  opt0.textContent = '— pick one (overrides every surface) —';
+  sel.appendChild(opt0);
+  for (const [k, p] of Object.entries(TREATMENT_PRESETS)) {
+    const o = document.createElement('option');
+    o.value = k;
+    o.textContent = p.label;
+    o.title = p.desc;
+    sel.appendChild(o);
+  }
+  sel.addEventListener('change', e => {
+    if (e.target.value) {
+      applyTreatmentPreset(e.target.value);
+      sel.value = '';
+    }
+  });
+  root.append(label, sel);
+}
+
 function renderSurfaceMaterials() {
+  renderTreatmentPresetRow();
   const root = document.getElementById('surface-materials');
   root.innerHTML = '';
 
