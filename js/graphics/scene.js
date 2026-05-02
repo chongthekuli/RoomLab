@@ -1784,8 +1784,14 @@ function applyAvatarAnimation(ctx) {
       sitting:   !!animState.sitting,
     });
     riggedAvatar.update(dt);
-    // Still update the SPL readout overlay at the avatar's ear height.
-    if (walkSplOverlay) updateWalkSplReadout(ctx, AVATAR_EYE_HEIGHT);
+    // Ear height tracks pose so SPL / STI probed in walk mode reflect
+    // the actual listening height. Standing 1.68 m → full crouch ≈ 1.0 m
+    // (drop 0.68 m) → sitting on a chair ≈ 1.18 m (drop 0.50 m).
+    // crouchF + sitF are 0..1 smoothed factors from updateAnimStateMachine.
+    const dynamicEarHeight = AVATAR_EYE_HEIGHT
+      - animState.crouchF * 0.68
+      - animState.sitF * 0.50;
+    if (walkSplOverlay) updateWalkSplReadout(ctx, dynamicEarHeight);
     return;
   }
 

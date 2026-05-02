@@ -158,7 +158,7 @@ function setupTabs() {
       case 'i': case 'I': click('toggle-isobars'); e.preventDefault(); break;
       case 'm': case 'M': click('toggle-stipa-mode'); e.preventDefault(); break;
       case 'r': case 'R': click('toggle-reverb'); e.preventDefault(); break;
-      case 'a': case 'A': click('toggle-aim-lines'); e.preventDefault(); break;
+      case 'l': case 'L': click('toggle-aim-lines'); e.preventDefault(); break;
       case 'y': case 'Y': click('toggle-rays'); e.preventDefault(); break;
       case 'p': case 'P': click('toggle-probe'); e.preventDefault(); break;
       case 'f': case 'F': frameCameraToRoom(); e.preventDefault(); break;
