@@ -47,17 +47,24 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
     }
   });
 
-  // --- Strip root motion from every clip ---
-  // Mixamo (and most DCC) bake forward translation into the Hips bone's
-  // position track. With the controller ALSO driving the character forward,
-  // the two pushes stack until the clip loops back to frame 0 — visible
-  // as the "walk forward, snap back, walk forward, snap back" stutter.
-  // Removing every Hips.position track makes the clip play in place; the
-  // controller alone owns world-space translation. Rotation tracks on
-  // Hips and every other bone are left intact so the gait still cycles.
+  // --- Strip lateral root motion from every clip ---
+  // Mixamo bakes forward + lateral translation into the Hips position
+  // track. With the controller already driving the character through
+  // world space, the X/Z components produce a "walk-forward then snap"
+  // stutter. We zero ONLY X and Z per keyframe so the clip plays in
+  // place horizontally — Y (vertical) stays so Jump still has its arc
+  // and Crouch / Sit still drop the hips into the right pose.
   const clips = gltf.animations || [];
   for (const clip of clips) {
-    clip.tracks = clip.tracks.filter(t => !/Hips\.position$/i.test(t.name));
+    for (const track of clip.tracks) {
+      if (!/Hips\.position$/i.test(track.name)) continue;
+      const v = track.values;
+      for (let i = 0; i < v.length; i += 3) {
+        v[i] = 0;       // X
+        v[i + 2] = 0;   // Z
+        // v[i + 1] (Y) preserved — needed for jump arc + crouch / sit pose
+      }
+    }
   }
 
   // --- Animation mixer + clip lookup ---
@@ -110,14 +117,28 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
     clipNames: Object.keys(actions),
     isRigged: true,
     _current: idleAction,
-    setState({ moving, running }) {
-      const wantRun = running && pickAction(actions, ['run', 'jog']);
-      const wantWalk = moving && !wantRun;
-      const target = wantRun
-        ? pickAction(actions, ['run', 'jog'])
-        : wantWalk
-          ? pickAction(actions, ['walk'])
-          : pickAction(actions, ['idle', 'rest', 'stand']);
+    setState({ moving, running, crouching, jumping, sitting }) {
+      // Priority order — most "specific" state wins. Sit beats jump beats
+      // crouch beats run beats walk beats idle. Falls back to idle when a
+      // requested clip isn't in the GLB.
+      let target = null;
+      if (sitting) {
+        target = pickAction(actions, ['sit']);
+      } else if (jumping) {
+        target = pickAction(actions, ['jump', 'leap']);
+      } else if (crouching) {
+        // Single 'Crouch' clip covers both crouch-idle and crouch-walk.
+        // If the GLB carries separate CrouchWalk + CrouchIdle, prefer walk
+        // when moving.
+        target = moving
+          ? pickAction(actions, ['crouchwalk', 'crouch_walk', 'sneakwalk', 'crouch'])
+          : pickAction(actions, ['crouchidle', 'crouch_idle', 'crouch']);
+      } else if (running && moving) {
+        target = pickAction(actions, ['run', 'jog']);
+      } else if (moving) {
+        target = pickAction(actions, ['walk']);
+      }
+      if (!target) target = pickAction(actions, ['idle', 'rest', 'stand']);
       if (!target || this._current === target) return;
       target.reset();
       target.setEffectiveTimeScale(1);

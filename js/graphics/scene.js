@@ -1724,7 +1724,13 @@ function applyAvatarAnimation(ctx) {
   // bypass the procedural joint-group pose code (which wouldn't find
   // avatarParts on a SkinnedMesh anyway).
   if (riggedAvatar) {
-    riggedAvatar.setState({ moving: ctx.moving, running: ctx.running });
+    riggedAvatar.setState({
+      moving:    ctx.moving,
+      running:   ctx.running,
+      crouching: animState.crouchF > 0.3,
+      jumping:   animState.jumpPhase !== 'grounded',
+      sitting:   !!animState.sitting,
+    });
     riggedAvatar.update(dt);
     // Still update the SPL readout overlay at the avatar's ear height.
     if (walkSplOverlay) updateWalkSplReadout(ctx, AVATAR_EYE_HEIGHT);
