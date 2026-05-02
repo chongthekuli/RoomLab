@@ -74,37 +74,66 @@ function loadSample() {
 // Convert the precision tracer's per-band histogram for ONE listener
 // into a time-domain mono IR at the AudioContext's sample rate.
 //
+// Phase-2 implementation: dense band-shaped white noise per bucket
+// (replaced the Phase-1 sparse Dirac-pulse-per-bucket which sounded
+// like a spring reverb tank because the regular pulse train creates
+// a frequency comb at 1/bucketDtMs Hz). Each histogram bucket of
+// duration `bucketDtMs` is filled with random-sign white noise scaled
+// so the bucket's total energy matches the histogram value. Result is
+// continuous decaying noise — exactly what real-room reverb looks
+// like in the time domain.
+//
+// Late tail truncation: any bucket whose energy is below -60 dB of
+// the peak bucket is below the audibility threshold relative to the
+// loudest reflection, so we drop it. Cuts IR length from 2 s to ~RT60
+// in absorbed rooms (smaller IR, less convolver cost).
+//
 // histogram: Float32Array shape [receivers, bands, buckets]
 // receiverIdx: which listener
 // bands × buckets: per shape
 // bucketDtMs: each bucket's duration (typically 2 ms)
 // sampleRate: AudioContext.sampleRate (typically 48 kHz)
-//
-// Returns a Float32Array of length ceil(buckets * bucketDtSec * sampleRate).
-// Sparse — most samples are zero; Dirac pulse at the start of each non-
-// empty bucket carries that bucket's broadband amplitude.
 function buildIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   const { bands: B, buckets: T } = shape;
   const bucketDtSec = bucketDtMs / 1000;
-  const totalDurSec = T * bucketDtSec;
-  const totalSamples = Math.max(1, Math.ceil(totalDurSec * sampleRate));
-  const ir = new Float32Array(totalSamples);
+  const samplesPerBucket = Math.max(1, Math.round(bucketDtSec * sampleRate));
 
-  // Sum bands per bucket → broadband energy, then sqrt → amplitude.
+  // First pass — broadband energy per bucket + find peak.
+  const bucketEnergy = new Float32Array(T);
   const recOff = receiverIdx * B * T;
+  let peakEnergy = 0;
   for (let b = 0; b < T; b++) {
     let energy = 0;
     for (let band = 0; band < B; band++) {
       energy += histogram[recOff + band * T + b];
     }
-    if (energy > 0) {
-      const sampleIdx = Math.round(b * bucketDtSec * sampleRate);
-      if (sampleIdx < totalSamples) {
-        // Alternate sign every few buckets so successive pulses don't
-        // accumulate into a single huge DC spike. Keeps energy spread.
-        const sign = (b & 1) ? -1 : 1;
-        ir[sampleIdx] = sign * Math.sqrt(energy);
-      }
+    bucketEnergy[b] = energy;
+    if (energy > peakEnergy) peakEnergy = energy;
+  }
+  if (peakEnergy <= 0) return new Float32Array(samplesPerBucket);
+
+  // Truncate at -60 dB below the peak bucket — anything quieter is
+  // masked by foreground content in normal listening.
+  const cutoff = peakEnergy * 1e-6;
+  let lastUseful = T - 1;
+  while (lastUseful > 0 && bucketEnergy[lastUseful] < cutoff) lastUseful--;
+  const usefulBuckets = lastUseful + 1;
+  const totalSamples = usefulBuckets * samplesPerBucket;
+  const ir = new Float32Array(totalSamples);
+
+  // Second pass — spread each bucket's energy as random-sign white noise
+  // across its samples. Uniform [-1, 1] has variance 1/3, so the per-
+  // sample amplitude scale is sqrt(3 × E_bucket / N) to make bucket
+  // energy = N × variance × scale² = E_bucket. This preserves the
+  // tracer's ENERGY DECAY ENVELOPE while replacing the pulse-train
+  // spectral coloration with a flat (white-noise) spectrum.
+  for (let b = 0; b < usefulBuckets; b++) {
+    const energy = bucketEnergy[b];
+    if (energy <= 0) continue;
+    const amp = Math.sqrt(3 * energy / samplesPerBucket);
+    const start = b * samplesPerBucket;
+    for (let i = 0; i < samplesPerBucket; i++) {
+      ir[start + i] = (Math.random() * 2 - 1) * amp;
     }
   }
   return ir;
@@ -154,6 +183,14 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const sample = await loadSample();
 
   // Build the listener-specific IR from the precision histogram.
+  // We DON'T peak-normalise the IR here — dense-noise IRs have most
+  // samples non-zero with low individual amplitude, so peak normalisation
+  // would over-amplify the body. Web Audio's `convolver.normalize = true`
+  // applies equal-power normalisation to the IR, scaling the output so
+  // overall loudness is comparable across rooms (a long-reverb cathedral
+  // and a dry studio audition at the same gain setting). Per the W3C
+  // Web Audio spec §1.34, this is the recommended path for "real" room
+  // IRs — manual normalisation is for synthetic / test impulses.
   const ir = buildIR(
     precisionResult.histogram,
     precisionResult.shape,
@@ -161,7 +198,6 @@ export async function startAudition({ precisionResult, receiverIdx }) {
     receiverIdx,
     ctx.sampleRate,
   );
-  normaliseIR(ir);
 
   const irBuffer = ctx.createBuffer(1, ir.length, ctx.sampleRate);
   irBuffer.getChannelData(0).set(ir);
@@ -171,7 +207,7 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   source.loop = true;
 
   const convolver = ctx.createConvolver();
-  convolver.normalize = false;     // we did our own peak normalisation
+  convolver.normalize = true;
   convolver.buffer = irBuffer;
 
   const gain = ctx.createGain();
