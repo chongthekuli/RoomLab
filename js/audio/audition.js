@@ -290,11 +290,17 @@ function buildStereoIRPair(histogram, shape, bucketDtMs, receiverIdx, sampleRate
 // room loudness gradient because the input/output RMS ratio is stable).
 // References: Välimäki & Reiss, More Than 50 Years of Artificial
 // Reverberation, AES60 keynote §5; Cauchy–Schwarz output peak bound.
-// Phase 9.2 — RMS target lowered 0.06 → 0.04. Bigger headroom budget
-// so the convolution output doesn't approach the limiter threshold on
-// LF-heavy IRs (a 73 m³ room with 1.3 s tail at 125 Hz produces strong
-// sustained LF that sums constructively with speech harmonics).
-function normaliseIR(ir, targetRms = 0.04) {
+// RMS-target IR normalisation. Output peak after convolution scales as
+// input_RMS × ||h||₂, where ||h||₂ = √N × RMS_h. For a 0.5 s IR at 48 kHz
+// (N = 24 000) and speech input at RMS 0.25, output_RMS ≈ 0.25 × 154 ×
+// RMS_h. To keep output_RMS below 0.4 (peak ~1.0 with 4× crest factor)
+// we need RMS_h ≤ 0.0104. Phase 9.2 shipped 0.04 which is far too loud
+// → output_RMS ≈ 1.5 → severe clipping at the WaveShaper boundary.
+// 0.012 keeps a typical room's output peak below the saturator's curve
+// boundary; loud-room IRs may still produce occasional peaks but those
+// land in the saturator's soft region (tanh roll-off) rather than the
+// hard-clip boundary. Phase 9.5 fix.
+function normaliseIR(ir, targetRms = 0.012) {
   let sumSq = 0;
   for (let i = 0; i < ir.length; i++) sumSq += ir[i] * ir[i];
   const rms = Math.sqrt(sumSq / ir.length);
@@ -390,12 +396,29 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const mixer = ctx.createGain();
   mixer.gain.value = 1.0;
 
-  // Phase 9.2 — soft-saturator WaveShaper instead of DynamicsCompressor.
-  // The compressor pumped audibly at LF (50 ms release vs 24-cycle bass
-  // accumulation), perceived as "low-frequency distortion". WaveShaper
-  // is per-sample instantaneous, no envelope follower, no pumping.
-  // Adds ~1 % THD at -3 dBFS but that's below the audibility threshold
-  // for speech (Toole, *Sound Reproduction* §4.3).
+  // Phase 9.5 — two-stage limiter. Phase 7.1 used DynamicsCompressor
+  // alone (pumped on LF). Phase 9.2 used WaveShaper alone (hard-clipped
+  // peaks above ±1 because the curve bounds output to its sample range).
+  // Now both, in series:
+  //   Stage A — slow compressor with 300 ms release. Long enough that
+  //   gain reduction holds across multiple LF cycles instead of breathing
+  //   within them (Katz, *Mastering Audio* §13 "bass-pumping problem").
+  //   Threshold -6 dB, ratio 4:1 → gentle envelope-following control of
+  //   the slow LF buildup, not a brick-wall.
+  //   Stage B — WaveShaper soft-saturator catches transients the slow
+  //   compressor missed, sample-by-sample, with no pumping. Curve is
+  //   tanh(1.5x)/tanh(1.5) — soft knee, monotonic, ~1% THD at -3 dBFS
+  //   (below speech audibility threshold per Toole §4.3). 4× oversampling
+  //   to suppress aliasing from saturation.
+  // Net: dynamic range squeezed by ~3 dB, transients softened, no
+  // pumping, no hard clipping. The proper fix (multiband AudioWorklet
+  // limiter) is Phase 10 backlog.
+  const compressor = ctx.createDynamicsCompressor();
+  compressor.threshold.value = -6;
+  compressor.knee.value = 6;
+  compressor.ratio.value = 4;
+  compressor.attack.value = 0.005;
+  compressor.release.value = 0.300;
   const limiter = ctx.createWaveShaper();
   limiter.curve = _saturatorCurve;
   limiter.oversample = '4x';
@@ -410,14 +433,15 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   // Path B: source → late IR convolver → mixer (no HRTF, no panner)
   source.connect(lateConv);
   lateConv.connect(mixer);
-  // Common downstream: limiter → gain → out
-  mixer.connect(limiter);
+  // Common downstream: slow compressor → soft-saturator → gain → out
+  mixer.connect(compressor);
+  compressor.connect(limiter);
   limiter.connect(gain);
   gain.connect(ctx.destination);
 
   source.start();
 
-  _activeChain = { source, panner, earlyConv, lateConv, mixer, limiter, gain, mode: 'convolved' };
+  _activeChain = { source, panner, earlyConv, lateConv, mixer, compressor, limiter, gain, mode: 'convolved' };
 }
 
 // Compute the dominant source's position relative to the given listener,
@@ -454,7 +478,7 @@ function sourceCentroidRelative(precisionResult, receiverIdx) {
 // mutually exclusive; only one is ever live.
 export function stopAudition() {
   if (!_activeChain) return;
-  const { source, panner, convolver, earlyConv, lateConv, mixer, limiter, gain } = _activeChain;
+  const { source, panner, convolver, earlyConv, lateConv, mixer, compressor, limiter, gain } = _activeChain;
   try { source.stop(); } catch (_) { /* already stopped */ }
   try {
     source.disconnect();
@@ -463,6 +487,7 @@ export function stopAudition() {
     if (earlyConv) earlyConv.disconnect();
     if (lateConv) lateConv.disconnect();
     if (mixer) mixer.disconnect();
+    if (compressor) compressor.disconnect();
     if (limiter) limiter.disconnect();
     gain.disconnect();
   } catch (_) { /* ignore */ }

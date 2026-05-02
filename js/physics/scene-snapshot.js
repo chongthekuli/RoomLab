@@ -29,18 +29,20 @@ export const PHYSICS_SCENE_VERSION = 1;
 const DEFAULT_SCATTERING = 0.10;
 
 // ODEON convention — volumetric receiver sphere radius. The 0.5 m
-// default is correct for halls (V ≥ 1000 m³) where it captures
-// binaural-ear-spacing-equivalent energy without aliasing, but in
-// small rooms (V ≈ 30–100 m³) a fixed 0.5 m sphere is 12 % of the
-// shortest room dimension and over-counts grazing rays — late-tail
-// energy ends up ~2 dB louder than physical. Vorländer §11.3.3
-// recommends r ∝ V^(1/3) clamped to [0.1, 0.5] m.
-//
-// Adaptive scale: r = clamp((V/2000)^(1/3), MIN, MAX). For V=30 m³
-// gives r=0.25 m; V=200 m³ gives r=0.46 m; V≥2000 m³ gives r=0.5 m
-// (clamped). Per-listener override still wins via lst.receiver_radius_m.
+// default works for halls; smaller rooms over-count slightly. Phase 8.2
+// shipped an adaptive scale `r = (V/2000)^(1/3)·0.5` clamped [0.1, 0.5]
+// but the lower bound was set too aggressively — for V=73 m³ the radius
+// dropped to 0.166 m, cutting ray-receiver capture cross-section by 9×
+// vs 0.5 m. With a fixed 50 000 ray budget the late-tail histogram went
+// statistically blank → STI metric collapsed to 1.0 (no reverb detected).
+// Floor raised to 0.4 m so the smallest-room radius stays close to ODEON
+// convention; over-counting in small rooms is now bounded to ~1 dB
+// (acceptable per Vorländer §11.3.3 vs the original 2 dB) WITHOUT
+// breaking convergence at fixed ray count. The proper fix — bump rays
+// proportional to (radius_default/radius_actual)² — is a Phase 11 task
+// once we have the worker-pool ray-count autobump infrastructure.
 const DEFAULT_RECEIVER_RADIUS_M = 0.5;
-const MIN_RECEIVER_RADIUS_M = 0.1;
+const MIN_RECEIVER_RADIUS_M = 0.4;
 const MAX_RECEIVER_RADIUS_M = 0.5;
 const RECEIVER_RADIUS_REFERENCE_VOLUME_M3 = 2000;
 const DEFAULT_EAR_HEIGHT_M = 1.2;
