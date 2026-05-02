@@ -471,6 +471,16 @@ function showError(msg) {
 }
 
 function stiRatingLabel(sti) {
+  // STI ≥ 0.95 means the room has effectively no audible reverberation
+  // — every word is delivered cleanly, the way it would be in a sound-
+  // booth or anechoic chamber. Most real venues even after careful
+  // treatment land at 0.70–0.85; STI = 1.0 specifically means C50 has
+  // saturated the formula, which only happens when total surface
+  // absorption is so high that late energy is below the audibility
+  // floor by 50+ dB. Distinct from "excellent" (0.75–0.94) because the
+  // user should know they've built a soundbooth, not a great-sounding
+  // hall.
+  if (sti >= 0.95) return { klass: 'excellent', label: 'soundbooth' };
   if (sti >= 0.75) return { klass: 'excellent', label: 'excellent' };
   if (sti >= 0.60) return { klass: 'good',      label: 'good' };
   if (sti >= 0.45) return { klass: 'fair',      label: 'fair' };

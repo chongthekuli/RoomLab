@@ -290,17 +290,31 @@ function buildStereoIRPair(histogram, shape, bucketDtMs, receiverIdx, sampleRate
 // room loudness gradient because the input/output RMS ratio is stable).
 // References: Välimäki & Reiss, More Than 50 Years of Artificial
 // Reverberation, AES60 keynote §5; Cauchy–Schwarz output peak bound.
-// RMS-target IR normalisation. Output peak after convolution scales as
-// input_RMS × ||h||₂, where ||h||₂ = √N × RMS_h. For a 0.5 s IR at 48 kHz
-// (N = 24 000) and speech input at RMS 0.25, output_RMS ≈ 0.25 × 154 ×
-// RMS_h. To keep output_RMS below 0.4 (peak ~1.0 with 4× crest factor)
-// we need RMS_h ≤ 0.0104. Phase 9.2 shipped 0.04 which is far too loud
-// → output_RMS ≈ 1.5 → severe clipping at the WaveShaper boundary.
-// 0.012 keeps a typical room's output peak below the saturator's curve
-// boundary; loud-room IRs may still produce occasional peaks but those
-// land in the saturator's soft region (tanh roll-off) rather than the
-// hard-clip boundary. Phase 9.5 fix.
-function normaliseIR(ir, targetRms = 0.012) {
+// IR-length-aware RMS normalisation. Phase 9.6 — adapts target RMS_h to
+// the IR's sample count so the convolution output level is consistent
+// across rooms of any RT60. Cauchy-Schwarz: for white-stationary input
+// of RMS σ_x and IR of L2 norm ||h||₂ = √N · RMS_h:
+//
+//   output_RMS = σ_x · √N · RMS_h
+//
+// Solve for RMS_h to land at a fixed output RMS of 0.18 (~-15 dBFS,
+// comfortable monitoring level after the 0.6 master gain → -19 dBFS at
+// destination, well clear of the -1 dBFS limiter):
+//
+//   RMS_h = OUTPUT_TARGET / (TYPICAL_INPUT_RMS · √N)
+//
+// For TYPICAL_INPUT_RMS = 0.25 (typical speech) and N varying with IR
+// length, RMS_h scales as 1/√N — short IRs use larger amplitudes, long
+// IRs use smaller. The room's loudness GRADIENT is squashed (cathedral
+// and studio sound similar loudness), traded for consistent monitoring
+// level across rooms. The user can always crank the master gain if they
+// want a long-tail room to feel proportionally louder.
+const TYPICAL_INPUT_RMS = 0.25;
+const OUTPUT_RMS_TARGET = 0.18;
+
+function normaliseIR(ir) {
+  if (ir.length === 0) return ir;
+  const targetRms = OUTPUT_RMS_TARGET / (TYPICAL_INPUT_RMS * Math.sqrt(ir.length));
   let sumSq = 0;
   for (let i = 0; i < ir.length; i++) sumSq += ir[i] * ir[i];
   const rms = Math.sqrt(sumSq / ir.length);
@@ -396,29 +410,20 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const mixer = ctx.createGain();
   mixer.gain.value = 1.0;
 
-  // Phase 9.5 — two-stage limiter. Phase 7.1 used DynamicsCompressor
-  // alone (pumped on LF). Phase 9.2 used WaveShaper alone (hard-clipped
-  // peaks above ±1 because the curve bounds output to its sample range).
-  // Now both, in series:
-  //   Stage A — slow compressor with 300 ms release. Long enough that
-  //   gain reduction holds across multiple LF cycles instead of breathing
-  //   within them (Katz, *Mastering Audio* §13 "bass-pumping problem").
-  //   Threshold -6 dB, ratio 4:1 → gentle envelope-following control of
-  //   the slow LF buildup, not a brick-wall.
-  //   Stage B — WaveShaper soft-saturator catches transients the slow
-  //   compressor missed, sample-by-sample, with no pumping. Curve is
-  //   tanh(1.5x)/tanh(1.5) — soft knee, monotonic, ~1% THD at -3 dBFS
-  //   (below speech audibility threshold per Toole §4.3). 4× oversampling
-  //   to suppress aliasing from saturation.
-  // Net: dynamic range squeezed by ~3 dB, transients softened, no
-  // pumping, no hard clipping. The proper fix (multiband AudioWorklet
-  // limiter) is Phase 10 backlog.
+  // Two-stage safety. Now that normaliseIR targets a consistent
+  // output_RMS ≈ 0.18, the compressor only needs to catch occasional
+  // peaks (transient + late-tail buildup) — not actively reduce signal
+  // level. Threshold -3 dB + 2:1 ratio + 200 ms release = transparent
+  // for typical content, gently bends down the rare > -3 dB spike. The
+  // WaveShaper soft-saturator catches anything that slips past for the
+  // final ±1 boundary safety. No pumping at LF because the compressor
+  // sees signal at its threshold only on transients now, not sustained.
   const compressor = ctx.createDynamicsCompressor();
-  compressor.threshold.value = -6;
+  compressor.threshold.value = -3;
   compressor.knee.value = 6;
-  compressor.ratio.value = 4;
+  compressor.ratio.value = 2;
   compressor.attack.value = 0.005;
-  compressor.release.value = 0.300;
+  compressor.release.value = 0.200;
   const limiter = ctx.createWaveShaper();
   limiter.curve = _saturatorCurve;
   limiter.oversample = '4x';
