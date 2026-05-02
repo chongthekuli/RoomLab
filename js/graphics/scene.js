@@ -328,7 +328,10 @@ export async function mount3DViewport({ materials }) {
   on('source:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
   on('source:model_changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
   on('listener:changed', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
-  on('listener:selected', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
+  on('listener:selected', () => {
+    queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP);
+    focusCameraOnSelectedListener();
+  });
   on('scene:reset', () => {
     invalidateRayViz();
     // NUCLEAR DISPOSAL — kill every group's contents IMMEDIATELY before
@@ -3233,6 +3236,56 @@ export function frameCameraToRoom() {
   controls.update();
 }
 
+// Smooth-focus tween — set when listener:selected fires (and we're in
+// 3D view, not walk mode). Each frame _tickCameraFocus eases controls
+// .target + camera.position toward the targets until both are within
+// epsilon, then clears the tween.
+let _focusTween = null;       // { targetPos: Vec3, targetCam: Vec3, t0, durationMs }
+const _focusTmp = new THREE.Vector3();
+
+export function focusCameraOnSelectedListener() {
+  if (walkMode || !camera || !controls) return;
+  const lst = getSelectedListener();
+  if (!lst) return;
+  // State coords (x=width, y=depth, z=elevation) → Three.js (x, z=elevation+ear, y=depth).
+  const earHeight = 1.2;     // typical seated ear, matches receiver sphere centre
+  const tx = lst.position.x;
+  const ty = (lst.elevation_m ?? 0) + earHeight;
+  const tz = lst.position.y;
+  // Pull the camera toward a sensible orbiting offset. Keep current
+  // distance + altitude bias roughly the same so the user doesn't lose
+  // their bearings. If camera is closer than 2 m, push out; if further
+  // than 12 m, pull in.
+  const currentDist = camera.position.distanceTo(controls.target);
+  const dist = Math.min(12, Math.max(3, currentDist));
+  // Direction from current target → current camera, reused so the new
+  // framing keeps roughly the same angle.
+  _focusTmp.copy(camera.position).sub(controls.target);
+  if (_focusTmp.lengthSq() < 0.01) {
+    // Camera was sitting on the target — pick a default 3/4 view.
+    _focusTmp.set(dist * 0.7, dist * 0.5, dist * 0.7);
+  } else {
+    _focusTmp.normalize().multiplyScalar(dist);
+  }
+  _focusTween = {
+    targetPos: new THREE.Vector3(tx, ty, tz),
+    targetCam: new THREE.Vector3(tx + _focusTmp.x, ty + _focusTmp.y, tz + _focusTmp.z),
+    startPos: controls.target.clone(),
+    startCam: camera.position.clone(),
+    t0: performance.now(),
+    durationMs: 600,
+  };
+}
+
+function _tickCameraFocus(ts) {
+  if (!_focusTween || !controls || !camera) return;
+  const t = Math.min(1, ((ts || performance.now()) - _focusTween.t0) / _focusTween.durationMs);
+  const e = t * t * (3 - 2 * t);  // smoothstep ease
+  controls.target.lerpVectors(_focusTween.startPos, _focusTween.targetPos, e);
+  camera.position.lerpVectors(_focusTween.startCam, _focusTween.targetCam, e);
+  if (t >= 1) _focusTween = null;
+}
+
 // Cabinet dimensions in meters by speaker type. Line-array elements are
 // scaled slightly larger than real-world (~1.2m × 0.42m × 0.7m, vs Nexo STM
 // M46 at 1.28 × 0.48 × 0.69) so they remain readable from arena-scale camera
@@ -5877,6 +5930,7 @@ function animate(ts) {
   if (!renderer || !scene || !activeCamera) return;
   if (shadowsNeedRefresh) { applyShadowFlags(); shadowsNeedRefresh = false; }
   _tickSurfaceSelectionPulse(ts);
+  _tickCameraFocus(ts);
   if (walkMode && tpController) {
     const now = ts || performance.now();
     const dt = Math.min(0.1, (now - tpLastTs) / 1000);

@@ -183,20 +183,52 @@ export async function startAudition({ precisionResult, receiverIdx }) {
 
   source.start();
 
-  _activeChain = { source, convolver, gain };
+  _activeChain = { source, convolver, gain, mode: 'convolved' };
 }
 
-// Stop + tear down the active chain. Idempotent.
+// Stop + tear down the active chain. Idempotent. Works for both the
+// convolved (audition) chain and the dry (original) chain — they're
+// mutually exclusive; only one is ever live.
 export function stopAudition() {
   if (!_activeChain) return;
   const { source, convolver, gain } = _activeChain;
   try { source.stop(); } catch (_) { /* already stopped */ }
-  try { source.disconnect(); convolver.disconnect(); gain.disconnect(); } catch (_) { /* ignore */ }
+  try {
+    source.disconnect();
+    if (convolver) convolver.disconnect();
+    gain.disconnect();
+  } catch (_) { /* ignore */ }
   _activeChain = null;
+}
+
+// Returns 'convolved' | 'dry' | null — the kind of playback in flight,
+// or null when nothing is playing. UI uses this to keep both buttons
+// in sync.
+export function getAuditionMode() {
+  return _activeChain?.mode ?? null;
 }
 
 export function isAuditionPlaying() {
   return _activeChain !== null;
+}
+
+// Play the speech sample WITHOUT convolution — the "original tone" the
+// audition is being compared against. Reuses the same gain envelope so
+// loudness matches the convolved playback for fair A/B.
+export async function startOriginalPlayback() {
+  stopAudition();
+  const ctx = getCtx();
+  if (ctx.state === 'suspended') await ctx.resume();
+  const sample = await loadSample();
+  const source = ctx.createBufferSource();
+  source.buffer = sample;
+  source.loop = true;
+  const gain = ctx.createGain();
+  gain.gain.value = DEFAULT_GAIN;
+  source.connect(gain);
+  gain.connect(ctx.destination);
+  source.start();
+  _activeChain = { source, convolver: null, gain, mode: 'dry' };
 }
 
 export function setAuditionGain(linear01) {

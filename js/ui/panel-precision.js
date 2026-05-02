@@ -19,7 +19,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { runPrecisionRender } from '../physics/precision/precision-engine.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { applyGlossary } from './glossary.js';
-import { startAudition, stopAudition, isAuditionPlaying, checkSampleAvailable } from '../audio/audition.js';
+import { startAudition, startOriginalPlayback, stopAudition, isAuditionPlaying, getAuditionMode, checkSampleAvailable } from '../audio/audition.js';
 
 let materialsRef;
 let currentAbort = null;
@@ -58,9 +58,15 @@ export function mountPrecisionPanel({ materials }) {
           Use closed-back headphones — speakers add their own room reverb on top of the simulation.
         </div>
         <div class="audition-controls">
-          <button id="precision-audition-btn" class="btn-audition" type="button" disabled>
+          <button id="precision-audition-btn" class="btn-audition" type="button" disabled
+                  title="Play the speech sample convolved with this listener’s impulse response.">
             <span class="audition-icon" aria-hidden="true">▶</span>
             <span class="audition-label">Audition at this listener</span>
+          </button>
+          <button id="precision-original-btn" class="btn-audition btn-audition-dry" type="button" disabled
+                  title="Play the original speech sample dry (no room) — A/B reference for the audition.">
+            <span class="audition-icon" aria-hidden="true">▶</span>
+            <span class="audition-label">Play original</span>
           </button>
           <span id="precision-audition-state" class="audition-state"></span>
         </div>
@@ -73,17 +79,20 @@ export function mountPrecisionPanel({ materials }) {
   root.querySelector('#precision-cancel-btn').addEventListener('click', cancelRender);
   root.querySelector('#precision-rerender-btn').addEventListener('click', runRender);
   root.querySelector('#precision-audition-btn').addEventListener('click', toggleAudition);
+  root.querySelector('#precision-original-btn').addEventListener('click', toggleOriginal);
 
-  // HEAD-probe the audio sample at panel mount so the button can show
+  // HEAD-probe the audio sample at panel mount so the buttons can show
   // a clear disabled-state tooltip if the file isn't shipped yet.
   checkSampleAvailable().then(ok => {
     const btn = root.querySelector('#precision-audition-btn');
-    if (!btn) return;
+    const dry = root.querySelector('#precision-original-btn');
+    if (!btn || !dry) return;
     if (!ok) {
       btn.title = 'No audio sample at assets/audio/testing-1-2-3.mp3 — drop one in to enable.';
+      dry.title = 'No audio sample at assets/audio/testing-1-2-3.mp3 — drop one in to enable.';
     } else {
-      btn.title = 'Convolve the speech sample with this listener’s impulse response.';
       btn.dataset.sampleReady = '1';
+      dry.dataset.sampleReady = '1';
     }
     updateAuditionUI();
   });
@@ -362,24 +371,31 @@ function updateUI() {
 
 function updateAuditionUI() {
   const btn = document.getElementById('precision-audition-btn');
+  const dry = document.getElementById('precision-original-btn');
   const stateEl = document.getElementById('precision-audition-state');
-  if (!btn) return;
+  if (!btn || !dry) return;
   const hasResult = !!state.results.precision;
   const sampleReady = btn.dataset.sampleReady === '1';
-  const playing = isAuditionPlaying();
+  const mode = getAuditionMode();
+  // Audition button (convolved): needs a render AND a sample.
   btn.disabled = !hasResult || !sampleReady;
-  btn.querySelector('.audition-icon').textContent = playing ? '■' : '▶';
-  btn.querySelector('.audition-label').textContent = playing ? 'Stop' : 'Audition at this listener';
+  btn.querySelector('.audition-icon').textContent = mode === 'convolved' ? '■' : '▶';
+  btn.querySelector('.audition-label').textContent = mode === 'convolved' ? 'Stop' : 'Audition at this listener';
+  // Dry button: only needs the sample. Useful even before a render.
+  dry.disabled = !sampleReady;
+  dry.querySelector('.audition-icon').textContent = mode === 'dry' ? '■' : '▶';
+  dry.querySelector('.audition-label').textContent = mode === 'dry' ? 'Stop' : 'Play original';
   if (stateEl) {
     if (!sampleReady) stateEl.textContent = 'no audio sample';
-    else if (!hasResult) stateEl.textContent = 'render first';
-    else if (playing) stateEl.textContent = 'playing through your headphones';
+    else if (mode === 'convolved') stateEl.textContent = 'audition playing — through your headphones';
+    else if (mode === 'dry') stateEl.textContent = 'original (dry) playing — A/B reference';
+    else if (!hasResult) stateEl.textContent = 'render first to enable audition';
     else stateEl.textContent = '';
   }
 }
 
 async function toggleAudition() {
-  if (isAuditionPlaying()) {
+  if (getAuditionMode() === 'convolved') {
     stopAudition();
     updateAuditionUI();
     return;
@@ -394,6 +410,21 @@ async function toggleAudition() {
     updateAuditionUI();
   } catch (err) {
     showError(`Audition failed: ${err.message ?? err}`);
+    updateAuditionUI();
+  }
+}
+
+async function toggleOriginal() {
+  if (getAuditionMode() === 'dry') {
+    stopAudition();
+    updateAuditionUI();
+    return;
+  }
+  try {
+    await startOriginalPlayback();
+    updateAuditionUI();
+  } catch (err) {
+    showError(`Playback failed: ${err.message ?? err}`);
     updateAuditionUI();
   }
 }
