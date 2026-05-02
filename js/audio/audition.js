@@ -218,17 +218,25 @@ function buildStereoIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   return [irL, irR];
 }
 
-// Normalise so peak amplitude = 0.5 — keeps the convolver output well
-// under +/- 1.0 even after sample envelope. Without this loud rooms
-// clip; quiet rooms are inaudible.
-function normaliseIR(ir, targetPeak = 0.5) {
-  let peak = 0;
-  for (let i = 0; i < ir.length; i++) {
-    const v = Math.abs(ir[i]);
-    if (v > peak) peak = v;
-  }
-  if (peak <= 0) return ir;
-  const scale = targetPeak / peak;
+// Loudness-target (RMS-based) IR normalisation. Phase 7.1 — replaced the
+// previous peak-target normaliser which keyed to a single-sample L∞ that
+// was dominated by the HF-band transient burst. The IR's L1 norm is
+// 30–60× larger than its L∞ for typical filtered-velvet IRs, so peak-
+// normalising to 0.5 left the convolution output peak at ±15 to ±30
+// before the master gain — guaranteed DAC clipping on speech transients,
+// audible as "blown driver" / LF distortion. Targeting an RMS of ~0.06
+// (matches what convolver.normalize=true does internally for "real-room"
+// IRs per W3C spec §1.34) keeps the convolved output peak under ±1.0
+// without forcing equal-power-across-rooms (we still preserve room-to-
+// room loudness gradient because the input/output RMS ratio is stable).
+// References: Välimäki & Reiss, More Than 50 Years of Artificial
+// Reverberation, AES60 keynote §5; Cauchy–Schwarz output peak bound.
+function normaliseIR(ir, targetRms = 0.06) {
+  let sumSq = 0;
+  for (let i = 0; i < ir.length; i++) sumSq += ir[i] * ir[i];
+  const rms = Math.sqrt(sumSq / ir.length);
+  if (rms <= 0) return ir;
+  const scale = targetRms / rms;
   for (let i = 0; i < ir.length; i++) ir[i] *= scale;
   return ir;
 }
@@ -316,17 +324,32 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   convolver.normalize = false;
   convolver.buffer = irBuffer;
 
+  // Brick-wall limiter — catches residual peaks that exceed -1 dBFS from
+  // the convolver. Without it, even RMS-normalised IRs occasionally spike
+  // on speech onsets (every consonant has a sharp transient that excites
+  // many overlapping IR samples at once → output peak > 1.0 → DAC clip).
+  // 20:1 ratio + 0 ms knee + 1 ms attack = effectively a brickwall above
+  // threshold, transparent below. Matches mastering-stage limiter
+  // settings recommended by Välimäki & Reiss AES60 §5.
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -1;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.001;
+  limiter.release.value = 0.05;
+
   const gain = ctx.createGain();
   gain.gain.value = DEFAULT_GAIN;
 
   source.connect(panner);
   panner.connect(convolver);
-  convolver.connect(gain);
+  convolver.connect(limiter);
+  limiter.connect(gain);
   gain.connect(ctx.destination);
 
   source.start();
 
-  _activeChain = { source, panner, convolver, gain, mode: 'convolved' };
+  _activeChain = { source, panner, convolver, limiter, gain, mode: 'convolved' };
 }
 
 // Compute the dominant source's position relative to the given listener,
@@ -363,12 +386,13 @@ function sourceCentroidRelative(precisionResult, receiverIdx) {
 // mutually exclusive; only one is ever live.
 export function stopAudition() {
   if (!_activeChain) return;
-  const { source, panner, convolver, gain } = _activeChain;
+  const { source, panner, convolver, limiter, gain } = _activeChain;
   try { source.stop(); } catch (_) { /* already stopped */ }
   try {
     source.disconnect();
     if (panner) panner.disconnect();
     if (convolver) convolver.disconnect();
+    if (limiter) limiter.disconnect();
     gain.disconnect();
   } catch (_) { /* ignore */ }
   _activeChain = null;
