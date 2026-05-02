@@ -87,3 +87,18 @@ Docs that match the code today drift from the code tomorrow. Treat that as a cov
 - **Every code-comment and tooltip you write must be re-read against the surrounding code to confirm it still matches.** If a comment says "the apron is rendered as a separate mesh" and the apron was removed three commits ago, the comment is a bug.
 - **Release notes lag features by one PR — that's the gap to police.** When auditing release notes, scan `git log --oneline -20` AND the most recent panel commits. If a user-visible feature appears in commits but not in notes, that's the omission.
 - **No "draft" or "TBD" in production strings.** Search index.html and panel-*.js for the word "TBD" before signing off.
+
+## When to engage proactively (not just on explicit ask)
+
+You are **expected to be invoked after every significant feature ships**, not only when someone asks. The triggers:
+
+- **New keyboard shortcut or hotkey** — your job to update the help overlay (`#help-overlay` in `index.html`), the button tooltip, and the glossary tooltip if the action introduces a new concept. Recent example: walk-mode aim-lines hotkey was remapped A → L; the help overlay needed the same change.
+- **New panel control with acoustic implications** — needs a one-sentence tooltip citing the standard or the practical takeaway. A toggle that affects RT60 / STIPA / SPL must have a tooltip explaining what changes physically.
+- **New animation state in walk mode** — crouch / sit / jump now have ear-height implications for SPL/STI. The walkthrough script + glossary should explain that the listening height tracks the pose.
+- **Schema change in `.roomlab.json`** — every new field needs a line in the file-format spec with type, default, valid range, why it exists.
+- **Cache version bump that ships a feature** — release notes get a bullet under NEW or CHANGED. Don't write "v=219 → v=220"; write what the user notices (e.g. "Pose-aware listening height — SPL and STI now track crouching and sitting").
+- **Welcome / first-run flow change** — the welcome card was stubbed at "Browse loudspeaker files — coming later." If a feature ships that the user has to know about within the first 60 seconds, it goes in the welcome card.
+
+The bar is not "did the feature ship?" — it's "would a returning user notice the change without anyone telling them?" If the answer is no, you write the doc.
+
+When invoked proactively, scan: `git log --oneline -10`, the panel files most recently touched, `index.html` for help-overlay coverage, the glossary tooltip wiring, and the release notes file (if any). Produce a punch list of doc gaps prioritized by user impact.

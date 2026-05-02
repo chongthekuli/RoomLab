@@ -221,7 +221,13 @@ export function traceRays(scene, bvh, opts = {}) {
   const energyCutoffDb = opts.energyCutoffDb ?? DEFAULT_ENERGY_CUTOFF_DB;
   const c_mps = opts.c_mps ?? SPEED_OF_SOUND_M_PER_S;
   const seed = opts.seed ?? 1;
-  const airAbsorption = opts.airAbsorption !== false;
+  // airAbsorption: explicit opts override wins; otherwise defer to the
+  // snapshot's physics flag (set from the panel's "Air absorption"
+  // toggle); otherwise default true. Without the snapshot fallback the
+  // worker-pool whitelist would silently strip the user's toggle.
+  const airAbsorption = opts.airAbsorption !== undefined
+    ? !!opts.airAbsorption
+    : (scene.physics?.airAbsorption !== false);
   const scattering = opts.scattering !== false;
   const progress = opts.progress ?? null;
 

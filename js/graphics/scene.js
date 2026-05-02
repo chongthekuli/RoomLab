@@ -1769,13 +1769,16 @@ export function setWalkthroughMode(on) {
 // path used to embed this inline, but the rigged path skipped it and the
 // state flags froze, latching the rigged setState() into Jump forever.
 function updateAnimStateMachine(ctx, dt) {
-  // Jump state machine
+  // Jump state machine. tpController.jump() returns false when the
+  // controller refuses (e.g. already airborne). If we set 'airborne'
+  // unconditionally we'd wait forever for a justLanded signal that
+  // never fires, latching the rigged avatar into the Jump clip.
   if (animState.jumpPhase === 'anticipate') {
     animState.jumpT += dt / 0.10;
     if (animState.jumpT >= 1) {
       animState.jumpT = 0;
-      animState.jumpPhase = 'airborne';
-      tpController.jump(JUMP_VELOCITY_MS);
+      const jumped = tpController.jump(JUMP_VELOCITY_MS);
+      animState.jumpPhase = jumped ? 'airborne' : 'grounded';
     }
   } else if (animState.jumpPhase === 'airborne') {
     animState.jumpT += dt;

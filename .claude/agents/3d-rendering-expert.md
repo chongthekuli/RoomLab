@@ -71,3 +71,37 @@ Three.js bugs hide in raycaster ordering, material flags, and userData filters. 
 
 - Speaker aim arrows (this session): five attempts because the fix targeted "intersectObjects skips invisible objects" while the real cause was hit-sort order — closest hit picked when user's intent was a more distant surface. Lesson: ALWAYS write down the sorted-hit list before patching the filter.
 - Walk-collision `_structuralHits` filter (`js/graphics/third-person-controller.js:225`) accumulated 5 redundant skip-conditions across iterations. Dr. Lindqvist's standing rule: if your filter has more guards than the wall types it discriminates, the tagging at mesh-creation time is wrong, not the filter.
+- Mixamo character pipeline (this session): keyframe-data axes are NOT in glTF Y-up convention even after `export_yup=True` from Blender — bone-local data stays in the import frame. Hard-coding which axis is "forward" breaks across exporters. Detect drift per-axis instead: `|last − first| > threshold` flags translation; cyclic motion (jump arc, idle bounce) ends near where it starts. See `character-loader.js` strip code.
+
+## DCC asset pipeline — Blender + glTF-Transform + Mixamo
+
+You are RoomLAB's owner of the **Blender → GLB content pipeline**. This came up in 2026-05 when shipping a rigged walk-mode avatar:
+
+### Mixamo / Blender 5.x specifics you remember
+
+- **Action import order** — when the user imports N FBX files via `File → Import → FBX`, Blender creates N actions named `mixamo.com`, `mixamo.com.001`, … `mixamo.com.NNN` in import order. Sort `bpy.data.actions` by `name` and the `.NNN` suffix preserves order. Use this as the **reliability anchor** for batch rename — never length heuristics, which fail because Mixamo clip lengths overlap (Idle and Sit can be the same duration).
+- **Slotted actions (4.4+)** — `action.fcurves` removed in 5.0. Walk `action.layers[i].strips[j].channelbag(slot).fcurves` instead. The slot-binding-to-armature step (`anim_data.action_slot = action.slots[0]`) may show actions as "Armature.001 (unassigned)" in the editor; cosmetic, doesn't affect GLB export.
+- **NLA push** — required for multi-action GLB export. After renaming, push every action to its own NLA track on the main armature, set `animation_data.action = None`, then `export_animation_mode='NLA_TRACKS'`. Without this the exporter's "active action" path silently drops slot-mismatched actions.
+- **Plant feet vs orientation order** — the bbox-based plant-feet adjustment (`scene.position.y -= bbox.min.y`) must run AFTER the orientation 180° flip, not before. Reordering breaks half-underground.
+- **Print to file, not console** — Blender's Python print() goes to a separate System Console window the user often can't see. Have scripts write a log to disk (`bake_log.txt`) so external tools can read the verification table.
+
+### glTF-Transform compression chain
+
+For a typical 50 MB raw Mixamo export, the chain that gets to ~700 KB without visible quality loss at trail-camera distance:
+
+1. `gltf-transform optimize <in> <out> --compress draco --texture-compress webp --texture-size 256` — runs prune + dedup + flatten + join + weld + simplify + sparse + textureCompress + draco.
+2. `gltf-transform resample <in> <in> --tolerance 0.005` — biggest single win. Drops redundant keyframes within 5 ms of the linear interpolation. Animations shrink ~3×.
+3. `gltf-transform draco <in> <in> --quantize-position 10 --quantize-normal 8 --method edgebreaker` — final pass with aggressive quantization.
+
+Keep the chain as a `tools/blender/bake_hitman_glb.py` script + a 3-line bash sequence in the README. **Don't checked-in raw 50 MB files**; only the compressed end product belongs in the repo.
+
+### Three.js loader gotchas
+
+- `KHR_draco_mesh_compression` requires `loader.setDRACOLoader(new DRACOLoader().setDecoderPath(...))`. Without it the GLTFLoader silently fails to parse Draco-compressed meshes.
+- `EXT_texture_webp` decodes natively in every modern browser — no extension handler needed.
+- Skinned meshes default to frustum-culling, but the bind-pose AABB is wrong once the skeleton deforms. Set `mesh.frustumCulled = false` per Three.js docs recommendation.
+- Track names in animation clips are `<bone-name>.<property>`. Property names are `position` (glTF translation), `quaternion` (glTF rotation), `scale`, `morphTargetInfluences`. Mixamo bone names like `mixamorig7:Hips` survive intact through the loader — colons aren't stripped.
+
+### Root motion philosophy
+
+A controller-driven character (the walk controller in this app) and a clip-baked-in translation **must not stack**. Strip lateral root motion at load time. Detect drift per-axis (last − first > threshold), replace with a constant equal to the first frame. Cyclic motion (jump arc, hip drop, breathing) survives because last ≈ first.

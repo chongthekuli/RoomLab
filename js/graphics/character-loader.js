@@ -158,14 +158,17 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
   };
 }
 
-// Shared Draco decoder — loaded once, reused for every GLB. Decoder
-// binary is fetched from the same unpkg CDN as Three.js itself so the
-// version stays in lock-step with the importmap entry.
+// Shared Draco decoder — loaded once, reused for every GLB. The decoder
+// binary (~1 MB) is vendored under assets/draco/ instead of fetched from
+// unpkg, so first-visit cold-cache load doesn't depend on a third-party
+// CDN's responsiveness and the app works offline once the page is cached.
+// If you bump the Three.js version in the importmap, refresh these files
+// from `https://unpkg.com/three@<NEW>/examples/jsm/libs/draco/`.
 let _dracoLoader = null;
 function getDracoLoader() {
   if (_dracoLoader) return _dracoLoader;
   _dracoLoader = new DRACOLoader();
-  _dracoLoader.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
+  _dracoLoader.setDecoderPath('assets/draco/');
   return _dracoLoader;
 }
 

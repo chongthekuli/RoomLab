@@ -144,16 +144,27 @@ function setupTabs() {
 
   // Keyboard shortcuts only act while RoomLAB is the active route —
   // pressing 'H' while reading a SpeakerLAB spec sheet shouldn't
-  // toggle the heatmap behind it.
+  // toggle the heatmap behind it. Layer / tool / camera shortcuts
+  // are also skipped while in walk mode (W/A/S/D are walk-controller
+  // movement keys; F would frame the camera away from the avatar; H /
+  // M / R toggle layers the user can't see while walking, etc.).
+  // View-switching (1/2/3) and help (?) / Esc remain always-on so the
+  // user can always exit walk mode or read the shortcuts list.
   document.addEventListener('keydown', (e) => {
     const activeRoute = document.querySelector('.lab-route.active')?.dataset.route;
     if (activeRoute && activeRoute !== 'room') return;
     if (isTypingTarget(e.target)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const walkActive = document.querySelector('#route-room .vp-tab.active')?.dataset.view === 'walk';
     switch (e.key) {
       case '1': clickTab('2d'); e.preventDefault(); break;
       case '2': clickTab('3d'); e.preventDefault(); break;
       case '3': clickTab('walk'); e.preventDefault(); break;
+      case '?':           openHelp(); e.preventDefault(); break;
+      case 'Escape':      closeTransient(); break;
+    }
+    if (walkActive) return;
+    switch (e.key) {
       case 'h': case 'H': click('toggle-heatmaps'); e.preventDefault(); break;
       case 'i': case 'I': click('toggle-isobars'); e.preventDefault(); break;
       case 'm': case 'M': click('toggle-stipa-mode'); e.preventDefault(); break;
@@ -162,8 +173,6 @@ function setupTabs() {
       case 'y': case 'Y': click('toggle-rays'); e.preventDefault(); break;
       case 'p': case 'P': click('toggle-probe'); e.preventDefault(); break;
       case 'f': case 'F': frameCameraToRoom(); e.preventDefault(); break;
-      case '?':           openHelp(); e.preventDefault(); break;
-      case 'Escape':      closeTransient(); break;
     }
   });
 }
