@@ -109,7 +109,18 @@ function loadSample() {
 // comb without losing transient identity for speech consonants.
 const BAND_CENTERS_HZ = [125, 250, 500, 1000, 2000, 4000, 8000];
 const BAND_Q = 1.41;     // 1-octave bandwidth
+// Velvet pulse density. Phase 8.3 — bands ≤ 250 Hz get 2× density to
+// avoid LF "warble" from the auditory critical band hearing each pulse
+// individually (Schlecht 2017 §3.2 critical-band-aware thresholds).
 const VELVET_DENSITY_PULSES_PER_SEC = 1500;
+const VELVET_DENSITY_LF_PULSES_PER_SEC = 3000;
+const VELVET_LF_BAND_INDEX = 1;          // 250 Hz and below
+// Mixing time — perceptual transition from "discrete reflections with
+// directional cues" (early, gets HRTF) to "diffuse statistical field"
+// (late, no HRTF, decorrelated noise per ear). 80 ms is the standard
+// across hall-sized rooms; smaller rooms reach mixing earlier but using
+// the standard value is safer than over-fitting.
+const MIXING_TIME_MS = 80;
 
 // Single-pass biquad bandpass — Audio EQ Cookbook (Robert Bristow-Johnson,
 // "Cookbook formulae for audio EQ biquad filter coefficients"). Direct
@@ -139,19 +150,27 @@ function biquadBandpassInPlace(samples, centerHz, Q, sampleRate) {
   }
 }
 
-// Build a 2-channel IR via filtered velvet noise (Phase 6). Direct,
-// early, and late are now ONE code path — per band, place Nv random-
-// position random-sign impulses per bucket, run the band's impulse
-// stream through a biquad bandpass, sum across bands. L and R channels
-// use independent random draws → decorrelated diffuse field for the
-// out-of-head listening cue (Phase 4 win retained).
-function buildStereoIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
+// Build TWO 2-channel IRs from the listener's histogram:
+//   • earlyIR: t < MIXING_TIME_MS, identical L/R per band — gets HRTF
+//     spatialisation upstream so direct + early reflections inherit the
+//     source-direction binaural cue (Begault, NASA TM-2000-110410 §4.3).
+//   • lateIR: t ≥ MIXING_TIME_MS, INDEPENDENT random per channel — the
+//     diffuse field is statistical from all directions, no single HRTF
+//     direction applies. Generic-HRTF stamping of late reverb makes it
+//     1.5–2 dB louder and "narrower" than physical (Wenzel et al.,
+//     J.AES 1993). Phase 8.1 separates the chains so the HRTF only
+//     touches the early section where it belongs.
+//
+// Both IRs use Phase 6 filtered velvet noise (random position +
+// random sign per impulse, per band, bandpass-filtered). Phase 8.3 — LF
+// bands (≤250 Hz) get 2× pulse density to keep the per-critical-band
+// pulse count above the smoothness threshold.
+function buildStereoIRPair(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   const { bands: B, buckets: T } = shape;
   const bucketDtSec = bucketDtMs / 1000;
   const samplesPerBucket = Math.max(1, Math.round(bucketDtSec * sampleRate));
 
-  // Broadband energy per bucket → find peak → truncate at -60 dB. Peak
-  // calc only used for IR truncation length, not for synthesis amplitude.
+  // Energy per bucket + peak (for truncation only).
   const bucketEnergy = new Float32Array(T);
   const recOff = receiverIdx * B * T;
   let peakEnergy = 0;
@@ -164,26 +183,32 @@ function buildStereoIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
     if (energy > peakEnergy) peakEnergy = energy;
   }
   if (peakEnergy <= 0) {
-    return [new Float32Array(samplesPerBucket), new Float32Array(samplesPerBucket)];
+    const empty = new Float32Array(samplesPerBucket);
+    return { earlyL: empty, earlyR: empty, lateL: empty, lateR: empty };
   }
   const cutoff = peakEnergy * 1e-6;
   let lastUseful = T - 1;
   while (lastUseful > 0 && bucketEnergy[lastUseful] < cutoff) lastUseful--;
   const usefulBuckets = lastUseful + 1;
+  const mixingBucket = Math.min(usefulBuckets, Math.ceil(MIXING_TIME_MS / bucketDtMs));
   const totalSamples = usefulBuckets * samplesPerBucket;
-  const irL = new Float32Array(totalSamples);
-  const irR = new Float32Array(totalSamples);
 
-  // Velvet pulse count per bucket per band. At 48 kHz with 2 ms buckets,
-  // Nv = 3 → 7×3 = 21 pulses/bucket aggregate = 10 500 pulses/s, well
-  // above Karjalainen's 1500 smoothness threshold.
-  const Nv = Math.max(1, Math.round(samplesPerBucket * VELVET_DENSITY_PULSES_PER_SEC / sampleRate));
+  const earlyL = new Float32Array(totalSamples);
+  const earlyR = new Float32Array(totalSamples);
+  const lateL = new Float32Array(totalSamples);
+  const lateR = new Float32Array(totalSamples);
+
+  const NvBroadband = Math.max(1, Math.round(samplesPerBucket * VELVET_DENSITY_PULSES_PER_SEC / sampleRate));
+  const NvLF = Math.max(1, Math.round(samplesPerBucket * VELVET_DENSITY_LF_PULSES_PER_SEC / sampleRate));
   const nBands = Math.min(B, BAND_CENTERS_HZ.length);
 
   for (let bandIdx = 0; bandIdx < nBands; bandIdx++) {
     const cf = BAND_CENTERS_HZ[bandIdx];
-    const bandIRL = new Float32Array(totalSamples);
-    const bandIRR = new Float32Array(totalSamples);
+    const Nv = bandIdx <= VELVET_LF_BAND_INDEX ? NvLF : NvBroadband;
+    const bandEarlyL = new Float32Array(totalSamples);
+    const bandEarlyR = new Float32Array(totalSamples);
+    const bandLateL = new Float32Array(totalSamples);
+    const bandLateR = new Float32Array(totalSamples);
     const bandOff = recOff + bandIdx * T;
     let bandHasEnergy = false;
 
@@ -191,31 +216,43 @@ function buildStereoIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
       const E = histogram[bandOff + b];
       if (E <= 0) continue;
       bandHasEnergy = true;
-      // Parseval-correct amplitude — Nv impulses each at magnitude
-      // √(E/Nv) sum to bucket energy E (random sign cancels DC).
       const amp = Math.sqrt(E / Nv);
       const start = b * samplesPerBucket;
-      for (let n = 0; n < Nv; n++) {
-        // L channel — independent random position + sign.
-        const posL = start + (Math.random() * samplesPerBucket) | 0;
-        bandIRL[posL] += (Math.random() < 0.5 ? -1 : 1) * amp;
-        // R channel — fully independent draw → diffuse-field decorrelation.
-        const posR = start + (Math.random() * samplesPerBucket) | 0;
-        bandIRR[posR] += (Math.random() < 0.5 ? -1 : 1) * amp;
+      const isEarly = b < mixingBucket;
+      if (isEarly) {
+        // Same impulses on both channels — the HRTF panner will provide
+        // the L/R cue based on source direction.
+        for (let n = 0; n < Nv; n++) {
+          const pos = start + (Math.random() * samplesPerBucket) | 0;
+          const sign = Math.random() < 0.5 ? -1 : 1;
+          bandEarlyL[pos] += sign * amp;
+          bandEarlyR[pos] += sign * amp;
+        }
+      } else {
+        // Independent draws per channel for diffuse-field decorrelation.
+        for (let n = 0; n < Nv; n++) {
+          const posL = start + (Math.random() * samplesPerBucket) | 0;
+          bandLateL[posL] += (Math.random() < 0.5 ? -1 : 1) * amp;
+          const posR = start + (Math.random() * samplesPerBucket) | 0;
+          bandLateR[posR] += (Math.random() < 0.5 ? -1 : 1) * amp;
+        }
       }
     }
     if (!bandHasEnergy) continue;
 
-    // Bandpass-filter both channels, then sum into final IR.
-    biquadBandpassInPlace(bandIRL, cf, BAND_Q, sampleRate);
-    biquadBandpassInPlace(bandIRR, cf, BAND_Q, sampleRate);
+    biquadBandpassInPlace(bandEarlyL, cf, BAND_Q, sampleRate);
+    biquadBandpassInPlace(bandEarlyR, cf, BAND_Q, sampleRate);
+    biquadBandpassInPlace(bandLateL, cf, BAND_Q, sampleRate);
+    biquadBandpassInPlace(bandLateR, cf, BAND_Q, sampleRate);
     for (let i = 0; i < totalSamples; i++) {
-      irL[i] += bandIRL[i];
-      irR[i] += bandIRR[i];
+      earlyL[i] += bandEarlyL[i];
+      earlyR[i] += bandEarlyR[i];
+      lateL[i] += bandLateL[i];
+      lateR[i] += bandLateR[i];
     }
   }
 
-  return [irL, irR];
+  return { earlyL, earlyR, lateL, lateR };
 }
 
 // Loudness-target (RMS-based) IR normalisation. Phase 7.1 — replaced the
@@ -269,68 +306,65 @@ export async function startAudition({ precisionResult, receiverIdx }) {
 
   const sample = await loadSample();
 
-  // Build the per-channel IRs (L and R) — independent random sequences
-  // for the late tail produce the decorrelated diffuse field that real
-  // rooms have between ears. Direct + early reflections are identical
-  // on both channels (broadband Dirac).
-  const [irL, irR] = buildStereoIR(
+  // Phase 8.1 — split early (HRTF-shaped, single source-direction cue)
+  // from late (per-ear decorrelated, no HRTF). Two parallel convolution
+  // chains sum at the output. See buildStereoIRPair for the rationale.
+  const { earlyL, earlyR, lateL, lateR } = buildStereoIRPair(
     precisionResult.histogram,
     precisionResult.shape,
     precisionResult.bucketDtMs,
     receiverIdx,
     ctx.sampleRate,
   );
+  // RMS-target normalise each IR independently. Phase 7.1 — peak norm
+  // under-budgets convolution output by L1/L_∞ ratio (~30×), causing DAC
+  // clip on transients. RMS norm + DynamicsCompressor limiter caps it.
+  normaliseIR(earlyL);
+  normaliseIR(earlyR);
+  normaliseIR(lateL);
+  normaliseIR(lateR);
 
-  // Peak-normalise each channel using the direct-sound Dirac as the
-  // reference. We DON'T use convolver.normalize=true because Web Audio's
-  // equal-power normalisation reverses room loudness (quiet rooms scale
-  // up, loud rooms scale down), which is wrong for accurate auralization.
-  normaliseIR(irL);
-  normaliseIR(irR);
-
-  const irBuffer = ctx.createBuffer(2, irL.length, ctx.sampleRate);
-  irBuffer.getChannelData(0).set(irL);
-  irBuffer.getChannelData(1).set(irR);
+  const earlyBuffer = ctx.createBuffer(2, earlyL.length, ctx.sampleRate);
+  earlyBuffer.getChannelData(0).set(earlyL);
+  earlyBuffer.getChannelData(1).set(earlyR);
+  const lateBuffer = ctx.createBuffer(2, lateL.length, ctx.sampleRate);
+  lateBuffer.getChannelData(0).set(lateL);
+  lateBuffer.getChannelData(1).set(lateR);
 
   const source = ctx.createBufferSource();
   source.buffer = sample;
   source.loop = true;
 
-  // Phase 5 — HRTF spatialisation. PannerNode in 'HRTF' mode pre-shapes
-  // the dry signal with binaural cues (interaural time + level diff +
-  // pinna filtering) for the position of the dominant source relative
-  // to the listener BEFORE the room convolution. The result is "in-
-  // space" listening — speaker on the left actually feels left, sources
-  // overhead feel overhead — instead of "in-the-head" mono playback.
-  // Source centroid is L_w-weighted average of all sources; for typical
-  // PA configurations this lands at the dominant cluster.
+  // HRTF panner positioned at the L_w-weighted source centroid relative
+  // to the listener. Only feeds the EARLY convolver — late reverb stays
+  // direction-neutral because real diffuse fields arrive from all
+  // directions with average HRTF colouring, not the source's HRTF.
   const panner = ctx.createPanner();
   panner.panningModel = 'HRTF';
   panner.distanceModel = 'inverse';
   panner.refDistance = 1;
   panner.maxDistance = 100;
-  panner.rolloffFactor = 0.5;     // softer than physical 1/r — convolver already adds attenuation
+  panner.rolloffFactor = 0.5;
   const rel = sourceCentroidRelative(precisionResult, receiverIdx);
   if (rel) {
-    // State coords (x=right, y=depth-forward, z=up) → Web Audio coords
-    // (x=right, y=up, z=-forward). Listener is at origin facing -Z by
-    // default; we just place the panner at the source's relative offset.
     panner.positionX.value = rel.x;
     panner.positionY.value = rel.z;
     panner.positionZ.value = -rel.y;
   }
 
-  const convolver = ctx.createConvolver();
-  convolver.normalize = false;
-  convolver.buffer = irBuffer;
+  const earlyConv = ctx.createConvolver();
+  earlyConv.normalize = false;
+  earlyConv.buffer = earlyBuffer;
 
-  // Brick-wall limiter — catches residual peaks that exceed -1 dBFS from
-  // the convolver. Without it, even RMS-normalised IRs occasionally spike
-  // on speech onsets (every consonant has a sharp transient that excites
-  // many overlapping IR samples at once → output peak > 1.0 → DAC clip).
-  // 20:1 ratio + 0 ms knee + 1 ms attack = effectively a brickwall above
-  // threshold, transparent below. Matches mastering-stage limiter
-  // settings recommended by Välimäki & Reiss AES60 §5.
+  const lateConv = ctx.createConvolver();
+  lateConv.normalize = false;
+  lateConv.buffer = lateBuffer;
+
+  // Sum the two paths via a single GainNode acting as a mixer.
+  const mixer = ctx.createGain();
+  mixer.gain.value = 1.0;
+
+  // Brick-wall limiter — catches residual peaks. Phase 7.1.
   const limiter = ctx.createDynamicsCompressor();
   limiter.threshold.value = -1;
   limiter.knee.value = 0;
@@ -341,15 +375,21 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const gain = ctx.createGain();
   gain.gain.value = DEFAULT_GAIN;
 
+  // Path A: source → HRTF → early IR convolver → mixer
   source.connect(panner);
-  panner.connect(convolver);
-  convolver.connect(limiter);
+  panner.connect(earlyConv);
+  earlyConv.connect(mixer);
+  // Path B: source → late IR convolver → mixer (no HRTF, no panner)
+  source.connect(lateConv);
+  lateConv.connect(mixer);
+  // Common downstream: limiter → gain → out
+  mixer.connect(limiter);
   limiter.connect(gain);
   gain.connect(ctx.destination);
 
   source.start();
 
-  _activeChain = { source, panner, convolver, limiter, gain, mode: 'convolved' };
+  _activeChain = { source, panner, earlyConv, lateConv, mixer, limiter, gain, mode: 'convolved' };
 }
 
 // Compute the dominant source's position relative to the given listener,
@@ -386,12 +426,15 @@ function sourceCentroidRelative(precisionResult, receiverIdx) {
 // mutually exclusive; only one is ever live.
 export function stopAudition() {
   if (!_activeChain) return;
-  const { source, panner, convolver, limiter, gain } = _activeChain;
+  const { source, panner, convolver, earlyConv, lateConv, mixer, limiter, gain } = _activeChain;
   try { source.stop(); } catch (_) { /* already stopped */ }
   try {
     source.disconnect();
     if (panner) panner.disconnect();
     if (convolver) convolver.disconnect();
+    if (earlyConv) earlyConv.disconnect();
+    if (lateConv) lateConv.disconnect();
+    if (mixer) mixer.disconnect();
     if (limiter) limiter.disconnect();
     gain.disconnect();
   } catch (_) { /* ignore */ }

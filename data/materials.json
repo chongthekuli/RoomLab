@@ -11,9 +11,17 @@
     },
     {
       "id": "carpet-heavy",
-      "name": "Heavy carpet on concrete",
+      "name": "Heavy carpet on concrete (no underlay)",
       "absorption": [0.02, 0.06, 0.14, 0.37, 0.60, 0.65, 0.65],
-      "scattering": [0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.40]
+      "scattering": [0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.40],
+      "_source": "Beranek, Noise & Vibration Control Engineering 2nd ed. table 8.1 (carpet, heavy, glued direct to slab)"
+    },
+    {
+      "id": "carpet-heavy-underlay",
+      "name": "Heavy carpet on foam underlay",
+      "absorption": [0.08, 0.24, 0.57, 0.69, 0.71, 0.73, 0.70],
+      "scattering": [0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.40],
+      "_source": "Cox & D'Antonio, Acoustic Absorbers and Diffusers 2nd ed. table A.1 (thick pile carpet on foam underlay) — typical residential carpet, much higher absorption above 250 Hz than the bare-glue case"
     },
     {
       "id": "acoustic-tile",

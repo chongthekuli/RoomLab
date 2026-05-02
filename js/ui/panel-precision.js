@@ -57,6 +57,7 @@ export function mountPrecisionPanel({ materials }) {
           <span aria-hidden="true">🎧</span>
           Use closed-back headphones — speakers add their own room reverb on top of the simulation.
         </div>
+        <div id="precision-schroeder-note" class="audition-schroeder" hidden></div>
         <div class="audition-controls">
           <button id="precision-audition-btn" class="btn-audition" type="button" disabled
                   title="Play the speech sample convolved with this listener’s impulse response.">
@@ -269,7 +270,39 @@ function renderResults() {
     </div>
   `;
   drawEchogram(result, selectedIdx);
+  updateSchroederNote(result, m);
   applyGlossary(container);
+}
+
+// Schroeder frequency = 2000 · √(T60 / V). Below this frequency the room
+// is in the modal regime (discrete resonant peaks) which geometric ray
+// tracing cannot reproduce — the simulated IR uses statistical diffuse-
+// field synthesis instead. We display the cutoff so the user knows when
+// the audition's bass response is qualitative rather than quantitative.
+function updateSchroederNote(result, metrics) {
+  const note = document.getElementById('precision-schroeder-note');
+  if (!note) return;
+  const w = state.room?.width_m, d = state.room?.depth_m, h = state.room?.height_m;
+  const V = Number.isFinite(w) && Number.isFinite(d) && Number.isFinite(h) ? w * d * h : 0;
+  const t60 = metrics?.broadband?.t30_s ?? 0;
+  if (V <= 0 || t60 <= 0) {
+    note.hidden = true;
+    return;
+  }
+  const fs = 2000 * Math.sqrt(t60 / V);
+  if (!Number.isFinite(fs) || fs < 50) {
+    note.hidden = true;
+    return;
+  }
+  // Only worth surfacing when fs lands inside the audible bands that the
+  // engine actually synthesises (≥ 100 Hz) — large halls have fs < 50 Hz
+  // and the disclosure adds noise.
+  if (fs > 100) {
+    note.hidden = false;
+    note.textContent = `Below ~${Math.round(fs)} Hz (Schroeder freq for this V/T60), the simulation reflects diffuse-field statistics, not modal behaviour. Real rooms ring at specific frequencies; the simulation rings across the band.`;
+  } else {
+    note.hidden = true;
+  }
 }
 
 function drawEchogram(result, receiverIdx) {

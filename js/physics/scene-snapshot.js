@@ -28,11 +28,39 @@ export const PHYSICS_SCENE_VERSION = 1;
 // rough" default used when no measurement is available.
 const DEFAULT_SCATTERING = 0.10;
 
-// ODEON convention — volumetric receiver sphere radius. Smaller = sharper
-// impulse response but more rays needed to converge. Larger = blurred
-// early reflections. Overridable per-listener later.
+// ODEON convention — volumetric receiver sphere radius. The 0.5 m
+// default is correct for halls (V ≥ 1000 m³) where it captures
+// binaural-ear-spacing-equivalent energy without aliasing, but in
+// small rooms (V ≈ 30–100 m³) a fixed 0.5 m sphere is 12 % of the
+// shortest room dimension and over-counts grazing rays — late-tail
+// energy ends up ~2 dB louder than physical. Vorländer §11.3.3
+// recommends r ∝ V^(1/3) clamped to [0.1, 0.5] m.
+//
+// Adaptive scale: r = clamp((V/2000)^(1/3), MIN, MAX). For V=30 m³
+// gives r=0.25 m; V=200 m³ gives r=0.46 m; V≥2000 m³ gives r=0.5 m
+// (clamped). Per-listener override still wins via lst.receiver_radius_m.
 const DEFAULT_RECEIVER_RADIUS_M = 0.5;
+const MIN_RECEIVER_RADIUS_M = 0.1;
+const MAX_RECEIVER_RADIUS_M = 0.5;
+const RECEIVER_RADIUS_REFERENCE_VOLUME_M3 = 2000;
 const DEFAULT_EAR_HEIGHT_M = 1.2;
+
+function adaptiveReceiverRadius(roomVolume_m3) {
+  if (!Number.isFinite(roomVolume_m3) || roomVolume_m3 <= 0) {
+    return DEFAULT_RECEIVER_RADIUS_M;
+  }
+  const r = Math.cbrt(roomVolume_m3 / RECEIVER_RADIUS_REFERENCE_VOLUME_M3) * DEFAULT_RECEIVER_RADIUS_M;
+  return Math.max(MIN_RECEIVER_RADIUS_M, Math.min(MAX_RECEIVER_RADIUS_M, r));
+}
+
+function approximateRoomVolume(room) {
+  if (!room) return null;
+  const w = room.width_m, d = room.depth_m, h = room.height_m;
+  if (Number.isFinite(w) && Number.isFinite(d) && Number.isFinite(h)) {
+    return w * d * h;
+  }
+  return null;
+}
 
 // Default raised-cosine exponent when neither nominal_dispersion_deg nor
 // directivity_index_db is on the loudspeaker JSON. n=1 = cardioid =
@@ -173,6 +201,9 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
   }
 
   // --- Receivers — listeners as volumetric spheres. -------------------
+  // Default radius scales with cube-root of room volume (Vorländer §11.3.3)
+  // so small rooms don't over-count grazing rays.
+  const adaptiveR = adaptiveReceiverRadius(approximateRoomVolume(state.room));
   const listeners = state.listeners ?? [];
   const R = listeners.length;
   const recPositions = new Float32Array(R * 3);
@@ -184,7 +215,7 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     recPositions[i * 3 + 0] = lst.position.x;
     recPositions[i * 3 + 1] = lst.position.y;
     recPositions[i * 3 + 2] = (lst.elevation_m ?? 0) + DEFAULT_EAR_HEIGHT_M;
-    recRadii[i] = lst.receiver_radius_m ?? DEFAULT_RECEIVER_RADIUS_M;
+    recRadii[i] = lst.receiver_radius_m ?? adaptiveR;
     recLabels.push(lst.label ?? `Listener ${i + 1}`);
     recIds.push(lst.id ?? `L${i + 1}`);
   }
