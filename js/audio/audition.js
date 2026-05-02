@@ -74,29 +74,56 @@ function loadSample() {
 // Convert the precision tracer's per-band histogram for ONE listener
 // into a time-domain mono IR at the AudioContext's sample rate.
 //
-// HYBRID IR (Phase 2.1) — Dirac pulses for early arrivals, noise for
-// late diffuse tail:
+// PHASE 3 — per-band synthesis. Real rooms decay frequency-dependently:
+// air absorption + most materials kill high-frequency energy faster than
+// low. Carpet is a classic example — RT60 at 8 kHz might be 0.1 s while
+// at 250 Hz it's 0.5 s in the same room. Phase 2.1 used broadband white
+// noise → flat decay → "digital / synthetic" character. Phase 3 builds
+// the late tail per histogram band, runs each band through a biquad
+// bandpass at its centre frequency, and sums them into the final IR.
 //
-//   t < HYBRID_TRANSITION_MS:
-//     Single Dirac per bucket at amplitude = sqrt(energy). Preserves
-//     transient sharpness — direct sound stays clean, early reflections
-//     remain discrete.
+//   Direct + early reflections (t < HYBRID_TRANSITION_MS):
+//     Broadband Dirac per bucket. δ(t) has flat spectrum, so the dry
+//     speech transients (consonants) pass through the convolution intact.
 //
-//   t ≥ HYBRID_TRANSITION_MS:
-//     Random-sign uniform noise across bucket samples, scaled so per-
-//     bucket energy still matches the histogram. The diffuse late field
-//     is statistically dense in real rooms, so noise modelling is
-//     correct here. Smooth tail, no spring-reverb metallic comb.
+//   Late diffuse tail (t ≥ HYBRID_TRANSITION_MS):
+//     For each octave band:
+//       — Generate white noise modulated by that band's per-bucket energy
+//       — Apply a biquad bandpass at the band's centre frequency, Q=1.41
+//         (1-octave bandwidth, Audio EQ Cookbook formulas)
+//     Sum the 7 band-filtered tails. The result has correct frequency-
+//     dependent decay and sounds like air, not a phaser plug-in.
 //
-// HYBRID_TRANSITION_MS ≈ 80 ms is the classic perceptual "mixing time"
-// after which discrete reflections fuse into a diffuse field. Earlier
-// rooms (e.g., a 4×3×2.5 m booth) reach mixing in ~30 ms; halls in
-// ~150 ms. 80 ms is the standard average.
-//
-// Late tail truncation: any bucket below -60 dB of the peak bucket is
-// dropped (masked by foreground content, contributes only to perceived
-// "room presence"). Without this an absorbed room still gets a 2 s IR.
+// HYBRID_TRANSITION_MS ≈ 80 ms is the perceptual "mixing time" after
+// which discrete reflections fuse into a diffuse field. Earlier in
+// small booths, later in halls; 80 ms is the standard average.
 const HYBRID_TRANSITION_MS = 80;
+const BAND_CENTERS_HZ = [125, 250, 500, 1000, 2000, 4000, 8000];
+const BAND_Q = 1.41;     // 1-octave bandwidth
+
+// Single-pass biquad bandpass — Audio EQ Cookbook (Robert Bristow-Johnson,
+// "Cookbook formulae for audio EQ biquad filter coefficients"). Direct
+// Form I, in-place over a Float32Array.
+function biquadBandpassInPlace(samples, centerHz, Q, sampleRate) {
+  if (centerHz <= 0 || centerHz >= sampleRate / 2) return;
+  const w0 = (2 * Math.PI * centerHz) / sampleRate;
+  const cosw0 = Math.cos(w0);
+  const alpha = Math.sin(w0) / (2 * Q);
+  // BPF (constant 0 dB peak gain): b = [α, 0, -α], a = [1+α, -2cosw0, 1-α]
+  const a0 = 1 + alpha;
+  const b0 = alpha / a0;
+  const b2 = -alpha / a0;
+  const a1 = (-2 * cosw0) / a0;
+  const a2 = (1 - alpha) / a0;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const x = samples[i];
+    const y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2;
+    samples[i] = y;
+    x2 = x1; x1 = x;
+    y2 = y1; y1 = y;
+  }
+}
 
 function buildIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   const { bands: B, buckets: T } = shape;
@@ -125,31 +152,52 @@ function buildIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   const totalSamples = usefulBuckets * samplesPerBucket;
   const ir = new Float32Array(totalSamples);
 
-  // Hybrid threshold — bucket index where we switch from Dirac to noise.
   const hybridBucket = Math.ceil(HYBRID_TRANSITION_MS / bucketDtMs);
 
-  for (let b = 0; b < usefulBuckets; b++) {
+  // Direct + early reflections: broadband Dirac per bucket. Preserves
+  // transient sharpness. Sign alternates to avoid DC accumulation.
+  for (let b = 0; b < Math.min(hybridBucket, usefulBuckets); b++) {
     const energy = bucketEnergy[b];
     if (energy <= 0) continue;
     const start = b * samplesPerBucket;
+    const sign = (b & 1) ? -1 : 1;
+    ir[start] = sign * Math.sqrt(energy);
+  }
 
-    if (b < hybridBucket) {
-      // EARLY — single Dirac at the start of the bucket. Sign alternates
-      // so the pulse train doesn't accumulate DC if the user has pushed
-      // the gain up. Energy of one Dirac at amplitude A = A², so to
-      // match bucket energy E we need A = sqrt(E).
-      const sign = (b & 1) ? -1 : 1;
-      ir[start] = sign * Math.sqrt(energy);
-    } else {
-      // LATE — random-sign white noise across N=samplesPerBucket samples.
-      // Uniform [-1, 1] has variance 1/3, so per-sample amplitude scale
-      // sqrt(3·E/N) makes bucket energy = N × (1/3) × (3E/N) = E.
-      const amp = Math.sqrt(3 * energy / samplesPerBucket);
-      for (let i = 0; i < samplesPerBucket; i++) {
-        ir[start + i] = (Math.random() * 2 - 1) * amp;
+  // Late tail: per-band noise, bandpass-filtered, summed into IR.
+  // Skip if the early section already covers the whole IR.
+  if (usefulBuckets > hybridBucket) {
+    const lateStart = hybridBucket * samplesPerBucket;
+    const lateLen = totalSamples - lateStart;
+    // Map tracer band index → centre frequency. The tracer's bands
+    // array (scene.bands_hz) typically aligns with BAND_CENTERS_HZ but
+    // we reference the constant for safety. If B != BAND_CENTERS_HZ.length
+    // we just use as many as we have.
+    const nBands = Math.min(B, BAND_CENTERS_HZ.length);
+    for (let bandIdx = 0; bandIdx < nBands; bandIdx++) {
+      const cf = BAND_CENTERS_HZ[bandIdx];
+      // Build noise modulated by THIS band's per-bucket energy.
+      const bandIR = new Float32Array(lateLen);
+      const bandOff = recOff + bandIdx * T;
+      let bandHasEnergy = false;
+      for (let b = hybridBucket; b < usefulBuckets; b++) {
+        const E = histogram[bandOff + b];
+        if (E <= 0) continue;
+        bandHasEnergy = true;
+        const amp = Math.sqrt(3 * E / samplesPerBucket);
+        const localStart = (b - hybridBucket) * samplesPerBucket;
+        for (let i = 0; i < samplesPerBucket; i++) {
+          bandIR[localStart + i] = (Math.random() * 2 - 1) * amp;
+        }
       }
+      if (!bandHasEnergy) continue;
+      // Bandpass filter the noise to centre on this band's frequency.
+      biquadBandpassInPlace(bandIR, cf, BAND_Q, sampleRate);
+      // Sum into the final IR's late region.
+      for (let i = 0; i < lateLen; i++) ir[lateStart + i] += bandIR[i];
     }
   }
+
   return ir;
 }
 
