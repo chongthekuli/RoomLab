@@ -74,25 +74,30 @@ function loadSample() {
 // Convert the precision tracer's per-band histogram for ONE listener
 // into a time-domain mono IR at the AudioContext's sample rate.
 //
-// Phase-2 implementation: dense band-shaped white noise per bucket
-// (replaced the Phase-1 sparse Dirac-pulse-per-bucket which sounded
-// like a spring reverb tank because the regular pulse train creates
-// a frequency comb at 1/bucketDtMs Hz). Each histogram bucket of
-// duration `bucketDtMs` is filled with random-sign white noise scaled
-// so the bucket's total energy matches the histogram value. Result is
-// continuous decaying noise — exactly what real-room reverb looks
-// like in the time domain.
+// HYBRID IR (Phase 2.1) — Dirac pulses for early arrivals, noise for
+// late diffuse tail:
 //
-// Late tail truncation: any bucket whose energy is below -60 dB of
-// the peak bucket is below the audibility threshold relative to the
-// loudest reflection, so we drop it. Cuts IR length from 2 s to ~RT60
-// in absorbed rooms (smaller IR, less convolver cost).
+//   t < HYBRID_TRANSITION_MS:
+//     Single Dirac per bucket at amplitude = sqrt(energy). Preserves
+//     transient sharpness — direct sound stays clean, early reflections
+//     remain discrete.
 //
-// histogram: Float32Array shape [receivers, bands, buckets]
-// receiverIdx: which listener
-// bands × buckets: per shape
-// bucketDtMs: each bucket's duration (typically 2 ms)
-// sampleRate: AudioContext.sampleRate (typically 48 kHz)
+//   t ≥ HYBRID_TRANSITION_MS:
+//     Random-sign uniform noise across bucket samples, scaled so per-
+//     bucket energy still matches the histogram. The diffuse late field
+//     is statistically dense in real rooms, so noise modelling is
+//     correct here. Smooth tail, no spring-reverb metallic comb.
+//
+// HYBRID_TRANSITION_MS ≈ 80 ms is the classic perceptual "mixing time"
+// after which discrete reflections fuse into a diffuse field. Earlier
+// rooms (e.g., a 4×3×2.5 m booth) reach mixing in ~30 ms; halls in
+// ~150 ms. 80 ms is the standard average.
+//
+// Late tail truncation: any bucket below -60 dB of the peak bucket is
+// dropped (masked by foreground content, contributes only to perceived
+// "room presence"). Without this an absorbed room still gets a 2 s IR.
+const HYBRID_TRANSITION_MS = 80;
+
 function buildIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   const { bands: B, buckets: T } = shape;
   const bucketDtSec = bucketDtMs / 1000;
@@ -112,8 +117,7 @@ function buildIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   }
   if (peakEnergy <= 0) return new Float32Array(samplesPerBucket);
 
-  // Truncate at -60 dB below the peak bucket — anything quieter is
-  // masked by foreground content in normal listening.
+  // Truncate at -60 dB below the peak bucket.
   const cutoff = peakEnergy * 1e-6;
   let lastUseful = T - 1;
   while (lastUseful > 0 && bucketEnergy[lastUseful] < cutoff) lastUseful--;
@@ -121,19 +125,29 @@ function buildIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   const totalSamples = usefulBuckets * samplesPerBucket;
   const ir = new Float32Array(totalSamples);
 
-  // Second pass — spread each bucket's energy as random-sign white noise
-  // across its samples. Uniform [-1, 1] has variance 1/3, so the per-
-  // sample amplitude scale is sqrt(3 × E_bucket / N) to make bucket
-  // energy = N × variance × scale² = E_bucket. This preserves the
-  // tracer's ENERGY DECAY ENVELOPE while replacing the pulse-train
-  // spectral coloration with a flat (white-noise) spectrum.
+  // Hybrid threshold — bucket index where we switch from Dirac to noise.
+  const hybridBucket = Math.ceil(HYBRID_TRANSITION_MS / bucketDtMs);
+
   for (let b = 0; b < usefulBuckets; b++) {
     const energy = bucketEnergy[b];
     if (energy <= 0) continue;
-    const amp = Math.sqrt(3 * energy / samplesPerBucket);
     const start = b * samplesPerBucket;
-    for (let i = 0; i < samplesPerBucket; i++) {
-      ir[start + i] = (Math.random() * 2 - 1) * amp;
+
+    if (b < hybridBucket) {
+      // EARLY — single Dirac at the start of the bucket. Sign alternates
+      // so the pulse train doesn't accumulate DC if the user has pushed
+      // the gain up. Energy of one Dirac at amplitude A = A², so to
+      // match bucket energy E we need A = sqrt(E).
+      const sign = (b & 1) ? -1 : 1;
+      ir[start] = sign * Math.sqrt(energy);
+    } else {
+      // LATE — random-sign white noise across N=samplesPerBucket samples.
+      // Uniform [-1, 1] has variance 1/3, so per-sample amplitude scale
+      // sqrt(3·E/N) makes bucket energy = N × (1/3) × (3E/N) = E.
+      const amp = Math.sqrt(3 * energy / samplesPerBucket);
+      for (let i = 0; i < samplesPerBucket; i++) {
+        ir[start + i] = (Math.random() * 2 - 1) * amp;
+      }
     }
   }
   return ir;
@@ -183,14 +197,6 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const sample = await loadSample();
 
   // Build the listener-specific IR from the precision histogram.
-  // We DON'T peak-normalise the IR here — dense-noise IRs have most
-  // samples non-zero with low individual amplitude, so peak normalisation
-  // would over-amplify the body. Web Audio's `convolver.normalize = true`
-  // applies equal-power normalisation to the IR, scaling the output so
-  // overall loudness is comparable across rooms (a long-reverb cathedral
-  // and a dry studio audition at the same gain setting). Per the W3C
-  // Web Audio spec §1.34, this is the recommended path for "real" room
-  // IRs — manual normalisation is for synthetic / test impulses.
   const ir = buildIR(
     precisionResult.histogram,
     precisionResult.shape,
@@ -198,6 +204,17 @@ export async function startAudition({ precisionResult, receiverIdx }) {
     receiverIdx,
     ctx.sampleRate,
   );
+
+  // Peak-normalise the IR with the direct-sound Dirac as the reference.
+  // The hybrid IR's peak is the loudest early Dirac (typically the direct
+  // sound). Scaling that peak to 0.5 keeps the dry-direct level consistent
+  // across rooms while letting the late tail be physically proportional
+  // — a cathedral's late energy is naturally close to its direct level
+  // (washy), an absorbed studio's late tail is much smaller (dry).
+  // We DON'T use convolver.normalize=true because Web Audio's equal-power
+  // normalisation REVERSES room loudness (loud rooms scaled down, quiet
+  // rooms scaled up to match), which is wrong for accurate auralization.
+  normaliseIR(ir);
 
   const irBuffer = ctx.createBuffer(1, ir.length, ctx.sampleRate);
   irBuffer.getChannelData(0).set(ir);
@@ -207,7 +224,7 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   source.loop = true;
 
   const convolver = ctx.createConvolver();
-  convolver.normalize = true;
+  convolver.normalize = false;
   convolver.buffer = irBuffer;
 
   const gain = ctx.createGain();
