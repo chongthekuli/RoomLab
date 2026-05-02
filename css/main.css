@@ -2474,6 +2474,37 @@ section h3 {
   color: #99a;
   font-size: 0.85rem;
 }
+.avatar-loading-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(20, 24, 32, 0.85);
+  color: #cdd2db;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 140, 160, 0.25);
+  pointer-events: none;
+  z-index: 10;
+  letter-spacing: 0.02em;
+}
+.avatar-loading-overlay::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border: 2px solid rgba(120, 140, 160, 0.3);
+  border-top-color: #4aa3ff;
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: avatar-loading-spin 0.8s linear infinite;
+}
+@keyframes avatar-loading-spin {
+  to { transform: rotate(360deg); }
+}
 
 .listener-card.selected {
   border-color: var(--data-amber);

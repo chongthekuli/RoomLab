@@ -1615,9 +1615,13 @@ function initWalkthrough() {
 
   // Async GLTF character upgrade — if assets/models/hitman.glb exists, swap
   // the procedural avatar for the rigged model + AnimationMixer fast path.
-  // If the file is missing, the loader rejects and we keep the procedural
-  // avatar (fully playable). HEAD-probe-first to avoid the noisy 4xx in
-  // DevTools when no asset is shipped.
+  // HEAD-probe first: a 404 means no asset shipped yet → keep procedural
+  // (and skip the loader so DevTools stays clean). On 200, mark the
+  // procedural avatar as a transient stand-in: hide it AND show a loading
+  // indicator while the GLB streams + DRACO decoder cold-fetches from
+  // unpkg (first-visit cost, ~5-15s on a normal connection). When the rig
+  // resolves we swap it in; if anything fails we restore procedural.
+  riggedAvatarLoading = true;
   fetch('assets/models/hitman.glb', { method: 'HEAD' })
     .then(res => {
       if (!res.ok) throw new Error('no-asset');
@@ -1627,16 +1631,47 @@ function initWalkthrough() {
       riggedAvatar = rig;
       rig.root.position.copy(avatar.position);
       rig.root.rotation.copy(avatar.rotation);
+      // Procedural is hidden during load (when walk mode is active);
+      // reveal the rig if walk mode is currently on, leave hidden otherwise.
+      rig.root.visible = walkMode;
       scene.remove(avatar);
       scene.add(rig.root);
       tpController.character = rig.root;
       shadowsNeedRefresh = true;
+      riggedAvatarLoading = false;
+      hideAvatarLoadingOverlay();
     })
     .catch(err => {
+      // No asset OR load failed — fall back to procedural.
+      riggedAvatarLoading = false;
+      hideAvatarLoadingOverlay();
+      // Restore procedural avatar visibility based on current walk mode.
+      if (avatar) avatar.visible = walkMode;
       if (err?.message !== 'no-asset') {
         console.info('[walkthrough] rigged avatar unavailable:', err?.message ?? err);
       }
     });
+}
+
+let riggedAvatarLoading = false;
+let _avatarLoadingOverlay = null;
+
+function showAvatarLoadingOverlay() {
+  if (_avatarLoadingOverlay) return;
+  const v3 = document.getElementById('view-3d');
+  if (!v3) return;
+  const el = document.createElement('div');
+  el.className = 'avatar-loading-overlay';
+  el.textContent = 'Loading character…';
+  v3.appendChild(el);
+  _avatarLoadingOverlay = el;
+}
+
+function hideAvatarLoadingOverlay() {
+  if (_avatarLoadingOverlay) {
+    _avatarLoadingOverlay.remove();
+    _avatarLoadingOverlay = null;
+  }
 }
 
 function placeAvatarAtDefault() {
@@ -1683,10 +1718,21 @@ export function setWalkthroughMode(on) {
   walkMode = !!on;
   if (walkMode) {
     placeAvatarAtDefault();
-    avatar.visible = true;
+    // Hide the procedural cylinder placeholder while the rigged GLB is
+    // streaming — show a "Loading character…" overlay instead so the user
+    // doesn't see the ugly fallback rod-figure during the cold-cache
+    // ~5-15 s first-visit fetch. When the rig resolves the overlay clears
+    // and the rigged mesh becomes visible.
+    if (riggedAvatarLoading) {
+      avatar.visible = false;
+      showAvatarLoadingOverlay();
+    } else {
+      avatar.visible = true;
+    }
     avatar.scale.set(1, 1, 1);
     if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
     if (avatarParts?.spine) avatarParts.spine.rotation.set(0, 0, 0);
+    if (riggedAvatar) riggedAvatar.root.visible = true;
     if (controls) controls.enabled = false;
     activeCamera = walkCamera;
     tpController.enable();
@@ -1700,6 +1746,8 @@ export function setWalkthroughMode(on) {
       if (avatarParts?.body) avatarParts.body.rotation.set(0, 0, 0);
       if (avatarParts?.spine) avatarParts.spine.rotation.set(0, 0, 0);
     }
+    if (riggedAvatar) riggedAvatar.root.visible = false;
+    hideAvatarLoadingOverlay();
     if (controls) controls.enabled = true;
     activeCamera = camera;
     tpController?.disable();
