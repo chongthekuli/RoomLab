@@ -80,18 +80,16 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
 
   // --- Orientation fix ---
   // Mixamo / most DCC export facing −Z; RoomLAB's ThirdPersonController
-  // treats +Z as character-forward. If the head bone is on the −Z side of
-  // the bbox center, rotate the INNER scene 180°. Fix the model, not the
-  // controller — keeps the controller contract stable across different
-  // model sources (Mixamo, RPM, Quaternius all face different directions).
-  const headBone = findHeadBone(gltf.scene);
-  if (headBone) {
-    const headWorld = new THREE.Vector3();
-    headBone.getWorldPosition(headWorld);
-    const center = new THREE.Vector3();
-    new THREE.Box3().setFromObject(gltf.scene).getCenter(center);
-    if (headWorld.z < center.z) gltf.scene.rotation.y = Math.PI;
-  }
+  // treats +Z as character-forward. Rotate the INNER scene so the model
+  // faces +Z. Use the SHOULDERS as the orientation reference: the vector
+  // from right-shoulder to left-shoulder is reliably horizontal regardless
+  // of the export-axis convention, while head-bone position swings into
+  // the Y axis once Blender's `export_yup` flag is applied. Cross-product
+  // (left − right) × world-up = forward; if forward.z is negative we
+  // rotate 180° around Y. Falls back to a flat 180° flip when shoulders
+  // aren't found (covers most Mixamo / RPM exports as a safe default).
+  const facing = detectFacing(gltf.scene);
+  if (facing.z < -1e-3) gltf.scene.rotation.y = Math.PI;
 
   return {
     root,                // outer wrapper — move / rotate this
@@ -164,14 +162,42 @@ function pickAction(actions, tokens) {
   return null;
 }
 
-// Find the head bone for orientation detection. Covers the common Mixamo /
-// Unity / VRoid bone naming conventions.
-function findHeadBone(root) {
-  const patterns = [/head/i, /mixamorig.*head/i];
+// Find a bone whose name matches any of the given patterns.
+function findBone(root, patterns) {
   let hit = null;
   root.traverse(n => {
     if (hit) return;
     if (n.isBone && patterns.some(p => p.test(n.name))) hit = n;
   });
   return hit;
+}
+
+// Detect the character's forward direction in world space. Returns a unit
+// vector — +z indicates the model already faces +Z (the controller's
+// forward), −z means we need to rotate 180°.
+//
+// Method 1 (preferred): use shoulder bones. (left − right) × up = forward.
+// Method 2 (fallback): assume Mixamo convention — model faces −Z, return
+// (0, 0, −1) so the caller applies the 180° flip.
+function detectFacing(root) {
+  const rightShoulder = findBone(root, [
+    /right.?shoulder/i, /mixamorig.*rightshoulder/i, /right.?clavicle/i,
+  ]);
+  const leftShoulder = findBone(root, [
+    /left.?shoulder/i, /mixamorig.*leftshoulder/i, /left.?clavicle/i,
+  ]);
+  if (rightShoulder && leftShoulder) {
+    const rWorld = new THREE.Vector3();
+    const lWorld = new THREE.Vector3();
+    rightShoulder.getWorldPosition(rWorld);
+    leftShoulder.getWorldPosition(lWorld);
+    const rightAxis = lWorld.sub(rWorld).normalize(); // points left
+    // Forward is right-axis × world-up (right-handed cross). For a model
+    // facing +Z with up = +Y: rightAxis = (-1,0,0), cross (0,1,0) = (0,0,1).
+    const up = new THREE.Vector3(0, 1, 0);
+    const forward = new THREE.Vector3().crossVectors(rightAxis, up).normalize();
+    return forward;
+  }
+  // Fallback — Mixamo convention.
+  return new THREE.Vector3(0, 0, -1);
 }
