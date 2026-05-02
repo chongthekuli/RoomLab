@@ -19,6 +19,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { runPrecisionRender } from '../physics/precision/precision-engine.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { applyGlossary } from './glossary.js';
+import { startAudition, stopAudition, isAuditionPlaying, checkSampleAvailable } from '../audio/audition.js';
 
 let materialsRef;
 let currentAbort = null;
@@ -51,6 +52,19 @@ export function mountPrecisionPanel({ materials }) {
       </div>
       <div id="precision-results" class="precision-results" hidden></div>
       <canvas id="precision-echogram" class="precision-echogram" width="300" height="140" hidden></canvas>
+      <div id="precision-audition" class="precision-audition" hidden>
+        <div class="audition-advisory">
+          <span aria-hidden="true">🎧</span>
+          Use closed-back headphones — speakers add their own room reverb on top of the simulation.
+        </div>
+        <div class="audition-controls">
+          <button id="precision-audition-btn" class="btn-audition" type="button" disabled>
+            <span class="audition-icon" aria-hidden="true">▶</span>
+            <span class="audition-label">Audition at this listener</span>
+          </button>
+          <span id="precision-audition-state" class="audition-state"></span>
+        </div>
+      </div>
       <div id="precision-error" class="precision-error" hidden></div>
     </div>
   `;
@@ -58,6 +72,21 @@ export function mountPrecisionPanel({ materials }) {
   root.querySelector('#precision-render-btn').addEventListener('click', runRender);
   root.querySelector('#precision-cancel-btn').addEventListener('click', cancelRender);
   root.querySelector('#precision-rerender-btn').addEventListener('click', runRender);
+  root.querySelector('#precision-audition-btn').addEventListener('click', toggleAudition);
+
+  // HEAD-probe the audio sample at panel mount so the button can show
+  // a clear disabled-state tooltip if the file isn't shipped yet.
+  checkSampleAvailable().then(ok => {
+    const btn = root.querySelector('#precision-audition-btn');
+    if (!btn) return;
+    if (!ok) {
+      btn.title = 'No audio sample at assets/audio/testing-1-2-3.mp3 — drop one in to enable.';
+    } else {
+      btn.title = 'Convolve the speech sample with this listener’s impulse response.';
+      btn.dataset.sampleReady = '1';
+    }
+    updateAuditionUI();
+  });
 
   // Any scene edit invalidates a cached render.
   on('room:changed', markStale);
@@ -70,6 +99,7 @@ export function mountPrecisionPanel({ materials }) {
   // re-derive. Re-render without marking stale.
   on('ambient:changed', () => { if (state.results.precision) renderResults(); });
   on('scene:reset', () => {
+    stopAudition();
     state.results.precision = null;
     state.results.engines.precision.lastRun = null;
     state.results.engines.precision.staleAt = null;
@@ -77,8 +107,12 @@ export function mountPrecisionPanel({ materials }) {
     emit('precision:changed');
   });
   // Listener selection changes only the displayed receiver, not the trace.
+  // Stop audition so the user explicitly re-starts at the new listener
+  // — silently swapping IRs mid-playback would mask the spatial cue.
   on('listener:selected', () => {
+    stopAudition();
     if (state.results.precision) renderResults();
+    updateAuditionUI();
   });
   updateUI();
 }
@@ -138,6 +172,9 @@ function cancelRender() {
 
 function markStale() {
   if (!state.results.precision) return;
+  // Audio convolution uses the cached IR; stop it so the user doesn't
+  // hear the old room while staring at the "scene changed" banner.
+  stopAudition();
   state.results.engines.precision.staleAt = Date.now();
   updateUI();
   emit('precision:changed');
@@ -304,6 +341,7 @@ function updateUI() {
   const progressEl = document.getElementById('precision-progress');
   const resultsEl = document.getElementById('precision-results');
   const echogramEl = document.getElementById('precision-echogram');
+  const auditionEl = document.getElementById('precision-audition');
   const staleEl = document.getElementById('precision-stale');
   const renderBtn = document.getElementById('precision-render-btn');
   const cancelBtn = document.getElementById('precision-cancel-btn');
@@ -317,7 +355,47 @@ function updateUI() {
   if (cancelBtn) cancelBtn.hidden = !inProgress;
   if (resultsEl) resultsEl.hidden = !hasResult || inProgress;
   if (echogramEl) echogramEl.hidden = !hasResult || inProgress;
+  if (auditionEl) auditionEl.hidden = !hasResult || inProgress;
   if (staleEl) staleEl.hidden = !isStale || inProgress;
+  updateAuditionUI();
+}
+
+function updateAuditionUI() {
+  const btn = document.getElementById('precision-audition-btn');
+  const stateEl = document.getElementById('precision-audition-state');
+  if (!btn) return;
+  const hasResult = !!state.results.precision;
+  const sampleReady = btn.dataset.sampleReady === '1';
+  const playing = isAuditionPlaying();
+  btn.disabled = !hasResult || !sampleReady;
+  btn.querySelector('.audition-icon').textContent = playing ? '■' : '▶';
+  btn.querySelector('.audition-label').textContent = playing ? 'Stop' : 'Audition at this listener';
+  if (stateEl) {
+    if (!sampleReady) stateEl.textContent = 'no audio sample';
+    else if (!hasResult) stateEl.textContent = 'render first';
+    else if (playing) stateEl.textContent = 'playing through your headphones';
+    else stateEl.textContent = '';
+  }
+}
+
+async function toggleAudition() {
+  if (isAuditionPlaying()) {
+    stopAudition();
+    updateAuditionUI();
+    return;
+  }
+  const result = state.results.precision;
+  if (!result) return;
+  const selected = getSelectedListener();
+  const idx = selected ? state.listeners.findIndex(l => l.id === selected.id) : 0;
+  if (idx < 0) return;
+  try {
+    await startAudition({ precisionResult: result, receiverIdx: idx });
+    updateAuditionUI();
+  } catch (err) {
+    showError(`Audition failed: ${err.message ?? err}`);
+    updateAuditionUI();
+  }
 }
 
 function showError(msg) {

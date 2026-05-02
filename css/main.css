@@ -3013,6 +3013,57 @@ section h3 {
   background: #0a0d12;
 }
 
+.precision-audition {
+  margin-top: var(--space-3);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(20, 24, 32, 0.4);
+}
+.audition-advisory {
+  font-size: 11px;
+  color: var(--muted-dim, #8a93a3);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+.audition-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.btn-audition {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-elev, #1c2028);
+  border: 1px solid var(--border, #2a2f38);
+  border-radius: 4px;
+  color: #cdd2db;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.btn-audition:hover:not(:disabled) {
+  background: rgba(74, 163, 255, 0.12);
+  border-color: rgba(74, 163, 255, 0.4);
+}
+.btn-audition:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.audition-icon {
+  font-size: 11px;
+  color: #4aa3ff;
+}
+.audition-state {
+  font-size: 11px;
+  color: var(--muted-dim, #8a93a3);
+  font-style: italic;
+}
+
 .precision-error {
   margin-top: var(--space-2);
   padding: 0.5rem 0.7rem;
