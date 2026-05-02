@@ -72,38 +72,52 @@ function loadSample() {
 }
 
 // Convert the precision tracer's per-band histogram for ONE listener
-// into a time-domain mono IR at the AudioContext's sample rate.
+// into a time-domain stereo IR at the AudioContext's sample rate.
 //
-// PHASE 3 — per-band synthesis. Real rooms decay frequency-dependently:
-// air absorption + most materials kill high-frequency energy faster than
-// low. Carpet is a classic example — RT60 at 8 kHz might be 0.1 s while
-// at 250 Hz it's 0.5 s in the same room. Phase 2.1 used broadband white
-// noise → flat decay → "digital / synthetic" character. Phase 3 builds
-// the late tail per histogram band, runs each band through a biquad
-// bandpass at its centre frequency, and sums them into the final IR.
+// PHASE 6 — filtered velvet noise (Karjalainen / Välimäki / Schlecht).
+// Earlier phases used a single Dirac per histogram bucket for the early
+// section and dense white noise for the late. The early-section Dirac
+// train is a 500 Hz comb spectrum (= 1/bucketDt) and survived as the
+// dominant residual artefact through Phases 2.1–5 — the "digital voice"
+// the user kept hearing was the comb stamping speech with a half-octave
+// vocoder character at every multiple of 500 Hz.
 //
-//   Direct + early reflections (t < HYBRID_TRANSITION_MS):
-//     Broadband Dirac per bucket. δ(t) has flat spectrum, so the dry
-//     speech transients (consonants) pass through the convolution intact.
+// Filtered velvet noise replaces both code paths with a single
+// stochastic synthesis that's been the SOTA for late-reverb modelling
+// since Karjalainen 2002 (and Schlecht 2017 *Applied Sciences* showed
+// it equivalent to Schroeder/FDN reverb at 1/10 the multiply count):
 //
-//   Late diffuse tail (t ≥ HYBRID_TRANSITION_MS):
-//     For each octave band:
-//       — Generate white noise modulated by that band's per-bucket energy
-//       — Apply a biquad bandpass at the band's centre frequency, Q=1.41
-//         (1-octave bandwidth, Audio EQ Cookbook formulas)
-//     Sum the 7 band-filtered tails. The result has correct frequency-
-//     dependent decay and sounds like air, not a phaser plug-in.
+//   For each band b (125, 250, 500, 1k, 2k, 4k, 8k Hz):
+//     For each histogram bucket t with band-energy E_b,t > 0:
+//       Place Nv ≈ ⌈samplesPerBucket × ρ / sampleRate⌉ random-position
+//       random-sign impulses at amplitude √(E_b,t / Nv) inside the
+//       bucket's sample range.
+//     Run that band's impulse stream through a biquad bandpass at the
+//     band's centre frequency, Q = 1.41 (1-octave bandwidth).
+//   Sum the 7 band streams.
 //
-// HYBRID_TRANSITION_MS ≈ 80 ms is the perceptual "mixing time" after
-// which discrete reflections fuse into a diffuse field. Earlier in
-// small booths, later in halls; 80 ms is the standard average.
-const HYBRID_TRANSITION_MS = 80;
+// ρ = VELVET_DENSITY_PULSES_PER_SEC sets the broadband pulse density.
+// 1500 pulses/s is the smoothness threshold per Karjalainen 2002 — below
+// it the noise is audibly "ratty"; above it perceptually equivalent to
+// Gaussian white noise. With 7 bands we get 7×Nv aggregate density
+// which is comfortably above the threshold.
+//
+// Diracs are no longer special-cased for direct sound — the filtered
+// velvet impulses still produce a sharp transient response (each impulse
+// becomes a brief band-shaped wavelet of length ~Q/cf seconds) and the
+// per-band scattering-in-time of multiple impulses naturally avoids the
+// comb without losing transient identity for speech consonants.
 const BAND_CENTERS_HZ = [125, 250, 500, 1000, 2000, 4000, 8000];
 const BAND_Q = 1.41;     // 1-octave bandwidth
+const VELVET_DENSITY_PULSES_PER_SEC = 1500;
 
 // Single-pass biquad bandpass — Audio EQ Cookbook (Robert Bristow-Johnson,
 // "Cookbook formulae for audio EQ biquad filter coefficients"). Direct
-// Form I, in-place over a Float32Array.
+// Form II Transposed for numerical stability at low centre frequencies
+// on Float32Array — Direct Form I drifts ~4 bits in the 125 Hz band at
+// 48 kHz because |1 - 2cos(w0) + 1| ≈ 2.6e-4 needs more dynamic range
+// than f32 has. DF2T keeps the magnitude of internal state bounded.
+// (Smith, "Introduction to Digital Filters" §B.6; Cookbook §3.2)
 function biquadBandpassInPlace(samples, centerHz, Q, sampleRate) {
   if (centerHz <= 0 || centerHz >= sampleRate / 2) return;
   const w0 = (2 * Math.PI * centerHz) / sampleRate;
@@ -115,32 +129,29 @@ function biquadBandpassInPlace(samples, centerHz, Q, sampleRate) {
   const b2 = -alpha / a0;
   const a1 = (-2 * cosw0) / a0;
   const a2 = (1 - alpha) / a0;
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  let s1 = 0, s2 = 0;
   for (let i = 0; i < samples.length; i++) {
     const x = samples[i];
-    const y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2;
+    const y = b0 * x + s1;
+    s1 = -a1 * y + s2;
+    s2 = b2 * x - a2 * y;
     samples[i] = y;
-    x2 = x1; x1 = x;
-    y2 = y1; y1 = y;
   }
 }
 
-// Build a 2-channel IR — direct + early Diracs are the SAME on both
-// channels (real direct sound has no ear-to-ear difference for an on-
-// axis source), but the late noise tail is INDEPENDENTLY synthesised
-// per channel. Each ear sees its own random sequence within each
-// histogram bucket, so the diffuse field is decorrelated between L
-// and R — which is exactly what real rooms produce. The decorrelation
-// is the dominant perceptual cue for "out of the head" reverb in
-// headphone listening; without it, a mono IR collapses the room to a
-// point inside your skull regardless of how realistic the decay shape
-// is. Phase 4 of auralization.
+// Build a 2-channel IR via filtered velvet noise (Phase 6). Direct,
+// early, and late are now ONE code path — per band, place Nv random-
+// position random-sign impulses per bucket, run the band's impulse
+// stream through a biquad bandpass, sum across bands. L and R channels
+// use independent random draws → decorrelated diffuse field for the
+// out-of-head listening cue (Phase 4 win retained).
 function buildStereoIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   const { bands: B, buckets: T } = shape;
   const bucketDtSec = bucketDtMs / 1000;
   const samplesPerBucket = Math.max(1, Math.round(bucketDtSec * sampleRate));
 
-  // Broadband energy per bucket + peak (for truncation).
+  // Broadband energy per bucket → find peak → truncate at -60 dB. Peak
+  // calc only used for IR truncation length, not for synthesis amplitude.
   const bucketEnergy = new Float32Array(T);
   const recOff = receiverIdx * B * T;
   let peakEnergy = 0;
@@ -155,7 +166,6 @@ function buildStereoIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   if (peakEnergy <= 0) {
     return [new Float32Array(samplesPerBucket), new Float32Array(samplesPerBucket)];
   }
-
   const cutoff = peakEnergy * 1e-6;
   let lastUseful = T - 1;
   while (lastUseful > 0 && bucketEnergy[lastUseful] < cutoff) lastUseful--;
@@ -164,50 +174,44 @@ function buildStereoIR(histogram, shape, bucketDtMs, receiverIdx, sampleRate) {
   const irL = new Float32Array(totalSamples);
   const irR = new Float32Array(totalSamples);
 
-  const hybridBucket = Math.ceil(HYBRID_TRANSITION_MS / bucketDtMs);
+  // Velvet pulse count per bucket per band. At 48 kHz with 2 ms buckets,
+  // Nv = 3 → 7×3 = 21 pulses/bucket aggregate = 10 500 pulses/s, well
+  // above Karjalainen's 1500 smoothness threshold.
+  const Nv = Math.max(1, Math.round(samplesPerBucket * VELVET_DENSITY_PULSES_PER_SEC / sampleRate));
+  const nBands = Math.min(B, BAND_CENTERS_HZ.length);
 
-  // Direct + early reflections — same on both channels (broadband Dirac).
-  for (let b = 0; b < Math.min(hybridBucket, usefulBuckets); b++) {
-    const energy = bucketEnergy[b];
-    if (energy <= 0) continue;
-    const start = b * samplesPerBucket;
-    const sign = (b & 1) ? -1 : 1;
-    const a = sign * Math.sqrt(energy);
-    irL[start] = a;
-    irR[start] = a;
-  }
+  for (let bandIdx = 0; bandIdx < nBands; bandIdx++) {
+    const cf = BAND_CENTERS_HZ[bandIdx];
+    const bandIRL = new Float32Array(totalSamples);
+    const bandIRR = new Float32Array(totalSamples);
+    const bandOff = recOff + bandIdx * T;
+    let bandHasEnergy = false;
 
-  // Late tail — per-band noise, INDEPENDENT random sequences per channel.
-  if (usefulBuckets > hybridBucket) {
-    const lateStart = hybridBucket * samplesPerBucket;
-    const lateLen = totalSamples - lateStart;
-    const nBands = Math.min(B, BAND_CENTERS_HZ.length);
-
-    // Build both channels' noise per band, filter independently, sum.
-    for (let bandIdx = 0; bandIdx < nBands; bandIdx++) {
-      const cf = BAND_CENTERS_HZ[bandIdx];
-      const bandIRL = new Float32Array(lateLen);
-      const bandIRR = new Float32Array(lateLen);
-      const bandOff = recOff + bandIdx * T;
-      let bandHasEnergy = false;
-      for (let b = hybridBucket; b < usefulBuckets; b++) {
-        const E = histogram[bandOff + b];
-        if (E <= 0) continue;
-        bandHasEnergy = true;
-        const amp = Math.sqrt(3 * E / samplesPerBucket);
-        const localStart = (b - hybridBucket) * samplesPerBucket;
-        for (let i = 0; i < samplesPerBucket; i++) {
-          bandIRL[localStart + i] = (Math.random() * 2 - 1) * amp;
-          bandIRR[localStart + i] = (Math.random() * 2 - 1) * amp;
-        }
+    for (let b = 0; b < usefulBuckets; b++) {
+      const E = histogram[bandOff + b];
+      if (E <= 0) continue;
+      bandHasEnergy = true;
+      // Parseval-correct amplitude — Nv impulses each at magnitude
+      // √(E/Nv) sum to bucket energy E (random sign cancels DC).
+      const amp = Math.sqrt(E / Nv);
+      const start = b * samplesPerBucket;
+      for (let n = 0; n < Nv; n++) {
+        // L channel — independent random position + sign.
+        const posL = start + (Math.random() * samplesPerBucket) | 0;
+        bandIRL[posL] += (Math.random() < 0.5 ? -1 : 1) * amp;
+        // R channel — fully independent draw → diffuse-field decorrelation.
+        const posR = start + (Math.random() * samplesPerBucket) | 0;
+        bandIRR[posR] += (Math.random() < 0.5 ? -1 : 1) * amp;
       }
-      if (!bandHasEnergy) continue;
-      biquadBandpassInPlace(bandIRL, cf, BAND_Q, sampleRate);
-      biquadBandpassInPlace(bandIRR, cf, BAND_Q, sampleRate);
-      for (let i = 0; i < lateLen; i++) {
-        irL[lateStart + i] += bandIRL[i];
-        irR[lateStart + i] += bandIRR[i];
-      }
+    }
+    if (!bandHasEnergy) continue;
+
+    // Bandpass-filter both channels, then sum into final IR.
+    biquadBandpassInPlace(bandIRL, cf, BAND_Q, sampleRate);
+    biquadBandpassInPlace(bandIRR, cf, BAND_Q, sampleRate);
+    for (let i = 0; i < totalSamples; i++) {
+      irL[i] += bandIRL[i];
+      irR[i] += bandIRR[i];
     }
   }
 
