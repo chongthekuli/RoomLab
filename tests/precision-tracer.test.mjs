@@ -99,15 +99,16 @@ function makeShoebox({ recPos = [8, 5, 1.5], recR = 0.5 } = {}) {
     const v = result.histogram[band * result.shape.buckets + t];
     if (v > 0) { firstBucket = t; break; }
   }
-  ok(firstBucket === 3 || firstBucket === 4,
-    `Direct path: first populated bucket = 3 or 4 (got ${firstBucket}; arrival ≈ 7.3-8.7 ms)`);
-  // With maxBounces=1, only first-segment hits are logged. Total hit
-  // count should be proportional to solid angle subtended by the 0.5 m
-  // receiver at 3 m:  Ω/(4π) = π·r² / (4π·d²) = r²/(4d²) = 0.25/36 ≈ 6.9e-3.
-  // So ~50,000 × 0.0069 ≈ 347 expected hits. Allow wide band: 200-550.
-  const expectedHits = 50000 * 0.25 / 36;
-  ok(result.hitCount > expectedHits * 0.6 && result.hitCount < expectedHits * 1.6,
-    `First-segment hit count ≈ ${expectedHits.toFixed(0)} (got ${result.hitCount})`);
+  ok(firstBucket === 4,
+    `Direct path: first populated bucket = 4 (got ${firstBucket}; arrival 8.74 ms / 2 ms = bucket 4 exact under analytical injection)`);
+  // Phase 11.A — direct sound is now ANALYTICAL, not stochastic.
+  // hitCount counts per-(source, receiver) analytical injections (1 each)
+  // PLUS any ray-bounce receiver crossings on segments after the first.
+  // For maxBounces=1 (only direct + one reflection segment, with first-
+  // segment receiver crossings deliberately skipped per the analytical
+  // path), there's exactly 1 analytical hit and ~0 ray hits.
+  ok(result.hitCount === 1,
+    `hitCount = 1 (analytical direct only, with maxBounces=1 and first-segment ray crossings skipped) (got ${result.hitCount})`);
 }
 
 // ---- Energy decay: monotonic-ish decrease with time in long window -----

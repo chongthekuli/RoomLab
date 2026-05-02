@@ -32,11 +32,20 @@
 // AudioContext. The IR is rebuilt every time `play()` is called so it
 // reflects the most recent precision render + listener selection.
 
+import { computeRectangularModes, buildModeFilterChain } from './room-modes.js';
+
 let _audioCtx = null;
 let _sampleBuffer = null;
 let _activeChain = null;          // { source, convolver, gain }
 let _samplePromise = null;
 let _saturatorCurve = null;
+// Phase 10 — multiband limiter worklet registration state.
+//   null    = not yet attempted to load
+//   Promise = load in flight (await it)
+//   true    = worklet is registered, AudioWorkletNode is safe to construct
+//   false   = worklet load failed → fall back to WaveShaper soft-clip
+let _limiterWorkletState = null;
+const LIMITER_WORKLET_URL = 'js/audio/multiband-limiter-worklet.js';
 
 // Phase 9.7 — master gain trimmed 0.6 → 0.5. Combined with the
 // DC-blocking HPF below, gives ~3 dB more headroom before the
@@ -81,6 +90,38 @@ function getCtx() {
   _audioCtx = new Ctx();
   if (!_saturatorCurve) _saturatorCurve = buildSoftSaturatorCurve();
   return _audioCtx;
+}
+
+// Phase 10 — register the multiband-limiter worklet exactly once per
+// AudioContext. Called from startAudition() before the chain is built.
+// Returns:
+//   true  — worklet is registered, caller may build an AudioWorkletNode
+//   false — worklet failed to load (no AudioWorklet API, or fetch error,
+//           or the worklet script failed to register). Caller falls back
+//           to the legacy WaveShaper soft-clip path.
+// Idempotent: subsequent calls return the cached state.
+async function ensureLimiterWorklet() {
+  if (_limiterWorkletState === true) return true;
+  if (_limiterWorkletState === false) return false;
+  if (_limiterWorkletState && typeof _limiterWorkletState.then === 'function') {
+    return _limiterWorkletState;
+  }
+  const ctx = getCtx();
+  if (!ctx.audioWorklet || typeof ctx.audioWorklet.addModule !== 'function') {
+    _limiterWorkletState = false;
+    return false;
+  }
+  _limiterWorkletState = ctx.audioWorklet.addModule(LIMITER_WORKLET_URL)
+    .then(() => {
+      _limiterWorkletState = true;
+      return true;
+    })
+    .catch((err) => {
+      console.warn('[audition] multiband-limiter worklet failed to load — falling back to WaveShaper soft-clip:', err);
+      _limiterWorkletState = false;
+      return false;
+    });
+  return _limiterWorkletState;
 }
 
 // Fetches and decodes the speech sample exactly once per session.
@@ -349,12 +390,15 @@ function buildStereoIRPair(histogram, shape, bucketDtMs, receiverIdx, sampleRate
 // level across rooms. The user can always crank the master gain if they
 // want a long-tail room to feel proportionally louder.
 const TYPICAL_INPUT_RMS = 0.25;
-// Phase 9.8 — lowered 0.18 → 0.12. Without the compressor in the chain,
-// peaks rely entirely on the WaveShaper for boundary safety. Speech has
-// a 4–6× crest factor; targeting RMS 0.12 keeps typical peaks at 0.7
-// (right at the saturator threshold, no THD added) and worst-case 0.85
-// (still safely in the soft-clip region, not the hard boundary).
-const OUTPUT_RMS_TARGET = 0.12;
+// Phase 9.9 — tightened 0.12 → 0.08. With LF-heavy carpet rooms the
+// convolver output's bass-band crest factor reaches 8–10× (vs 4–6×
+// for typical speech) — the LF buildup integrates speech transients
+// into peaks that exceed the saturator threshold. RMS 0.08 keeps
+// worst-case LF peaks at 0.8, just inside the saturator's soft-clip
+// region. User can boost their headphone gain ~3 dB to compensate
+// for the quieter monitoring level until the AudioWorklet multiband
+// limiter (Phase 10) ships proper per-band dynamics.
+const OUTPUT_RMS_TARGET = 0.08;
 
 function normaliseIR(ir) {
   if (ir.length === 0) return ir;
@@ -396,6 +440,12 @@ export async function startAudition({ precisionResult, receiverIdx }) {
 
   const sample = await loadSample();
 
+  // Phase 10 — load the multiband-limiter worklet (idempotent). If it
+  // fails to load (older browser, fetch error) the chain falls back to
+  // the legacy WaveShaper soft-clip. We await BEFORE building the chain
+  // so we know which limiter node to insert.
+  const limiterReady = await ensureLimiterWorklet();
+
   // Phase 8.1 — split early (HRTF-shaped, single source-direction cue)
   // from late (per-ear decorrelated, no HRTF). Two parallel convolution
   // chains sum at the output. See buildStereoIRPair for the rationale.
@@ -425,17 +475,29 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   source.buffer = sample;
   source.loop = true;
 
-  // Phase 9.7 — subsonic high-pass on the source. The MP3 sample carries
-  // 30–60 Hz residual content (TTS / phone-recording rumble + MP3 codec
-  // pre-echo) that no real speaker would reproduce but a Web Audio
-  // convolver dutifully convolves with the LF-heavy IR of a carpeted
-  // room — producing audible sub-bass artefacts on transients. 60 Hz
-  // 2nd-order Butterworth HPF kills it without touching speech
-  // fundamentals (male voice ~80 Hz minimum). Q = 0.707 = no resonance.
+  // Phase 9.7 — subsonic high-pass on the source. Cuts 30–60 Hz rumble
+  // from MP3 codec / TTS source. Q = 0.707 = no resonance.
   const hpf = ctx.createBiquadFilter();
   hpf.type = 'highpass';
   hpf.frequency.value = 60;
   hpf.Q.value = 0.707;
+
+  // Phase 9.9 → Phase 10 — LF-band shelf cut, now -1 dB (was -4 dB).
+  // The original -4 dB shelf was a Phase 9.9 same-day workaround for
+  // the HIFI preset's longer LF tail clipping the WaveShaper soft-clip
+  // path. With the Phase 10 multiband limiter handling LF dynamics
+  // properly (5 ms attack / 300 ms release / 10:1 ratio on the <200 Hz
+  // band), the shelf no longer NEEDS to do gain reduction — but a small
+  // residual cut keeps the LF band away from the limiter threshold on
+  // the steady-state RMS so the limiter only engages on actual peaks,
+  // not the broadband signal floor. -1 dB is below the JND for spectral
+  // tilt (Toole, "Sound Reproduction" 3rd ed. §17.4 ≈ 1 dB) so the
+  // tonal balance is preserved. If A/B testing confirms the multiband
+  // limiter is sufficient, this can drop to 0 in a follow-up.
+  const lfShelf = ctx.createBiquadFilter();
+  lfShelf.type = 'lowshelf';
+  lfShelf.frequency.value = 200;
+  lfShelf.gain.value = -1;
 
   // HRTF panner positioned at the L_w-weighted source centroid relative
   // to the listener. Only feeds the EARLY convolver — late reverb stays
@@ -466,30 +528,82 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   const mixer = ctx.createGain();
   mixer.gain.value = 1.0;
 
-  // Phase 9.8 — DynamicsCompressor REMOVED from the chain. Even at
-  // 200 ms release / 2:1 ratio it pumped audibly on LF-heavy content
-  // (release window > 25 cycles of 125 Hz means each speech transient
-  // triggered gain reduction that breathed for 200 ms before recovery,
-  // perceived as LF distortion). The proper fix is a multiband
-  // AudioWorklet limiter (Phase 10 backlog). Until then we rely on:
-  //   1. Dynamic IR-length-aware RMS normalisation (target 0.12 RMS)
-  //      to keep typical peaks at 0.7 = right at saturator threshold
-  //   2. WaveShaper hard-knee soft-clip for the rare 0.7–1.0 transient
-  // No envelope follower in the chain → no pumping, period.
-  const limiter = ctx.createWaveShaper();
-  limiter.curve = _saturatorCurve;
-  limiter.oversample = '4x';
+  // Phase 10 — proper 3-band Linkwitz-Riley multiband limiter. Splits
+  // the convolver output into LF (<200 Hz) / MF (200–2k) / HF (>2k),
+  // applies independent envelope-follower limiting per band (LF: 5 ms
+  // attack / 300 ms release / soft 6 dB knee; MF: 1 ms / 50 ms; HF:
+  // 0.5 ms / 30 ms), then sums the bands. The 300 ms LF release
+  // window is long enough to be inaudible per Tan & Moore J.AES 2003
+  // — pumping is only heard when the release < 1 / pumping_freq, and
+  // 300 ms covers ~9 cycles of 30 Hz so any modulation is below the
+  // perception threshold.
+  //
+  // If the AudioWorklet API or the worklet script load failed, we fall
+  // back to the legacy Phase 9.8 WaveShaper soft-clip so audition still
+  // works on Chrome < 66 / Firefox < 76 / Safari < 14.1. Those browsers
+  // will still hear the LF crack on HIFI content — there's no fixing
+  // that without an audio-thread compressor — but at least audition
+  // doesn't hard-fail.
+  let limiter;
+  if (limiterReady) {
+    try {
+      limiter = new AudioWorkletNode(ctx, 'multiband-limiter', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+      });
+    } catch (err) {
+      console.warn('[audition] AudioWorkletNode construction failed — falling back to WaveShaper:', err);
+      limiter = ctx.createWaveShaper();
+      limiter.curve = _saturatorCurve;
+      limiter.oversample = '4x';
+    }
+  } else {
+    limiter = ctx.createWaveShaper();
+    limiter.curve = _saturatorCurve;
+    limiter.oversample = '4x';
+  }
 
   const gain = ctx.createGain();
   gain.gain.value = DEFAULT_GAIN;
 
-  // Path A: source → HPF → HRTF → early IR convolver → mixer
+  // Phase 11.F — modal synthesis for rectangular rooms. Below the
+  // Schroeder frequency (~200 Hz in a typical 73 m³ room) geometric ray
+  // tracing fundamentally fails because the field is dominated by sparse
+  // modes at specific frequencies, not the smooth diffuse decay the
+  // tracer produces. We synthesise the audible 8–14 lowest modes via a
+  // bank of biquad peaking filters tuned to the room's eigenfrequencies,
+  // amplitude-weighted by mode-source-receiver coupling. Skipped for
+  // non-rectangular rooms (the eigenfrequency closed form is rectangular-
+  // specific; polygonal/round rooms need an FDTD/BEM solver — Phase 12+).
+  let modeFilters = null;
+  const room = precisionResult.scene?.room;
+  if (room?.shape === 'rectangular') {
+    const sourcePos = sourceWorldCentroid(precisionResult);
+    const listenerPos = receiverWorldPos(precisionResult, receiverIdx);
+    const t60 = precisionResult?.metricsCache?.[receiverIdx]?.broadband?.t30_s ?? 0.4;
+    const V = (room.width_m ?? 0) * (room.depth_m ?? 0) * (room.height_m ?? 0);
+    const schroederHz = V > 0 && t60 > 0 ? 2000 * Math.sqrt(t60 / V) : 200;
+    const modes = computeRectangularModes({
+      width_m: room.width_m, depth_m: room.depth_m, height_m: room.height_m,
+      sourcePos, listenerPos, t60_s: t60, schroederHz, roomVolume_m3: V,
+    });
+    modeFilters = buildModeFilterChain(ctx, modes);
+  }
+
+  // Path A: source → HPF → LF-shelf → [modes] → HRTF → early IR → mixer
   source.connect(hpf);
-  hpf.connect(panner);
+  hpf.connect(lfShelf);
+  let preConvolverNode = lfShelf;
+  if (modeFilters) {
+    lfShelf.connect(modeFilters.input);
+    preConvolverNode = modeFilters.output;
+  }
+  preConvolverNode.connect(panner);
   panner.connect(earlyConv);
   earlyConv.connect(mixer);
-  // Path B: source → HPF → late IR convolver → mixer (no HRTF, no panner)
-  hpf.connect(lateConv);
+  // Path B: source → HPF → LF-shelf → [modes] → late IR convolver → mixer
+  preConvolverNode.connect(lateConv);
   lateConv.connect(mixer);
   // Common downstream: soft-clip saturator → gain → out (NO compressor).
   mixer.connect(limiter);
@@ -498,7 +612,35 @@ export async function startAudition({ precisionResult, receiverIdx }) {
 
   source.start();
 
-  _activeChain = { source, hpf, panner, earlyConv, lateConv, mixer, limiter, gain, mode: 'convolved' };
+  _activeChain = { source, hpf, lfShelf, modeFilters, panner, earlyConv, lateConv, mixer, limiter, gain, mode: 'convolved' };
+}
+
+// Helpers for modal synthesis — return positions in STATE coords.
+function sourceWorldCentroid(precisionResult) {
+  const scene = precisionResult.scene;
+  const sources = scene?.sources;
+  if (!sources || sources.count === 0) return { x: 0, y: 0, z: 0 };
+  const B = scene.bands_hz?.length ?? 7;
+  let cx = 0, cy = 0, cz = 0, total = 0;
+  for (let i = 0; i < sources.count; i++) {
+    let lw = 0;
+    for (let k = 0; k < B; k++) lw += Math.pow(10, sources.L_w[i * B + k] / 10);
+    cx += sources.positions[i * 3 + 0] * lw;
+    cy += sources.positions[i * 3 + 1] * lw;
+    cz += sources.positions[i * 3 + 2] * lw;
+    total += lw;
+  }
+  if (total <= 0) return { x: 0, y: 0, z: 0 };
+  return { x: cx / total, y: cy / total, z: cz / total };
+}
+function receiverWorldPos(precisionResult, receiverIdx) {
+  const positions = precisionResult.scene?.receivers?.positions;
+  if (!positions) return { x: 0, y: 0, z: 0 };
+  return {
+    x: positions[receiverIdx * 3 + 0],
+    y: positions[receiverIdx * 3 + 1],
+    z: positions[receiverIdx * 3 + 2],
+  };
 }
 
 // Compute the dominant source's position relative to the given listener,
@@ -535,11 +677,15 @@ function sourceCentroidRelative(precisionResult, receiverIdx) {
 // mutually exclusive; only one is ever live.
 export function stopAudition() {
   if (!_activeChain) return;
-  const { source, hpf, panner, convolver, earlyConv, lateConv, mixer, limiter, gain } = _activeChain;
+  const { source, hpf, lfShelf, modeFilters, panner, convolver, earlyConv, lateConv, mixer, limiter, gain } = _activeChain;
   try { source.stop(); } catch (_) { /* already stopped */ }
   try {
     source.disconnect();
     if (hpf) hpf.disconnect();
+    if (lfShelf) lfShelf.disconnect();
+    if (modeFilters && modeFilters.all) {
+      for (const f of modeFilters.all) f.disconnect();
+    }
     if (panner) panner.disconnect();
     if (convolver) convolver.disconnect();
     if (earlyConv) earlyConv.disconnect();
@@ -560,6 +706,41 @@ export function getAuditionMode() {
 
 export function isAuditionPlaying() {
   return _activeChain !== null;
+}
+
+// Walk-mode listener orientation → AudioListener forward vector. Lets
+// the user "look around" inside the audition — turn left and the speaker
+// pans right (it stays at the same world position, the listener's frame
+// rotates around it). Mapping from state coords (x right, y depth-forward,
+// z up) to Web Audio (x right, y up, z back-forward = -forward):
+//   forwardWorldState = (sin(yaw)·cos(pitch), cos(yaw)·cos(pitch), sin(pitch))
+//   forwardAudio      = (forwardX_state, forwardZ_state, -forwardY_state)
+// Up vector is fixed +Y in audio coords (state +Z up). Throttled to 30 Hz
+// inside the caller — that's well within Web Audio's a-rate param-event
+// budget and below the perceptual ITD-update threshold (Wenzel et al.
+// J.AES 1993 found ~50 Hz update is sufficient).
+export function setAuditionListenerOrientation(yawRad, pitchRad) {
+  if (!_audioCtx) return;        // no audition session yet — nothing to update
+  const cy = Math.cos(yawRad), sy = Math.sin(yawRad);
+  const cp = Math.cos(pitchRad), sp = Math.sin(pitchRad);
+  // State-frame forward.
+  const fxs = sy * cp;
+  const fys = cy * cp;
+  const fzs = sp;
+  // Audio-frame forward = (state_x, state_z, -state_y).
+  const listener = _audioCtx.listener;
+  if (listener.forwardX) {
+    listener.forwardX.value = fxs;
+    listener.forwardY.value = fzs;
+    listener.forwardZ.value = -fys;
+    // Up stays +Y (state +Z up = audio +Y up).
+    listener.upX.value = 0;
+    listener.upY.value = 1;
+    listener.upZ.value = 0;
+  } else if (listener.setOrientation) {
+    // Older Safari / Firefox before AudioParam-style listener.
+    listener.setOrientation(fxs, fzs, -fys, 0, 1, 0);
+  }
 }
 
 // Play the speech sample WITHOUT convolution — the "original tone" the

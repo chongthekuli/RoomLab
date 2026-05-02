@@ -20,6 +20,7 @@ import { runPrecisionRender } from '../physics/precision/precision-engine.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { applyGlossary } from './glossary.js';
 import { startAudition, startOriginalPlayback, stopAudition, isAuditionPlaying, getAuditionMode, checkSampleAvailable } from '../audio/audition.js';
+import { airAbsorptionDbPerM } from '../physics/air-absorption.js';
 
 let materialsRef;
 let currentAbort = null;
@@ -117,11 +118,23 @@ export function mountPrecisionPanel({ materials }) {
     emit('precision:changed');
   });
   // Listener selection changes only the displayed receiver, not the trace.
-  // Stop audition so the user explicitly re-starts at the new listener
-  // — silently swapping IRs mid-playback would mask the spatial cue.
+  // Phase 11.C — if audition is playing in convolved mode, hot-swap to
+  // the new listener's IR (multi-seat A/B comparison). User can click
+  // through L1 → L2 → L3 to feel the same speech in different seats
+  // without re-clicking Audition. Dry mode keeps playing as-is (no IR).
   on('listener:selected', () => {
-    stopAudition();
     if (state.results.precision) renderResults();
+    if (getAuditionMode() === 'convolved') {
+      const result = state.results.precision;
+      const sel = getSelectedListener();
+      const idx = sel ? state.listeners.findIndex(l => l.id === sel.id) : -1;
+      if (result && idx >= 0) {
+        startAudition({ precisionResult: result, receiverIdx: idx })
+          .catch(() => stopAudition());
+      } else {
+        stopAudition();
+      }
+    }
     updateAuditionUI();
   });
   updateUI();
@@ -254,13 +267,14 @@ function renderResults() {
             <th title="Expected direct-path arrival at this listener (closest source / c). C50 is ISO-defined on the [0, 50 ms] window — if direct > 50 ms, the metric is undefined by standard.">Direct</th><td>${fmt(m.broadband.directArrivalMs, 1, ' ms')}</td></tr>
       </table>
       <details class="precision-per-band">
-        <summary>T30 per band · STI per band</summary>
+        <summary>T30 per band · STI per band · Air absorption</summary>
         <table class="band-table">
           <thead><tr><th>Hz</th>${m.perBand.map((_, i) => `<th>${BAND_LABELS[i] ?? i}</th>`).join('')}</tr></thead>
           <tbody>
             <tr><th data-gloss="t30">T30</th>${m.perBand.map(b => `<td>${fmt(b.t30_s, 2)}</td>`).join('')}</tr>
             <tr><th data-gloss="c80">C80</th>${m.perBand.map(b => `<td>${fmt(b.c80_db, 1)}</td>`).join('')}</tr>
             <tr><th title="TI — per-band transmission index, weighted sum → STI">TI</th>${m.sti.tiPerBand.map(v => `<td>${fmt(v, 2)}</td>`).join('')}</tr>
+            <tr><th title="ISO 9613-1 air absorption at the source-listener distance, in dB. Above ~1 kHz at 30+ m air absorption dominates over inverse-square — Phase 11.E disclosure">Air @${fmt(m.broadband.directArrivalMs * 0.3432, 1, 'm')}</th>${m.perBand.map((_, i) => `<td>${fmt(airAbsorptionDbPerM([125,250,500,1000,2000,4000,8000][i]) * (m.broadband.directArrivalMs * 0.3432), 1)}</td>`).join('')}</tr>
           </tbody>
         </table>
       </details>

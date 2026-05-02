@@ -274,6 +274,66 @@ export function traceRays(scene, bvh, opts = {}) {
   const rng = mulberry32(seed);
   const maxTime_s = maxTimeMs / 1000;
 
+  // PHASE 11.A — analytical direct-path injection per (source, receiver)
+  // pair. Replaces the stochastic Monte Carlo direct-bucket contribution
+  // from rays that happen to fly through the receiver on their first
+  // segment (typically ~780 of 50 000 rays for a typical close source,
+  // giving ±1.5 dB variance on the direct sound). Vorländer §11.3 — every
+  // pro auralization tool (Odeon, EASE, Treble) does direct sound
+  // analytically. The ray loop's receiver-crossing logging is skipped on
+  // bounce === 0 below to avoid double-counting.
+  //
+  // Per-worker scaling: each worker contributes its share (raysPerSource
+  // / normalizationRays) so summing N worker partials gives the full
+  // analytical value once. Without this each worker would inject the
+  // FULL analytical value and the merged histogram would be N× too loud
+  // on direct sound.
+  const workerShare = raysPerSource / normalizationRays;
+  for (let sIdx = 0; sIdx < S; sIdx++) {
+    const sx = srcPos[sIdx * 3 + 0];
+    const sy = srcPos[sIdx * 3 + 1];
+    const sz = srcPos[sIdx * 3 + 2];
+    const aimX = srcAims ? srcAims[sIdx * 3 + 0] : 0;
+    const aimY = srcAims ? srcAims[sIdx * 3 + 1] : 1;
+    const aimZ = srcAims ? srcAims[sIdx * 3 + 2] : 0;
+    const lobeN = srcDirN ? srcDirN[sIdx] : 0;
+    for (let recIdx = 0; recIdx < R; recIdx++) {
+      const rx = recPos[recIdx * 3 + 0];
+      const ry = recPos[recIdx * 3 + 1];
+      const rz = recPos[recIdx * 3 + 2];
+      const dxs = rx - sx, dys = ry - sy, dzs = rz - sz;
+      const d = Math.sqrt(dxs * dxs + dys * dys + dzs * dzs);
+      if (d < 1e-3) continue;     // listener at source — degenerate
+      const arrival_s = d / c_mps;
+      const bucket = Math.floor((arrival_s * 1000) / bucketDtMs);
+      if (bucket < 0 || bucket >= T) continue;
+      // Directivity D(θ) for raised-cosine lobe. Same closed-form as the
+      // importance-sampling path uses internally: D(θ) = (n+1)·((1+cosθ)/2)^n
+      // (n=0 → D=1 omni; integrates to 4π for any n ≥ 0).
+      const dxn = dxs / d, dyn = dys / d, dzn = dzs / d;
+      const cosTheta = Math.max(-1, Math.min(1, aimX * dxn + aimY * dyn + aimZ * dzn));
+      const half1pCos = 0.5 + 0.5 * cosTheta;
+      const Dlobe = (lobeN + 1) * Math.pow(half1pCos, lobeN);
+      // Receiver capture cross-section per source: π·r² / (4π·d²) = r²/(4d²)
+      const captureFrac = (recR[recIdx] * recR[recIdx]) / (4 * d * d);
+      const base = recIdx * B * T + bucket;
+      if (airAbsorption) {
+        for (let k = 0; k < B; k++) {
+          const sourcePower = Math.pow(10, srcLw[sIdx * B + k] / 10);
+          const E = sourcePower * Dlobe * captureFrac * Math.exp(-airCoef[k] * d) * workerShare;
+          histogram[base + k * T] += E;
+        }
+      } else {
+        for (let k = 0; k < B; k++) {
+          const sourcePower = Math.pow(10, srcLw[sIdx * B + k] / 10);
+          const E = sourcePower * Dlobe * captureFrac * workerShare;
+          histogram[base + k * T] += E;
+        }
+      }
+      hitCount++;
+    }
+  }
+
   for (let sIdx = 0; sIdx < S; sIdx++) {
     // Initial per-band energy for one ray from this source. Divided by
     // `normalizationRays` (total across pool) rather than `raysPerSource`
@@ -319,7 +379,16 @@ export function traceRays(scene, bvh, opts = {}) {
         // path length from segment-start to the sphere-entry point tRec —
         // the ray hasn't yet travelled the full segment when it crosses
         // the receiver.
-        for (let recIdx = 0; recIdx < R; recIdx++) {
+        //
+        // Phase 11.A — skip first-segment crossings (bounce === 0). The
+        // ray's first segment is the direct path from the source; we
+        // injected an analytical value for this earlier (search "Phase
+        // 11.A — analytical direct-path injection"). Letting the ray
+        // loop ALSO log first-segment crossings would double-count
+        // direct sound. NOTE the wrap is around only the inner receiver
+        // loop — the wall advancement and reflection below this block
+        // still run, so the ray correctly continues to bounces ≥ 1.
+        if (bounce > 0) for (let recIdx = 0; recIdx < R; recIdx++) {
           const tRec = raySphereEntry(
             ox, oy, oz, dx, dy, dz,
             recPos[recIdx * 3], recPos[recIdx * 3 + 1], recPos[recIdx * 3 + 2],

@@ -18,6 +18,7 @@ import { roomPlanVertices, domeGeometry, isInsideRoom3D, normalizeWallSlot } fro
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { loadCharacterRig } from './character-loader.js';
+import { setAuditionListenerOrientation } from '../audio/audition.js';
 
 let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
@@ -58,6 +59,7 @@ let avatarParts = null;       // { armL, armR, legL, legR, body }
 let activeCamera = null;
 let walkMode = false;
 let walkPhase = 0;            // stride phase for leg/arm swing animation
+let _lastAuditionOrientTs = 0;  // ms — last time we pushed walk yaw/pitch to AudioListener
 let tpController = null;
 let tpLastTs = 0;
 // Rigged GLTF character (loaded async). When present, the avatar swaps to
@@ -5936,6 +5938,15 @@ function animate(ts) {
     const dt = Math.min(0.1, (now - tpLastTs) / 1000);
     tpLastTs = now;
     tpController.update(dt);
+    // Phase 11.D — head-rotation tracking for in-walk audition. Throttled
+    // to ~33 Hz (every 30 ms) since the spatialisation cue doesn't need
+    // sub-frame resolution and Web Audio AudioParam writes have a small
+    // cost. Audition itself is unchanged when not playing — the function
+    // bails on a missing AudioContext.
+    if (!_lastAuditionOrientTs || now - _lastAuditionOrientTs > 30) {
+      _lastAuditionOrientTs = now;
+      setAuditionListenerOrientation(tpController.yaw, tpController.cameraPitch);
+    }
   } else if (controls) {
     controls.update();
   }
