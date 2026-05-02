@@ -1715,8 +1715,60 @@ export function setWalkthroughMode(on) {
 // avatar's body/knee/elbow transforms, and updates the live SPL readout.
 // Reset pose state is now fully owned by scene.js (the controller handles
 // position/yaw/vy/collision/camera only).
+// Input → state-machine transitions. Owns animState.jumpPhase,
+// animState.crouchF, animState.sitting / sitF / sitLatch. Runs for both
+// avatar paths (rigged GLB and procedural primitives) — the procedural
+// path used to embed this inline, but the rigged path skipped it and the
+// state flags froze, latching the rigged setState() into Jump forever.
+function updateAnimStateMachine(ctx, dt) {
+  // Jump state machine
+  if (animState.jumpPhase === 'anticipate') {
+    animState.jumpT += dt / 0.10;
+    if (animState.jumpT >= 1) {
+      animState.jumpT = 0;
+      animState.jumpPhase = 'airborne';
+      tpController.jump(JUMP_VELOCITY_MS);
+    }
+  } else if (animState.jumpPhase === 'airborne') {
+    animState.jumpT += dt;
+    if (ctx.justLanded) {
+      animState.impactVel = Math.abs(ctx.impactVy);
+      animState.landingAmount = Math.min(1, Math.max(0.3, animState.impactVel / 8));
+      animState.jumpPhase = 'landing';
+      animState.jumpT = 0;
+    }
+  } else if (animState.jumpPhase === 'landing') {
+    animState.jumpT += dt / 0.22;
+    if (animState.jumpT >= 1) {
+      animState.jumpT = 1;
+      animState.jumpPhase = 'grounded';
+      animState.landingAmount = 0;
+    }
+  }
+
+  // Crouch factor
+  const crouchHeld = ctx.keys.has('KeyC') || ctx.keys.has('ControlLeft') || ctx.keys.has('ControlRight');
+  animState.crouchF += ((crouchHeld ? 1 : 0) - animState.crouchF) * (1 - Math.exp(-dt / 0.12));
+
+  // Sit toggle (Z) — edge-triggered so holding Z doesn't thrash the state.
+  const zHeld = ctx.keys.has('KeyZ');
+  if (zHeld && !animState.sitLatch) {
+    animState.sitting = !animState.sitting;
+    animState.sitLatch = true;
+    if (tpController) tpController.blockMovement = animState.sitting;
+  }
+  if (!zHeld) animState.sitLatch = false;
+  animState.sitF += ((animState.sitting ? 1 : 0) - animState.sitF) * (1 - Math.exp(-dt / 0.20));
+}
+
 function applyAvatarAnimation(ctx) {
   const dt = ctx.dt;
+
+  // Input → state-machine transitions must run for BOTH avatar paths.
+  // Previously this lived inline below the early return for the rigged
+  // path; with the rigged avatar it never fired so animState.jumpPhase
+  // / crouchF / sitting froze and the rigged setState always picked Jump.
+  updateAnimStateMachine(ctx, dt);
 
   // --- Rigged GLTF fast path ---
   // When assets/models/hitman.glb loaded successfully, let the AnimationMixer
@@ -1762,47 +1814,7 @@ function applyAvatarAnimation(ctx) {
   const leanTarget = Math.max(-0.35, Math.min(0.35, -animState.yawRate * 0.18));
   animState.turnLean += (leanTarget - animState.turnLean) * 0.12;
 
-  // --- Jump state machine ---
-  // Anticipate fires the real impulse on the controller once wind-up completes;
-  // airborne tracks its own airtime for blend-in; landing is detected from the
-  // controller's grounded flag transitioning back to true.
-  if (animState.jumpPhase === 'anticipate') {
-    animState.jumpT += dt / 0.10;
-    if (animState.jumpT >= 1) {
-      animState.jumpT = 0;
-      animState.jumpPhase = 'airborne';
-      tpController.jump(JUMP_VELOCITY_MS);
-    }
-  } else if (animState.jumpPhase === 'airborne') {
-    animState.jumpT += dt;
-    if (ctx.justLanded) {
-      animState.impactVel = Math.abs(ctx.impactVy);
-      animState.landingAmount = Math.min(1, Math.max(0.3, animState.impactVel / 8));
-      animState.jumpPhase = 'landing';
-      animState.jumpT = 0;
-    }
-  } else if (animState.jumpPhase === 'landing') {
-    animState.jumpT += dt / 0.22;
-    if (animState.jumpT >= 1) {
-      animState.jumpT = 1;
-      animState.jumpPhase = 'grounded';
-      animState.landingAmount = 0;
-    }
-  }
-
-  // --- Crouch factor ---
-  const crouchHeld = ctx.keys.has('KeyC') || ctx.keys.has('ControlLeft') || ctx.keys.has('ControlRight');
-  animState.crouchF += ((crouchHeld ? 1 : 0) - animState.crouchF) * (1 - Math.exp(-dt / 0.12));
-
-  // --- Sit toggle (Z) — edge-triggered so holding Z doesn't thrash the state.
-  const zHeld = ctx.keys.has('KeyZ');
-  if (zHeld && !animState.sitLatch) {
-    animState.sitting = !animState.sitting;
-    animState.sitLatch = true;
-    if (tpController) tpController.blockMovement = animState.sitting;
-  }
-  if (!zHeld) animState.sitLatch = false;
-  animState.sitF += ((animState.sitting ? 1 : 0) - animState.sitF) * (1 - Math.exp(-dt / 0.20));
+  // (state machine ran at the top of applyAvatarAnimation)
 
   // --- Pose accumulation ---
   let bodyScale = 1;

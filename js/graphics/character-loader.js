@@ -47,22 +47,31 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
     }
   });
 
-  // --- Strip lateral root motion from every clip ---
-  // Mixamo bakes forward + lateral translation into the Hips position
-  // track. With the controller already driving the character through
-  // world space, the X/Z components produce a "walk-forward then snap"
-  // stutter. We zero ONLY X and Z per keyframe so the clip plays in
-  // place horizontally — Y (vertical) stays so Jump still has its arc
-  // and Crouch / Sit still drop the hips into the right pose.
+  // --- Strip drift root motion per-axis from every clip ---
+  // Mixamo bakes forward translation into the Hips bone, but the AXIS
+  // varies by export pipeline: Blender's `export_yup=True` typically
+  // keeps the keyframe data in its import frame so the "forward" axis
+  // can land on Y instead of Z. Static heuristic on X/Z misses the GLB.
+  //
+  // Drift detection: for each axis on Hips.position, compute (last −
+  // first). If |drift| > 10 cm, the axis carries monotonic translation
+  // (walk forward, run forward, etc.) — replace with a constant equal
+  // to the first frame so the cycle plays in place. Cyclic motions
+  // (jump's vertical arc, idle bounce, crouch hip-drop) end near where
+  // they started → drift small → axis preserved.
   const clips = gltf.animations || [];
   for (const clip of clips) {
     for (const track of clip.tracks) {
       if (!/Hips\.position$/i.test(track.name)) continue;
       const v = track.values;
-      for (let i = 0; i < v.length; i += 3) {
-        v[i] = 0;       // X
-        v[i + 2] = 0;   // Z
-        // v[i + 1] (Y) preserved — needed for jump arc + crouch / sit pose
+      const N = v.length / 3;
+      if (N < 2) continue;
+      for (let axis = 0; axis < 3; axis++) {
+        const startVal = v[axis];
+        const endVal = v[(N - 1) * 3 + axis];
+        if (Math.abs(endVal - startVal) > 10) {
+          for (let i = 0; i < N; i++) v[i * 3 + axis] = startVal;
+        }
       }
     }
   }
@@ -82,11 +91,19 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
   const idleAction = pickAction(actions, ['idle', 'rest', 'stand']);
   if (idleAction) idleAction.setEffectiveWeight(1);
 
-  // --- Scale to target height ---
-  // Force skeleton update so the vertex-bind-pose bbox is tight, then
-  // measure + rescale. Re-measure after scaling so we can plant feet at y=0.
+  // --- Orientation fix (apply BEFORE scaling + plant-feet) ---
+  // Use the SHOULDERS as the orientation reference: (left − right) × up
+  // = forward. Robust to whichever export-axis convention the GLB shipped
+  // with (Mixamo / RPM / Quaternius all face different directions).
+  // Falls back to a flat 180° flip if shoulders aren't found (Mixamo
+  // default convention).
   gltf.scene.updateMatrixWorld(true);
   gltf.scene.traverse(o => { if (o.isSkinnedMesh) o.skeleton.update(); });
+  const facing = detectFacing(gltf.scene);
+  if (facing.z < -1e-3) gltf.scene.rotation.y = Math.PI;
+  gltf.scene.updateMatrixWorld(true);
+
+  // --- Scale + plant feet (after orientation so bbox is in final frame) ---
   const bbox = new THREE.Box3().setFromObject(gltf.scene);
   const size = new THREE.Vector3(); bbox.getSize(size);
   if (size.y > 0) {
@@ -96,19 +113,6 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
     const bbox2 = new THREE.Box3().setFromObject(gltf.scene);
     gltf.scene.position.y -= bbox2.min.y;   // plant feet at root y=0
   }
-
-  // --- Orientation fix ---
-  // Mixamo / most DCC export facing −Z; RoomLAB's ThirdPersonController
-  // treats +Z as character-forward. Rotate the INNER scene so the model
-  // faces +Z. Use the SHOULDERS as the orientation reference: the vector
-  // from right-shoulder to left-shoulder is reliably horizontal regardless
-  // of the export-axis convention, while head-bone position swings into
-  // the Y axis once Blender's `export_yup` flag is applied. Cross-product
-  // (left − right) × world-up = forward; if forward.z is negative we
-  // rotate 180° around Y. Falls back to a flat 180° flip when shoulders
-  // aren't found (covers most Mixamo / RPM exports as a safe default).
-  const facing = detectFacing(gltf.scene);
-  if (facing.z < -1e-3) gltf.scene.rotation.y = Math.PI;
 
   return {
     root,                // outer wrapper — move / rotate this
