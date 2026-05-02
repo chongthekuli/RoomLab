@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 // CharacterLoader — wraps THREE.GLTFLoader + AnimationMixer for the
 // walkthrough avatar. Handles:
@@ -122,14 +123,29 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
   };
 }
 
-// Promise wrapper around the callback-style GLTFLoader.
+// Shared Draco decoder — loaded once, reused for every GLB. Decoder
+// binary is fetched from the same unpkg CDN as Three.js itself so the
+// version stays in lock-step with the importmap entry.
+let _dracoLoader = null;
+function getDracoLoader() {
+  if (_dracoLoader) return _dracoLoader;
+  _dracoLoader = new DRACOLoader();
+  _dracoLoader.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
+  return _dracoLoader;
+}
+
+// Promise wrapper around the callback-style GLTFLoader. Draco decoder is
+// attached so KHR_draco_mesh_compression GLBs (98%+ smaller bundles) can
+// load. WebP textures (EXT_texture_webp) work natively in every modern
+// browser without an extra extension handler.
 function loadGLB(url) {
   const loader = new GLTFLoader();
+  loader.setDRACOLoader(getDracoLoader());
   return new Promise((resolve, reject) => {
     loader.load(
       url,
       gltf => resolve(gltf),
-      undefined, // onProgress — ignored
+      undefined,
       err => reject(err),
     );
   });
