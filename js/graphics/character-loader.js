@@ -47,9 +47,21 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
     }
   });
 
+  // --- Strip root motion from every clip ---
+  // Mixamo (and most DCC) bake forward translation into the Hips bone's
+  // position track. With the controller ALSO driving the character forward,
+  // the two pushes stack until the clip loops back to frame 0 — visible
+  // as the "walk forward, snap back, walk forward, snap back" stutter.
+  // Removing every Hips.position track makes the clip play in place; the
+  // controller alone owns world-space translation. Rotation tracks on
+  // Hips and every other bone are left intact so the gait still cycles.
+  const clips = gltf.animations || [];
+  for (const clip of clips) {
+    clip.tracks = clip.tracks.filter(t => !/Hips\.position$/i.test(t.name));
+  }
+
   // --- Animation mixer + clip lookup ---
   const mixer = new THREE.AnimationMixer(gltf.scene);
-  const clips = gltf.animations || [];
   const actions = {};
   for (const c of clips) actions[c.name] = mixer.clipAction(c);
 
