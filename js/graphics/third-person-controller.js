@@ -122,6 +122,14 @@ export class ThirdPersonController {
     this._onMouseUp   = this._onMouseUp.bind(this);
     this._onWheel     = this._onWheel.bind(this);
     this._onBlur      = () => this.keys.clear();
+    // Touch handlers — single-finger drag on the viewport background
+    // rotates the chase camera (same effect as mouse drag). Touches
+    // that originate inside the walk-touch HUD are ignored here
+    // because that overlay's own listeners stopPropagation.
+    this._onTouchStart = this._onTouchStart.bind(this);
+    this._onTouchMove  = this._onTouchMove.bind(this);
+    this._onTouchEnd   = this._onTouchEnd.bind(this);
+    this._cameraTouchId = null;
   }
 
   setPosition(v) {
@@ -146,6 +154,10 @@ export class ThirdPersonController {
     window.addEventListener('mousemove', this._onMouseMove);
     window.addEventListener('mouseup',   this._onMouseUp);
     this.domElement.addEventListener('wheel', this._onWheel, { passive: false });
+    this.domElement.addEventListener('touchstart', this._onTouchStart, { passive: false });
+    window.addEventListener('touchmove',  this._onTouchMove,  { passive: false });
+    window.addEventListener('touchend',   this._onTouchEnd,   { passive: false });
+    window.addEventListener('touchcancel', this._onTouchEnd,  { passive: false });
     window.addEventListener('blur', this._onBlur);
   }
   disable() {
@@ -153,12 +165,17 @@ export class ThirdPersonController {
     this.enabled = false;
     this.keys.clear();
     this._mouseDragging = false;
+    this._cameraTouchId = null;
     document.removeEventListener('keydown', this._onKeyDown);
     document.removeEventListener('keyup',   this._onKeyUp);
     this.domElement.removeEventListener('mousedown', this._onMouseDown);
     window.removeEventListener('mousemove', this._onMouseMove);
     window.removeEventListener('mouseup',   this._onMouseUp);
     this.domElement.removeEventListener('wheel', this._onWheel);
+    this.domElement.removeEventListener('touchstart', this._onTouchStart);
+    window.removeEventListener('touchmove',  this._onTouchMove);
+    window.removeEventListener('touchend',   this._onTouchEnd);
+    window.removeEventListener('touchcancel', this._onTouchEnd);
     window.removeEventListener('blur', this._onBlur);
     this.domElement.style.cursor = '';
   }
@@ -195,6 +212,44 @@ export class ThirdPersonController {
     this.cameraPitch = Math.max(this.pitchMin, Math.min(this.pitchMax, this.cameraPitch));
   }
   _onMouseUp()   { this._mouseDragging = false; this.domElement.style.cursor = ''; }
+
+  // Touch-drag camera rotation. Only listens on the viewport surface;
+  // touches inside the walk-touch HUD never reach this element because
+  // the HUD's own listeners e.preventDefault(). One-finger drag rotates
+  // (same as mouse drag). Multi-touch is ignored (pinch / pan on the
+  // viewport are reserved for future use).
+  _onTouchStart(e) {
+    if (!this.enabled) return;
+    if (e.touches.length !== 1) return;          // ignore multi-touch
+    // Skip touches that started on a UI element (button, joystick).
+    const path = e.composedPath ? e.composedPath() : [];
+    if (path.some(n => n?.classList?.contains?.('walk-btn')
+                    || n?.classList?.contains?.('walk-rot-btn')
+                    || n?.classList?.contains?.('walk-joystick'))) return;
+    const t = e.touches[0];
+    this._cameraTouchId = t.identifier;
+    this._mouseLastX = t.clientX;
+    this._mouseLastY = t.clientY;
+    e.preventDefault();
+  }
+  _onTouchMove(e) {
+    if (!this.enabled || this._cameraTouchId === null) return;
+    const t = Array.from(e.touches).find(x => x.identifier === this._cameraTouchId);
+    if (!t) return;
+    const dx = t.clientX - this._mouseLastX;
+    const dy = t.clientY - this._mouseLastY;
+    this._mouseLastX = t.clientX;
+    this._mouseLastY = t.clientY;
+    this.cameraYaw   -= dx * 0.006;
+    this.cameraPitch -= dy * 0.0045;
+    this.cameraPitch = Math.max(this.pitchMin, Math.min(this.pitchMax, this.cameraPitch));
+    e.preventDefault();
+  }
+  _onTouchEnd(e) {
+    if (this._cameraTouchId === null) return;
+    const stillTouched = Array.from(e.touches ?? []).some(x => x.identifier === this._cameraTouchId);
+    if (!stillTouched) this._cameraTouchId = null;
+  }
   _onWheel(e) {
     e.preventDefault();
     this.cameraDistance *= (1 + e.deltaY * 0.001);
@@ -215,8 +270,11 @@ export class ThirdPersonController {
     let mx = 0, mz = 0;
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp'))    { mx += fx; mz += fz; }
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown'))  { mx -= fx; mz -= fz; }
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft'))  { mx -= rx; mz -= rz; }
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) { mx += rx; mz += rz; }
+    // ArrowLeft / ArrowRight ROTATE (handled in update() via _arrowYawRate)
+    // — kept off strafe so the user can use them as look-around in walk
+    // mode. A/D still strafe for users who want sideways movement.
+    if (this.keys.has('KeyA'))  { mx -= rx; mz -= rz; }
+    if (this.keys.has('KeyD'))  { mx += rx; mz += rz; }
     const mag = Math.hypot(mx, mz);
     return { x: mag > 0 ? mx / mag : 0, z: mag > 0 ? mz / mag : 0, magnitude: mag };
   }
@@ -321,6 +379,25 @@ export class ThirdPersonController {
     const move = this._cameraRelativeMove();
     const running = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
     const speed = this.movementSpeed * (running ? this.runMultiplier : 1);
+
+    // Arrow Left / Right rotate — turn rate ~100 °/s. Rotates the chase
+    // camera AND the avatar's yaw target so the avatar visibly turns to
+    // match. This is the "tank-controls" feel; user-tested choice over
+    // strafe-on-arrows because the audio listener orientation follows
+    // the camera (W.1) and arrow-strafe was causing audio L/R confusion
+    // (the avatar's anatomical left was on the user's screen-right when
+    // viewed from behind).
+    const TURN_RATE_RAD_S = 1.8;
+    let arrowYaw = 0;
+    if (this.keys.has('ArrowLeft'))  arrowYaw -= TURN_RATE_RAD_S * dt;
+    if (this.keys.has('ArrowRight')) arrowYaw += TURN_RATE_RAD_S * dt;
+    if (arrowYaw !== 0) {
+      this.cameraYaw += arrowYaw;
+      // Avatar slerps toward the camera direction so the turn LOOKS
+      // committed; without this the avatar would stand still while the
+      // camera orbits, which feels like sliding on ice.
+      this.targetYaw = this.cameraYaw;
+    }
 
     if (move.magnitude > 0.01) {
       const dx = move.x * speed * dt;

@@ -7,9 +7,9 @@
   <!-- Inline empty favicon stops the default /favicon.ico fetch + 404
        in DevTools Console. Replace with a real .ico/.svg later. -->
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="css/main.css?v=242" />
-  <link rel="stylesheet" href="css/theme.css?v=242" />
-  <link rel="stylesheet" href="css/print.css?v=242" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=255" />
+  <link rel="stylesheet" href="css/theme.css?v=255" />
+  <link rel="stylesheet" href="css/print.css?v=255" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -46,6 +46,7 @@
             <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D</button>
             <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D</button>
             <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walk</button>
+            <button class="vp-tab vp-fullscreen-btn" id="btn-fullscreen" title="Toggle fullscreen — useful for tablet walk mode" type="button">⛶</button>
           </div>
           <div class="vp-group vp-group-layers">
             <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer — shortcut H">Heatmap</button>
@@ -63,6 +64,30 @@
         <div id="view-2d" class="viewport-view" hidden></div>
         <div id="view-3d" class="viewport-view">
           <div class="viewport-loading">Loading 3D view…</div>
+          <!-- Walk-mode touch controls. Hidden by default; scene.js's
+               setWalkthroughMode(true) reveals them. Mobile-Legends-
+               style: virtual joystick on the left for movement, action
+               buttons on the right for jump / run / crouch / sit, plus
+               two small rotate buttons for arrow-key-equivalent turning.
+               All buttons dispatch synthetic keyboard events into
+               document so the existing ThirdPersonController handles
+               them with no special-case code. -->
+          <div id="walk-touch-controls" class="walk-touch" hidden aria-hidden="true">
+            <div class="walk-joystick" id="walk-joystick" role="presentation">
+              <div class="walk-joystick-base"></div>
+              <div class="walk-joystick-nub" id="walk-joystick-nub"></div>
+            </div>
+            <div class="walk-rotate-buttons">
+              <button class="walk-rot-btn" data-key="ArrowLeft" type="button" aria-label="Rotate left">↺</button>
+              <button class="walk-rot-btn" data-key="ArrowRight" type="button" aria-label="Rotate right">↻</button>
+            </div>
+            <div class="walk-actions">
+              <button class="walk-btn walk-btn-jump"   data-key="Space"      data-keyup-fires="false" type="button" aria-label="Jump"><span>JUMP</span></button>
+              <button class="walk-btn walk-btn-run"    data-key="ShiftLeft"  type="button" aria-label="Run (hold)"><span>RUN</span></button>
+              <button class="walk-btn walk-btn-crouch" data-key="KeyC"       type="button" aria-label="Crouch (hold)"><span>CROUCH</span></button>
+              <button class="walk-btn walk-btn-sit"    data-key="KeyZ"       data-keyup-fires="true" type="button" aria-label="Sit / stand"><span>SIT</span></button>
+            </div>
+          </div>
         </div>
       </section>
       <aside id="panel-right">
@@ -103,6 +128,8 @@
           <h3>Walkthrough</h3>
           <dl class="help-keys">
             <dt>W A S D</dt><dd>Move forward / strafe / back</dd>
+            <dt>← →</dt><dd>Rotate (turn left / right)</dd>
+            <dt>↑ ↓</dt><dd>Move forward / back (same as W / S)</dd>
             <dt>Space</dt><dd>Jump</dd>
             <dt>Shift</dt><dd>Run</dd>
             <dt>C</dt><dd>Crouch</dd>
@@ -135,6 +162,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=242"></script>
+  <script type="module" src="js/main.js?v=255"></script>
 </body>
 </html>

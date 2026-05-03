@@ -34,11 +34,18 @@ import {
   setRackCatalogues, setWalkthroughMode,
 } from '../../graphics/scene.js';
 import { installCollapsibles } from '../../ui/collapsibles.js';
+import { mountWalkTouchHUD } from '../../ui/walk-touch-hud.js';
 
 let _mounted = false;
 
 function setupTabs() {
-  const tabs = document.querySelectorAll('#route-room .vp-tab');
+  // Restrict to tabs with a data-view attribute. Other vp-tab styled
+  // elements (e.g., the fullscreen toggle button which inherits
+  // .vp-tab for visual consistency but has no data-view) MUST NOT be
+  // treated as view-switchers — they were silently hiding every
+  // viewport view because target=undefined, then the visibility
+  // filter `v.id !== 'view-undefined'` matched every view.
+  const tabs = document.querySelectorAll('#route-room .vp-tab[data-view]');
   const views = document.querySelectorAll('#route-room .viewport-view');
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -125,6 +132,60 @@ function setupTabs() {
     mountWelcomeCard({ force: true });
   });
   helpOverlay?.addEventListener('click', e => { if (e.target === helpOverlay) closeHelp(); });
+
+  // Walk-mode touch HUD (joystick + action buttons). One-time mount;
+  // scene.js's setWalkthroughMode shows / hides the overlay.
+  mountWalkTouchHUD();
+
+  // Fullscreen toggle next to the Walk tab. Targets documentElement
+  // so the WHOLE page goes fullscreen — keeps the side panels reachable,
+  // hides the browser chrome on tablet, and avoids a CSS trap where
+  // fullscreening a flexbox child (like #viewport) can leave the WebGL
+  // canvas stuck at stale dimensions and render solid black until the
+  // user resizes the window.
+  //
+  // Also wires `fullscreenchange` to dispatch a window-resize event so
+  // any component that listens (the 3D renderer / EffectComposer / 2D
+  // SVG heatmap painter) re-fits to the new viewport rect immediately.
+  const fsBtn = document.getElementById('btn-fullscreen');
+  if (fsBtn) {
+    const updateFsIcon = () => {
+      const inFs = !!document.fullscreenElement;
+      fsBtn.textContent = inFs ? '⤢' : '⛶';
+      fsBtn.title = inFs ? 'Exit fullscreen — Esc' : 'Toggle fullscreen — useful for tablet walk mode';
+    };
+    fsBtn.addEventListener('click', async () => {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (err) {
+        console.warn('[fullscreen] toggle failed:', err);
+      }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      updateFsIcon();
+      // Toggle a class on documentElement so CSS can hide the side
+      // panels (300 + 320 px of fixed grid columns) and let the
+      // viewport take the full-screen rect. Without this the viewport
+      // is still a ~25 % strip between panels even in fullscreen, and
+      // a Three.js canvas sized to that strip looks black against the
+      // huge fullscreen rect.
+      document.documentElement.classList.toggle('is-fullscreen', !!document.fullscreenElement);
+      // Force every renderer that listens for window resize to re-fit
+      // to the new viewport rect. Done in TWO frames: one to let the
+      // CSS class apply, one to fire after grid re-flows. Otherwise
+      // the resize fires too early and reads stale dimensions.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.dispatchEvent(new Event('resize'));
+        });
+      });
+    });
+    updateFsIcon();
+  }
 
   const closeTransient = () => {
     closeHelp();

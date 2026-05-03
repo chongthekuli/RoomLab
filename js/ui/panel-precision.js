@@ -19,7 +19,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { runPrecisionRender } from '../physics/precision/precision-engine.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { applyGlossary } from './glossary.js';
-import { startAudition, startOriginalPlayback, stopAudition, isAuditionPlaying, getAuditionMode, checkSampleAvailable } from '../audio/audition.js';
+import { startAudition, startOriginalPlayback, stopAudition, isAuditionPlaying, getAuditionMode, isAuditionInWalkMode, checkSampleAvailable } from '../audio/audition.js';
 import { airAbsorptionDbPerM } from '../physics/air-absorption.js';
 
 let materialsRef;
@@ -118,13 +118,16 @@ export function mountPrecisionPanel({ materials }) {
     emit('precision:changed');
   });
   // Listener selection changes only the displayed receiver, not the trace.
-  // Phase 11.C — if audition is playing in convolved mode, hot-swap to
-  // the new listener's IR (multi-seat A/B comparison). User can click
-  // through L1 → L2 → L3 to feel the same speech in different seats
-  // without re-clicking Audition. Dry mode keeps playing as-is (no IR).
+  // Phase 11.C — in 3D / 2D view, if audition is playing in convolved
+  // mode, hot-swap to the new listener's IR (multi-seat A/B comparison).
+  // Phase W.1 — in walk mode, the AVATAR is the listener, not whoever
+  // is selected in the sidebar; sidebar selection should NOT restart
+  // the audition (otherwise the user hears the IR jump every time
+  // they touch the sidebar, regardless of where they're walking).
+  // Dry mode keeps playing as-is (no IR) in either view.
   on('listener:selected', () => {
     if (state.results.precision) renderResults();
-    if (getAuditionMode() === 'convolved') {
+    if (getAuditionMode() === 'convolved' && !isAuditionInWalkMode()) {
       const result = state.results.precision;
       const sel = getSelectedListener();
       const idx = sel ? state.listeners.findIndex(l => l.id === sel.id) : -1;

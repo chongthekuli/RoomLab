@@ -33,12 +33,48 @@
 // reflects the most recent precision render + listener selection.
 
 import { computeRectangularModes, buildModeFilterChain } from './room-modes.js';
+import { LiveDirectPathChain, subtractAnalyticalDirect } from './direct-path.js';
+import { state, expandSources } from '../app-state.js';
+import { computeMultiSourceSPL } from '../physics/spl-calculator.js';
+import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
+
+// Compute the broadband-equivalent SPL the user reads off the 2D / 3D
+// heatmap and the probe tooltip — single-frequency (state.physics.
+// freq_hz, default 1 kHz), direct-field only (roomConstantR=0 because
+// reverb is handled by the convolver path, not the SPL-trim). Goes
+// through the EXACT same function the heatmap uses, so audition
+// loudness changes match the heatmap colour byte-for-byte.
+//
+// Why direct-only? If we included the reverb in the SPL trim, the
+// trim would change less aggressively as the listener walks (reverb
+// is roughly position-independent), which would mute the perceived
+// dynamics. The current architecture has reverb baked into the
+// convolver IR; the SPL trim's job is to track the SPATIAL variation
+// the user sees on the heatmap.
+function computeAuditionSplDb(pos) {
+  if (!state?.sources?.length) return -Infinity;
+  try {
+    return computeMultiSourceSPL({
+      sources: expandSources(state.sources),
+      getSpeakerDef: url => getCachedLoudspeaker(url),
+      listenerPos: pos,
+      freq_hz: state.physics?.freq_hz ?? 1000,
+      roomConstantR: 0,
+      coherent: !!state.physics?.coherent,
+      airAbsorption: state.physics?.airAbsorption !== false,
+    });
+  } catch (err) {
+    console.warn('[audition] SPL compute failed:', err);
+    return -Infinity;
+  }
+}
 
 let _audioCtx = null;
 let _sampleBuffer = null;
 let _activeChain = null;          // { source, convolver, gain }
 let _samplePromise = null;
 let _saturatorCurve = null;
+let _lastDebugLogTs = 0;          // walk-mode SPL-trim debug print throttle
 // Phase 10 — multiband limiter worklet registration state.
 //   null    = not yet attempted to load
 //   Promise = load in flight (await it)
@@ -47,10 +83,15 @@ let _saturatorCurve = null;
 let _limiterWorkletState = null;
 const LIMITER_WORKLET_URL = 'js/audio/multiband-limiter-worklet.js';
 
-// Phase 9.7 — master gain trimmed 0.6 → 0.5. Combined with the
-// DC-blocking HPF below, gives ~3 dB more headroom before the
-// WaveShaper saturator engages.
-const DEFAULT_GAIN = 0.5;
+// Phase 9.7 → W.1 — master gain trimmed 0.5 → 0.25 to make 6 dB more
+// headroom for the post-limiter SPL-trim. Walk-mode places the SPL-trim
+// AFTER the multiband limiter so position-dependent loudness changes
+// survive the limiter's clamping; that pushes the worst-case DAC
+// excursion up to splTrimMax × master, so master had to come down to
+// keep the chain below DAC clip at maximum live-direct boost.
+// Baseline audition is therefore quieter than pre-W.1 — user can
+// crank speaker / headphone volume; trade is full SPL-field dynamics.
+const DEFAULT_GAIN = 0.25;
 const SAMPLE_URL = 'assets/audio/testing-1-2-3.mp3';
 
 // Phase 9.8 — hard-knee soft-clip curve, linear below -3 dBFS. Previous
@@ -446,11 +487,29 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   // so we know which limiter node to insert.
   const limiterReady = await ensureLimiterWorklet();
 
+  // Phase W.1 — subtract the analytical-direct contribution from the
+  // histogram BEFORE building the IR. The convolved chain then carries
+  // reflections + reverb only; a parallel LiveDirectPathChain (built
+  // below) supplies the direct sound from the live listener pose. This
+  // is what lets walk-mode update the direct cue without rebuilding
+  // the IR per step. The original histogram is left untouched (we
+  // operate on a copy) so a future audition for a different listener
+  // re-subtracts cleanly.
+  const cleanedHistogram = subtractAnalyticalDirect({
+    histogram: precisionResult.histogram,
+    shape: precisionResult.shape,
+    bucketDtMs: precisionResult.bucketDtMs,
+    scene: precisionResult.scene,
+    receiverIdx,
+    airAbsorption: !!precisionResult?.options?.airAbsorption,
+    airAbsCoefPerBand: precisionResult?.scene?.airAbsCoefPerBand ?? null,
+  });
+
   // Phase 8.1 — split early (HRTF-shaped, single source-direction cue)
   // from late (per-ear decorrelated, no HRTF). Two parallel convolution
   // chains sum at the output. See buildStereoIRPair for the rationale.
   const { earlyL, earlyR, lateL, lateR } = buildStereoIRPair(
-    precisionResult.histogram,
+    cleanedHistogram,
     precisionResult.shape,
     precisionResult.bucketDtMs,
     receiverIdx,
@@ -591,6 +650,35 @@ export async function startAudition({ precisionResult, receiverIdx }) {
     modeFilters = buildModeFilterChain(ctx, modes);
   }
 
+  // Phase W.1 — live direct-path chain. Built once at startAudition and
+  // updated per frame from setAuditionListenerPose() as the avatar
+  // walks. Only feeds the mixer (no convolver) — the IR's direct
+  // contribution was subtracted out above, so there's no double-count.
+  // Bypasses the LF-shelf and the modes filter (the direct sound is
+  // not subject to the room's modal coupling — modes are a long-term
+  // resonant-field property of the reverberant tail).
+  const liveDirect = new LiveDirectPathChain(ctx, precisionResult.scene, receiverIdx);
+
+  // Phase W.1 SPL-trim — POST-LIMITER master GainNode that scales the
+  // entire mix in lock-step with the predicted broadband direct SPL at
+  // the listener's CURRENT position. Same physics as the heatmap
+  // (computeBroadbandDirectSPL). At baseline = 1.0 (no audible jump
+  // on audition start); walking changes it.
+  //
+  // Why post-limiter and not per-path? Earlier W.1 draft parked the
+  // splTrim between the live-direct path and the mixer — but the
+  // multiband limiter sits DOWNSTREAM of the mixer and was clamping
+  // the resulting peaks back to threshold, so a 20 dB SPL drop produced
+  // a barely-audible level change. Putting splTrim AFTER the limiter
+  // makes the whole limited mix scale linearly with predicted SPL —
+  // the user hears the position-dependent dynamics matching the
+  // heatmap. Reverb tail also scales (approx wrong physically but
+  // perceptually convincing); W.3's grid-interpolated late field
+  // refines this to real per-position reverb.
+  const splTrim = ctx.createGain();
+  splTrim.gain.value = 1.0;
+  const baselineSplDb = computeAuditionSplDb(receiverWorldPos(precisionResult, receiverIdx));
+
   // Path A: source → HPF → LF-shelf → [modes] → HRTF → early IR → mixer
   source.connect(hpf);
   hpf.connect(lfShelf);
@@ -605,14 +693,35 @@ export async function startAudition({ precisionResult, receiverIdx }) {
   // Path B: source → HPF → LF-shelf → [modes] → late IR convolver → mixer
   preConvolverNode.connect(lateConv);
   lateConv.connect(mixer);
-  // Common downstream: soft-clip saturator → gain → out (NO compressor).
+  // Path C (W.1): source → HPF → LF-shelf → liveDirect → mixer
+  // Live direct shares the source-side HPF + LF-shelf treatment but
+  // skips the modes filter and the convolver.
+  lfShelf.connect(liveDirect.input);
+  liveDirect.output.connect(mixer);
+  // Common downstream: mixer → multiband limiter → SPL-trim → master
+  // gain → destination. splTrim is post-limiter (see comment above)
+  // so the limiter sees a stable, baseline-calibrated mix and the
+  // splTrim freely scales the limited output without being clamped.
   mixer.connect(limiter);
-  limiter.connect(gain);
+  limiter.connect(splTrim);
+  splTrim.connect(gain);
   gain.connect(ctx.destination);
 
   source.start();
 
-  _activeChain = { source, hpf, lfShelf, modeFilters, panner, earlyConv, lateConv, mixer, limiter, gain, mode: 'convolved' };
+  _activeChain = {
+    source, hpf, lfShelf, modeFilters, panner, earlyConv, lateConv,
+    liveDirect, splTrim, mixer, limiter, gain, mode: 'convolved',
+    // Cache so setAuditionListenerPose can re-evaluate panners
+    // against the live source positions.
+    precisionResult, receiverIdx,
+    // SPL-trim baseline — the reference dB the live trim is computed
+    // RELATIVE TO. Captured at audition-start time so subsequent
+    // pose updates always produce the right delta.
+    baselineSplDb,
+    airAbsCoefPerBand: precisionResult?.scene?.airAbsCoefPerBand ?? null,
+    airAbsorption: !!precisionResult?.options?.airAbsorption,
+  };
 }
 
 // Helpers for modal synthesis — return positions in STATE coords.
@@ -677,7 +786,7 @@ function sourceCentroidRelative(precisionResult, receiverIdx) {
 // mutually exclusive; only one is ever live.
 export function stopAudition() {
   if (!_activeChain) return;
-  const { source, hpf, lfShelf, modeFilters, panner, convolver, earlyConv, lateConv, mixer, limiter, gain } = _activeChain;
+  const { source, hpf, lfShelf, modeFilters, panner, convolver, earlyConv, lateConv, liveDirect, splTrim, mixer, limiter, gain } = _activeChain;
   try { source.stop(); } catch (_) { /* already stopped */ }
   try {
     source.disconnect();
@@ -690,6 +799,8 @@ export function stopAudition() {
     if (convolver) convolver.disconnect();
     if (earlyConv) earlyConv.disconnect();
     if (lateConv) lateConv.disconnect();
+    if (liveDirect) liveDirect.disconnect();
+    if (splTrim) splTrim.disconnect();
     if (mixer) mixer.disconnect();
     if (limiter) limiter.disconnect();
     gain.disconnect();
@@ -706,6 +817,28 @@ export function getAuditionMode() {
 
 export function isAuditionPlaying() {
   return _activeChain !== null;
+}
+
+// Phase W.1 — walk-mode entry / exit hook. When set, the audition
+// graph treats the AVATAR as the listener: the sidebar listener-row
+// click no longer restarts audition (otherwise the user would hear
+// the IR jump every time they tweaked sidebar selection unrelated to
+// where they're actually walking), and the SPL baseline is re-anchored
+// to the avatar's current position on the next setAuditionListenerPose
+// call. Pass false on walk-mode exit to restore normal behaviour.
+export function setAuditionWalkMode(active) {
+  if (!_activeChain) return;
+  if (active) {
+    _activeChain.walkMode = true;
+    _activeChain.pendingWalkAnchor = true;       // re-anchor on next pose update
+  } else {
+    _activeChain.walkMode = false;
+    _activeChain.pendingWalkAnchor = false;
+  }
+}
+
+export function isAuditionInWalkMode() {
+  return !!_activeChain?.walkMode;
 }
 
 // Walk-mode listener orientation → AudioListener forward vector. Lets
@@ -740,6 +873,84 @@ export function setAuditionListenerOrientation(yawRad, pitchRad) {
   } else if (listener.setOrientation) {
     // Older Safari / Firefox before AudioParam-style listener.
     listener.setOrientation(fxs, fzs, -fys, 0, 1, 0);
+  }
+}
+
+// Phase W.1 — full pose update for walk mode. Combines orientation
+// (forward vector → AudioListener) AND position (drives the live
+// direct-path chain so the speakers get louder as you walk closer,
+// pan correctly as you turn, and re-time their delay so the live
+// transient stays aligned with the convolver's reflections).
+//
+// Args:
+//   yawRad, pitchRad — head orientation, same convention as
+//                      setAuditionListenerOrientation.
+//   posState         — { x, y, z } in STATE coords (avatar world position
+//                      with z = ear height). Pass null/undefined to skip
+//                      the position half (orientation-only update).
+//
+// Throttle at the call site (10–20 Hz is the perceptual budget per
+// Wenzel J.AES 1993 + Hannes spec §4). Internally we use
+// setTargetAtTime with τ ≈ 15 ms so the AudioParam ramp absorbs any
+// jitter in the calling cadence.
+export function setAuditionListenerPose(yawRad, pitchRad, posState) {
+  setAuditionListenerOrientation(yawRad, pitchRad);
+  if (!posState || !_activeChain || !_activeChain.liveDirect) return;
+  _activeChain.liveDirect.setPose(posState);
+  // First pose update after walk-mode entry → anchor the SPL baseline
+  // to the avatar's actual starting position. Without this, the
+  // baseline stays at whatever sidebar listener was used to start the
+  // audition, which makes SPL deltas meaningless relative to where
+  // the user is actually walking. (Re-anchored ONCE per walk-mode
+  // entry; flag cleared after first pose update so subsequent
+  // movement produces real deltas.)
+  if (_activeChain.pendingWalkAnchor) {
+    const newBaseline = computeAuditionSplDb(posState);
+    if (Number.isFinite(newBaseline)) {
+      _activeChain.baselineSplDb = newBaseline;
+      _activeChain.pendingWalkAnchor = false;
+      if (typeof window !== 'undefined' && window.__rl_audition_debug) {
+        console.log(`[audition] walk-mode baseline anchored to avatar: ${newBaseline.toFixed(1)} dB`);
+      }
+    }
+  }
+
+  // SPL-trim — heatmap-matching loudness. Computed against the same
+  // direct-field physics the heatmap uses, so audible level == colour
+  // on the heatmap as the avatar walks. Reverb path is intentionally
+  // not scaled (statistical-acoustics late field is approximately
+  // position-independent; W.3 grid-interpolation will refine that).
+  if (_activeChain.splTrim && Number.isFinite(_activeChain.baselineSplDb)) {
+    const liveSplDb = computeAuditionSplDb(posState);
+    if (Number.isFinite(liveSplDb)) {
+      const dbDelta = liveSplDb - _activeChain.baselineSplDb;
+      // Asymmetric clamp: −30 dB on the quiet side (room far from
+      // sources can genuinely be 30 dB below the calibrated listener
+      // and we want the user to hear "almost silent there"); +12 dB
+      // on the loud side (worst-case DAC headroom: limiter@1.0 ×
+      // splTrim@10^(12/20)=3.98 × master@0.25 = 0.995, safely below
+      // clip). Listeners inside a source can theoretically demand
+      // higher gains but the point-source physics is broken there
+      // anyway, so capping is the right behaviour.
+      const clamped = Math.max(-30, Math.min(12, dbDelta));
+      const linearGain = Math.pow(10, clamped / 20);
+      const ctx = _audioCtx;
+      _activeChain.splTrim.gain.setTargetAtTime(linearGain, ctx.currentTime, 0.05);
+      // Diagnostic — set window.__rl_audition_debug = true in DevTools
+      // to watch live SPL / baseline / delta / gain as the avatar
+      // walks. Throttled to 500 ms so the console doesn't flood.
+      if (typeof window !== 'undefined' && window.__rl_audition_debug) {
+        const nowMs = Date.now();
+        if (!_lastDebugLogTs || nowMs - _lastDebugLogTs > 500) {
+          _lastDebugLogTs = nowMs;
+          console.log(
+            `[audition] avatar(${posState.x.toFixed(2)},${posState.y.toFixed(2)},${posState.z.toFixed(2)}) ` +
+            `live=${liveSplDb.toFixed(1)}dB baseline=${_activeChain.baselineSplDb.toFixed(1)}dB ` +
+            `Δ=${dbDelta.toFixed(1)}dB(clamp ${clamped.toFixed(1)}) gain=${linearGain.toFixed(2)}x`
+          );
+        }
+      }
+    }
   }
 }
 

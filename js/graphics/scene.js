@@ -18,7 +18,8 @@ import { roomPlanVertices, domeGeometry, isInsideRoom3D, normalizeWallSlot } fro
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { loadCharacterRig } from './character-loader.js';
-import { setAuditionListenerOrientation } from '../audio/audition.js';
+import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode } from '../audio/audition.js';
+import { showWalkTouchHUD, hideWalkTouchHUD } from '../ui/walk-touch-hud.js';
 import { splColorRGB, stiColorRGB } from './colour-ramps.js';
 import { computeTicks, formatTickLabel } from './legend-ticks.js';
 
@@ -429,7 +430,12 @@ function initScene() {
   // below). PCFSoftShadowMap is the middle ground between perf and quality.
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  container.innerHTML = '';
+  // Remove the static-HTML "Loading 3D view…" placeholder, but PRESERVE
+  // any other static markup inside #view-3d (e.g. #walk-touch-controls
+  // — the joystick / action-button HUD). Earlier this was a wholesale
+  // `container.innerHTML = ''` which detached the HUD from the live DOM
+  // and made walk-mode show() silently no-op against an orphaned node.
+  container.querySelector('.viewport-loading')?.remove();
   container.style.position = 'relative';
   container.appendChild(renderer.domElement);
   // Post-processing (SSAO/Bloom/SMAA) is temporarily disabled — the previous
@@ -1723,6 +1729,15 @@ export function setWalkthroughMode(on) {
     return;
   }
   walkMode = !!on;
+  // Phase W.1 — tell the audition graph whether the avatar is the
+  // listener now. setAuditionWalkMode(true) re-anchors the SPL-trim
+  // baseline to the avatar on the next pose update AND blocks the
+  // sidebar listener-selection event from restarting audition.
+  setAuditionWalkMode(walkMode);
+  // Show / hide the touch HUD overlay (joystick + action buttons) so
+  // tablet users have a usable walk control surface. Desktop users
+  // can ignore it (CSS dims to ~55% opacity until hovered).
+  if (walkMode) showWalkTouchHUD(); else hideWalkTouchHUD();
   if (walkMode) {
     placeAvatarAtDefault();
     // Hide the procedural cylinder placeholder while the rigged GLB is
@@ -5891,14 +5906,31 @@ function animate(ts) {
     const dt = Math.min(0.1, (now - tpLastTs) / 1000);
     tpLastTs = now;
     tpController.update(dt);
-    // Phase 11.D — head-rotation tracking for in-walk audition. Throttled
-    // to ~33 Hz (every 30 ms) since the spatialisation cue doesn't need
-    // sub-frame resolution and Web Audio AudioParam writes have a small
-    // cost. Audition itself is unchanged when not playing — the function
-    // bails on a missing AudioContext.
-    if (!_lastAuditionOrientTs || now - _lastAuditionOrientTs > 30) {
+    // Phase 11.D + W.1 — head-rotation AND position tracking for in-
+    // walk audition. Throttled to ~20 Hz (every 50 ms) per Hannes's
+    // spec §4 — IR rebuild budget is 80–120 ms perceived end-to-end,
+    // so a 50 ms cadence keeps the position ahead of the audio thread
+    // without burning CPU. Three.js → state coord mapping:
+    //   state.x = three.x, state.y = three.z, state.z = three.y + ear
+    // (ear-height offset matches the rest of the listener-positioning
+    // code in scene.js around line 1140).
+    //
+    // Yaw source: cameraYaw, NOT the avatar's anatomical yaw. Reason:
+    // the user observes the scene through the chase camera, and what
+    // they perceive as "left" is screen-left = camera-relative. Tying
+    // audio to the camera matches that perception (also avoids the
+    // L/R-swap report when the camera was orbited around the avatar).
+    // Pitch already uses cameraPitch since Phase 11.D.
+    if (!_lastAuditionOrientTs || now - _lastAuditionOrientTs > 50) {
       _lastAuditionOrientTs = now;
-      setAuditionListenerOrientation(tpController.yaw, tpController.cameraPitch);
+      const tp = tpController.pos;       // Three.js Vector3 (x right, y up, z back-forward)
+      const earOffset = (tpController.characterHeight ?? 1.78) * 0.94;     // ~ear-canal height
+      const posState = {
+        x: tp.x,
+        y: tp.z,
+        z: tp.y + earOffset,
+      };
+      setAuditionListenerPose(tpController.cameraYaw, tpController.cameraPitch, posState);
     }
   } else if (controls) {
     controls.update();

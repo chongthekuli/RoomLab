@@ -141,6 +141,19 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   height: calc(100vh - 60px);
 }
 
+/* Fullscreen mode — toggled by roomlab/main.js's fullscreenchange
+   handler. Hides the left + right side panels (per user request)
+   and collapses the grid to a single column so the viewport occupies
+   the entire fullscreen rect. The header stays visible (its own
+   buttons are still useful at this scale). */
+html.is-fullscreen #panel-left,
+html.is-fullscreen #panel-right {
+  display: none;
+}
+html.is-fullscreen #app-root {
+  grid-template-columns: 1fr;
+}
+
 #panel-left {
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
@@ -203,6 +216,16 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   align-items: center;
 }
 .vp-group-layers { margin-left: 12px; padding-left: 12px; border-left: 1px solid #2a2f38; }
+
+/* Fullscreen toggle — sits beside the Walk tab. JS swaps text content
+   between ⛶ (enter) and ⤢ (exit) on fullscreenchange. */
+.vp-fullscreen-btn {
+  font-size: 1rem;
+  padding: 0.25rem 0.5rem;
+  margin-left: 4px;
+  min-width: 2rem;
+  text-align: center;
+}
 .vp-group-tools  { margin-left: auto; padding-left: 12px; border-left: 1px solid #2a2f38; }
 
 .vp-toggle {
@@ -735,6 +758,128 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   margin-bottom: 4px;
 }
 .walk-hint.hidden { display: none; }
+
+/* ---------- Walk-mode touch controls (tablet / mobile) -------------
+   Mobile-Legends-style HUD: virtual joystick bottom-left for move;
+   action button cluster bottom-right for jump / run / crouch / sit;
+   small rotate buttons beside the joystick for arrow-key turns. All
+   buttons dispatch synthetic keyboard events into document so the
+   ThirdPersonController handles them with no special path. Visible
+   only when the walk-touch container's `hidden` attribute is removed
+   by scene.js's setWalkthroughMode(true). */
+.walk-touch {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;             /* gaps don't intercept camera drag */
+  z-index: 8;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.walk-touch[hidden] { display: none; }
+
+.walk-joystick {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 32px;
+  left: 32px;
+  width: 140px;
+  height: 140px;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+}
+.walk-joystick-base {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(40, 44, 52, 0.55) 0%, rgba(20, 22, 28, 0.55) 65%, rgba(20, 22, 28, 0.0) 100%);
+  border: 2px solid rgba(192, 196, 208, 0.35);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+}
+.walk-joystick-nub {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #3b4250 0%, #232830 100%);
+  border: 2px solid #c0c4d0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  transform: translate(0, 0);
+  transition: transform 0.05s linear;
+}
+.walk-joystick.is-active .walk-joystick-nub { transition: none; }
+
+.walk-rotate-buttons {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 30px;
+  left: 196px;            /* sits to the right of the joystick */
+  display: flex;
+  gap: 8px;
+}
+.walk-rot-btn {
+  width: 52px;
+  height: 52px;
+  font-size: 1.2rem;
+  border-radius: 50%;
+  border: 2px solid rgba(192, 196, 208, 0.5);
+  background: rgba(20, 22, 28, 0.7);
+  color: #c0c4d0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.walk-rot-btn.is-pressed { background: rgba(74, 163, 255, 0.4); border-color: #4aa3ff; }
+
+.walk-actions {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 32px;
+  right: 32px;
+  display: grid;
+  grid-template-columns: 80px 80px;
+  gap: 10px;
+}
+.walk-btn {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 2px solid rgba(192, 196, 208, 0.5);
+  background: radial-gradient(circle, rgba(45, 52, 65, 0.85) 0%, rgba(20, 22, 28, 0.85) 80%);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.walk-btn span { line-height: 1; }
+.walk-btn.is-pressed {
+  background: radial-gradient(circle, #4aa3ff 0%, #1f5faa 80%);
+  border-color: #ffffff;
+  transform: scale(0.96);
+  box-shadow: 0 2px 6px rgba(74, 163, 255, 0.5);
+}
+.walk-btn-jump   { border-color: rgba(74, 163, 255, 0.7); }
+.walk-btn-run    { border-color: rgba(255, 200, 70, 0.7); }
+.walk-btn-crouch { border-color: rgba(120, 220, 120, 0.7); }
+.walk-btn-sit    { border-color: rgba(200, 130, 240, 0.7); }
+
+/* Hide the touch HUD on coarse-pointer-OFF (desktop) UNLESS the user is
+   in a fullscreen viewport on a small screen — keeps desktop clean. */
+@media (hover: hover) and (pointer: fine) {
+  .walk-touch:not(.force-show) {
+    /* desktop: still visible but slightly translucent so it's clearly
+       a "touch HUD" and doesn't dominate the keyboard-driven view. */
+    opacity: 0.55;
+  }
+  .walk-touch:hover { opacity: 1; }
+}
 
 /* Walkthrough live SPL readout — top-right of the 3D canvas, updates every
    frame with the avatar's ear position + current pose + total SPL. */
