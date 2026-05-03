@@ -2776,10 +2776,70 @@ section h3 {
   width: 180px;
   height: 10px;
   border-radius: 2px;
-  background: linear-gradient(to right, #1a1a4a, #0066cc, #00cc66, #ffcc00, #ff3300);
+  background: linear-gradient(to right, #1428b4, #008ce6, #1edc50, #ffd700, #f01e1e);
 }
 .vp-legend.spl-legend .legend-range { font-size: 0.7rem; color: #99a; }
 .vp-legend.spl-legend .legend-label { font-size: 0.72rem; color: #c0c4d0; font-weight: 500; }
+
+/* Vertical SPL legend (Sofia v1) — single source of truth with the
+   3D viewport and the print-report heatmap legend. Width 56 px, 14 px
+   colour swatch, 4 px tick, 6 px gap, 10 px label. Numeric ticks come
+   from computeTicks() so the same data shows the same scale across
+   2D, 3D, and PDF. */
+.vp-legend.spl-legend-v {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.45rem;
+  justify-content: center;
+  padding: 0.4rem 0.6rem;
+}
+.vp-legend.spl-legend-v .legend-header {
+  font-size: 0.7rem;
+  color: #c0c4d0;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  align-self: center;
+  margin-right: 0.3rem;
+}
+.vp-legend.spl-legend-v .spl-legend-stage {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 140px;
+}
+.vp-legend.spl-legend-v .legend-bar {
+  width: 14px;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(to top, #1428b4 0%, #008ce6 25%, #1edc50 50%, #ffd700 75%, #f01e1e 100%);
+}
+.vp-legend.spl-legend-v .spl-legend-ticks {
+  position: relative;
+  width: 32px;
+  margin-left: 6px;
+  height: 100%;
+}
+.vp-legend.spl-legend-v .spl-legend-tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.vp-legend.spl-legend-v .spl-legend-tick-line {
+  width: 4px;
+  height: 1px;
+  background: #c0c4d0;
+}
+.vp-legend.spl-legend-v .spl-legend-tick-label {
+  font-size: 0.64rem;
+  color: #c0c4d0;
+  line-height: 1;
+}
 
 /* ------------------------------------------------------------------ */
 /* Phase E — Precision Render panel                                   */

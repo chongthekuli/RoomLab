@@ -4,6 +4,7 @@ import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
 import { roomPlanVertices, isInsideRoom3D } from '../physics/room-shape.js';
+import { computeTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
 
 let materialsRef;
 
@@ -990,11 +991,27 @@ function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room) {
 
 function renderLegend(splResult) {
   if (splResult) {
-    return `<div class="vp-legend spl-legend">
-      <span class="legend-label">SPL</span>
-      <span class="legend-range">${splResult.minSPL_db.toFixed(0)} dB</span>
-      <span class="legend-bar"></span>
-      <span class="legend-range">${splResult.maxSPL_db.toFixed(0)} dB</span>
+    // Vertical legend per Sofia's spec — swatch column with numeric ticks
+    // beside it, sharing computeTicks() with the 3D legend and the
+    // print-report heatmap so the same data shows the same scale
+    // everywhere. 5–7 ticks at 5 / 10 dB step, capped to avoid label
+    // collision on the ~180 px bar.
+    const minVal = splResult.minSPL_db;
+    const maxVal = splResult.maxSPL_db;
+    const ticks = computeTicks(minVal, maxVal, 'spl');
+    const tickRows = ticks.map(t => {
+      const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
+      return `<div class="spl-legend-tick" style="top:${pct}%">
+        <span class="spl-legend-tick-line"></span>
+        <span class="spl-legend-tick-label">${formatTickLabel(t.value, 'spl')}</span>
+      </div>`;
+    }).join('');
+    return `<div class="vp-legend spl-legend spl-legend-v">
+      <span class="legend-header">${legendHeader('spl')}</span>
+      <div class="spl-legend-stage">
+        <div class="legend-bar"></div>
+        <div class="spl-legend-ticks">${tickRows}</div>
+      </div>
     </div>`;
   }
   return `<div class="vp-legend">

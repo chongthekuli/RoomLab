@@ -59,6 +59,59 @@
     break-after: auto;
   }
 
+  /* User-flagged: methodology + disclaimers must NEVER continue from a
+     previous page. Force a page break before each — page-break-after on
+     the previous .pr-page already triggers, but page-break-before is
+     belt-and-braces against future re-orderings of the page list. */
+  #print-report .pr-page-methodology,
+  #print-report .pr-page-disclaimer,
+  #print-report .pr-page-heatmap {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  /* Headings should never be the last line on a page. */
+  #print-report h1,
+  #print-report h2,
+  #print-report h3,
+  #print-report .pr-eyebrow {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  /* Body paragraphs should keep at least 3 lines together at a page
+     boundary — orphaned 1-line continuations look unfinished. */
+  #print-report p,
+  #print-report .pr-note,
+  #print-report .pr-section p {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Table headers repeat across page breaks and rows never split. */
+  #print-report .pr-table thead { display: table-header-group; }
+  #print-report .pr-table tfoot { display: table-footer-group; }
+
+  /* Chromium strips background-image (linear-gradient) and background-
+     colour fills from print by default to "save ink". Sofia v2 audit:
+     opt the elements that NEED to print colour into exact-rendering
+     mode. Keep this list narrow — applied globally it would also force
+     incidental background fills (zebra rows on muted-paper) which the
+     proposal aesthetic already strips on purpose. */
+  #print-report .pr-heatmap-legend-bar,
+  #print-report .pr-tierstrip-cell.pr-tierstrip-active,
+  #print-report .pr-precision-headline,
+  #print-report .pr-reviewer-note,
+  #print-report .pr-empty-state,
+  #print-report .pr-cover-hero,
+  #print-report .pr-table th,
+  #print-report .pr-zebra tbody tr:nth-child(even) td,
+  #print-report .pr-bandstrip-label,
+  #print-report .pr-tile {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
   /* ----------- Type scale ----------- */
   #print-report h1 {
     font-size: 26pt;
@@ -135,14 +188,15 @@
     line-height: 1.5;
   }
 
-  /* Hero band — floor plan dominates */
+  /* Hero band — coloured coverage map dominates the cover. */
   #print-report .pr-cover-hero {
     width: 100%;
     background: var(--paper-2);
     padding: 6mm 4mm;
     border-radius: 0;
   }
-  #print-report .pr-cover-hero .pr-plan-svg {
+  #print-report .pr-cover-hero .pr-heatmap-svg,
+  #print-report .pr-cover-hero svg {
     width: 100%;
     max-height: 130mm;
     height: auto;
@@ -251,6 +305,94 @@
     color: var(--muted);
     font-style: italic;
     line-height: 1.45;
+  }
+
+  /* ----------- HERO HEATMAP PAGE (Sofia v1) -----------
+     Drawing 02. Hybrid SVG (vector linework over PNG raster) + a
+     vertical legend column with numeric ticks shared with the 2D
+     and 3D viewports via computeTicks(). */
+  #print-report .pr-heatmap-grid {
+    display: grid;
+    grid-template-columns: 1fr 110pt;
+    gap: 12pt;
+    align-items: stretch;
+    margin: 4pt 0 8pt 0;
+  }
+  #print-report .pr-heatmap-stage {
+    border: 1pt solid var(--rule);
+    padding: 4mm;
+    background: var(--paper);
+  }
+  #print-report .pr-heatmap-svg {
+    width: 100%;
+    max-height: 18cm;
+    height: auto;
+    display: block;
+  }
+  #print-report .pr-heatmap-stage svg { width: 100%; height: auto; }
+  #print-report .pr-heatmap-legend {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6pt;
+    border-left: 0.5pt solid var(--rule);
+    padding-left: 8pt;
+    font-size: 8.5pt;
+    color: var(--ink);
+  }
+  #print-report .pr-heatmap-legend-header {
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  #print-report .pr-heatmap-legend-stage {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    height: 16cm;
+  }
+  #print-report .pr-heatmap-legend-bar {
+    width: 14pt;
+    height: 100%;
+    border-radius: 1pt;
+    border: 0.4pt solid var(--rule);
+  }
+  #print-report .pr-heatmap-legend-ticks {
+    position: relative;
+    width: 32pt;
+    margin-left: 5pt;
+    height: 100%;
+  }
+  #print-report .pr-heatmap-legend-tick {
+    position: absolute;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 4pt;
+    white-space: nowrap;
+  }
+  #print-report .pr-heatmap-legend-tick-line {
+    width: 4pt;
+    height: 0.4pt;
+    background: var(--ink);
+  }
+  #print-report .pr-heatmap-legend-tick-label {
+    font-size: 7.5pt;
+    color: var(--ink);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  #print-report .pr-caption {
+    font-size: 8.5pt;
+    line-height: 1.45;
+    color: var(--ink);
+    margin: 6pt 0 0 0;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
 
   /* Tile grid (moved off cover, lives below plan) */

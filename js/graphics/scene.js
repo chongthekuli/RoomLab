@@ -19,6 +19,8 @@ import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { loadCharacterRig } from './character-loader.js';
 import { setAuditionListenerOrientation } from '../audio/audition.js';
+import { splColorRGB, stiColorRGB } from './colour-ramps.js';
+import { computeTicks, formatTickLabel } from './legend-ticks.js';
 
 let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
@@ -5790,17 +5792,19 @@ function updateSPLLegend() {
     ticksEl.appendChild(t);
   };
 
+  // Tick layout shared with the 2D legend and print-report heatmap legend
+  // — see js/graphics/legend-ticks.js. Cap of 7 ticks lives there.
+  const tickMode = mode === 'stipa' ? 'sti' : 'spl';
+  const ticks = computeTicks(minVal, maxVal, tickMode);
   if (mode === 'stipa') {
     if (title) title.textContent = 'STI';
     // Gradient matches stiColorRGB: red (bad) → orange (poor) → yellow
     // (fair) → green (good) → teal (excellent). Top of bar = 1.00.
     if (bar) bar.style.background = 'linear-gradient(to top, ' +
       '#d21414 0%, #ff8214 30%, #ffd700 45%, #3cd23c 60%, #00c896 75%, #00aadc 100%)';
-    // STI ticks are FIXED at the IEC 60268-16 rating-band boundaries —
-    // these are the values the user actually needs to read off the
-    // colour ("where does 'good' start") regardless of the data range.
-    for (const v of [0.00, 0.30, 0.45, 0.60, 0.75, 1.00]) {
-      addTick(v * 100, v.toFixed(2));
+    for (const t of ticks) {
+      const pct = Math.max(0, Math.min(100, t.position01 * 100));
+      addTick(pct, formatTickLabel(t.value, 'sti'));
     }
     if (maxL) maxL.textContent = maxVal.toFixed(2);
     if (minL) minL.textContent = minVal.toFixed(2);
@@ -5808,64 +5812,13 @@ function updateSPLLegend() {
     if (title) title.textContent = 'SPL';
     if (bar) bar.style.background = 'linear-gradient(to top, ' +
       '#1428b4 0%, #008ce6 25%, #1edc50 50%, #ffd700 75%, #f01e1e 100%)';
-    // SPL ticks are dynamic — choose 5 dB step for narrow ranges, 10 dB
-    // for wider, snap to multiples. Cap at 7 ticks to avoid label
-    // collision on the 180 px bar.
-    const span = Math.max(1e-3, maxVal - minVal);
-    let step = span <= 30 ? 5 : 10;
-    let first = Math.ceil(minVal / step) * step;
-    let last  = Math.floor(maxVal / step) * step;
-    let count = Math.floor((last - first) / step) + 1;
-    if (count > 7) {
-      step *= 2;
-      first = Math.ceil(minVal / step) * step;
-      last  = Math.floor(maxVal / step) * step;
-      count = Math.floor((last - first) / step) + 1;
-    }
-    if (count >= 1) {
-      for (let v = first; v <= last + 1e-6; v += step) {
-        const pct = ((v - minVal) / span) * 100;
-        if (pct >= 0 && pct <= 100) addTick(pct, v.toFixed(0));
-      }
+    for (const t of ticks) {
+      const pct = Math.max(0, Math.min(100, t.position01 * 100));
+      addTick(pct, formatTickLabel(t.value, 'spl'));
     }
     if (maxL) maxL.textContent = maxVal.toFixed(0) + ' dB';
     if (minL) minL.textContent = minVal.toFixed(0) + ' dB';
   }
-}
-
-function splColorRGB(spl_db) {
-  const t = Math.max(0, Math.min(1, (spl_db - 60) / 50));
-  // Punchier 4-stop ramp: deep saturated blue → cyan-green → yellow →
-  // pure red. Dull navy at the low end was washed out under the heatmap's
-  // own alpha; pushing every stop closer to a primary keeps cells legible
-  // even in a bright 3D viewport with HDR + bloom.
-  if (t < 0.25) return interpRGB([ 20,  40, 180], [  0, 140, 230], t / 0.25);
-  if (t < 0.50) return interpRGB([  0, 140, 230], [ 30, 220,  80], (t - 0.25) / 0.25);
-  if (t < 0.75) return interpRGB([ 30, 220,  80], [255, 215,   0], (t - 0.50) / 0.25);
-  return interpRGB([255, 215, 0], [240, 30, 30], (t - 0.75) / 0.25);
-}
-
-// STIPA color palette mapped to the IEC 60268-16 5-tier rating bands.
-// Red (bad) → orange (poor) → yellow (fair) → green (good) → teal (excellent).
-// Legend ticks at 0.00 / 0.30 / 0.45 / 0.60 / 0.75 / 1.00 match the rating
-// boundaries so the user can read off "poor vs fair" from the colour alone.
-// Saturation matches the SPL ramp so the two metrics read with the same
-// visual weight when toggling between them.
-function stiColorRGB(sti) {
-  const t = Math.max(0, Math.min(1, sti));
-  if (t < 0.30) return interpRGB([210,  20,  20], [255, 130,  20], t / 0.30);           // bad → poor
-  if (t < 0.45) return interpRGB([255, 130,  20], [255, 215,   0], (t - 0.30) / 0.15);  // poor → fair
-  if (t < 0.60) return interpRGB([255, 215,   0], [ 60, 210,  60], (t - 0.45) / 0.15);  // fair → good
-  if (t < 0.75) return interpRGB([ 60, 210,  60], [  0, 200, 150], (t - 0.60) / 0.15);  // good → excellent
-  return interpRGB([0, 200, 150], [0, 170, 220], (t - 0.75) / 0.25);                    // excellent → top
-}
-
-function interpRGB(a, b, t) {
-  return [
-    Math.round(a[0] + (b[0] - a[0]) * t),
-    Math.round(a[1] + (b[1] - a[1]) * t),
-    Math.round(a[2] + (b[2] - a[2]) * t),
-  ];
 }
 
 function onResize() {

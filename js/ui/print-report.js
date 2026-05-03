@@ -29,8 +29,9 @@ import { state, earHeightFor, expandSources, POSTURE_LABELS, SPEAKER_CATALOG } f
 import { computeAllBands } from '../physics/rt60.js';
 import { roomVolume, baseArea } from '../physics/room-shape.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
+import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
-import { buildFloorPlanSVG, buildFloorPlanLegend } from './print-plan-svg.js';
+import { buildHeatmapPageSVG, buildHeatmapLegend } from './print-heatmap.js';
 
 // ---------------------------------------------------------------------------
 // buildPrintModel — pure data function (testable without a headless browser).
@@ -63,6 +64,15 @@ export function buildPrintModel({ materials, nameHint } = {}) {
   const schroederCutoff_hz = (t60_1k && t60_1k > 0 && volume > 0)
     ? 2000 * Math.sqrt(t60_1k / volume)
     : null;
+
+  // SPL heatmap grid. Re-uses the cached state.results.splGrid when the
+  // user has already visited the 2D viewport this session — that grid
+  // matches what they see on screen exactly. When no grid is cached
+  // (e.g., the user opens print straight from the 3D view), we compute
+  // a fresh one at print resolution so the report never ships with an
+  // empty hero page. Honours the active heatmap mode (SPL / STIPA) via
+  // state.display.heatmapMode.
+  const splGrid = ensurePrintSplGrid({ materials, t60_1k });
 
   return {
     project: {
@@ -136,7 +146,59 @@ export function buildPrintModel({ materials, nameHint } = {}) {
       Q_assumed: Q_avg,
       DI_assumed_db: 3,
     },
+    // Heatmap METADATA only — keeps the model JSON-serialisable under
+    // the 50 KB print-report budget (a 60×60 grid would not fit). The
+    // grid blob is recomputed at render time via ensurePrintSplGrid.
+    heatmap: splGrid ? {
+      metric: splGrid.metric ?? 'spl',
+      freq_hz: splGrid.freq_hz ?? 1000,
+      earHeight_m: splGrid.earHeight_m ?? null,
+      minSPL_db: splGrid.minSPL_db,
+      maxSPL_db: splGrid.maxSPL_db,
+      avgSPL_db: splGrid.avgSPL_db,
+      sourceCount: splGrid.sourceCount ?? 0,
+    } : null,
   };
+}
+
+// Build (or reuse) the SPL grid used for the print-report hero
+// heatmap. Keeps the render pure — never mutates state.results.
+function ensurePrintSplGrid({ materials, t60_1k }) {
+  const cached = state.results?.splGrid;
+  const hasSources = (state.sources ?? []).length > 0;
+  if (!hasSources) return null;
+  if (cached && cached.grid && cached.cellsX > 0 && cached.cellsY > 0
+      && (cached.sourceCount ?? 0) > 0) {
+    return cached;
+  }
+  // Compute fresh. Match the same parameters the 2D viewport uses so
+  // the printed heatmap is byte-for-byte the on-screen heatmap.
+  try {
+    const earH = state.listeners?.[0] ? earHeightFor(state.listeners[0]) : 1.2;
+    const includeReverb = !!state.physics?.reverberantField;
+    const coherent = !!state.physics?.coherent;
+    const airAbs = state.physics?.airAbsorption !== false;
+    let R = 0;
+    if (includeReverb && t60_1k && t60_1k > 0 && materials) {
+      try { R = computeRoomConstant({ room: state.room, materials, T60_s: t60_1k }); }
+      catch (_) { R = 0; }
+    }
+    return computeSPLGrid({
+      sources: state.sources ?? [],
+      getSpeakerDef: getCachedLoudspeaker,
+      room: state.room,
+      earHeight_m: earH,
+      gridSize: 60,             // Sofia spec: print-resolution raster
+      freq_hz: state.physics?.freq_hz ?? 1000,
+      roomConstantR: R,
+      coherent,
+      airAbsorption: airAbs,
+      metric: 'spl',
+    });
+  } catch (err) {
+    console.warn('[print-report] heatmap grid compute failed:', err);
+    return null;
+  }
 }
 
 // Aggregate sources into a Bill of Materials. One row per unique model
@@ -344,7 +406,7 @@ function escapeHtml(s) {
 // hero plan on the cover, displayed numbers, two-tone + one accent.
 // Tear-down is via afterprint, see mountPrintReport.
 // ---------------------------------------------------------------------------
-function renderPrintReport(model) {
+function renderPrintReport(model, { splGrid = null } = {}) {
   let root = document.getElementById('print-report');
   if (root) root.remove();
   root = document.createElement('div');
@@ -356,14 +418,16 @@ function renderPrintReport(model) {
       ${body}
     </section>`;
 
-  // ------ Page 1: COVER — title block + hero plan + 3 displayed nums ----
-  // Per Sofia: floor plan IS the hero element (174 mm wide). Three
-  // displayed figures only (RT60, r_c, Volume). RT60 is the ONE accent
-  // colour on the entire page. The 12-tile grid moves to page 2.
+  // ------ Page 1: COVER — title block + COLOURED heatmap hero + 3 figs --
+  // Per Sofia v2 (post-export-audit): the coloured heatmap IS the hero.
+  // Earlier draft shipped a B&W floor plan on the cover AND on page 2,
+  // then the colour heatmap on page 6 — the user flagged the duplication
+  // ("don't need so many pages reminding this 2D view"). One plan view,
+  // the colour one, top of the report.
   const room = model.room;
   const rt60_1k = model.rt60[3];
-  const planSvg = buildFloorPlanSVG(state);
-  const planLegend = buildFloorPlanLegend();
+  const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid) : '';
+  const heatLegend = (model.heatmap && splGrid) ? buildHeatmapLegend(splGrid) : '';
 
   const coverFigures = `
     <div class="pr-hero-figures">
@@ -394,7 +458,7 @@ function renderPrintReport(model) {
         </div>
       </div>
       <div class="pr-cover-hero">
-        ${planSvg}
+        ${heatSvg || '<p class="pr-empty-state" style="margin:0">Place at least one source to render a coverage map.</p>'}
       </div>
       ${coverFigures}
       <p class="pr-lead">
@@ -405,37 +469,13 @@ function renderPrintReport(model) {
       </p>
       <div class="pr-cover-foot">
         <span>schema v${model.project.schemaVersion} · generated ${escapeHtml(model.project.generatedAt)}</span>
-        <span>page 1 / 7</span>
       </div>
     </div>`;
 
-  // ------ Page 2: PLAN — drawing-sheet treatment with tile grid below --
-  // Per Sofia: heading demoted to small-caps eyebrow (cover already sold
-  // the plan). Tile grid lands here below the plan as the "scene at a
-  // glance" reference data.
-  const planPage = `
-    <div class="pr-page pr-page-plan">
-      <span class="pr-eyebrow">Drawing 01 · Floor plan, top-down view</span>
-      <div class="pr-plan-grid">
-        <div class="pr-plan-svg-wrap">${planSvg}</div>
-        ${planLegend}
-      </div>
-      <p class="pr-note">Numbers next to source markers index the equipment list on page 4 (<span class="pr-mono">3.2</span> = source 3, line-array element 2). Listener labels match the listener table on page 5.</p>
-      <div class="pr-tilegrid">
-        ${tile('Volume',                  `${fmt(room.volume_m3, 0)} m³`)}
-        ${tile('Floor area',              `${fmt(room.baseArea_m2, 1)} m²`)}
-        ${tile('Surface area',            `${fmt(room.totalArea_m2, 0)} m²`)}
-        ${tile('Mean α @ 1 kHz',          fmt(room.meanAbsorption_1k, 3))}
-        ${tile('RT60 @ 1 kHz · Sabine',   rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
-        ${tile('RT60 @ 1 kHz · Eyring',   rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
-        ${tile('Sources (raw / elements)', `${model.sourceFlat.raw} / ${model.sourceFlat.total}`)}
-        ${tile('Listeners',               `${model.listeners.length}`)}
-        ${tile('Audience zones',          `${model.zones.length}`)}
-        ${tile('Schroeder cutoff',        model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—')}
-        ${tile('Critical distance',       model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
-        ${tile('Ambient preset',          escapeHtml(model.ambient.preset))}
-      </div>
-    </div>`;
+  // The standalone B&W floor-plan page used to live here. Killed in
+  // Sofia v2 to remove the cover/page-2 duplication. Tile grid now
+  // lives on the heatmap detail page (built further down, alongside
+  // the larger coverage map + numeric legend).
 
   // ------ Page 3: RT60 — chapter opener with ghost number + sparkline --
   // Per Sofia: chapter eyebrow + 60 pt ghost "02" + h2; sparkline above
@@ -589,6 +629,52 @@ function renderPrintReport(model) {
       ${ambientStrip ? sec('', 'Ambient noise floor', ambientStrip) : ''}
     </div>`;
 
+  // ------ Page 2: SCENE AT A GLANCE — coverage map + 12 KPI tiles ------
+  // Per Sofia v2 (post-export-audit): the heatmap on the cover is the
+  // headline composition; this page repeats it larger with the numeric
+  // legend and the scene-summary tile grid below. Replaces the dead
+  // standalone B&W floor-plan page from v1.
+  let heatmapPage = '';
+  if (heatSvg) {
+    const metricLabel = model.heatmap.metric === 'sti' ? 'STI (IEC 60268-16)' : 'SPL @ 1 kHz';
+    const earTxt = model.heatmap.earHeight_m != null
+      ? `at ${fmt(model.heatmap.earHeight_m, 2)} m ear height`
+      : '';
+    const valueRange = model.heatmap.metric === 'sti'
+      ? `range ${fmt(model.heatmap.minSPL_db, 2)} – ${fmt(model.heatmap.maxSPL_db, 2)}`
+      : `range ${fmt(model.heatmap.minSPL_db, 0)} – ${fmt(model.heatmap.maxSPL_db, 0)} dB`;
+    const meanTxt = model.heatmap.metric === 'sti'
+      ? `mean ${fmt(model.heatmap.avgSPL_db, 2)}`
+      : `mean ${fmt(model.heatmap.avgSPL_db, 0)} dB`;
+    heatmapPage = `
+      <div class="pr-page pr-page-heatmap">
+        <span class="pr-eyebrow">Drawing 01 · Coverage map, top-down view</span>
+        <div class="pr-heatmap-grid">
+          <div class="pr-heatmap-stage">${heatSvg}</div>
+          ${heatLegend}
+        </div>
+        <p class="pr-caption">
+          ${escapeHtml(metricLabel)} ${escapeHtml(earTxt)} across
+          ${model.heatmap.sourceCount} element${model.heatmap.sourceCount === 1 ? '' : 's'}.
+          ${escapeHtml(valueRange)}, ${escapeHtml(meanTxt)}. Grey is outside the room footprint.
+        </p>
+        <div class="pr-tilegrid">
+          ${tile('Volume',                  `${fmt(room.volume_m3, 0)} m³`)}
+          ${tile('Floor area',              `${fmt(room.baseArea_m2, 1)} m²`)}
+          ${tile('Surface area',            `${fmt(room.totalArea_m2, 0)} m²`)}
+          ${tile('Mean α @ 1 kHz',          fmt(room.meanAbsorption_1k, 3))}
+          ${tile('RT60 @ 1 kHz · Sabine',   rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
+          ${tile('RT60 @ 1 kHz · Eyring',   rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
+          ${tile('Sources (raw / elements)', `${model.sourceFlat.raw} / ${model.sourceFlat.total}`)}
+          ${tile('Listeners',               `${model.listeners.length}`)}
+          ${tile('Audience zones',          `${model.zones.length}`)}
+          ${tile('Schroeder cutoff',        model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—')}
+          ${tile('Critical distance',       model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
+          ${tile('Ambient preset',          escapeHtml(model.ambient.preset))}
+        </div>
+      </div>`;
+  }
+
   // ------ Page 6: PRECISION — chapter opener + STI tier strip ---------
   // Per Sofia: this is "the second answer" — promote it. STI broadband
   // pulled out as a 28 pt accent-coloured displayed number with a
@@ -618,16 +704,27 @@ function renderPrintReport(model) {
 
   const disclaimerBody = DISCLAIMER_BODY.map(p => `<p>${escapeHtml(p)}</p>`).join('');
 
-  // Per Sofia: reviewer's note moves to page 7 (above references), with
-  // accent left-bar on white background (no banana-yellow). References
-  // become a 2-column block at 8pt — comma-separated lists are
-  // amateurish at this length.
-  const methodPage = `
-    <div class="pr-page">
+  // Methodology + disclaimers are on TWO separate .pr-page blocks so
+  // each is forced to the top of its own physical page. Earlier draft
+  // packed both into one page; on short scenes (1–2 listeners, no
+  // precision render) the precision page ran short and the disclaimers
+  // started halfway down — proposal-readers flagged it as unfinished
+  // ("page break in the middle of legalese reads sloppy"). Per Sofia
+  // v1 + user request: ALWAYS new page for methodology AND for
+  // disclaimers, regardless of scene length.
+  const methodologyPage = `
+    <div class="pr-page pr-page-methodology">
       ${sec('', 'Methodology', `
         <p class="pr-note">The metrics below describe how each figure in this report is computed, the standard it follows, and the assumptions baked into the model. Citations are given inline so a reviewing engineer can trace any number back to its source.</p>
         ${methodRows}
       `)}
+    </div>`;
+
+  // Per Sofia: reviewer's note sits with the disclaimers (it's the same
+  // legal-tone block); references become a 2-column block at 8 pt —
+  // comma-separated lists at this length are amateurish.
+  const disclaimerPage = `
+    <div class="pr-page pr-page-disclaimer">
       ${sec('', 'Disclaimers', `
         <p class="pr-disclaimer-intro">${escapeHtml(DISCLAIMER_INTRO)}</p>
         ${disclaimerBody}
@@ -647,12 +744,13 @@ function renderPrintReport(model) {
 
   root.innerHTML = `
     ${cover}
-    ${planPage}
+    ${heatmapPage}
     ${roomPage}
     ${sourcePage}
     ${listenerPage}
     ${precisionPage}
-    ${methodPage}
+    ${methodologyPage}
+    ${disclaimerPage}
     <footer class="pr-foot">
       RoomLAB · <span class="pr-mono">chongthekuli.github.io/RoomLab</span> · generated ${escapeHtml(model.project.generatedAt)} · schema v${model.project.schemaVersion}
     </footer>
@@ -775,8 +873,13 @@ export function triggerPrint() {
     console.warn('[print-report] mountPrintReport() never called — materials reference missing');
     return;
   }
+  // Compute the grid ONCE here (so buildPrintModel's metadata and the
+  // renderer's hero heatmap come from the same data) instead of twice.
+  const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones });
+  const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
+  const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
   const model = buildPrintModel({ materials: _printMaterialsRef });
-  renderPrintReport(model);
+  renderPrintReport(model, { splGrid });
   requestAnimationFrame(() => { window.print(); });
 }
 
@@ -786,8 +889,11 @@ export function mountPrintReport({ materials }) {
   window.addEventListener('beforeprint', () => {
     if (!_printMaterialsRef) return;
     if (document.getElementById('print-report')) return;
+    const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones });
+    const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
+    const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
     const model = buildPrintModel({ materials: _printMaterialsRef });
-    renderPrintReport(model);
+    renderPrintReport(model, { splGrid });
   });
 
   window.addEventListener('afterprint', () => {
