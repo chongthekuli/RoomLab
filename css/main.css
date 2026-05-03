@@ -142,16 +142,17 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
 }
 
 /* Fullscreen mode — toggled by roomlab/main.js's fullscreenchange
-   handler. Hides the left + right side panels (per user request)
-   and collapses the grid to a single column so the viewport occupies
-   the entire fullscreen rect. The header stays visible (its own
-   buttons are still useful at this scale). */
+   handler. Hides side panels AND the top header so the viewport
+   occupies the entire fullscreen rect. Also reclaims the 60 px the
+   header was reserving by setting #app-root height to full viewport. */
 html.is-fullscreen #panel-left,
-html.is-fullscreen #panel-right {
+html.is-fullscreen #panel-right,
+html.is-fullscreen #app-header {
   display: none;
 }
 html.is-fullscreen #app-root {
   grid-template-columns: 1fr;
+  height: 100vh;
 }
 
 #panel-left {
@@ -841,7 +842,13 @@ html.is-fullscreen #app-root {
   display: grid;
   grid-template-columns: 80px 80px;
   gap: 10px;
+  /* Above the SPL legend (z-index 10). The legend's bottom-right
+     position overlapped the SIT button (bottom-right of this 2×2
+     grid) and was hiding it. The legend can show through the gap
+     between buttons; touching a button still works. */
+  z-index: 12;
 }
+.walk-rotate-buttons { z-index: 12; }
 .walk-btn {
   width: 80px;
   height: 80px;
