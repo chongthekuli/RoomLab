@@ -1051,6 +1051,17 @@ html.is-fullscreen #app-root {
   user-select: none;
 }
 .spl-legend-3d.hidden { display: none; }
+
+/* Walk-mode: move the colour-ramp reference legend to the top-right
+   (below the live SPL/STI readout) so it doesn't sit underneath the
+   RUN / SIT touch buttons. The buttons are partly translucent and the
+   legend's gradient was bleeding through. Live SPL + colour reference
+   stay vertically stacked at top-right; touch HUD owns bottom-right. */
+html.is-walkmode .spl-legend-3d {
+  top: 220px;
+  bottom: auto;
+  right: 16px;
+}
 .spl-legend-3d .legend-title {
   font-weight: 700;
   font-size: 10px;

@@ -1738,6 +1738,11 @@ export function setWalkthroughMode(on) {
   // tablet users have a usable walk control surface. Desktop users
   // can ignore it (CSS dims to ~55% opacity until hovered).
   if (walkMode) showWalkTouchHUD(); else hideWalkTouchHUD();
+  // Toggle a body-level class so CSS can re-position siblings out of
+  // the touch-control's way (e.g., the SPL legend was sitting in the
+  // bottom-right where the RUN / SIT buttons are, and the legend's
+  // gradient bar showed THROUGH the partly-translucent buttons).
+  document.documentElement.classList.toggle('is-walkmode', walkMode);
   if (walkMode) {
     placeAvatarAtDefault();
     // Hide the procedural cylinder placeholder while the rigged GLB is
