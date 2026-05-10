@@ -188,15 +188,15 @@ html, body {
 .lab-route { display: none; }
 .lab-route.active { display: block; }
 
-/* Layout overhaul (Hannes spec, P1). Viewport-first grid: thin icon
-   rails on each edge, viewport fills the centre. Side panels are
-   absolute overlays anchored to the rail; opening a panel does NOT
-   shrink the viewport. Glass / animation / submenus arrive in P2/P3.
-   The 56 px rail width matches Hannes's spec §2. */
+/* Layout (P7 — full-bleed). Viewport spans 100 % of the width below
+   the header; rail icons float as ABSOLUTE overlays on each edge with
+   their own glass backgrounds, no longer occupying grid columns. The
+   3D / 2D preview uses every pixel between the screen edges. Panels
+   still slide out from the rail's old anchor (56 px from edge). */
 #app-root {
   display: grid;
-  grid-template-columns: 56px 1fr 56px;
-  height: calc(100vh - 44px);     /* header trimmed to 44 px in P5 — for now reuse 60 baseline if header still 60 */
+  grid-template-columns: 1fr;
+  height: calc(100vh - 44px);
   position: relative;
 }
 
@@ -213,31 +213,51 @@ html.is-fullscreen #app-root {
   height: 100vh;
 }
 
-/* ---------- Icon rails ---------- */
+/* ---------- Icon rails (P7 floating) ----------
+   The rail STRIP is gone — no dark vertical bar competing with the
+   viewport. Each icon is its own floating glass pill, stacked
+   vertically in a column anchored to the screen edge. Modern pro-app
+   pattern (Figma toolbox, Linear sidebar, Treble action column). */
 .rail {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  padding: 8px 0;
-  gap: 4px;
-  background: var(--bg-panel);
+  align-items: center;
+  justify-content: flex-start;
+  padding: 4px;
+  gap: 6px;
+  background: transparent;
+  border: none;
   z-index: 10;
+  pointer-events: none;       /* gaps don't intercept viewport drags */
 }
-.rail-left  { border-right: 1px solid var(--border); }
-.rail-right { border-left:  1px solid var(--border); }
+.rail-left  { left: 0; }
+.rail-right { right: 0; }
 
 .rail-icon {
-  width: 56px;
-  height: 48px;
-  background: transparent;
-  border: 0;
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  /* Each icon is its own glass pill so it stays readable over any
+     heatmap colour or 3D scene. Backdrop-filter same family as the
+     panel surfaces; falls back to opaque slate on browsers without. */
+  background: rgba(20, 22, 28, 0.55);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius);
   cursor: pointer;
   display: grid;
   place-items: center;
   color: var(--muted);
   position: relative;
   -webkit-tap-highlight-color: transparent;
-  transition: color 120ms ease, background 120ms ease;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+@supports not ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  .rail-icon { background: rgba(20, 22, 28, 0.92); }
 }
 .rail-icon svg {
   width: 22px;
@@ -248,20 +268,17 @@ html.is-fullscreen #app-root {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.rail-icon:hover { color: var(--fg); background: rgba(255, 255, 255, 0.04); }
-.rail-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
-.rail-icon.is-active { color: var(--fg-strong); }
-.rail-icon.is-active::before {
-  content: '';
-  position: absolute;
-  width: 3px;
-  height: 26px;
-  background: var(--accent);
-  border-radius: 1.5px;
-  top: 11px;
+.rail-icon:hover {
+  color: var(--fg);
+  background: rgba(40, 50, 65, 0.78);
+  border-color: rgba(255, 255, 255, 0.18);
 }
-.rail-left  .rail-icon.is-active::before { right: 0; }
-.rail-right .rail-icon.is-active::before { left:  0; }
+.rail-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rail-icon.is-active {
+  color: var(--fg-strong);
+  background: rgba(50, 70, 100, 0.85);
+  border-color: var(--accent);
+}
 
 /* Hover label — small floating tooltip slides 8 px from the rail. */
 .rail-icon::after {
@@ -749,10 +766,10 @@ html[data-rail-right="bom"]          #panel-bom {
   height: calc(100vh - 44px);
   background: var(--bg-app);
   overflow: hidden;
-  /* P4 — same rail grammar as #app-root (RoomLAB). 56 px rails on
-     each edge, view fills the centre 1fr column. */
+  /* P7 — full-bleed grid; rails float as overlays, viewport
+     occupies 100 % of the width below the header. */
   display: grid;
-  grid-template-columns: 56px 1fr 56px;
+  grid-template-columns: 1fr;
   position: relative;
 }
 #speakerlab-root #view-speaker {
@@ -2122,9 +2139,9 @@ section h3 {
   height: calc(100vh - 44px);
   background: var(--bg-app);
   overflow: hidden;
-  /* P4 — viewport-first grid; rails on each edge. */
+  /* P7 — full-bleed grid; rails float as overlays. */
   display: grid;
-  grid-template-columns: 56px 1fr 56px;
+  grid-template-columns: 1fr;
   position: relative;
 }
 #devicelab-root #view-rack {
