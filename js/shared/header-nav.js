@@ -52,7 +52,7 @@ export function mountHeaderNav({ activeLab } = {}) {
       <button id="btn-save-project" class="btn-save" title="Save the entire project (room, speakers, listeners, zones, EQ, ambient noise) to a .roomlab.json file">💾 Save</button>
       <button id="btn-load-project" class="btn-load" title="Load a previously saved .roomlab.json project file">📂 Load</button>
       <button id="btn-share-link" class="btn-share" aria-label="share scene as link" title="Copy a URL that opens this exact scene — paste into Slack or email">🔗 Share</button>
-      <button id="btn-print-report" class="btn-print" aria-label="print scene report" title="Open the browser print dialog with a one-page design summary (also Ctrl/Cmd-P)">🖨 Print</button>
+      <button id="btn-print-report" class="btn-print" aria-label="generate proposal PDF" title="Generate a multi-page PDF proposal of the current scene — saves directly to your downloads, works on mobile (no print dialog)">📄 Proposal</button>
       <input type="file" id="file-roomlab" accept=".json,.roomlab.json,application/json" hidden />
     </div>
   `;

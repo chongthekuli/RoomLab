@@ -11,11 +11,71 @@
  * @page named counters, no webfonts.
  */
 
+/* Default: hide the report on screen. Print mode and the PDF-export
+   capture path both override this further down. */
 @media screen {
   #print-report { display: none; }
 }
 
+/* PDF-export path (html2pdf.js): the design rules below apply universally
+   to #print-report so html2canvas can rasterize them. We just need to flip
+   visibility for the duration of the export — body class set by
+   triggerProposalPDF() in print-report.js. */
+body.is-pdf-export > *:not(#print-report) { display: none !important; }
+body.is-pdf-export #print-report { display: block !important; }
+
+/* Native browser-print path. */
 @media print {
+  html { color-scheme: light; }
+  body > *:not(#print-report) { display: none !important; }
+  #print-report { display: block !important; }
+
+  @page {
+    size: A4 portrait;
+    margin: 18mm 18mm 14mm 22mm;       /* outer / outer / footer / inner gutter */
+  }
+
+  /* Hide live-app chrome that lives outside #print-report. The
+     body > *:not(#print-report) rule above catches direct children;
+     these explicit selectors are belt-and-braces against deeper
+     descendants (e.g. portals, fullscreen overlays). */
+  .help-modal, #help-overlay, .probe-tooltip, .vp-tab, .rl-toast,
+  .rail, .rail-panel, .walk-touch, .vp-fullscreen-btn,
+  .vp-mode-segment, .vp-corner-btn, .vp-more-panel,
+  #app-header, .lab-route, .vp-tabs {
+    display: none !important;
+  }
+}
+
+/* Same chrome-hide for PDF export — html2canvas captures only the
+   #print-report subtree but a forced layout reflow with these visible
+   can still affect coordinate math, so we strip them defensively. */
+body.is-pdf-export .help-modal,
+body.is-pdf-export #help-overlay,
+body.is-pdf-export .probe-tooltip,
+body.is-pdf-export .vp-tab,
+body.is-pdf-export .rl-toast,
+body.is-pdf-export .rail,
+body.is-pdf-export .rail-panel,
+body.is-pdf-export .walk-touch,
+body.is-pdf-export .vp-fullscreen-btn,
+body.is-pdf-export .vp-mode-segment,
+body.is-pdf-export .vp-corner-btn,
+body.is-pdf-export .vp-more-panel,
+body.is-pdf-export #app-header,
+body.is-pdf-export .lab-route,
+body.is-pdf-export .vp-tabs {
+  display: none !important;
+}
+
+/* ============================================================
+   Below: ALL design rules for #print-report. These used to be
+   wrapped in @media print, but html2canvas captures with screen
+   rendering, so the rules must apply universally. They're inert
+   on screen because #print-report is display:none unless the
+   PDF-export class is set or @media print is active.
+   ============================================================ */
+
   /* ----------- Design tokens ----------- */
   #print-report {
     --ink:     #1A1F24;
@@ -28,12 +88,7 @@
     --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
 
-  /* ----------- Page baseline ----------- */
-  html { color-scheme: light; }
-  body > *:not(#print-report) { display: none !important; }
-
   #print-report {
-    display: block !important;
     color: var(--ink);
     background: var(--paper);
     font-family: var(--font-sans);
@@ -42,11 +97,6 @@
     font-variant-numeric: tabular-nums;
     padding: 0;
     margin: 0;
-  }
-
-  @page {
-    size: A4 portrait;
-    margin: 18mm 18mm 14mm 22mm;       /* outer / outer / footer / inner gutter */
   }
 
   /* Each .pr-page becomes its own physical page. */
@@ -720,18 +770,5 @@
     margin-top: 10pt;
   }
 
-  /* ----------- HIDE FROM PRINT ----------- */
-  /* P6.a — also hide the rail system (icon rails + open panels) and
-     the walk-mode touch HUD so the print report shows the report
-     content only, no chrome. The print stylesheet's own
-     `body > *:not(#print-report) { display: none !important; }`
-     rule (line 33) catches most of this; these explicit selectors
-     are belt-and-braces against future markup that sits OUTSIDE the
-     #print-report subtree. */
-  .help-modal, #help-overlay, .probe-tooltip, .vp-tab, .rl-toast,
-  .rail, .rail-panel, .walk-touch, .vp-fullscreen-btn,
-  .vp-mode-segment, .vp-corner-btn, .vp-more-panel,
-  #app-header, .lab-route, .vp-tabs {
-    display: none !important;
-  }
-}
+/* (Chrome-hide rules moved to top of file — applied via @media print
+   AND body.is-pdf-export so they cover both paths.) */

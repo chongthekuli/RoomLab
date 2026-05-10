@@ -868,19 +868,90 @@ function renderPrecisionSection(p) {
 
 let _printMaterialsRef = null;
 
+// Lazy-load html2pdf.js from CDN. Only fetched on first Proposal click;
+// keeps the main bundle lean for users who never generate a PDF.
+let _html2pdfLoading = null;
+function loadHtml2pdf() {
+  if (window.html2pdf) return Promise.resolve(window.html2pdf);
+  if (_html2pdfLoading) return _html2pdfLoading;
+  _html2pdfLoading = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    script.crossOrigin = 'anonymous';
+    script.onload = () => resolve(window.html2pdf);
+    script.onerror = () => {
+      _html2pdfLoading = null;
+      reject(new Error('Could not load html2pdf — check network connection'));
+    };
+    document.head.appendChild(script);
+  });
+  return _html2pdfLoading;
+}
+
+function safeFilename(s) {
+  return String(s || 'untitled').replace(/[^a-z0-9-_]+/gi, '_').slice(0, 64);
+}
+
 export function triggerPrint() {
+  return triggerProposalPDF();
+}
+
+// Generate a multi-page PDF proposal of the current scene and save
+// it directly to the user's downloads — no browser print dialog,
+// works on mobile (where Save-as-PDF was hard to find inside the
+// native print flow). Uses html2pdf.js (html2canvas + jsPDF) loaded
+// lazily from CDN. Reuses the existing print-report renderer so the
+// PDF layout matches what `window.print()` produced.
+export async function triggerProposalPDF() {
   if (!_printMaterialsRef) {
     console.warn('[print-report] mountPrintReport() never called — materials reference missing');
     return;
   }
-  // Compute the grid ONCE here (so buildPrintModel's metadata and the
-  // renderer's hero heatmap come from the same data) instead of twice.
-  const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones });
-  const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
-  const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
-  const model = buildPrintModel({ materials: _printMaterialsRef });
-  renderPrintReport(model, { splGrid });
-  requestAnimationFrame(() => { window.print(); });
+  const btn = document.getElementById('btn-print-report');
+  const originalLabel = btn?.textContent;
+  if (btn) {
+    btn.textContent = '⏳ Generating…';
+    btn.disabled = true;
+  }
+  let root = null;
+  try {
+    // Lazy-load html2pdf first so we fail fast if there's no network.
+    const html2pdf = await loadHtml2pdf();
+
+    // Build the report DOM (same renderer as the old window.print()
+    // flow). The print-report.css @media print rules don't apply
+    // during off-screen capture, so we add a body class that the
+    // print stylesheet ALSO matches — see css/print.css.
+    const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones });
+    const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
+    const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
+    const model = buildPrintModel({ materials: _printMaterialsRef });
+    root = renderPrintReport(model, { splGrid });
+
+    document.body.classList.add('is-pdf-export');
+
+    const filename = `roomlab-proposal-${safeFilename(model.project.name)}-${model.project.date}.pdf`;
+    await html2pdf().set({
+      margin: 0,
+      filename,
+      image: { type: 'jpeg', quality: 0.96 },
+      html2canvas: { scale: 2, useCORS: true, logging: false, letterRendering: true, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'] },
+    }).from(root).save();
+  } catch (err) {
+    console.error('[print-report] PDF generation failed:', err);
+    if (typeof alert === 'function') {
+      alert('Could not generate PDF: ' + (err?.message ?? err) + '\n\nTry the browser print dialog (Ctrl/Cmd-P → Save as PDF) as a fallback.');
+    }
+  } finally {
+    document.body.classList.remove('is-pdf-export');
+    root?.remove();
+    if (btn) {
+      btn.textContent = originalLabel ?? '📄 Proposal';
+      btn.disabled = false;
+    }
+  }
 }
 
 export function mountPrintReport({ materials }) {
