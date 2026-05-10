@@ -144,6 +144,40 @@ function setupTabs() {
   // the viewport. P2 will add slide animation + frosted glass.
   mountRailSystem({ routeId: 'room' });
 
+  // P8 — "•••" menu trigger top-right opens a slide-down panel
+  // containing layer toggles + tools + keyboard shortcuts (Maya's
+  // 3-cluster layout: 2D/3D/Walk persistent segmented + fullscreen +
+  // this menu). State stored on <html data-more-menu>; CSS keys all
+  // open/close styling off that attribute. Click-outside-to-close
+  // mirrors the rail pattern.
+  const moreTrigger = document.getElementById('btn-more-menu');
+  const morePanel = document.getElementById('vp-more-panel');
+  if (moreTrigger && morePanel) {
+    morePanel.hidden = false;     // remove static `hidden`; CSS opacity handles invisibility
+    const setOpen = (open) => {
+      document.documentElement.toggleAttribute('data-more-menu', open);
+      moreTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    moreTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setOpen(!document.documentElement.hasAttribute('data-more-menu'));
+    });
+    // Close on click outside.
+    document.addEventListener('pointerdown', (e) => {
+      if (!document.documentElement.hasAttribute('data-more-menu')) return;
+      const t = e.target;
+      if (!t || !(t instanceof Element)) return;
+      if (t.closest('#vp-more-panel') || t.closest('#btn-more-menu')) return;
+      setOpen(false);
+    });
+    // Close on Esc.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!document.documentElement.hasAttribute('data-more-menu')) return;
+      setOpen(false);
+    });
+  }
+
   // P4.8 — click-target-to-open. When the user clicks a speaker or a
   // wall in the 3D viewport, auto-expand the relevant rail panel so
   // they land directly on that item's controls. Existing event

@@ -730,6 +730,7 @@
      #print-report subtree. */
   .help-modal, #help-overlay, .probe-tooltip, .vp-tab, .rl-toast,
   .rail, .rail-panel, .walk-touch, .vp-fullscreen-btn,
+  .vp-mode-segment, .vp-corner-btn, .vp-more-panel,
   #app-header, .lab-route, .vp-tabs {
     display: none !important;
   }
