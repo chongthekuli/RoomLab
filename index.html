@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=278" />
-  <link rel="stylesheet" href="css/theme.css?v=278" />
-  <link rel="stylesheet" href="css/print.css?v=278" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=279" />
+  <link rel="stylesheet" href="css/theme.css?v=279" />
+  <link rel="stylesheet" href="css/print.css?v=279" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -66,12 +66,12 @@
              belong in a menu). Everything else (layers + tools +
              keyboard shortcuts) tucks into the "•••" slide-down
              panel for low-frequency settings. -->
-        <div class="vp-mode-segment" role="radiogroup" aria-label="Viewport mode">
+        <div class="vp-mode-segment" role="group" aria-label="Viewport mode">
           <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D</button>
           <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D</button>
           <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walk</button>
+          <button class="vp-tab vp-fullscreen-btn" id="btn-fullscreen" title="Toggle fullscreen — useful for tablet walk mode" type="button">⛶</button>
         </div>
-        <button class="vp-corner-btn vp-fullscreen-btn" id="btn-fullscreen" title="Toggle fullscreen — useful for tablet walk mode" type="button">⛶</button>
         <button class="vp-corner-btn vp-more-trigger" id="btn-more-menu" title="Layers, tools, keyboard shortcuts" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="vp-more-panel">⋯</button>
         <div class="vp-more-panel" id="vp-more-panel" hidden>
           <div class="vp-more-section">
@@ -243,6 +243,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=278"></script>
+  <script type="module" src="js/main.js?v=279"></script>
 </body>
 </html>

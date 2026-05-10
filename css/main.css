@@ -598,8 +598,17 @@ html[data-rail-right="bom"]          #panel-bom {
   background: rgba(40, 50, 65, 0.78);
   border-color: rgba(255, 255, 255, 0.18);
 }
-.vp-fullscreen-btn { right: 60px; top: 56px; }
+/* Fullscreen now lives INSIDE the segmented control (2D/3D/Walk/⛶);
+   only the more-trigger keeps a corner position. */
 .vp-more-trigger   { right: 12px; top: 56px; font-size: 1.4rem; line-height: 1; padding-bottom: 6px; }
+/* Fullscreen icon sits in the segment beside the view-mode tabs.
+   Inherits .vp-tab dimensions; just sizes the glyph slightly larger
+   so the icon matches the visual weight of the text labels. */
+.vp-mode-segment .vp-fullscreen-btn {
+  min-width: 40px;
+  font-size: 1rem;
+  padding-inline: 8px;
+}
 .vp-more-trigger[aria-expanded="true"] {
   color: var(--fg-strong, #fff);
   background: rgba(50, 70, 100, 0.85);
