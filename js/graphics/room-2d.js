@@ -495,17 +495,19 @@ function renderCustomDraw(vp) {
   wireDrawEvents(vp);
 }
 
-// Origin crosshair: 14 px stroke arms with a 4 px gap at centre, plus
-// '0.0, 0.0 m' label. Used in BOTH custom-draw and normal modes so the
-// user always knows where world (0, 0) sits on the canvas.
-function renderOriginCrosshair(x0, y0, color = '#7a89a0') {
+// Origin crosshair: 14 px stroke arms with a 4 px gap at centre.
+// Used in BOTH custom-draw and normal modes so the user always knows
+// where world (0, 0) sits on the canvas. Per Maya v9 audit §4 the
+// `0.0, 0.0 m` text is dropped — the crosshair is self-explanatory
+// to anyone using a 2D CAD tool, and the text was clutter at low
+// contrast that nobody read.
+function renderOriginCrosshair(x0, y0, color = '#5a6677') {
   const armLen = 14, gap = 4;
   return `
     <line x1="${x0 - armLen - gap}" y1="${y0}" x2="${x0 - gap}" y2="${y0}" stroke="${color}" stroke-width="1"/>
     <line x1="${x0 + gap}" y1="${y0}" x2="${x0 + armLen + gap}" y2="${y0}" stroke="${color}" stroke-width="1"/>
     <line x1="${x0}" y1="${y0 - armLen - gap}" x2="${x0}" y2="${y0 - gap}" stroke="${color}" stroke-width="1"/>
     <line x1="${x0}" y1="${y0 + gap}" x2="${x0}" y2="${y0 + armLen + gap}" stroke="${color}" stroke-width="1"/>
-    <text x="${x0 + 8}" y="${y0 - 10}" fill="${color}" font-size="10">0.0, 0.0 m</text>
   `;
 }
 
@@ -698,18 +700,29 @@ function renderNormal(vp) {
   const encSvg = renderStandaloneEnclosures(state.room.standaloneEnclosures, x0, y0, pxW, pxD, state.room);
   const wsegSvg = renderSharedWallSegments(state.room.wallSegments, x0, y0, pxW, pxD, state.room);
 
-  const shapeLbl = shape === 'rectangular'
-    ? `${w} m wide · ${d} m deep`
+  // Maya v9 audit §3 — collapsed footer, single line of structured
+  // metadata pipe-separated. Engineers read `4.5 × 6.0 × 2.7 m`,
+  // not `4.5 m wide · 6 m deep · h 2.7 m`.
+  const shapeMeta = shape === 'rectangular'
+    ? `${w} × ${d} × ${h} m`
     : shape === 'polygon'
-      ? `${state.room.polygon_sides}-gon · radius ${state.room.polygon_radius_m} m`
+      ? `${state.room.polygon_sides}-gon · r ${state.room.polygon_radius_m} m · h ${h} m`
       : shape === 'round'
-        ? `round · radius ${state.room.round_radius_m} m`
-        : `custom · ${(state.room.custom_vertices || []).length} vertices`;
-  const ceilLbl = state.room.ceiling_type === 'dome' ? ` · domed ceiling (rise ${state.room.ceiling_dome_rise_m} m)` : '';
+        ? `round · r ${state.room.round_radius_m} m · h ${h} m`
+        : `custom · ${(state.room.custom_vertices || []).length} verts · h ${h} m`;
+  const ceilMeta = state.room.ceiling_type === 'dome'
+    ? `dome (rise ${state.room.ceiling_dome_rise_m} m)`
+    : nameOf(surfaces.ceiling);
+  // For rectangular rooms the wall material is per-side; pick the
+  // most common one for the footer line. For other shapes the
+  // single `walls` material is canonical.
+  const wallsMeta = shape === 'rectangular'
+    ? nameOf(matIdOf(surfaces.wall_north ?? surfaces.walls))
+    : nameOf(matIdOf(surfaces.walls ?? surfaces.wall_north));
 
   vp.innerHTML = `
     <div class="viewport-2d">
-      <div class="vp-header">Floor plan — top-down view (heatmap @ ${ear.toFixed(2)} m ear height)</div>
+      <div class="vp-header">Floor plan — top-down</div>
       <svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
         <defs>${clipPathSvg}</defs>
         ${roomOutline.floorFill}
@@ -722,11 +735,11 @@ function renderNormal(vp) {
         ${wsegSvg}
         ${listenerSvg}
         ${speakerSvg}
-        ${renderOriginCrosshair(x0, y0, '#7a89a0')}
-        <text x="${x0 + pxW/2}" y="${500 - 20}" text-anchor="middle" class="vp-lbl vp-lbl-dim">${shapeLbl} · h ${h} m · Floor: ${nameOf(surfaces.floor)} · Ceiling: ${nameOf(surfaces.ceiling)}${ceilLbl}</text>
+        ${renderOriginCrosshair(x0, y0, '#5a6677')}
+        <text x="${x0 + pxW/2}" y="${500 - 18}" text-anchor="middle" class="vp-lbl vp-lbl-dim">${shapeMeta}  |  floor: ${nameOf(surfaces.floor)}  |  walls: ${wallsMeta}  |  ceiling: ${ceilMeta}</text>
+        ${splResult ? '' : `<text x="${x0 + pxW/2}" y="${y0 + pxD/2}" text-anchor="middle" class="vp-lbl vp-lbl-empty">no sources placed</text><text x="${x0 + pxW/2}" y="${y0 + pxD/2 + 18}" text-anchor="middle" class="vp-lbl vp-lbl-empty-hint">add a speaker to compute SPL</text>`}
       </svg>
       ${renderLegend(splResult)}
-      <div class="vp-note">${splResult ? `SPL heatmap sums all speakers · white triangles = speakers · yellow circle = selected listener${state.zones.length > 0 ? ' · colored outlines = audience zones' : ''}` : 'Add a source to see SPL coverage.'}</div>
     </div>
   `;
 }
@@ -893,11 +906,16 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
       <line x1="${x0 + pxW}" y1="${y0}" x2="${x0 + pxW}" y2="${y0 + pxD}" stroke="${colorFor(alphaOf(wE))}" stroke-width="8" stroke-linecap="round" />
       <line x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + pxD}" stroke="${colorFor(alphaOf(wW))}" stroke-width="8" stroke-linecap="round" />
     `;
+    // Maya v9 audit §2 — direction tags only (small caps, muted),
+    // material name moves to a hover tooltip on the wall stroke and
+    // is restated authoritatively in the page footer. Drops the
+    // "Front — Gypsum board 13mm on studs" inline label that was
+    // shouting louder than the architecture.
     const labels = `
-      <text x="${x0 + pxW/2}" y="${y0 - 22}" text-anchor="middle" class="vp-lbl vp-lbl-wall">Front — ${nameOf(wN)}</text>
-      <text x="${x0 + pxW/2}" y="${y0 + pxD + 34}" text-anchor="middle" class="vp-lbl vp-lbl-wall">Back — ${nameOf(wS)}</text>
-      <text x="${x0 + pxW + 18}" y="${y0 + pxD/2 + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">Right — ${nameOf(wE)}</text>
-      <text x="${x0 - 18}" y="${y0 + pxD/2 + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">Left — ${nameOf(wW)}</text>
+      <text x="${x0 + pxW/2}" y="${y0 - 14}" text-anchor="middle" class="vp-lbl vp-lbl-wall">FRONT</text>
+      <text x="${x0 + pxW/2}" y="${y0 + pxD + 22}" text-anchor="middle" class="vp-lbl vp-lbl-wall">BACK</text>
+      <text x="${x0 + pxW + 14}" y="${y0 + pxD/2 + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">RIGHT</text>
+      <text x="${x0 - 14}" y="${y0 + pxD/2 + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">LEFT</text>
     `;
     return { floorFill, walls, labels };
   }
@@ -923,7 +941,8 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
   const walls = `<polygon points="${pointsAttr}" fill="none" stroke="${colorFor(alphaOf(wallsMat))}" stroke-width="8" stroke-linejoin="round" />`;
   const centerX = svgPts.reduce((s, p) => s + p.sx, 0) / svgPts.length;
   const topY = Math.min(...svgPts.map(p => p.sy));
-  const labels = `<text x="${centerX.toFixed(1)}" y="${(topY - 22).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall">Walls — ${nameOf(wallsMat)}</text>`;
+  // Maya v9 audit §2 — single direction tag, no material name on canvas.
+  const labels = `<text x="${centerX.toFixed(1)}" y="${(topY - 14).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall">WALLS</text>`;
   return { floorFill, walls, labels };
 }
 
@@ -963,9 +982,11 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room) {
     }
     s += `<polygon points="${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${bl.x.toFixed(1)},${bl.y.toFixed(1)} ${br.x.toFixed(1)},${br.y.toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" />`;
     s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2" fill="${stroke}" />`;
-    const lblFill = outside ? '#ff5a3c' : (groupColor || '#fff');
-    const grpTag = src.groupId ? ` [${src.groupId}]` : '';
-    const lblText = outside ? `S${i + 1} ⚠` : `S${i + 1}${grpTag}`;
+    // Maya v9 audit §5 — drop the `[A]` group tag from the label
+    // text. Group identity is COLOUR (the ring around the triangle),
+    // not text. The bracketed letter was decorative noise.
+    const lblFill = outside ? '#ff5a3c' : (groupColor || '#e8ecf2');
+    const lblText = outside ? `S${i + 1} ⚠` : `S${i + 1}`;
     s += `<text x="${sx.toFixed(1)}" y="${(sy - 18).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-spk" fill="${lblFill}">${lblText}</text>`;
   });
   return s;
@@ -991,13 +1012,13 @@ function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room) {
 
 function renderLegend(splResult) {
   if (splResult) {
-    // Vertical legend per Sofia's spec — swatch column with numeric ticks
-    // beside it, sharing computeTicks() with the 3D legend and the
-    // print-report heatmap so the same data shows the same scale
-    // everywhere. 5–7 ticks at 5 / 10 dB step, capped to avoid label
-    // collision on the ~180 px bar.
+    // Vertical legend (Maya v9 audit §1). Metric NAME with frequency
+    // context above the bar; tick values include unit suffix on each
+    // line; reference footnote ("re 20 µPa") below — gives the dB its
+    // physical meaning. Drops the orphaned standalone "DB" label.
     const minVal = splResult.minSPL_db;
     const maxVal = splResult.maxSPL_db;
+    const freqHz = state.physics?.freq_hz ?? 1000;
     const ticks = computeTicks(minVal, maxVal, 'spl');
     const tickRows = ticks.map(t => {
       const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
@@ -1007,11 +1028,12 @@ function renderLegend(splResult) {
       </div>`;
     }).join('');
     return `<div class="vp-legend spl-legend spl-legend-v">
-      <span class="legend-header">${legendHeader('spl')}</span>
+      <span class="legend-header">${legendHeader('spl', freqHz)}</span>
       <div class="spl-legend-stage">
         <div class="legend-bar"></div>
         <div class="spl-legend-ticks">${tickRows}</div>
       </div>
+      <span class="legend-footnote">re 20 µPa</span>
     </div>`;
   }
   return `<div class="vp-legend">

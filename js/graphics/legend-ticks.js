@@ -45,13 +45,29 @@ export function computeTicks(min, max, mode) {
   return out;
 }
 
-// Format a tick value for display. SPL → integer dB; STI → 2 decimals.
+// Format a tick value for display. SPL → integer + dB suffix; STI → 2
+// decimals (unitless). Maya's call: pros scan tick lists; they don't
+// connect a header unit to 6 numbers below. Repeating the unit on
+// every tick is redundant in a column header but correct on a list of
+// values (Treble, Odeon, EASE all do this in their plot legends).
 export function formatTickLabel(value, mode) {
   if (mode === 'sti') return value.toFixed(2);
-  return Math.round(value).toString();
+  return `${Math.round(value)} dB`;
 }
 
-// Header label for the legend column / row, including the unit.
-export function legendHeader(mode) {
-  return mode === 'sti' ? 'STI' : 'dB';
+// Header label for the legend column / row. Returns the metric NAME
+// with context (frequency for SPL, IEC tier for STI), never the bare
+// unit. Earlier this function returned `'dB'` which orphaned next to
+// the gradient bar with no metric context. Per Maya v9 audit §1 —
+// header is for "what is this," tick labels are for "what value."
+//
+// Args:
+//   mode    — 'spl' | 'sti'
+//   freqHz  — frequency the SPL field was evaluated at (default 1000).
+export function legendHeader(mode, freqHz = 1000) {
+  if (mode === 'sti') return 'STI';
+  // Format frequency: 1000 → '1 kHz', 500 → '500 Hz', 2000 → '2 kHz'.
+  const f = Number.isFinite(freqHz) ? freqHz : 1000;
+  const freqLabel = f >= 1000 ? `${(f / 1000).toFixed(f % 1000 ? 1 : 0)} kHz` : `${Math.round(f)} Hz`;
+  return `SPL @ ${freqLabel}`;
 }

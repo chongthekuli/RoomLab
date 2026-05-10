@@ -2144,10 +2144,15 @@ section h3 {
   font-size: 0.72rem;
   color: #667;
 }
-.vp-lbl { font-family: system-ui, -apple-system, sans-serif; }
-.vp-lbl-wall   { font-size: 13px; fill: #c8ccd8; font-weight: 500; }
+.vp-lbl { font-family: "Inter Tight", system-ui, -apple-system, sans-serif; }
+/* Maya v9 audit §4 hierarchy. Wall direction tags are quiet (small
+   uppercase, muted) — direction matters for orientation, the
+   material no longer competes for attention. */
+.vp-lbl-wall   { font-size: 9px; fill: #5a6677; font-weight: 600; letter-spacing: 0.12em; }
 .vp-lbl-center { font-size: 12px; fill: #8a8e99; }
-.vp-lbl-dim    { font-size: 12px; fill: #6c7080; }
+.vp-lbl-dim    { font-size: 11px; fill: #7a8090; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
+.vp-lbl-empty       { font-size: 13px; fill: #5a6677; }
+.vp-lbl-empty-hint  { font-size: 11px; fill: #4a5260; }
 /* Default (non-SPL) legend — vertical now since it sits in the right
    column. Horizontal flex-wrap doesn't make sense in a narrow column. */
 .vp-legend {
@@ -3237,7 +3242,7 @@ section h3 {
   font-weight: 600;
 }
 
-.vp-lbl-listener { font-size: 10px; fill: #f5f1ea; font-weight: 700; }
+.vp-lbl-listener { font-size: 9px; fill: #13161c; font-weight: 700; }
 
 .listener-results {
   padding: 0.55rem 0.7rem;
@@ -3466,7 +3471,7 @@ section h3 {
 #spl-table th { text-align: left; font-weight: 600; color: var(--muted); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; }
 #spl-table td { text-align: right; }
 
-.vp-lbl-spk { font-size: 11px; fill: #ffffff; font-weight: 700; }
+.vp-lbl-spk { font-size: 11px; fill: #e8ecf2; font-weight: 600; }
 .vp-legend.spl-legend {
   align-items: center;
   gap: 0.45rem;
@@ -3486,37 +3491,41 @@ section h3 {
    colour swatch, 4 px tick, 6 px gap, 10 px label. Numeric ticks come
    from computeTicks() so the same data shows the same scale across
    2D, 3D, and PDF. */
+/* Maya v9 audit §1 — header ABOVE the bar (not orphaned beside it),
+   left-aligned to bar's left edge. Footnote underneath gives the dB
+   its physical reference. Tick labels right-aligned in a 50 px
+   column so digits column-align (95 dB / 100 dB / 105 dB). */
 .vp-legend.spl-legend-v {
-  flex-direction: row;
-  align-items: stretch;
-  gap: 0.45rem;
-  justify-content: center;
-  padding: 0.4rem 0.6rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px 4px;
 }
 .vp-legend.spl-legend-v .legend-header {
-  font-size: 0.7rem;
-  color: #c0c4d0;
+  font-size: 0.66rem;
+  color: var(--muted);
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  align-self: center;
-  margin-right: 0.3rem;
+  margin: 0;
+  white-space: nowrap;
 }
 .vp-legend.spl-legend-v .spl-legend-stage {
   position: relative;
   display: flex;
   align-items: stretch;
-  height: 140px;
+  height: 180px;
 }
 .vp-legend.spl-legend-v .legend-bar {
   width: 14px;
   height: 100%;
   border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(to top, #1428b4 0%, #008ce6 25%, #1edc50 50%, #ffd700 75%, #f01e1e 100%);
 }
 .vp-legend.spl-legend-v .spl-legend-ticks {
   position: relative;
-  width: 32px;
+  width: 50px;
   margin-left: 6px;
   height: 100%;
 }
@@ -3533,12 +3542,20 @@ section h3 {
 .vp-legend.spl-legend-v .spl-legend-tick-line {
   width: 4px;
   height: 1px;
-  background: #c0c4d0;
+  background: var(--muted);
+  flex: 0 0 4px;
 }
 .vp-legend.spl-legend-v .spl-legend-tick-label {
-  font-size: 0.64rem;
-  color: #c0c4d0;
+  font-size: 0.66rem;
+  color: var(--fg);
   line-height: 1;
+}
+.vp-legend.spl-legend-v .legend-footnote {
+  font-size: 0.6rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  margin: 0;
+  white-space: nowrap;
 }
 
 /* ------------------------------------------------------------------ */
