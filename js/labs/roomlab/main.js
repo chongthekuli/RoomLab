@@ -35,6 +35,7 @@ import {
 } from '../../graphics/scene.js';
 import { installCollapsibles } from '../../ui/collapsibles.js';
 import { mountWalkTouchHUD } from '../../ui/walk-touch-hud.js';
+import { mountRailSystem, openPanel } from '../../ui/rail-system.js';
 
 let _mounted = false;
 
@@ -136,6 +137,27 @@ function setupTabs() {
   // Walk-mode touch HUD (joystick + action buttons). One-time mount;
   // scene.js's setWalkthroughMode shows / hides the overlay.
   mountWalkTouchHUD();
+
+  // P1 — viewport-first layout. Wires the icon rails on each edge
+  // (Room / Sources / Listeners / … on the left, Results / Precision
+  // on the right) so clicking an icon overlays that panel on top of
+  // the viewport. P2 will add slide animation + frosted glass.
+  mountRailSystem({ routeId: 'room' });
+
+  // P4.8 — click-target-to-open. When the user clicks a speaker or a
+  // wall in the 3D viewport, auto-expand the relevant rail panel so
+  // they land directly on that item's controls. Existing event
+  // handlers in panel-sources / panel-room scroll to and pulse the
+  // matching card; we just need to make sure the panel is OPEN when
+  // they fire.
+  on('source:highlight', () => {
+    if (document.querySelector('.lab-route.active')?.dataset.route !== 'room') return;
+    openPanel('left', 'sources');
+  });
+  on('surface:picked', () => {
+    if (document.querySelector('.lab-route.active')?.dataset.route !== 'room') return;
+    openPanel('left', 'room');
+  });
 
   // Fullscreen toggle next to the Walk tab. Targets documentElement
   // so the WHOLE page goes fullscreen — keeps the side panels reachable,

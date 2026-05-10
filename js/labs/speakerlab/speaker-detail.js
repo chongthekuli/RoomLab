@@ -39,9 +39,11 @@ let currentFreqIdx = 3;
 export function mountSpeakerView() {
   const root = document.getElementById('view-speaker');
   if (!root) return;
+  // P4.7 — centre view is just the workbench head + body. Catalogue
+  // renders directly into the left-rail #panel-catalogue (renderCatalog
+  // targets that element), no #sv-catalog wrapper needed in the centre.
   root.innerHTML = `
     <div class="speaker-view">
-      <aside class="sv-catalog" id="sv-catalog"></aside>
       <div class="sv-main">
         <div class="sv-head">
           <div class="sv-title" id="sv-title"></div>
@@ -54,7 +56,7 @@ export function mountSpeakerView() {
         <div id="sv-body" class="sv-body">
           <div class="sv-empty">
             <h3>Loudspeaker workbench</h3>
-            <p>Pick a speaker from the catalogue on the left, or click a speaker in the 3D view to see its full spec sheet, on-axis frequency response, and polar patterns here.</p>
+            <p>Open the <strong>Catalogue</strong> rail icon on the left to pick a speaker, or click a speaker in the 3D view of RoomLAB to deep-link here.</p>
             <p>Or <strong>import a file</strong> (top-right) to add a new model to the catalogue:</p>
             <ul>
               <li><strong>.json</strong> — RoomLAB / EASE-JSON</li>
@@ -270,6 +272,52 @@ async function render() {
   // freq-selector clicks (same def), only when the speaker changes.
   const stageCanvas = body.querySelector('#sv-3d-canvas');
   if (stageCanvas) mountSpeaker3DPreview(stageCanvas, def);
+
+  // P4.6 — relocate the spec sections out of the centre #sv-body into
+  // their dedicated right-rail panels. The centre keeps ONLY the 3D
+  // preview (#sv-3d-stage) so the speaker rendering is the headline
+  // visual, full-bleed. Each section moves to its own rail panel —
+  // user clicks the rail icon to slide it out as a glass overlay.
+  // Order in #sv-body after render:
+  //   .sv-grid                         → panel-specs
+  //   .sv-3d-stage                     → STAYS in #sv-body (centre)
+  //   .sv-designer-note (optional)     → STAYS (small, with preview)
+  //   .sv-section "On-axis frequency"  → panel-frequency
+  //   .sv-section "Polar patterns"     → panel-polar
+  //   .sv-section "Directivity waterfall" → panel-waterfall
+  //   .sv-section "Expert review"      → panel-specs (appended)
+  relocateSpecSections(body);
+}
+
+function relocateSpecSections(body) {
+  const grid = body.querySelector('.sv-grid');
+  const sections = body.querySelectorAll('.sv-section');
+  // Sections are rendered in fixed order; index-based mapping is safe.
+  // [0] frequency, [1] polar, [2] waterfall, [3] expert review
+  const [secFreq, secPolar, secWaterfall, secReview] = sections;
+  const targets = {
+    specs: document.getElementById('panel-specs'),
+    frequency: document.getElementById('panel-frequency'),
+    polar: document.getElementById('panel-polar'),
+    waterfall: document.getElementById('panel-waterfall'),
+  };
+  if (targets.specs) {
+    targets.specs.innerHTML = '<h2>Specs</h2>';
+    if (grid) targets.specs.appendChild(grid);
+    if (secReview) targets.specs.appendChild(secReview);
+  }
+  if (targets.frequency) {
+    targets.frequency.innerHTML = '<h2>Frequency response</h2>';
+    if (secFreq) targets.frequency.appendChild(secFreq);
+  }
+  if (targets.polar) {
+    targets.polar.innerHTML = '<h2>Polar plots</h2>';
+    if (secPolar) targets.polar.appendChild(secPolar);
+  }
+  if (targets.waterfall) {
+    targets.waterfall.innerHTML = '<h2>Directivity waterfall</h2>';
+    if (secWaterfall) targets.waterfall.appendChild(secWaterfall);
+  }
 }
 
 async function handleImport(file) {
@@ -305,7 +353,11 @@ async function handleImport(file) {
 // an entry swaps state.selectedSpeakerUrl; we rerender, which paints
 // the workbench body and highlights the active card in the catalogue.
 function renderCatalog() {
-  const host = document.getElementById('sv-catalog');
+  // P4.7 — render DIRECTLY into the rail panel. Eliminates the
+  // relocation-dependency that the previous P4.5/P4.6 had — a stale
+  // ES-module-cached speaker-detail.js could skip the relocation
+  // step and leave the catalogue empty.
+  const host = document.getElementById('panel-catalogue');
   if (!host) return;
   const active = state.selectedSpeakerUrl;
 
@@ -331,7 +383,8 @@ function renderCatalog() {
   }).join('');
 
   host.innerHTML = `
-    <div class="sv-cat-head">Catalogue <span class="sv-cat-count">${SPEAKER_CATALOG.length}</span></div>
+    <h2>Catalogue</h2>
+    <div class="sv-cat-head">Models <span class="sv-cat-count">${SPEAKER_CATALOG.length}</span></div>
     ${cards || '<div class="sv-cat-empty">No speakers yet — import one above.</div>'}
   `;
   for (const card of host.querySelectorAll('.sv-cat-card')) {

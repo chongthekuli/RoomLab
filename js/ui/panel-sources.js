@@ -24,14 +24,32 @@ function clampPower(watts, modelUrl) {
 export function mountSourcesPanel({ speakerCatalog }) {
   catalogRef = speakerCatalog;
   const root = document.getElementById('panel-sources');
+  // P3 — split into accordion sub-sections:
+  // * Master EQ — collapsed by default (advanced; once-and-forget)
+  // * Loudspeakers — point sources (kind === 'speaker'); open by default
+  // * Line arrays — kind === 'line-array'; open by default
+  // Add buttons live INSIDE each section so the add-flow is anchored
+  // to where the user is looking. Maya's spec §5.
   root.innerHTML = `
     <h2>Sources</h2>
-    <div id="master-eq"></div>
-    <div id="sources-list"></div>
-    <div class="source-actions">
-      <button id="add-source-btn" class="btn-add">+ Add speaker</button>
-      <button id="add-array-btn" class="btn-add">+ Add line array</button>
-    </div>
+    <details class="acc" id="acc-master-eq">
+      <summary>Master EQ <span class="acc-count" id="acc-master-eq-count">bypass</span></summary>
+      <div id="master-eq"></div>
+    </details>
+    <details class="acc" id="acc-speakers" open>
+      <summary>Loudspeakers <span class="acc-count" id="acc-speakers-count">0</span></summary>
+      <div id="sources-list-speakers"></div>
+      <div class="source-actions">
+        <button id="add-source-btn" class="btn-add">+ Add speaker</button>
+      </div>
+    </details>
+    <details class="acc" id="acc-arrays" open>
+      <summary>Line arrays <span class="acc-count" id="acc-arrays-count">0</span></summary>
+      <div id="sources-list-arrays"></div>
+      <div class="source-actions">
+        <button id="add-array-btn" class="btn-add">+ Add line array</button>
+      </div>
+    </details>
   `;
   root.querySelector('#add-source-btn').addEventListener('click', addSource);
   root.querySelector('#add-array-btn').addEventListener('click', addLineArray);
@@ -173,18 +191,37 @@ function removeSource(idx) {
 }
 
 function render() {
-  const listRoot = document.getElementById('sources-list');
-  if (!listRoot) return;
+  const speakersRoot = document.getElementById('sources-list-speakers');
+  const arraysRoot = document.getElementById('sources-list-arrays');
+  if (!speakersRoot || !arraysRoot) return;
+
+  // Categorise sources by kind, preserving original index for rendering.
+  const indexed = state.sources.map((src, i) => ({ src, i }));
+  const speakers = indexed.filter(({ src }) => src.kind !== 'line-array');
+  const arrays = indexed.filter(({ src }) => src.kind === 'line-array');
+
+  // Update accordion counts in the summary chips.
+  const speakersCount = document.getElementById('acc-speakers-count');
+  const arraysCount = document.getElementById('acc-arrays-count');
+  if (speakersCount) speakersCount.textContent = String(speakers.length);
+  if (arraysCount) arraysCount.textContent = String(arrays.length);
 
   if (state.sources.length === 0) {
-    listRoot.innerHTML = '<div class="phase-placeholder"><strong>Sources</strong> are the loudspeakers in your venue. Pick a model from the catalogue and place it in the room; aim, tilt, and power are editable afterwards. Use <em>+ Add line array</em> for column PA systems. Heatmaps only render once at least one source exists.</div>';
-    return;
+    speakersRoot.innerHTML = '<div class="phase-placeholder"><strong>Sources</strong> are the loudspeakers in your venue. Pick a model from the catalogue and place it in the room; aim, tilt, and power are editable afterwards. Heatmaps only render once at least one source exists.</div>';
+    arraysRoot.innerHTML = '<div class="phase-placeholder">Use <em>+ Add line array</em> for column PA systems with multiple flown elements.</div>';
+  } else {
+    speakersRoot.innerHTML = speakers.length === 0
+      ? '<div class="phase-placeholder">No point-source speakers placed yet.</div>'
+      : speakers.map(({ src, i }) => renderSpeakerCard(src, i)).join('');
+    arraysRoot.innerHTML = arrays.length === 0
+      ? '<div class="phase-placeholder">No line arrays placed yet.</div>'
+      : arrays.map(({ src, i }) => renderLineArrayCard(src, i)).join('');
   }
 
-  listRoot.innerHTML = state.sources.map((src, i) =>
-    src.kind === 'line-array' ? renderLineArrayCard(src, i) : renderSpeakerCard(src, i),
-  ).join('');
-
+  // Combine both lists for event-binding so existing click handlers
+  // continue to find their cards via querySelectorAll on the root.
+  const listRoot = document.getElementById('panel-sources');
+  if (!listRoot) return;
   listRoot.querySelectorAll('.btn-remove').forEach(btn => {
     btn.addEventListener('click', () => removeSource(parseInt(btn.dataset.removeIdx, 10)));
   });

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="no-transitions-yet">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -7,9 +7,12 @@
   <!-- Inline empty favicon stops the default /favicon.ico fetch + 404
        in DevTools Console. Replace with a real .ico/.svg later. -->
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="css/main.css?v=257" />
-  <link rel="stylesheet" href="css/theme.css?v=257" />
-  <link rel="stylesheet" href="css/print.css?v=257" media="all" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="css/main.css?v=272" />
+  <link rel="stylesheet" href="css/theme.css?v=272" />
+  <link rel="stylesheet" href="css/print.css?v=272" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -26,10 +29,26 @@
        which `.lab-route` is `.active`. Lab modules mount lazily on
        first visit; subsequent route changes are instant DOM swaps. -->
 
-  <!-- ROOMLAB ROUTE -->
+  <!-- ROOMLAB ROUTE
+       Layout system overhaul (Hannes spec, P1 skeleton):
+       * #app-root grid:  rail-left (56) | viewport (1fr) | rail-right (56)
+       * Side panels are POSITIONED OVERLAYS, not grid columns. They
+         start hidden; the rail icons toggle them.
+       * Each panel section (room / sources / listeners / …) lives
+         inside #panel-left or #panel-right, but only ONE per side
+         is shown at a time, controlled by a body data-attribute.
+       * Glass / animation / submenus arrive in P2 / P3. -->
   <div class="lab-route" id="route-room" data-route="room">
     <main id="app-root">
-      <aside id="panel-left">
+      <nav class="rail rail-left" id="rail-left" aria-label="Left tools">
+        <button class="rail-icon" data-panel="room"      data-side="left" type="button" aria-label="Room geometry"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12 12 3l9 9v9a1 1 0 0 1-1 1h-5v-7H10v7H4a1 1 0 0 1-1-1Z"/></svg></button>
+        <button class="rail-icon" data-panel="sources"   data-side="left" type="button" aria-label="Sources"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h3l4-4v14l-4-4H5Zm10.5 0a4 4 0 0 1 0 6m2-9a7 7 0 0 1 0 12"/></svg></button>
+        <button class="rail-icon" data-panel="listeners" data-side="left" type="button" aria-label="Listeners"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M14.5 19a4 4 0 0 1 7 1"/></svg></button>
+        <button class="rail-icon" data-panel="zones"     data-side="left" type="button" aria-label="Audience zones"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v6H3Zm0 8h18v6H3Z"/></svg></button>
+        <button class="rail-icon" data-panel="ambient"   data-side="left" type="button" aria-label="Environment noise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l3-7 4 14 3-7h5"/></svg></button>
+        <button class="rail-icon" data-panel="library"   data-side="left" type="button" aria-label="Library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3"/><path d="M9 8h7M9 12h7"/></svg></button>
+      </nav>
+      <aside id="panel-left" class="rail-panel rail-panel-left" aria-hidden="true">
         <section id="panel-room"><h2>Room</h2></section>
         <section id="panel-sources"><h2>Sources</h2></section>
         <section id="panel-listeners"><h2>Listeners</h2></section>
@@ -90,24 +109,71 @@
           </div>
         </div>
       </section>
-      <aside id="panel-right">
+      <aside id="panel-right" class="rail-panel rail-panel-right" aria-hidden="true">
         <section id="panel-results"><h2>Results</h2></section>
         <section id="panel-precision"><h2>Precision Render</h2></section>
       </aside>
+      <nav class="rail rail-right" id="rail-right" aria-label="Right tools">
+        <button class="rail-icon" data-panel="results"   data-side="right" type="button" aria-label="Results"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V4M4 20h16M8 16V8m4 8v-5m4 5v-9"/></svg></button>
+        <button class="rail-icon" data-panel="precision" data-side="right" type="button" aria-label="Precision render"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg></button>
+      </nav>
     </main>
   </div>
 
-  <!-- SPEAKERLAB ROUTE -->
+  <!-- SPEAKERLAB ROUTE
+       P4 — same rail grammar as RoomLAB. Catalogue + Filter on the
+       left rail; Spec sheet + Polar/Frequency on the right. The
+       existing #view-speaker stays as the centre full-bleed surface;
+       the rail panels OVERLAY on top when toggled (same pattern as
+       RoomLAB). Panel content is intentionally minimal in P4 — the
+       content reorganisation lands as a follow-up; this phase is
+       about visual consistency across the suite. -->
   <div class="lab-route" id="route-speaker" data-route="speaker">
     <main id="speakerlab-root">
+      <nav class="rail rail-left" id="rail-left-speaker" aria-label="Left tools">
+        <button class="rail-icon" data-panel="catalogue" data-side="left" type="button" aria-label="Catalogue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3"/><path d="M9 8h7M9 12h7"/></svg></button>
+        <button class="rail-icon" data-panel="filter" data-side="left" type="button" aria-label="Filter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4"/></svg></button>
+      </nav>
+      <aside id="panel-left" class="rail-panel rail-panel-left" aria-hidden="true">
+        <section id="panel-catalogue"><h2>Catalogue</h2><div class="phase-placeholder">Browse the loudspeaker catalogue. Coming in next iteration — for now, use the central card grid.</div></section>
+        <section id="panel-filter"><h2>Filter</h2><div class="phase-placeholder">Filter by manufacturer, kind, max SPL. Coming in next iteration.</div></section>
+      </aside>
       <div id="view-speaker" class="speakerlab-view"></div>
+      <aside id="panel-right" class="rail-panel rail-panel-right" aria-hidden="true">
+        <section id="panel-specs"><h2>Specs</h2><div class="phase-placeholder">Pick a speaker from the catalogue to see specs here.</div></section>
+        <section id="panel-frequency"><h2>Frequency response</h2><div class="phase-placeholder">Pick a speaker to see its on-axis frequency response.</div></section>
+        <section id="panel-polar"><h2>Polar plots</h2><div class="phase-placeholder">Pick a speaker to see its H/V polar patterns.</div></section>
+        <section id="panel-waterfall"><h2>Directivity waterfall</h2><div class="phase-placeholder">Pick a speaker to see its directivity-vs-frequency map.</div></section>
+      </aside>
+      <nav class="rail rail-right" id="rail-right-speaker" aria-label="Right tools">
+        <button class="rail-icon" data-panel="specs" data-side="right" type="button" aria-label="Specs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6Z"/><path d="M14 3v5h5M9 13h7M9 17h5"/></svg></button>
+        <button class="rail-icon" data-panel="frequency" data-side="right" type="button" aria-label="Frequency response"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 14c2-4 3-9 5-9s3 5 4 9 2 5 3 5 2-3 3-3 2 1 3 1"/></svg></button>
+        <button class="rail-icon" data-panel="polar" data-side="right" type="button" aria-label="Polar plots"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M3 12h18M12 3v18"/></svg></button>
+        <button class="rail-icon" data-panel="waterfall" data-side="right" type="button" aria-label="Directivity waterfall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18c3-2 5-2 6 0M3 13c3-3 5-3 6 0M3 8c3-3 5-3 6 0M9 18c3-2 5-2 6 0M9 13c3-3 5-3 6 0M9 8c3-3 5-3 6 0M15 18c3-2 5-2 6 0M15 13c3-3 5-3 6 0M15 8c3-3 5-3 6 0"/></svg></button>
+      </nav>
     </main>
   </div>
 
-  <!-- DEVICELAB ROUTE -->
+  <!-- DEVICELAB ROUTE — same rail grammar as RoomLAB / SpeakerLAB. -->
   <div class="lab-route" id="route-device" data-route="device">
     <main id="devicelab-root">
+      <nav class="rail rail-left" id="rail-left-device" aria-label="Left tools">
+        <button class="rail-icon" data-panel="rackbrowser" data-side="left" type="button" aria-label="Rack browser"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 8h16M4 13h16M4 18h16"/></svg></button>
+        <button class="rail-icon" data-panel="devicelibrary" data-side="left" type="button" aria-label="Device library"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="1"/><circle cx="8" cy="12" r="1.2"/><circle cx="16" cy="12" r="1.2"/></svg></button>
+      </nav>
+      <aside id="panel-left" class="rail-panel rail-panel-left" aria-hidden="true">
+        <section id="panel-rackbrowser"><h2>Rack browser</h2><div class="phase-placeholder">Browse and configure rack units. Coming in next iteration.</div></section>
+        <section id="panel-devicelibrary"><h2>Device library</h2><div class="phase-placeholder">All rack devices, filterable. Coming in next iteration.</div></section>
+      </aside>
       <div id="view-rack" class="devicelab-view"></div>
+      <aside id="panel-right" class="rail-panel rail-panel-right" aria-hidden="true">
+        <section id="panel-signalflow"><h2>Signal flow</h2><div class="phase-placeholder">Visualise the audio path through the rack. Coming in next iteration.</div></section>
+        <section id="panel-bom"><h2>Bill of materials</h2><div class="phase-placeholder">Aggregated BOM + total power. Coming in next iteration.</div></section>
+      </aside>
+      <nav class="rail rail-right" id="rail-right-device" aria-label="Right tools">
+        <button class="rail-icon" data-panel="signalflow" data-side="right" type="button" aria-label="Signal flow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h6M15 12h6M9 12l3-3 3 3-3 3z"/></svg></button>
+        <button class="rail-icon" data-panel="bom" data-side="right" type="button" aria-label="Bill of materials"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5Z"/><path d="M9 12h6M9 16h4M9 8h2"/></svg></button>
+      </nav>
     </main>
   </div>
 
@@ -162,6 +228,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=257"></script>
+  <script type="module" src="js/main.js?v=272"></script>
 </body>
 </html>

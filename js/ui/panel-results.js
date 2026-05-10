@@ -11,29 +11,44 @@ let materialsRef;
 export function mountResultsPanel({ materials }) {
   materialsRef = materials;
   const root = document.getElementById('panel-results');
+  // P3 — accordion sub-sections per Maya's spec. Listener summary stays
+  // at top (always relevant). RT60 and SPL/STIPA open by default
+  // (the metrics consultants check first); Coverage opens only when
+  // zones exist; the target-range hint stays collapsed (reference
+  // info, not active workflow).
   root.innerHTML = `
     <h2>Results</h2>
     <div id="listener-section"></div>
-    <div id="rt60-summary" class="summary"></div>
-    <h3 data-gloss="rt60">Reverberation (RT60) per band</h3>
-    <div id="rt60-rec" class="rt60-rec" hidden></div>
-    <table id="rt60-table">
-      <thead><tr>
-        <th>Hz</th>
-        <th data-gloss="sabine">Sabine</th>
-        <th data-gloss="eyring">Eyring</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-    <div id="spl-section"></div>
-    <div id="zones-section"></div>
-    <div class="hint">
-      <strong>Target ranges:</strong><br>
-      Speech / meetings: 0.4–0.8 s<br>
-      Classrooms: 0.5–0.7 s<br>
-      Live music: 1.2–2.0 s<br>
-      Concert halls: 1.8–2.4 s
-    </div>
+    <details class="acc" id="acc-rt60" open>
+      <summary data-gloss="rt60">Reverberation (RT60)</summary>
+      <div id="rt60-summary" class="summary"></div>
+      <div id="rt60-rec" class="rt60-rec" hidden></div>
+      <table id="rt60-table">
+        <thead><tr>
+          <th>Hz</th>
+          <th data-gloss="sabine">Sabine</th>
+          <th data-gloss="eyring">Eyring</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </details>
+    <details class="acc" id="acc-spl" open>
+      <summary>SPL &amp; STIPA at listener</summary>
+      <div id="spl-section"></div>
+    </details>
+    <details class="acc" id="acc-zones" open>
+      <summary>Audience zone coverage <span class="acc-count" id="acc-zones-count">0</span></summary>
+      <div id="zones-section"></div>
+    </details>
+    <details class="acc" id="acc-target-ranges">
+      <summary>Target RT60 ranges (reference)</summary>
+      <div class="hint">
+        Speech / meetings: 0.4–0.8 s<br>
+        Classrooms: 0.5–0.7 s<br>
+        Live music: 1.2–2.0 s<br>
+        Concert halls: 1.8–2.4 s
+      </div>
+    </details>
   `;
   render();
   on('room:changed', render);
@@ -60,12 +75,20 @@ function renderZoneStats() {
   const root = document.getElementById('zones-section');
   if (!root) return;
   const grids = state.results.zoneGrids || [];
+  // P3 — update accordion count chip; collapse the accordion when
+  // there are no zones (no point keeping it expanded with empty state).
+  const countChip = document.getElementById('acc-zones-count');
+  const accZones = document.getElementById('acc-zones');
+  if (countChip) countChip.textContent = String(grids.length);
+  if (accZones && grids.length === 0) accZones.removeAttribute('open');
+  else if (accZones && grids.length > 0) accZones.setAttribute('open', '');
   if (grids.length === 0 || state.sources.length === 0) {
-    root.innerHTML = '';
+    root.innerHTML = grids.length === 0
+      ? '<div class="phase-placeholder">No audience zones defined. Add a zone via the Zones panel for coverage stats.</div>'
+      : '<div class="phase-placeholder">No sources placed — add a speaker or line array for coverage stats.</div>';
     return;
   }
   root.innerHTML = `
-    <h3>Audience zone coverage</h3>
     <table id="zones-table">
       <thead><tr><th>Zone</th><th>Max</th><th>Avg</th><th>Uniformity</th></tr></thead>
       <tbody>

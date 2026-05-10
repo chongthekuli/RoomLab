@@ -721,7 +721,16 @@
   }
 
   /* ----------- HIDE FROM PRINT ----------- */
-  .help-modal, #help-overlay, .probe-tooltip, .vp-tab, .rl-toast {
+  /* P6.a — also hide the rail system (icon rails + open panels) and
+     the walk-mode touch HUD so the print report shows the report
+     content only, no chrome. The print stylesheet's own
+     `body > *:not(#print-report) { display: none !important; }`
+     rule (line 33) catches most of this; these explicit selectors
+     are belt-and-braces against future markup that sits OUTSIDE the
+     #print-report subtree. */
+  .help-modal, #help-overlay, .probe-tooltip, .vp-tab, .rl-toast,
+  .rail, .rail-panel, .walk-touch, .vp-fullscreen-btn,
+  #app-header, .lab-route, .vp-tabs {
     display: none !important;
   }
 }

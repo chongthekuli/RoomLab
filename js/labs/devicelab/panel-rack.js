@@ -198,6 +198,22 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
       renderSystemOverview();
     });
   });
+
+  // P4.5 — relocate side columns out of the centre 3-column layout
+  // into rail panels. The DOM nodes move with their event handlers
+  // intact. Centre keeps the rack editor (.rack-col-mid).
+  const colLeft  = root.querySelector('.rack-col-left');
+  const colRight = root.querySelector('.rack-col-right');
+  const railRackBrowser = document.getElementById('panel-rackbrowser');
+  const railBom = document.getElementById('panel-bom');
+  if (colLeft && railRackBrowser) {
+    railRackBrowser.innerHTML = '<h2>Rack browser</h2>';
+    railRackBrowser.appendChild(colLeft);
+  }
+  if (colRight && railBom) {
+    railBom.innerHTML = '<h2>System overview</h2>';
+    railBom.appendChild(colRight);
+  }
 }
 
 // ---- 3D preview (isolated Three.js scene) ------------------------------

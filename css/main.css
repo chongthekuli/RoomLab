@@ -1,11 +1,53 @@
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, sans-serif; }
+/* P5 — typography pass. Specialist tools use a NAMED display sans, not
+   the OS default (system-ui resolves to Segoe UI on Windows / SF on
+   Mac, both of which read as "AI-generated landing page" against a
+   pro-AV simulator). Inter Tight is the same family Treble uses;
+   JetBrains Mono is the de-facto DAW/CAD numeric face. Numerics get
+   tabular-nums by default so digits don't dance when SPL / RT60 /
+   distance values update mid-session. */
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: "Inter Tight", "IBM Plex Sans", -apple-system, system-ui, sans-serif;
+  font-feature-settings: "tnum" 1, "cv11" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+/* P5.c — JetBrains Mono on every numeric readout (live SPL / STI in
+   walk mode, the SPL legend tick labels, the 2D legend, the results
+   panel metric values, the precision-render headline number, the
+   listener-row XYZ display). DAW / CAD convention — instrument-class
+   tools use a mono face for digits so column alignment is rock-steady
+   when values update mid-frame. The `tabular-nums` already comes via
+   the body's font-feature-settings; this just swaps the face. */
+.walk-spl,
+.walk-spl-big,
+.spl-legend-3d,
+.spl-legend-3d .legend-tick-label,
+.vp-legend.spl-legend-v,
+.vp-legend.spl-legend-v .spl-legend-tick-label,
+.summary,
+.metric-value,
+.metric-num,
+.precision-headline-num,
+.tile-value,
+.pr-mono,
+.sv-cat-summary {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
 
 #app-header {
+  /* P5 — trimmed from ~60 px to 44 px. Less vertical chrome, more
+     viewport. Buttons and lab tabs adapt to the smaller height via
+     padding cuts further down this stylesheet. */
   display: flex;
   align-items: center;
-  gap: 1.2rem;
-  padding: 0.4rem 1rem;
+  gap: 1rem;
+  height: 44px;
+  padding: 0 12px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
 }
@@ -16,11 +58,13 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   white-space: nowrap;
 }
 #app-header .brand-text {
-  font-size: 0.7rem;
+  /* P5 — dropped uppercase + 0.12em letter-spacing (Maya's "2018
+     startup tell" call). Mixed-case + tighter spacing reads as a
+     specialist tool brand, not a SaaS landing page. */
+  font-size: 0.78rem;
   font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
+  letter-spacing: -0.005em;
+  color: var(--fg-strong, #e5e7eb);
 }
 #app-header .project-name {
   font-size: 0.85rem;
@@ -50,21 +94,26 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   align-items: center;
 }
 #app-header .header-actions button {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  padding: 0.32rem 0.65rem;
+  /* P5 — file-level actions visually demoted. Smaller padding, no
+     border by default, muted colour. Hover lifts to a subtle bg
+     so they're discoverable but never compete with the lab tabs.
+     This separates "where am I" (lab nav, primary) from "save this"
+     (file actions, secondary) the way EASE / ArrayCalc do. */
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 4px 10px;
   font-size: 0.74rem;
-  border-radius: 4px;
+  border-radius: var(--radius);
   cursor: pointer;
   white-space: nowrap;
   font: inherit;
   transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
 }
 #app-header .header-actions button:hover {
-  border-color: #4a515b;
+  border-color: var(--border);
   color: var(--fg-strong, #fff);
-  background: #2a2f38;
+  background: rgba(255, 255, 255, 0.04);
 }
 /* Reset button — same shape as the others but visually distinct so
    the destructive action signals itself. Compact, icon-only;
@@ -82,14 +131,18 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
   color: #fca5a5;
 }
 #app-header .lab-tab {
+  /* P5 — square chrome, no rounded pill. Active state is a subtle
+     inset (lighter background + 1 px inset shadow) instead of a solid
+     blue fill — instrument-like, less SaaS-tab feel. Saturated colour
+     stays reserved for data-vis. */
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
   gap: 1px;
-  padding: 0.32rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill, 0);
   background: transparent;
   color: var(--muted);
   text-decoration: none;
@@ -98,15 +151,15 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
 }
 #app-header .lab-tab:hover:not(.disabled):not(.active) {
   color: var(--fg);
-  border-color: #4a515b;
-  background: var(--bg-elev);
+  background: rgba(255, 255, 255, 0.03);
 }
 #app-header .lab-tab.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-strong, #fff);
+  border-color: var(--border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -1px 0 rgba(0, 0, 0, 0.3);
 }
-#app-header .lab-tab.active .lab-tab-sub { color: rgba(255, 255, 255, 0.78); }
+#app-header .lab-tab.active .lab-tab-sub { color: rgba(255, 255, 255, 0.5); }
 #app-header .lab-tab.disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -135,16 +188,21 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, san
 .lab-route { display: none; }
 .lab-route.active { display: block; }
 
+/* Layout overhaul (Hannes spec, P1). Viewport-first grid: thin icon
+   rails on each edge, viewport fills the centre. Side panels are
+   absolute overlays anchored to the rail; opening a panel does NOT
+   shrink the viewport. Glass / animation / submenus arrive in P2/P3.
+   The 56 px rail width matches Hannes's spec §2. */
 #app-root {
   display: grid;
-  grid-template-columns: 300px 1fr 320px;
-  height: calc(100vh - 60px);
+  grid-template-columns: 56px 1fr 56px;
+  height: calc(100vh - 44px);     /* header trimmed to 44 px in P5 — for now reuse 60 baseline if header still 60 */
+  position: relative;
 }
 
-/* Fullscreen mode — toggled by roomlab/main.js's fullscreenchange
-   handler. Hides side panels AND the top header so the viewport
-   occupies the entire fullscreen rect. Also reclaims the 60 px the
-   header was reserving by setting #app-root height to full viewport. */
+/* Fullscreen mode — hides side panels AND the top header AND the
+   rails so the viewport occupies the entire fullscreen rect. */
+html.is-fullscreen .rail,
 html.is-fullscreen #panel-left,
 html.is-fullscreen #panel-right,
 html.is-fullscreen #app-header {
@@ -155,21 +213,271 @@ html.is-fullscreen #app-root {
   height: 100vh;
 }
 
-#panel-left {
+/* ---------- Icon rails ---------- */
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px 0;
+  gap: 4px;
   background: var(--bg-panel);
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: var(--space-3) var(--space-4);
-  min-width: 0;
+  z-index: 10;
 }
-#panel-right {
-  background: var(--bg-panel);
-  border-left: 1px solid var(--border);
+.rail-left  { border-right: 1px solid var(--border); }
+.rail-right { border-left:  1px solid var(--border); }
+
+.rail-icon {
+  width: 56px;
+  height: 48px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 120ms ease, background 120ms ease;
+}
+.rail-icon svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.rail-icon:hover { color: var(--fg); background: rgba(255, 255, 255, 0.04); }
+.rail-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.rail-icon.is-active { color: var(--fg-strong); }
+.rail-icon.is-active::before {
+  content: '';
+  position: absolute;
+  width: 3px;
+  height: 26px;
+  background: var(--accent);
+  border-radius: 1.5px;
+  top: 11px;
+}
+.rail-left  .rail-icon.is-active::before { right: 0; }
+.rail-right .rail-icon.is-active::before { left:  0; }
+
+/* Hover label — small floating tooltip slides 8 px from the rail. */
+.rail-icon::after {
+  content: attr(aria-label);
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%) translateX(0);
+  background: rgba(20, 22, 28, 0.92);
+  color: var(--fg);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease 80ms, transform 120ms ease 80ms;
+  z-index: 20;
+}
+.rail-left  .rail-icon::after { left:  64px; }
+.rail-right .rail-icon::after { right: 64px; }
+.rail-icon:hover::after,
+.rail-icon:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* ---------- Side-panel overlays (P2: animated + frosted glass) ----
+   Visibility is driven by transform + opacity (NOT display: none) so
+   transitions can run on toggle. Initial state is off-screen + invis-
+   ible + non-interactive; `data-rail-<side>` flips that to on-screen.
+   * Open  → 320 ms slide with cubic-bezier(0.34, 1.56, 0.64, 1) bounce
+   * Close → 220 ms ease-in (snappier; "get out of the way")
+   * Glass → backdrop-filter blur + saturate, with @supports fallback
+   * Mobile → blur radius cap at 12 px (Viktor §4 perf constraint)
+   * Reduced motion → opacity-only fade, no transform, no bounce
+   * will-change: transform applied ONLY during animation (the
+     `.is-animating` class set by rail-system.js for ~350 ms)
+*/
+.rail-panel {
+  position: fixed;
+  top: 44px;          /* sits flush with the trimmed header */
+  bottom: 0;
+  width: 360px;
+  background: rgba(20, 24, 32, 0.94);   /* fallback when no backdrop-filter */
+  border: 1px solid var(--border);
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--space-3) var(--space-4);
-  min-width: 0;
+  z-index: 11;
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 220ms cubic-bezier(0.4, 0, 1, 1),
+              opacity 180ms linear;
+}
+.rail-panel-left  { left:  56px; border-left:  none; transform: translateX(-100%); }
+.rail-panel-right { right: 56px; border-right: none; transform: translateX(100%); }
+
+/* Glass surface — only when supported AND the FPS-watchdog has not
+   degraded to opaque mode (`html.is-glass-fallback`). */
+@supports (backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px)) {
+  html:not(.is-glass-fallback) .rail-panel {
+    background: rgba(20, 24, 32, 0.62);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+}
+
+/* Mobile / small-tablet: cap blur radius at 12 px (Viktor §4) and
+   drop saturate to 130% (mobile Safari ignores past ~130%). */
+@media (max-width: 768px) {
+  @supports (backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px)) {
+    html:not(.is-glass-fallback) .rail-panel {
+      backdrop-filter: blur(12px) saturate(130%);
+      -webkit-backdrop-filter: blur(12px) saturate(130%);
+    }
+  }
+}
+
+/* Open state — applied when <html> carries data-rail-<side>. Bounce
+   curve overshoots ~8 % (~3 px) before settling; opacity fades in
+   during the first 180 ms so the bounce lands on a fully-opaque
+   element. */
+html[data-rail-left]  #panel-left,
+html[data-rail-right] #panel-right {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+  transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              opacity 180ms linear;
+}
+
+/* will-change scoped to the animation window so the panel doesn't
+   permanently pin a GPU layer (Viktor's §4 constraint #1). The
+   .is-animating class is added by rail-system.js on every toggle and
+   removed ~350 ms later. */
+.rail-panel.is-animating {
+  will-change: transform, opacity;
+}
+
+/* Reduced-motion: replace slide + bounce with a 120 ms opacity fade.
+   No transform animation means no GPU compositing concern, and no
+   peripheral motion for users with vestibular sensitivity. */
+@media (prefers-reduced-motion: reduce) {
+  .rail-panel,
+  html[data-rail-left]  #panel-left,
+  html[data-rail-right] #panel-right {
+    transform: none;
+    transition: opacity 120ms linear;
+  }
+}
+
+/* No-transition guard for initial page load: prevents a slide-in
+   "flash" if sessionStorage had a panel open from the previous
+   session. The class is removed by rail-system.js after first paint. */
+html.no-transitions-yet .rail-panel {
+  transition: none !important;
+}
+
+/* Walk-mode: rails dim but stay interactive (Hannes §3 + §8). The
+   user is focused on the avatar; rail icons should be reachable but
+   not visually compete. */
+html.is-walkmode .rail {
+  opacity: 0.45;
+  transition: opacity 200ms ease;
+}
+html.is-walkmode .rail:hover,
+html.is-walkmode .rail:focus-within {
+  opacity: 1;
+}
+
+/* ---------- Panel-internal accordions (P3) -----------
+   Styled <details>/<summary> for collapsible sub-sections inside an
+   open panel. No JS needed — <details> is native HTML. We strip the
+   default browser disclosure triangle and replace with a chevron
+   that rotates on open. */
+.rail-panel details.acc {
+  margin: 6px 0 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+.rail-panel details.acc:first-of-type { border-top: none; padding-top: 0; }
+.rail-panel details.acc > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg);
+  text-transform: uppercase;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.rail-panel details.acc > summary::-webkit-details-marker { display: none; }
+.rail-panel details.acc > summary::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg) translate(-2px, 0);
+  transition: transform 180ms ease, border-color 180ms ease;
+  flex: 0 0 8px;
+}
+.rail-panel details.acc[open] > summary::before {
+  transform: rotate(45deg) translate(-2px, -2px);
+  border-color: var(--fg-strong);
+}
+.rail-panel details.acc > summary:hover::before { border-color: var(--fg); }
+.rail-panel details.acc > summary .acc-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 0.72rem;
+}
+.rail-panel details.acc > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.rail-panel details.acc[open] > summary {
+  color: var(--fg-strong);
+}
+
+/* Hide every section inside the panel by default; show only the one
+   matching <html data-rail-<side>="…">. */
+.rail-panel > section { display: none; }
+/* RoomLAB */
+html[data-rail-left="room"]      #panel-room,
+html[data-rail-left="sources"]   #panel-sources,
+html[data-rail-left="listeners"] #panel-listeners,
+html[data-rail-left="zones"]     #panel-zones,
+html[data-rail-left="ambient"]   #panel-ambient,
+html[data-rail-left="library"]   #panel-library,
+html[data-rail-right="results"]   #panel-results,
+html[data-rail-right="precision"] #panel-precision,
+/* SpeakerLAB (P4 + P4.6) */
+html[data-rail-left="catalogue"]  #panel-catalogue,
+html[data-rail-left="filter"]     #panel-filter,
+html[data-rail-right="specs"]     #panel-specs,
+html[data-rail-right="frequency"] #panel-frequency,
+html[data-rail-right="polar"]     #panel-polar,
+html[data-rail-right="waterfall"] #panel-waterfall,
+/* DeviceLAB (P4) */
+html[data-rail-left="rackbrowser"]   #panel-rackbrowser,
+html[data-rail-left="devicelibrary"] #panel-devicelibrary,
+html[data-rail-right="signalflow"]   #panel-signalflow,
+html[data-rail-right="bom"]          #panel-bom {
+  display: block;
 }
 #viewport {
   position: relative;
@@ -407,10 +715,30 @@ html.is-fullscreen #app-root {
 }
 .speaker-view {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 1fr;       /* P4.5 — catalogue moved to left-rail panel; centre is single column */
   gap: 0;
   color: var(--fg);
   height: 100%;
+}
+
+/* When the catalogue list is relocated into the left-rail panel,
+   strip its old sidebar chrome (border, background, max-height,
+   sidebar padding) so it renders flush inside the rail panel.
+   Same for DeviceLAB's rack columns. */
+#panel-catalogue .sv-catalog {
+  padding: 0;
+  border-right: none;
+  background: transparent;
+  max-height: none;
+  overflow: visible;
+}
+#panel-rackbrowser .rack-col-left,
+#panel-bom .rack-col-right {
+  padding: 0;
+  border: none;
+  background: transparent;
+  width: auto;
+  min-width: 0;
 }
 
 /* SpeakerLAB-page wrapper — when this view runs as the whole page
@@ -418,9 +746,14 @@ html.is-fullscreen #app-root {
    the body height below the header nav. */
 .lab-speakerlab body, body.lab-speakerlab { height: 100vh; }
 #speakerlab-root {
-  height: calc(100vh - 60px);
+  height: calc(100vh - 44px);
   background: var(--bg-app);
   overflow: hidden;
+  /* P4 — same rail grammar as #app-root (RoomLAB). 56 px rails on
+     each edge, view fills the centre 1fr column. */
+  display: grid;
+  grid-template-columns: 56px 1fr 56px;
+  position: relative;
 }
 #speakerlab-root #view-speaker {
   height: 100%;
@@ -518,22 +851,48 @@ html.is-fullscreen #app-root {
 /* Animated 3D cabinet preview — sits between the spec-card grid and
    the FR plot in the Speaker workbench. */
 .sv-3d-stage {
-  margin: 0 0 1.4rem;
-  padding: 0.5rem 0.5rem 0.6rem;
+  margin: 0;
+  padding: 1rem;
   background: radial-gradient(ellipse at 50% 30%, rgba(90, 130, 180, 0.12) 0%, rgba(10, 12, 16, 0.8) 70%);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   text-align: center;
+  /* P4.6 — fill the centre column when this is the only thing in
+     #sv-body. .sv-main is height: 100% (set below). Stage stretches
+     vertically; canvas fills it via aspect-ratio fallback. */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
 .sv-3d-stage canvas {
   display: block;
   margin: 0 auto;
-  width: 100%;
-  max-width: 640px;
+  width: min(100%, 1100px);     /* generous max so it actually fills 1080+ screens */
   height: auto;
   aspect-ratio: 16 / 9;
   cursor: grab;
   touch-action: none;
+}
+/* The centre column needs to be height: 100% so the 3D preview can
+   fill it. .sv-body is the immediate parent; .sv-main wraps it. */
+#view-speaker .sv-main { height: 100%; padding: 0.6rem 0.8rem; box-sizing: border-box; }
+#view-speaker .sv-body { height: calc(100% - 3rem); }
+
+/* Defensive — ensure the centre column shows ONLY the 3D preview,
+   regardless of whether the JS DOM-relocation in speaker-detail.js
+   fires successfully. Spec sections / catalogue / charts live in
+   rail panels (P4.6); if any happen to remain in #view-speaker
+   (timing race, error before relocation, etc.) we hide them here.
+   This rule is a no-op when relocation works because the hidden
+   selectors target descendants of #view-speaker — once relocated
+   they're descendants of the rail panel, not #view-speaker. */
+#view-speaker .sv-catalog,
+#view-speaker .sv-grid,
+#view-speaker .sv-body > .sv-section,
+#view-speaker .sv-designer-note {
+  display: none;
 }
 .sv-3d-stage canvas:active { cursor: grabbing; }
 .sv-3d-caption {
@@ -1675,7 +2034,7 @@ section h3 {
    dismisses sticky via localStorage. */
 #welcome-card {
   position: absolute;
-  top: 60px;
+  top: 50px;
   right: 16px;
   width: 340px;
   max-width: calc(100vw - 32px);
@@ -1760,9 +2119,13 @@ section h3 {
    #view-rack container fills the viewport area below the header
    nav; the .rack-builder grid does the three-column layout. */
 #devicelab-root {
-  height: calc(100vh - 60px);
+  height: calc(100vh - 44px);
   background: var(--bg-app);
   overflow: hidden;
+  /* P4 — viewport-first grid; rails on each edge. */
+  display: grid;
+  grid-template-columns: 56px 1fr 56px;
+  position: relative;
 }
 #devicelab-root #view-rack {
   height: 100%;
@@ -1815,8 +2178,12 @@ section h3 {
 
 /* PA Rack Builder — three-column layout. */
 .rack-builder {
+  /* P4.5 — left + right columns moved into rail panels; centre column
+     now fills the viewport. CSS:has() degrades cleanly: when the
+     side columns are missing, grid-template-columns collapses to a
+     single 1fr track. */
   display: grid;
-  grid-template-columns: 320px 1fr 280px;
+  grid-template-columns: 1fr;
   gap: 0.75rem;
   height: 100%;
   padding: 0.6rem;

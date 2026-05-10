@@ -11,6 +11,7 @@ import { SPEAKER_CATALOG, findCatalogEntry } from '../../shared/speaker-catalog.
 import { loadLoudspeaker } from '../../physics/loudspeaker.js';
 import { emit } from '../../shared/events.js';
 import { mountSpeakerView, state as speakerState } from './speaker-detail.js';
+import { mountRailSystem } from '../../ui/rail-system.js';
 
 let _mounted = false;
 
@@ -36,5 +37,17 @@ export async function mountSpeakerLab() {
   }
 
   mountSpeakerView();
+  // P4 — viewport-first rails for SpeakerLAB. Same mechanism as
+  // RoomLAB; per-lab manifest determines which icons/panels appear.
+  // P4.6 — auto-open removed per user feedback. Clear any stale
+  // auto-open value left from a prior session before mounting the
+  // rail system so the centre 3D preview is unobstructed by default.
+  // Maps to the now-deleted rail IDs from earlier iterations too
+  // (speakerspec → specs; if a user has the old key, drop it.)
+  try {
+    sessionStorage.removeItem('roomlab.rail.speaker.left');
+    sessionStorage.removeItem('roomlab.rail.speaker.right');
+  } catch (_) { /* private mode */ }
+  mountRailSystem({ routeId: 'speaker' });
   if (speakerState.selectedSpeakerUrl) emit('speaker:selected');
 }

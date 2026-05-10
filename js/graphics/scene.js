@@ -552,6 +552,50 @@ function initProbeTool() {
     _hoveredSpeakerGroup = null;
     renderer.domElement.style.cursor = '';
   });
+  // Drag-vs-click discriminator. Browsers fire `click` after a tiny
+  // mouse movement (sub-3 px) which means a small orbit drag still
+  // triggers downstream click handlers — landing the user on a wall-
+  // material picker when they only meant to nudge the camera. We
+  // capture the pointer-down position, track the distance travelled,
+  // and on click suppress propagation if the user moved more than
+  // a UX-meaningful threshold. Registered in CAPTURE phase so it
+  // runs BEFORE onSpeakerClick / onSurfaceClick / onSubStructureClick
+  // (which are in bubble phase) — `stopImmediatePropagation` then
+  // halts all further click listeners for this event.
+  //
+  // pointermove is on WINDOW (not canvas) because OrbitControls
+  // captures the pointer during a drag — pointer events get
+  // redirected away from the canvas element, so a canvas-scoped
+  // listener wouldn't see the movement and _ptrDragged stays false.
+  // The window listener catches pointermove regardless of capture,
+  // and we use `mousemove` as a belt-and-braces second source in
+  // case any browser routes mouse and pointer differently.
+  let _ptrDownX = 0, _ptrDownY = 0, _ptrDragged = false;
+  const DRAG_CLICK_THRESHOLD_PX = 6;
+  const onPtrDown = (e) => {
+    _ptrDownX = e.clientX;
+    _ptrDownY = e.clientY;
+    _ptrDragged = false;
+  };
+  const onPtrMove = (e) => {
+    // e.buttons is 0 when no button is held — skip in that case so
+    // pure hover doesn't accidentally count as a drag.
+    if (e.buttons === 0 && e.pressure === undefined) return;
+    const dx = e.clientX - _ptrDownX;
+    const dy = e.clientY - _ptrDownY;
+    if (Math.hypot(dx, dy) > DRAG_CLICK_THRESHOLD_PX) _ptrDragged = true;
+  };
+  renderer.domElement.addEventListener('pointerdown', onPtrDown, true);
+  renderer.domElement.addEventListener('mousedown',  onPtrDown, true);
+  window.addEventListener('pointermove', onPtrMove, true);
+  window.addEventListener('mousemove',   onPtrMove, true);
+  renderer.domElement.addEventListener('click', (e) => {
+    if (_ptrDragged) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }
+  }, true);
+
   // Click-to-inspect: tapping a loudspeaker cabinet in 3D opens the
   // Speaker workbench focused on that model.
   renderer.domElement.addEventListener('click', onSpeakerClick);

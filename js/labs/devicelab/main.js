@@ -7,6 +7,7 @@
 // already in the scene — no page reload, no autosave round-trip.
 
 import { mountRackPanel } from './panel-rack.js';
+import { mountRailSystem } from '../../ui/rail-system.js';
 
 let _mounted = false;
 
@@ -32,4 +33,12 @@ export async function mountDeviceLab() {
   ]);
 
   mountRackPanel({ rackCatalogue, ampCatalog });
+  // P4 — viewport-first rails for DeviceLAB. Auto-open removed in
+  // P4.6 — clear stale auto-open from prior sessions so the centre
+  // rack editor is unobstructed by default.
+  try {
+    sessionStorage.removeItem('roomlab.rail.device.left');
+    sessionStorage.removeItem('roomlab.rail.device.right');
+  } catch (_) { /* private mode */ }
+  mountRailSystem({ routeId: 'device' });
 }
