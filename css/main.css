@@ -219,8 +219,13 @@ html.is-fullscreen #app-root {
    vertically in a column anchored to the screen edge. Modern pro-app
    pattern (Figma toolbox, Linear sidebar, Treble action column). */
 .rail {
+  /* top: 56px clears the .viewport-tabs row (~44 px tall + a bit of
+     breathing room) so rail icons never sit on top of the 2D / 3D /
+     Walk buttons or the tools cluster. Same offset works for all
+     three labs because each has its own top toolbar / banner of
+     similar height. */
   position: absolute;
-  top: 12px;
+  top: 56px;
   bottom: 12px;
   display: flex;
   flex-direction: column;
