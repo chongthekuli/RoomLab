@@ -40,16 +40,27 @@ html, body {
 }
 
 #app-header {
-  /* P5 — trimmed from ~60 px to 44 px. Less vertical chrome, more
-     viewport. Buttons and lab tabs adapt to the smaller height via
-     padding cuts further down this stylesheet. */
+  /* P10 — glass header. Position fixed at viewport top so the 3D /
+     2D scene extends BEHIND it; backdrop-filter blurs the scene
+     visibly through the header. Same visual family as rail panels
+     and floating segment / corner buttons. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
   display: flex;
   align-items: center;
   gap: 1rem;
-  height: 44px;
   padding: 0 12px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
+  z-index: 30;     /* above floating segment / rails / panels */
+  background: rgba(20, 22, 28, 0.55);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+@supports not ((backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px))) {
+  #app-header { background: rgba(20, 22, 28, 0.94); }
 }
 #app-header .app-brand {
   display: flex;
@@ -194,9 +205,12 @@ html, body {
    3D / 2D preview uses every pixel between the screen edges. Panels
    still slide out from the rail's old anchor (56 px from edge). */
 #app-root {
+  /* P10 — full viewport height; content extends BEHIND the now-fixed
+     glass header. Floating elements inside (segment, rails, panels)
+     have offsets bumped by ~44 px below to clear the header. */
   display: grid;
   grid-template-columns: 1fr;
-  height: calc(100vh - 44px);
+  height: 100vh;
   position: relative;
 }
 
@@ -219,12 +233,10 @@ html.is-fullscreen #app-root {
    vertically in a column anchored to the screen edge. Modern pro-app
    pattern (Figma toolbox, Linear sidebar, Treble action column). */
 .rail {
-  /* top: 60px clears the persistent segmented control (which floats
-     at top: 12 with ~36 px height) plus a small gap. With the old
-     .viewport-tabs row gone, this is just clearance for the floating
-     glass mode-segment, not a full toolbar. */
+  /* P10 — top: 104 clears the glass header (44) + the floating mode
+     segment (now at 56) + the segment height (~36) + small gap. */
   position: absolute;
-  top: 60px;
+  top: 104px;
   bottom: 12px;
   display: flex;
   flex-direction: column;
@@ -521,7 +533,7 @@ html[data-rail-right="bom"]          #panel-bom {
    horizontal and grouping the three radio options inside. */
 .vp-mode-segment {
   position: absolute;
-  top: 12px;
+  top: 56px;       /* below the 44 px glass header + 12 px breathing */
   left: 50%;
   transform: translateX(-50%);
   display: inline-flex;
@@ -562,7 +574,7 @@ html[data-rail-right="bom"]          #panel-bom {
 /* Corner buttons — top-right. Same glass-pill family as rail icons. */
 .vp-corner-btn {
   position: absolute;
-  top: 12px;
+  top: 56px;
   width: 40px;
   height: 40px;
   background: rgba(20, 22, 28, 0.55);
@@ -586,8 +598,8 @@ html[data-rail-right="bom"]          #panel-bom {
   background: rgba(40, 50, 65, 0.78);
   border-color: rgba(255, 255, 255, 0.18);
 }
-.vp-fullscreen-btn { right: 60px; }
-.vp-more-trigger   { right: 12px; font-size: 1.4rem; line-height: 1; padding-bottom: 6px; }
+.vp-fullscreen-btn { right: 60px; top: 56px; }
+.vp-more-trigger   { right: 12px; top: 56px; font-size: 1.4rem; line-height: 1; padding-bottom: 6px; }
 .vp-more-trigger[aria-expanded="true"] {
   color: var(--fg-strong, #fff);
   background: rgba(50, 70, 100, 0.85);
@@ -599,7 +611,7 @@ html[data-rail-right="bom"]          #panel-bom {
    bounce on open, fade-in on opacity. */
 .vp-more-panel {
   position: absolute;
-  top: 60px;
+  top: 104px;     /* below corner buttons (56) + button height (40) + gap (8) */
   right: 12px;
   width: 280px;
   background: rgba(20, 22, 28, 0.62);
@@ -873,11 +885,9 @@ html[data-more-menu] .vp-more-panel {
    the body height below the header nav. */
 .lab-speakerlab body, body.lab-speakerlab { height: 100vh; }
 #speakerlab-root {
-  height: calc(100vh - 44px);
+  height: 100vh;       /* P10 — content extends behind glass header */
   background: var(--bg-app);
   overflow: hidden;
-  /* P7 — full-bleed grid; rails float as overlays, viewport
-     occupies 100 % of the width below the header. */
   display: grid;
   grid-template-columns: 1fr;
   position: relative;
@@ -1377,11 +1387,11 @@ html[data-more-menu] .vp-more-panel {
 /* Walkthrough live SPL readout — top-right of the 3D canvas, updates every
    frame with the avatar's ear position + current pose + total SPL. */
 .walk-spl {
-  /* P8 — sit below the corner buttons (fullscreen + ⋯) which now
-     occupy top: 12 / right: 12–100. Top: 60 clears them with a
-     small breathing gap. */
+  /* P10 — sit below the corner buttons (which now sit at top: 56
+     after the glass header bumped). Top: 104 = corner btn top (56)
+     + height (40) + 8 gap. */
   position: absolute;
-  top: 60px; right: 16px;
+  top: 104px; right: 16px;
   background: rgba(20, 22, 28, 0.92);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-pop);
@@ -1553,7 +1563,7 @@ html[data-more-menu] .vp-more-panel {
    legend's gradient was bleeding through. Live SPL + colour reference
    stay vertically stacked at top-right; touch HUD owns bottom-right. */
 html.is-walkmode .spl-legend-3d {
-  top: 280px;          /* walk-spl now starts at 60 + ~200 tall = 260; +20 gap */
+  top: 324px;          /* walk-spl now at 104 + ~200 tall + 20 gap */
   bottom: auto;
   right: 16px;
 }
@@ -2108,7 +2118,7 @@ section h3 {
 .viewport-2d {
   width: 100%;
   height: 100%;
-  padding: 60px 60px 0.6rem;       /* top, side (= rail width + breathing), bottom */
+  padding: 104px 60px 0.6rem;       /* top — clear glass header + mode segment */
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -2294,10 +2304,9 @@ section h3 {
    #view-rack container fills the viewport area below the header
    nav; the .rack-builder grid does the three-column layout. */
 #devicelab-root {
-  height: calc(100vh - 44px);
+  height: 100vh;       /* P10 — content extends behind glass header */
   background: var(--bg-app);
   overflow: hidden;
-  /* P7 — full-bleed grid; rails float as overlays. */
   display: grid;
   grid-template-columns: 1fr;
   position: relative;
