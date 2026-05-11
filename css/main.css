@@ -1087,7 +1087,13 @@ html[data-more-menu] .vp-more-panel {
    pulled out of normal flow into an absolute-positioned glass overlay
    below — that lets the canvas reach the top edge instead of being
    pushed down. */
-#view-speaker .sv-main {
+/* Centre-column layout for SpeakerLAB AND SurfaceLAB — both Labs use
+   the .speaker-view → .sv-main → .sv-head + .sv-body structure with a
+   full-viewport 3D preview and a floating glass title bar. SurfaceLAB
+   was originally missing these rules (falling through to the generic
+   .sv-head), so the title rendered behind the glass header. */
+#view-speaker .sv-main,
+#view-surface .sv-main {
   position: absolute;
   inset: 0;
   height: 100%;
@@ -1095,17 +1101,19 @@ html[data-more-menu] .vp-more-panel {
   box-sizing: border-box;
   overflow: hidden;
 }
-#view-speaker .sv-body {
+#view-speaker .sv-body,
+#view-surface .sv-body {
   position: absolute;
   inset: 0;
   height: 100%;
   overflow: hidden;
 }
 
-/* Title + import-button bar — floats over the 3D preview at the top,
-   inside the rail clearance gutters so it doesn't collide with the
-   icon rails. Glass panel matching the rail-panel + segment family. */
-#view-speaker .sv-head {
+/* Title + actions bar — floats over the 3D preview at the top, inside
+   the rail clearance gutters so it doesn't collide with the icon
+   rails. Glass panel matching the rail-panel + segment family. */
+#view-speaker .sv-head,
+#view-surface .sv-head {
   position: absolute;
   top: 56px;          /* clear the 44 px fixed glass header + 12 px gap */
   left: 64px;          /* clear the left rail (40 px icon + 24 px gap) */
@@ -1126,7 +1134,8 @@ html[data-more-menu] .vp-more-panel {
   pointer-events: auto;
 }
 @supports not ((backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px))) {
-  #view-speaker .sv-head { background: rgba(20, 22, 28, 0.94); }
+  #view-speaker .sv-head,
+  #view-surface .sv-head { background: rgba(20, 22, 28, 0.94); }
 }
 
 /* Defensive — ensure the centre column shows ONLY the 3D preview,
