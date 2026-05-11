@@ -27,6 +27,15 @@ body.is-pdf-export #print-report { display: block !important; }
 /* Native browser-print path. */
 @media print {
   html { color-scheme: light; }
+  /* CRITICAL: main.css sets `html, body { overflow: hidden; height: 100% }`
+     to prevent SpeakerLAB / SurfaceLAB scroll. That rule clips
+     anything past one viewport-height during print and the print
+     engine only produces a single page. Reset both for print so the
+     pagination engine can flow the whole report. */
+  html, body {
+    overflow: visible !important;
+    height: auto !important;
+  }
   body > *:not(#print-report) { display: none !important; }
   #print-report { display: block !important; }
 
