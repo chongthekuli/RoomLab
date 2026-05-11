@@ -535,11 +535,27 @@ function buildFoamWedgePanel(entry, visual) {
   // (out of the panel face toward the viewer). Real Auralex Studiofoam
   // Wedge has the peaks-out-of-the-panel orientation.
   //
-  // Triangle defined in shape (X, Y) plane with X = vertical span of
-  // one row, Y = depth toward camera. ExtrudeGeometry extrudes along
-  // shape +Z (= panel width). Rotations XYZ='XYZ' applied X then Z
-  // permute shape (X,Y,Z) → world (Y,Z,X), giving:
-  //   ridge runs along world X (horizontal), apex at +Z (toward camera).
+  // ExtrudeGeometry produces a prism in shape (X, Y, Z) where Z is the
+  // extrude direction. We want the cyclic mapping shape (X,Y,Z) →
+  // world (Y, Z, X) so:
+  //   shape X (rowH span) → world Y (one row's vertical span)
+  //   shape Y (peak)      → world Z (apex toward camera)
+  //   shape Z (W)         → world X (ridge runs horizontally)
+  //
+  // This is a 120° rotation around (1,1,1) and can't be expressed as a
+  // single mesh.rotation axis. The previous attempt set rotation.x +
+  // rotation.z but Three.js default Euler order 'XYZ' applies Z first
+  // (matrix = R_x · R_y · R_z), so the rotation around Z happened in
+  // shape-local coordinates and rotated the cross-section the wrong
+  // way before X tilted it.
+  //
+  // Fix: rotate the GEOMETRY itself (vertex-space) with two
+  // single-axis steps that compose to the cyclic permutation.
+  // rotateY(π/2) then rotateX(π/2) on the geometry maps:
+  //   local (1,0,0) → (0,1,0)  ✓
+  //   local (0,1,0) → (0,0,1)  ✓
+  //   local (0,0,1) → (1,0,0)  ✓
+  // Then mesh.rotation is identity, and the translate places each row.
   const rows = 8;
   const rowH = H / rows;
   const peak = D * 0.85;
@@ -552,15 +568,9 @@ function buildFoamWedgePanel(entry, visual) {
     tri.lineTo(rowH / 2, peak);       // apex toward camera
     tri.lineTo(0, 0);
     const extr = new THREE.ExtrudeGeometry(tri, { depth: W, bevelEnabled: false });
+    extr.rotateY(Math.PI / 2);
+    extr.rotateX(Math.PI / 2);
     const mesh = new THREE.Mesh(extr, mat);
-    mesh.rotation.x = Math.PI / 2;
-    mesh.rotation.z = Math.PI / 2;
-    // After the cyclic permutation:
-    //   shape X-extent [0, rowH] → world Y-extent
-    //   shape Y-extent [0, peak] → world Z-extent
-    //   shape Z-extent [0, W]    → world X-extent
-    // Translate so the prism sits at y=yBase, z=backerFrontZ, centred
-    // on x.
     mesh.position.set(-W / 2, yBase, backerFrontZ);
     g.add(mesh);
   }
@@ -588,24 +598,26 @@ function buildFoamPyramidPanel(entry, visual) {
   // ConeGeometry(radius, height, 4) is a 4-sided pyramid with apex
   // along +Y by default; corners of the base are at angles 0°, 90°,
   // 180°, 270° around the apex axis — DIAMOND-oriented in the
-  // perpendicular plane. After rotation.x = π/2 (apex → +Z) the
-  // diamond is in the XY plane, with base corners at world (±R, 0)
-  // and (0, ±R). Real Auralex Studiofoam Pyramid has axis-aligned
-  // bases (edges parallel to panel edges), so we rotate the cone an
-  // additional 45° around the apex axis (now world Z) to put edges
-  // axis-aligned and corners at ±45°.
+  // perpendicular plane. Real Auralex Studiofoam Pyramid has
+  // axis-aligned bases (edges parallel to panel edges), so we
+  // PRE-rotate the geometry 45° around its apex axis (local Y)
+  // BEFORE applying the X tilt. Doing it on the geometry side
+  // avoids Three.js's Euler order pitfall: with rotation.order =
+  // 'XYZ' (default) the matrix is R_x · R_y · R_z, so a rotation.z
+  // is applied to the BASE COORDINATES first, BEFORE the X tilt —
+  // which tilts the cone's apex axis 45° off +Z instead of
+  // rotating around the apex axis. Pre-rotating the geometry
+  // sidesteps this entirely.
   //
   // Radius sized so square side = cellW × 0.95 (5% gap between
   // adjacent pyramids for definition). side = R × √2 → R = cellW × 0.67.
   const radius = cellW * 0.67;
+  const coneGeom = new THREE.ConeGeometry(radius, D * 0.85, 4);
+  coneGeom.rotateY(Math.PI / 4);   // axis-align base around the cone's local Y axis
   for (let i = 0; i < cells; i++) {
     for (let j = 0; j < cells; j++) {
-      const pyr = new THREE.Mesh(
-        new THREE.ConeGeometry(radius, D * 0.85, 4),
-        mat,
-      );
-      pyr.rotation.x = Math.PI / 2;
-      pyr.rotation.z = Math.PI / 4;     // axis-align the square base
+      const pyr = new THREE.Mesh(coneGeom, mat);
+      pyr.rotation.x = Math.PI / 2;     // tilt apex from +Y to +Z (toward camera)
       // Backer spans z = -D*0.5 to z = -D*0.3 (centered at -D*0.4,
       // thickness D*0.2). After rotation.x = +π/2 the cone's base is
       // at local z = -h/2 = -D*0.425 (where h = D*0.85). To sit the
