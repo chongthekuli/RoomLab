@@ -341,11 +341,17 @@ function drawGrainPattern(ctx, base) {
 
 function buildQRDPanel(entry, is2D, visual) {
   const g = new THREE.Group();
+  // Schema v2 moved diffuser-specific fields out of entry.geometry into
+  // entry.diffuser.{prime_N, period_width_mm, max_well_depth_mm,
+  // well_count, fmin_hz, fmax_hz, sequence_type}. Read from the new
+  // location first, fall back to entry.geometry (legacy v1) so the
+  // builder still works on stale data.
   const wMm = entry.geometry?.width_mm  ?? 600;
   const hMm = entry.geometry?.height_mm ?? 600;
-  const dMaxMm = entry.geometry?.max_well_depth_mm ?? 100;
-  const N = entry.geometry?.prime_N ?? 7;
-  const wellsAcross = is2D ? Math.max(7, Math.round(Math.sqrt(entry.geometry?.well_count ?? 49))) : N;
+  const dMaxMm = entry.diffuser?.max_well_depth_mm ?? entry.geometry?.max_well_depth_mm ?? entry.geometry?.depth_mm ?? 100;
+  const N      = entry.diffuser?.prime_N           ?? entry.geometry?.prime_N           ?? 7;
+  const wellCount = entry.diffuser?.well_count     ?? entry.geometry?.well_count        ?? 49;
+  const wellsAcross = is2D ? Math.max(7, Math.round(Math.sqrt(wellCount))) : N;
   const wellsDown   = is2D ? wellsAcross : 1;
 
   const W = wMm / 1000, H = hMm / 1000, D = dMaxMm / 1000;
@@ -396,8 +402,10 @@ function buildPolycylPanel(entry, visual) {
   const g = new THREE.Group();
   const W = (entry.geometry?.width_mm  ?? 600) / 1000;
   const H = (entry.geometry?.height_mm ?? 600) / 1000;
-  const radius = (entry.geometry?.radius_mm ?? 450) / 1000;
-  const rise = (entry.geometry?.rise_mm ?? 100) / 1000;
+  // Schema v2: radius_mm / rise_mm moved to entry.diffuser.*; fall back
+  // to entry.geometry for legacy data.
+  const radius = (entry.diffuser?.radius_mm ?? entry.geometry?.radius_mm ?? 450) / 1000;
+  const rise   = (entry.diffuser?.rise_mm   ?? entry.geometry?.rise_mm   ?? 100) / 1000;
   const segments = 32;
 
   const halfChord = W / 2;
