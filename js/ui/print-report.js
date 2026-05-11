@@ -489,7 +489,17 @@ function renderPrintReport(model, { splGrid = null } = {}) {
       <td>${fmt(r.meanAbsorption, 3)}</td>
     </tr>`).join('');
 
-  const rt60Sparkline = renderRT60Sparkline(model.rt60);
+  const rt60Chart = renderRT60Chart(model.rt60, {
+    volume_m3: room.volume_m3,
+    schroederHz: model.derived.schroederCutoff_hz,
+  });
+  const targetLabel = (() => {
+    const t = resolveRT60Target(room.volume_m3);
+    return t ? `${t.lo.toFixed(1)}–${t.hi.toFixed(1)} s (${t.label})` : null;
+  })();
+  const schroederNote = model.derived.schroederCutoff_hz != null
+    ? `Schroeder cutoff f<sub>s</sub> = ${fmt(model.derived.schroederCutoff_hz, 0)} Hz — modal region below 125 Hz band.`
+    : '';
 
   const roomPage = `
     <div class="pr-page">
@@ -498,26 +508,31 @@ function renderPrintReport(model, { splGrid = null } = {}) {
         <span class="pr-eyebrow">Chapter 02</span>
         <h2>Reverberation</h2>
       </div>
-      <section class="pr-section">
-        <table class="pr-table pr-kv">
-          <tr><th>Shape</th><td>${escapeHtml(room.shape)}</td></tr>
-          <tr><th>Width × Depth × Height</th><td>${fmt(room.width_m, 2)} × ${fmt(room.depth_m, 2)} × ${fmt(room.height_m, 2)} m</td></tr>
-          <tr><th>Floor area</th><td>${fmt(room.baseArea_m2, 1)} m²</td></tr>
-          <tr><th>Volume</th><td>${fmt(room.volume_m3, 0)} m³</td></tr>
-          <tr><th>Total interior surface area</th><td>${fmt(room.totalArea_m2, 0)} m²</td></tr>
-          <tr><th>Mean absorption (1 kHz)</th><td>${fmt(room.meanAbsorption_1k, 3)}</td></tr>
-          <tr><th>Ceiling type</th><td>${escapeHtml(room.ceiling_type)}</td></tr>
-          <tr><th>Critical distance r_c</th><td>${model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m  <span class="pr-mute">(Q ≈ ${model.derived.Q_assumed}, DI ≈ ${model.derived.DI_assumed_db} dB)</span>` : '—'}</td></tr>
-          <tr><th>Schroeder cutoff</th><td>${model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—'}</td></tr>
-        </table>
+      <section class="pr-section pr-rt60-grid">
+        <div class="pr-rt60-chart-wrap">
+          ${rt60Chart}
+          <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Values on Eyring curve; Sabine shown for reference. n = 7 bands, 125 Hz – 8 kHz.</p>
+        </div>
+        <div class="pr-rt60-kv-wrap">
+          <table class="pr-table pr-kv">
+            <tr><th>Shape</th><td>${escapeHtml(room.shape)}</td></tr>
+            <tr><th>W × D × H</th><td>${fmt(room.width_m, 2)} × ${fmt(room.depth_m, 2)} × ${fmt(room.height_m, 2)} m</td></tr>
+            <tr><th>Floor area</th><td>${fmt(room.baseArea_m2, 1)} m²</td></tr>
+            <tr><th>Volume</th><td>${fmt(room.volume_m3, 0)} m³</td></tr>
+            <tr><th>Total surface</th><td>${fmt(room.totalArea_m2, 0)} m²</td></tr>
+            <tr><th>Mean α (1 kHz)</th><td>${fmt(room.meanAbsorption_1k, 3)}</td></tr>
+            <tr><th>Ceiling</th><td>${escapeHtml(room.ceiling_type)}</td></tr>
+            <tr><th>r_c (critical)</th><td>${model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—'}</td></tr>
+            <tr><th>f_s (Schroeder)</th><td>${model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—'}</td></tr>
+          </table>
+        </div>
       </section>
       <section class="pr-section">
-        ${rt60Sparkline}
-        <table class="pr-table">
+        <table class="pr-table pr-zebra">
           <thead><tr><th>Band</th><th>Sabine</th><th>Eyring</th><th>Mean α</th></tr></thead>
           <tbody>${rt60Rows}</tbody>
         </table>
-        <p class="pr-note">Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2). Air absorption per ISO 9613-1 included in both denominators. Sparkline shows the Eyring per-band values across 125 Hz – 8 kHz.</p>
+        <p class="pr-note">Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2). Air absorption per ISO 9613-1 included in both denominators. ${schroederNote}</p>
       </section>
     </div>`;
 
@@ -767,33 +782,148 @@ function tile(label, value) {
     </div>`;
 }
 
-// RT60-vs-frequency sparkline for the chapter-02 page. Per Sofia: 7
-// points (one per band) at 180 × 36 logical pt, 1.2pt stroke, no axis
-// labels — texture, not a real chart. Uses Eyring values.
-function renderRT60Sparkline(rt60Bands) {
-  const eyringValues = rt60Bands.map(b => Number.isFinite(b.eyring_s) ? b.eyring_s : null);
-  const finite = eyringValues.filter(v => v !== null);
-  if (finite.length === 0) return '';
-  const maxV = Math.max(...finite, 0.1);
-  const W = 180, H = 36;
-  const pad = 4;
-  const innerW = W - pad * 2, innerH = H - pad * 2;
-  const points = eyringValues.map((v, i) => {
-    const x = pad + (i / (eyringValues.length - 1)) * innerW;
-    const y = v === null ? null : pad + (1 - v / maxV) * innerH;
-    return { x, y };
-  });
-  const dPath = points
-    .filter(p => p.y !== null)
-    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
-    .join(' ');
-  const dots = points
-    .filter(p => p.y !== null)
-    .map(p => `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="1.4" />`)
-    .join('');
-  return `<svg class="pr-sparkline" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-    <path d="${dPath}" stroke-width="1.2" />
-    ${dots}
+// Resolve target RT60 band for the proposal chart. Pure volume heuristic
+// per Beranek (Concert Halls and Opera Houses, 2nd ed. 2004, §3) and BBC
+// R&D studio tech notes: mid-frequency target reverberation rises with
+// room volume because larger rooms benefit acoustically from a longer
+// decay. Boundaries are conservative midpoints of the cited ranges; the
+// label tells the reviewer which usage band we assumed.
+function resolveRT60Target(volumeM3) {
+  if (!(volumeM3 > 0)) return null;
+  if (volumeM3 < 50)   return { lo: 0.25, hi: 0.45, label: 'studio / control room' };
+  if (volumeM3 < 200)  return { lo: 0.35, hi: 0.60, label: 'small speech / classroom' };
+  if (volumeM3 < 1000) return { lo: 0.60, hi: 1.00, label: 'speech / lecture' };
+  if (volumeM3 < 5000) return { lo: 1.00, hi: 1.50, label: 'multi-purpose' };
+  return                       { lo: 1.40, hi: 2.20, label: 'music / concert' };
+}
+
+// RT60-vs-frequency analytical chart for the Reverberation page. Sofia's
+// spec (post-sparkline rejection): 100×70mm vector, two series (Eyring
+// solid + accent, Sabine dotted reference), shaded target band per
+// Beranek volume heuristic, gridlines every 0.5s, value labels on every
+// Eyring point, 1 kHz gridline emphasised as the headline anchor. SVG
+// coordinate system is in millimetres so the figure prints crisp.
+//
+// Inline stroke/fill (no CSS classes) — keeps the figure self-contained
+// for any rasterisation pipeline (browser print, screenshot tools).
+function renderRT60Chart(rt60Bands, { volume_m3, schroederHz } = {}) {
+  const eyring = rt60Bands.map(b => Number.isFinite(b.eyring_s) ? b.eyring_s : null);
+  const sabine = rt60Bands.map(b => Number.isFinite(b.sabine_s) ? b.sabine_s : null);
+  const finiteE = eyring.filter(v => v !== null);
+  if (finiteE.length === 0) return '';
+
+  // ---- Plot geometry (mm) -------------------------------------------
+  const W = 100, H = 70;
+  const padL = 12, padR = 4, padT = 6, padB = 12;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const plotX = padL;
+  const plotY = padT;
+
+  // ---- Y range -------------------------------------------------------
+  // Floor at 1.5s so different scenes are visually comparable, lift to
+  // include any value over 1.25s. Always rounded up to a 0.5s tick.
+  const target = resolveRT60Target(volume_m3);
+  const allValues = [...finiteE, ...sabine.filter(v => v !== null)];
+  if (target) allValues.push(target.hi);
+  const maxRaw = Math.max(...allValues) * 1.2;
+  const yMax = Math.max(1.5, Math.ceil(maxRaw * 2) / 2);
+
+  // ---- Coordinate helpers -------------------------------------------
+  const N = rt60Bands.length;
+  const xOf = (i) => plotX + (N === 1 ? plotW / 2 : (i / (N - 1)) * plotW);
+  const yOf = (v) => plotY + plotH - (v / yMax) * plotH;
+
+  // ---- Target band rect (drawn first so lines paint over) -----------
+  let targetRect = '';
+  let targetLabel = '';
+  if (target) {
+    const yHi = yOf(target.hi);                  // higher RT = lower y
+    const yLo = yOf(target.lo);
+    targetRect = `<rect x="${plotX.toFixed(2)}" y="${yHi.toFixed(2)}" width="${plotW.toFixed(2)}" height="${(yLo - yHi).toFixed(2)}" fill="#8C2A2A" fill-opacity="0.12" />`;
+    targetLabel = `<text x="${(plotX + plotW - 0.5).toFixed(2)}" y="${(plotY + 3).toFixed(2)}" text-anchor="end" font-size="2.4" font-weight="600" fill="#8C2A2A">Target ${target.lo.toFixed(1)}–${target.hi.toFixed(1)} s · ${target.label}</text>`;
+  }
+
+  // ---- Major + minor gridlines --------------------------------------
+  const gridLines = [];
+  for (let v = 0; v <= yMax + 1e-6; v += 0.25) {
+    const y = yOf(v);
+    const isMajor = Math.abs((v * 2) % 1) < 1e-6;     // every 0.5
+    const sw = isMajor ? 0.12 : 0.06;
+    gridLines.push(`<line x1="${plotX.toFixed(2)}" y1="${y.toFixed(2)}" x2="${(plotX + plotW).toFixed(2)}" y2="${y.toFixed(2)}" stroke="#C9C5BC" stroke-width="${sw}" />`);
+  }
+  // 1 kHz vertical anchor — index 3 in the standard 125…8k array.
+  const idx1k = rt60Bands.findIndex(b => b.freq_hz === 1000);
+  if (idx1k >= 0) {
+    const x1k = xOf(idx1k);
+    gridLines.push(`<line x1="${x1k.toFixed(2)}" y1="${plotY.toFixed(2)}" x2="${x1k.toFixed(2)}" y2="${(plotY + plotH).toFixed(2)}" stroke="#C9C5BC" stroke-width="0.18" />`);
+  }
+
+  // ---- Y-axis tick labels (major gridlines only) --------------------
+  const yLabels = [];
+  for (let v = 0; v <= yMax + 1e-6; v += 0.5) {
+    const y = yOf(v);
+    yLabels.push(`<text x="${(plotX - 1.5).toFixed(2)}" y="${(y + 0.9).toFixed(2)}" text-anchor="end" font-size="2.4" fill="#6B6F75">${v.toFixed(1)}</text>`);
+  }
+  // Y-axis title
+  yLabels.push(`<text x="${(plotX - 8).toFixed(2)}" y="${(plotY + plotH / 2).toFixed(2)}" text-anchor="middle" font-size="2.4" font-weight="600" fill="#1A1F24" transform="rotate(-90 ${(plotX - 8).toFixed(2)} ${(plotY + plotH / 2).toFixed(2)})">RT60 (s)</text>`);
+
+  // ---- X-axis tick labels -------------------------------------------
+  const xLabels = rt60Bands.map((b, i) => {
+    const x = xOf(i);
+    const label = b.freq_hz >= 1000 ? `${b.freq_hz / 1000}k` : `${b.freq_hz}`;
+    return `<text x="${x.toFixed(2)}" y="${(plotY + plotH + 4).toFixed(2)}" text-anchor="middle" font-size="2.4" fill="#6B6F75">${label}</text>`;
+  }).join('');
+  const xAxisTitle = `<text x="${(plotX + plotW / 2).toFixed(2)}" y="${(plotY + plotH + 8.5).toFixed(2)}" text-anchor="middle" font-size="2.4" font-weight="600" fill="#1A1F24">Octave-band centre frequency (Hz)</text>`;
+
+  // ---- Plot frame (left + bottom only — Tufte-friendly) -------------
+  const frame = `
+    <line x1="${plotX.toFixed(2)}" y1="${plotY.toFixed(2)}" x2="${plotX.toFixed(2)}" y2="${(plotY + plotH).toFixed(2)}" stroke="#1A1F24" stroke-width="0.16" />
+    <line x1="${plotX.toFixed(2)}" y1="${(plotY + plotH).toFixed(2)}" x2="${(plotX + plotW).toFixed(2)}" y2="${(plotY + plotH).toFixed(2)}" stroke="#1A1F24" stroke-width="0.16" />`;
+
+  // ---- Sabine series (dotted ink reference) -------------------------
+  const sabinePts = sabine.map((v, i) => v == null ? null : { x: xOf(i), y: yOf(v) }).filter(p => p);
+  const sabinePath = sabinePts.length >= 2
+    ? `<path d="${sabinePts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')}" stroke="#1A1F24" stroke-width="0.2" stroke-dasharray="0.8 0.8" fill="none" stroke-linejoin="round" />`
+    : '';
+
+  // ---- Eyring series (headline accent) ------------------------------
+  const eyringPts = eyring.map((v, i) => v == null ? null : { x: xOf(i), y: yOf(v), v }).filter(p => p);
+  const eyringPath = eyringPts.length >= 2
+    ? `<path d="${eyringPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')}" stroke="#8C2A2A" stroke-width="0.4" fill="none" stroke-linejoin="round" stroke-linecap="round" />`
+    : '';
+  const eyringDots = eyringPts.map(p =>
+    `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="0.8" fill="#8C2A2A" />`
+  ).join('');
+  const eyringLabels = eyringPts.map(p =>
+    `<text x="${p.x.toFixed(2)}" y="${(p.y - 1.6).toFixed(2)}" text-anchor="middle" font-size="2.3" font-weight="500" fill="#1A1F24">${p.v.toFixed(2)}</text>`
+  ).join('');
+
+  // ---- Legend (top-left of plot) ------------------------------------
+  const lx = plotX + 1.5;
+  const ly = plotY + 3;
+  const legend = `
+    <g>
+      <line x1="${lx.toFixed(2)}" y1="${ly.toFixed(2)}" x2="${(lx + 5).toFixed(2)}" y2="${ly.toFixed(2)}" stroke="#8C2A2A" stroke-width="0.4" />
+      <circle cx="${(lx + 2.5).toFixed(2)}" cy="${ly.toFixed(2)}" r="0.7" fill="#8C2A2A" />
+      <text x="${(lx + 6).toFixed(2)}" y="${(ly + 0.9).toFixed(2)}" font-size="2.4" fill="#1A1F24">Eyring</text>
+      <line x1="${(lx + 14).toFixed(2)}" y1="${ly.toFixed(2)}" x2="${(lx + 19).toFixed(2)}" y2="${ly.toFixed(2)}" stroke="#1A1F24" stroke-width="0.2" stroke-dasharray="0.8 0.8" />
+      <text x="${(lx + 20).toFixed(2)}" y="${(ly + 0.9).toFixed(2)}" font-size="2.4" fill="#1A1F24">Sabine</text>
+    </g>`;
+
+  return `<svg class="pr-rt60-chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" width="100mm" height="70mm">
+    ${targetRect}
+    ${gridLines.join('')}
+    ${frame}
+    ${legend}
+    ${sabinePath}
+    ${eyringPath}
+    ${eyringDots}
+    ${eyringLabels}
+    ${targetLabel}
+    ${yLabels.join('')}
+    ${xLabels}
+    ${xAxisTitle}
   </svg>`;
 }
 
@@ -868,90 +998,66 @@ function renderPrecisionSection(p) {
 
 let _printMaterialsRef = null;
 
-// Lazy-load html2pdf.js from CDN. Only fetched on first Proposal click;
-// keeps the main bundle lean for users who never generate a PDF.
-let _html2pdfLoading = null;
-function loadHtml2pdf() {
-  if (window.html2pdf) return Promise.resolve(window.html2pdf);
-  if (_html2pdfLoading) return _html2pdfLoading;
-  _html2pdfLoading = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.crossOrigin = 'anonymous';
-    script.onload = () => resolve(window.html2pdf);
-    script.onerror = () => {
-      _html2pdfLoading = null;
-      reject(new Error('Could not load html2pdf — check network connection'));
-    };
-    document.head.appendChild(script);
-  });
-  return _html2pdfLoading;
+// Click handler for the header "Print" button. Renders the report
+// DOM (so it's ready when @media print kicks in) and calls
+// window.print(). On desktop browsers the print dialog has a
+// "Save as PDF" destination. On mobile, the dialog usually offers
+// it too — but the option is sometimes buried in a menu, so the
+// first-time mobile click also pops a one-off hint.
+//
+// Why no in-app PDF generation: html2canvas / html2pdf / jspdf
+// approaches all failed on this report — the page hosts a Three.js
+// WebGL canvas that breaks html2canvas's clone pipeline (returns
+// 0×0 canvases). The SVG <foreignObject> fallback hits browser
+// security blocks on the resulting Blob URL. EASE, Odeon, and CATT
+// all use native print for the same reason: client-side raster of
+// rich CSS layouts is fragile. The mobile UX trade-off (one extra
+// tap) is worth the reliability.
+const MOBILE_HINT_KEY = 'roomlab.printMobileHintShown.v1';
+
+function isMobileBrowser() {
+  // UA-string sniffing is unreliable in general but adequate for
+  // an opt-in tooltip — false negatives just mean a desktop user
+  // sees the hint once, which is harmless.
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
-function safeFilename(s) {
-  return String(s || 'untitled').replace(/[^a-z0-9-_]+/gi, '_').slice(0, 64);
+function showMobilePrintHint() {
+  if (typeof alert !== 'function') return;
+  alert(
+    'Tip: To save the proposal as a PDF on your phone:\n\n' +
+    '• Android Chrome: tap the destination dropdown and choose "Save as PDF".\n' +
+    '• iOS Safari: tap the share icon in the print preview, then "Save to Files".\n\n' +
+    'This tip won\'t show again.'
+  );
+  try { localStorage.setItem(MOBILE_HINT_KEY, '1'); } catch (e) { /* private mode */ }
 }
 
 export function triggerPrint() {
-  return triggerProposalPDF();
-}
-
-// Generate a multi-page PDF proposal of the current scene and save
-// it directly to the user's downloads — no browser print dialog,
-// works on mobile (where Save-as-PDF was hard to find inside the
-// native print flow). Uses html2pdf.js (html2canvas + jsPDF) loaded
-// lazily from CDN. Reuses the existing print-report renderer so the
-// PDF layout matches what `window.print()` produced.
-export async function triggerProposalPDF() {
   if (!_printMaterialsRef) {
     console.warn('[print-report] mountPrintReport() never called — materials reference missing');
     return;
   }
-  const btn = document.getElementById('btn-print-report');
-  const originalLabel = btn?.textContent;
-  if (btn) {
-    btn.textContent = '⏳ Generating…';
-    btn.disabled = true;
-  }
-  let root = null;
+  // Compute the grid ONCE here (so buildPrintModel's metadata and the
+  // renderer's hero heatmap come from the same data) instead of twice.
+  const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones });
+  const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
+  const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
+  const model = buildPrintModel({ materials: _printMaterialsRef });
+  renderPrintReport(model, { splGrid });
+
+  // Show the mobile hint BEFORE invoking print so users have time
+  // to read it. The hint is a blocking alert — print() runs after
+  // they dismiss it.
+  let hintShown = false;
   try {
-    // Lazy-load html2pdf first so we fail fast if there's no network.
-    const html2pdf = await loadHtml2pdf();
-
-    // Build the report DOM (same renderer as the old window.print()
-    // flow). The print-report.css @media print rules don't apply
-    // during off-screen capture, so we add a body class that the
-    // print stylesheet ALSO matches — see css/print.css.
-    const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones });
-    const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
-    const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
-    const model = buildPrintModel({ materials: _printMaterialsRef });
-    root = renderPrintReport(model, { splGrid });
-
-    document.body.classList.add('is-pdf-export');
-
-    const filename = `roomlab-proposal-${safeFilename(model.project.name)}-${model.project.date}.pdf`;
-    await html2pdf().set({
-      margin: 0,
-      filename,
-      image: { type: 'jpeg', quality: 0.96 },
-      html2canvas: { scale: 2, useCORS: true, logging: false, letterRendering: true, backgroundColor: '#ffffff' },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'] },
-    }).from(root).save();
-  } catch (err) {
-    console.error('[print-report] PDF generation failed:', err);
-    if (typeof alert === 'function') {
-      alert('Could not generate PDF: ' + (err?.message ?? err) + '\n\nTry the browser print dialog (Ctrl/Cmd-P → Save as PDF) as a fallback.');
+    if (isMobileBrowser() && !localStorage.getItem(MOBILE_HINT_KEY)) {
+      showMobilePrintHint();
+      hintShown = true;
     }
-  } finally {
-    document.body.classList.remove('is-pdf-export');
-    root?.remove();
-    if (btn) {
-      btn.textContent = originalLabel ?? '📄 Proposal';
-      btn.disabled = false;
-    }
-  }
+  } catch (e) { /* localStorage blocked — skip hint silently */ }
+
+  requestAnimationFrame(() => { window.print(); });
 }
 
 export function mountPrintReport({ materials }) {

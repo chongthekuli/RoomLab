@@ -432,6 +432,24 @@ function animate() {
   if (!renderer || !scene || !camera) return;
   const t = performance.now() / 1000;
 
+  // Resize sync — when the canvas's CSS size changes (viewport resize,
+  // panel open/close, route switch), update the renderer's pixel
+  // buffer + camera aspect so the 3D image fills the new bounds
+  // without stretching. Cheap: a few comparisons per frame.
+  const canvasEl = renderer.domElement;
+  const cssW = canvasEl.clientWidth;
+  const cssH = canvasEl.clientHeight;
+  if (cssW > 0 && cssH > 0) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const targetW = Math.round(cssW * dpr);
+    const targetH = Math.round(cssH * dpr);
+    if (canvasEl.width !== targetW || canvasEl.height !== targetH) {
+      renderer.setSize(cssW, cssH, false);
+      camera.aspect = cssW / cssH;
+      camera.updateProjectionMatrix();
+    }
+  }
+
   // Camera orbit is now handled by OrbitControls (auto-rotate when idle,
   // user drag when active). Damping needs update() every frame.
   if (controls) controls.update();

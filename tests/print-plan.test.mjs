@@ -42,9 +42,9 @@ applyTemplateToState('hifi');
   assert(m && m[1] === '0' && m[2] === '0', 'viewBox starts at 0 0');
   const w = parseFloat(m[3]);
   const h = parseFloat(m[4]);
-  // hifi default: 4.5 × 6 m + 2 m margin → 6.5 × 8 viewBox
-  assert(Math.abs(w - 6.5) < 0.01, `hifi viewBox width (got ${w.toFixed(2)}, expected 6.5)`);
-  assert(Math.abs(h - 8.0) < 0.01, `hifi viewBox height (got ${h.toFixed(2)}, expected 8.0)`);
+  // hifi default: 4.5 × 6 m + 3 m margin (1.5 each side) → 7.5 × 9 viewBox
+  assert(Math.abs(w - 7.5) < 0.01, `hifi viewBox width (got ${w.toFixed(2)}, expected 7.5)`);
+  assert(Math.abs(h - 9.0) < 0.01, `hifi viewBox height (got ${h.toFixed(2)}, expected 9.0)`);
 }
 
 // 3. Sources render as circles in the SVG.
@@ -73,21 +73,21 @@ applyTemplateToState('chamber');
 }
 
 // 6. Y-axis is flipped — depth = 6 m means a source at y=0.8 should
-//    render at SVG-y ≈ depth - 0.8 + margin = 6.2.
+//    render at SVG-y ≈ depth - 0.8 + margin = 6.7 (with 1.5m margin).
 applyTemplateToState('hifi');
 state.sources = [
   { modelUrl: 'data/loudspeakers/generic-12inch.json', position: { x: 1, y: 0.8, z: 1 }, aim: { yaw: 0, pitch: 0, roll: 0 }, power_watts: 50, groupId: 'A' },
 ];
 {
   const svg = buildFloorPlanSVG(state);
-  // hifi default depth = 6, margin = 1 → expected SVG-y = 6 - 0.8 + 1 = 6.2
-  // First circle should have cy near 6.2.
+  // hifi default depth = 6, margin = 1.5 → expected SVG-y = 6 - 0.8 + 1.5 = 6.7
+  // First circle should have cy near 6.7.
   const m = svg.match(/<circle cx="([^"]+)" cy="([^"]+)"/);
   assert(m, 'circle present');
   if (m) {
     const cy = parseFloat(m[2]);
-    assert(Math.abs(cy - 6.2) < 0.01,
-      `Y-flip: source at state-y=0.8 → SVG-y=6.2 (got ${cy.toFixed(3)})`);
+    assert(Math.abs(cy - 6.7) < 0.01,
+      `Y-flip: source at state-y=0.8 → SVG-y=6.7 (got ${cy.toFixed(3)})`);
   }
 }
 

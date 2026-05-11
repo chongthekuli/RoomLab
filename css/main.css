@@ -9,6 +9,11 @@
 html, body {
   margin: 0;
   height: 100%;
+  /* App is viewport-bound — every Lab fits 100vh by design (3D
+     viewport, SpeakerLAB workbench, DeviceLAB rack browser). The body
+     should never scroll; if a Lab needs scrolling it does so inside
+     its own container so the rails / glass header stay pinned. */
+  overflow: hidden;
   font-family: "Inter Tight", "IBM Plex Sans", -apple-system, system-ui, sans-serif;
   font-feature-settings: "tnum" 1, "cv11" 1;
   -webkit-font-smoothing: antialiased;
@@ -509,7 +514,13 @@ html[data-rail-right="waterfall"] #panel-waterfall,
 html[data-rail-left="rackbrowser"]   #panel-rackbrowser,
 html[data-rail-left="devicelibrary"] #panel-devicelibrary,
 html[data-rail-right="signalflow"]   #panel-signalflow,
-html[data-rail-right="bom"]          #panel-bom {
+html[data-rail-right="bom"]          #panel-bom,
+/* SurfaceLAB (Lab #4) — `library` and `filter` and `specs` selectors
+   reuse rules above by panel id; the three new right-rail panels
+   register here. */
+html[data-rail-right="absorption"]      #panel-absorption,
+html[data-rail-right="polardiffusion"]  #panel-polardiffusion,
+html[data-rail-right="construction"]    #panel-construction {
   display: block;
 }
 #viewport {
@@ -598,30 +609,39 @@ html[data-rail-right="bom"]          #panel-bom {
   background: rgba(40, 50, 65, 0.78);
   border-color: rgba(255, 255, 255, 0.18);
 }
-/* Fullscreen now lives INSIDE the segmented control (2D/3D/Walk/⛶);
-   only the more-trigger keeps a corner position. */
-.vp-more-trigger   { right: 12px; top: 56px; font-size: 1.4rem; line-height: 1; padding-bottom: 6px; }
-/* Fullscreen icon sits in the segment beside the view-mode tabs.
-   Inherits .vp-tab dimensions; just sizes the glyph slightly larger
-   so the icon matches the visual weight of the text labels. */
-.vp-mode-segment .vp-fullscreen-btn {
+/* Fullscreen + more-menu BOTH live INSIDE the segmented control now
+   (2D / 3D / Walk / ⛶ / ⋯). Both inherit .vp-tab dimensions; just
+   size the glyph slightly larger so icons match the visual weight
+   of the text labels. */
+.vp-mode-segment .vp-fullscreen-btn,
+.vp-mode-segment .vp-more-trigger {
   min-width: 40px;
   font-size: 1rem;
   padding-inline: 8px;
 }
-.vp-more-trigger[aria-expanded="true"] {
+.vp-mode-segment .vp-more-trigger {
+  font-size: 1.2rem;          /* ⋯ glyph is small in default size; bump it */
+  line-height: 0.6;            /* nudge the dots vertically into centre */
+  padding-bottom: 4px;
+}
+/* Active "more menu open" state on the segment trigger — same accent
+   treatment as the rail icons when a panel is open, so the affordance
+   stays consistent across the app. */
+.vp-mode-segment .vp-more-trigger[aria-expanded="true"] {
   color: var(--fg-strong, #fff);
   background: rgba(50, 70, 100, 0.85);
   border-color: var(--accent);
 }
 
-/* Slide-down "more" panel anchored to the top-right corner. Same
-   animation grammar as the rail panels — translateY-from-above with
-   bounce on open, fade-in on opacity. */
+/* Slide-down "more" panel anchored below the centred segmented
+   control (2D/3D/Walk/⛶/⋯). Same animation grammar as the rail
+   panels — translateY-from-above with bounce on open, fade-in on
+   opacity. */
 .vp-more-panel {
   position: absolute;
-  top: 104px;     /* below corner buttons (56) + button height (40) + gap (8) */
-  right: 12px;
+  top: 104px;     /* below segment (56) + segment height (~40) + gap (8) */
+  left: 50%;
+  transform: translateX(-50%) translateY(-8px);
   width: 280px;
   background: rgba(20, 22, 28, 0.62);
   backdrop-filter: blur(18px) saturate(140%);
@@ -631,7 +651,6 @@ html[data-rail-right="bom"]          #panel-bom {
   padding: 12px 14px 10px;
   z-index: 11;
   opacity: 0;
-  transform: translateY(-8px);
   pointer-events: none;
   transition: transform 220ms cubic-bezier(0.4, 0, 1, 1), opacity 180ms linear;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
@@ -643,13 +662,13 @@ html[data-rail-right="bom"]          #panel-bom {
 html[data-more-menu] .vp-more-panel {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
+  transform: translateX(-50%) translateY(0);
   transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 180ms linear;
 }
 @media (prefers-reduced-motion: reduce) {
   .vp-more-panel,
   html[data-more-menu] .vp-more-panel {
-    transform: none;
+    transform: translateX(-50%);
     transition: opacity 120ms linear;
   }
 }
@@ -858,8 +877,16 @@ html[data-more-menu] .vp-more-panel {
    the user opens a loudspeaker's spec card.
    ==================================================================== */
 #view-speaker {
-  overflow: auto;
+  /* SpeakerLAB now mirrors the RoomLAB pattern: 3D preview fills the
+     full viewport edge-to-edge; rails + title block float ON TOP as
+     glass overlays. No padding here so the 3D canvas can use 100% of
+     the window — that's also what makes the rail-panel's
+     backdrop-filter blur visible (it has the 3D scene to blur). */
+  padding: 0;
   background: var(--bg-app);
+  overflow: hidden;
+  height: 100vh;
+  position: relative;          /* for absolute children (.sv-head, .sv-3d-caption) */
 }
 .speaker-view {
   display: grid;
@@ -887,6 +914,39 @@ html[data-more-menu] .vp-more-panel {
   background: transparent;
   width: auto;
   min-width: 0;
+}
+
+/* SurfaceLAB wrapper — Lab #4. Same shell as SpeakerLAB so navigation
+   feels consistent; the centre column hosts a 3D preview of either a
+   textured surface panel (plain finishes) or a procedural treatment
+   product (QRDs, traps, absorbers). */
+#surfacelab-root {
+  height: 100vh;
+  background: var(--bg-app);
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr;
+  position: relative;
+}
+#surfacelab-root #view-surface {
+  height: 100%;
+}
+.surfacelab-view {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  color: var(--fg);
+  height: 100%;
+}
+/* All four right-rail panels in SurfaceLAB follow SpeakerLAB's rules
+   for blue accent + tight spacing. The kind-aware spec card content
+   is rendered into #panel-specs by surface-detail.js. */
+#view-surface {
+  padding: 0;
+  background: var(--bg-app);
+  overflow: hidden;
+  height: 100vh;
+  position: relative;
 }
 
 /* SpeakerLAB-page wrapper — when this view runs as the whole page
@@ -994,37 +1054,80 @@ html[data-more-menu] .vp-more-panel {
   font-style: italic;
 }
 
-/* Animated 3D cabinet preview — sits between the spec-card grid and
-   the FR plot in the Speaker workbench. */
+/* Animated 3D cabinet preview — viewport-bound, edge-to-edge. Flat
+   dark background matching the app palette so the canvas reads as
+   "the 3D scene fills the window," same idiom as RoomLAB's viewport. */
 .sv-3d-stage {
   margin: 0;
-  padding: 1rem;
-  background: radial-gradient(ellipse at 50% 30%, rgba(90, 130, 180, 0.12) 0%, rgba(10, 12, 16, 0.8) 70%);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding: 0;
+  background: var(--bg-app);
+  border: none;
+  border-radius: 0;
   text-align: center;
-  /* P4.6 — fill the centre column when this is the only thing in
-     #sv-body. .sv-main is height: 100% (set below). Stage stretches
-     vertically; canvas fills it via aspect-ratio fallback. */
+  position: absolute;
+  inset: 0;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
+  display: block;
+  overflow: hidden;
 }
 .sv-3d-stage canvas {
   display: block;
-  margin: 0 auto;
-  width: min(100%, 1100px);     /* generous max so it actually fills 1080+ screens */
-  height: auto;
-  aspect-ratio: 16 / 9;
+  /* Fill the entire stage (which fills the viewport). No aspect-ratio
+     lock — Three.js's camera adjusts to whatever shape the viewport is,
+     same as RoomLAB's 3D viewport. The renderer's pixel buffer is
+     resized to match clientWidth/clientHeight in the animate loop
+     (speaker-3d-preview.js). */
+  width: 100%;
+  height: 100%;
   cursor: grab;
   touch-action: none;
 }
-/* The centre column needs to be height: 100% so the 3D preview can
-   fill it. .sv-body is the immediate parent; .sv-main wraps it. */
-#view-speaker .sv-main { height: 100%; padding: 0.6rem 0.8rem; box-sizing: border-box; }
-#view-speaker .sv-body { height: calc(100% - 3rem); }
+/* The centre column fills the viewport; .sv-body fills the centre
+   so the 3D preview can claim every pixel. Title block (.sv-head) is
+   pulled out of normal flow into an absolute-positioned glass overlay
+   below — that lets the canvas reach the top edge instead of being
+   pushed down. */
+#view-speaker .sv-main {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  padding: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+#view-speaker .sv-body {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Title + import-button bar — floats over the 3D preview at the top,
+   inside the rail clearance gutters so it doesn't collide with the
+   icon rails. Glass panel matching the rail-panel + segment family. */
+#view-speaker .sv-head {
+  position: absolute;
+  top: 56px;          /* clear the 44 px fixed glass header + 12 px gap */
+  left: 64px;          /* clear the left rail (40 px icon + 24 px gap) */
+  right: 64px;         /* clear the right rail */
+  z-index: 5;          /* above canvas (0), below rails (10) and header (30) */
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.6rem 0.9rem;
+  background: rgba(20, 22, 28, 0.55);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-lg);
+  margin-bottom: 0;
+  border-bottom: none;
+  pointer-events: auto;
+}
+@supports not ((backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px))) {
+  #view-speaker .sv-head { background: rgba(20, 22, 28, 0.94); }
+}
 
 /* Defensive — ensure the centre column shows ONLY the 3D preview,
    regardless of whether the JS DOM-relocation in speaker-detail.js
@@ -1041,11 +1144,32 @@ html[data-more-menu] .vp-more-panel {
   display: none;
 }
 .sv-3d-stage canvas:active { cursor: grabbing; }
+/* Caption pinned to the bottom of the stage so the canvas can claim
+   the full vertical space; small glass pill for legibility against
+   any speaker model. */
 .sv-3d-caption {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 0.7rem;
   color: var(--muted);
-  margin-top: 0.3rem;
   font-style: italic;
+  padding: 4px 10px;
+  background: rgba(20, 22, 28, 0.55);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius);
+  white-space: nowrap;
+  max-width: calc(100% - 160px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 5;
+}
+@supports not ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
+  .sv-3d-caption { background: rgba(20, 22, 28, 0.92); }
 }
 .sv-head {
   display: flex;
@@ -1113,10 +1237,13 @@ html[data-more-menu] .vp-more-panel {
 }
 
 .sv-empty {
-  padding: 2rem 1.5rem;
+  /* Clear the floating glass head bar (~ top: 56 + 60 px tall + gap)
+     and the left rail icon column. .sv-body is now inset:0 so the
+     empty-state content needs its own viewport-clearance padding. */
+  padding: 140px 80px 24px 80px;
   text-align: left;
   color: var(--muted);
-  max-width: 560px;
+  max-width: 720px;
   line-height: 1.55;
 }
 .sv-empty h3 { color: var(--fg-strong); font-weight: 500; margin: 0 0 0.5rem; }
@@ -2324,6 +2451,10 @@ section h3 {
   height: 100%;
   display: flex;
   flex-direction: column;
+  /* Same chrome-clearance as #view-speaker: top for glass header,
+     sides for floating rail icons. */
+  padding: 56px 64px 16px 64px;
+  box-sizing: border-box;
 }
 #devicelab-root #view-rack .rack-builder { flex: 1; min-height: 0; }
 
@@ -3910,4 +4041,374 @@ section h3 {
   color: var(--muted);
   padding: var(--space-2);
   font-style: italic;
+}
+
+/* ====================================================================
+   SurfaceLAB — Lab #4
+   ==================================================================== */
+
+/* Catalogue rail (left) — accordion of grouped surfaces. Each <details>
+   is a category section; each row is a clickable button. */
+#panel-library .surface-cat-group {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 4px;
+}
+#panel-library .surface-cat-group:last-child { border-bottom: none; }
+#panel-library .surface-cat-group > summary {
+  cursor: pointer;
+  padding: 8px 4px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+  list-style: none;
+}
+#panel-library .surface-cat-group > summary::-webkit-details-marker { display: none; }
+#panel-library .surface-cat-group > summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 10px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  transition: transform 120ms ease;
+  margin-right: 4px;
+}
+#panel-library .surface-cat-group[open] > summary::before { transform: rotate(90deg); }
+.surface-cat-count {
+  font-size: 0.66rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+.surface-cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 8px;
+}
+.surface-cat-row {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  color: var(--fg);
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+.surface-cat-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+.surface-cat-row.active {
+  background: rgba(116, 208, 255, 0.10);
+  border-color: rgba(116, 208, 255, 0.35);
+}
+.surface-cat-mfr {
+  font-size: 0.62rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  grid-column: 1 / 4;
+  margin-bottom: -2px;
+}
+.surface-cat-name {
+  font-size: 0.78rem;
+  color: var(--fg);
+  grid-column: 1;
+}
+.surface-cat-headline {
+  font-size: 0.72rem;
+  color: #74d0ff;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  grid-column: 2;
+}
+.surface-cat-flag {
+  color: #ffaa55;
+  font-size: 0.85rem;
+  grid-column: 3;
+}
+
+/* Title bar headline figure — appended to the right of the title block
+   (a glass overlay floats over the 3D canvas). */
+.surface-headline {
+  margin-top: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.surface-h-big {
+  font-size: 1.5rem;
+  font-weight: 300;
+  color: #74d0ff;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: -0.01em;
+}
+.surface-h-unit {
+  font-size: 0.7rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.surface-trust-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: flex-start;
+}
+.surface-flag-chip {
+  font-size: 0.62rem;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  background: rgba(255, 170, 85, 0.14);
+  color: #ffc888;
+  border: 1px solid rgba(255, 170, 85, 0.4);
+  cursor: help;
+}
+.surface-flag-chip.surface-flag-high {
+  background: rgba(255, 100, 100, 0.18);
+  color: #ff9090;
+  border-color: rgba(255, 100, 100, 0.5);
+}
+
+/* Right-rail panels — Specs, Absorption, Polar, Cross-section */
+#panel-specs .surface-headline-block {
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+#panel-specs .surface-headline-value {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+#panel-specs .surface-headline-value .surface-h-big {
+  font-size: 2.4rem;
+  color: var(--fg-strong, #fff);
+  display: inline-block;
+  margin-right: 6px;
+}
+.surface-flag-block {
+  margin: 0 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.surface-flag-row {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: rgba(255, 170, 85, 0.08);
+  border-left: 2px solid #ffaa55;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--fg);
+}
+.surface-flag-row.surface-flag-high {
+  background: rgba(255, 100, 100, 0.10);
+  border-left-color: #ff7070;
+}
+.surface-flag-icon { color: #ffaa55; flex: 0 0 auto; }
+.surface-flag-row.surface-flag-high .surface-flag-icon { color: #ff7070; }
+.surface-flag-msg { color: var(--muted); }
+
+.surface-spec-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  margin-bottom: 12px;
+}
+.surface-spec-table tr {
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.06);
+}
+.surface-spec-table th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 4px 0;
+  width: 50%;
+}
+.surface-spec-table td {
+  padding: 4px 0;
+  text-align: right;
+  color: var(--fg);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.74rem;
+}
+.surface-cite {
+  font-size: 0.66rem;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+.surface-note {
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+
+/* Charts — alpha + diffusion + polar */
+.surface-alpha-chart,
+.surface-diff-chart,
+.surface-polar-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-bottom: 10px;
+}
+.surface-nrc-stripe {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(116, 208, 255, 0.06);
+  border-radius: var(--radius);
+  border-left: 2px solid #74d0ff;
+}
+.surface-nrc-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.surface-nrc-value {
+  font-size: 1.2rem;
+  font-weight: 300;
+  color: #74d0ff;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+.surface-nrc-note {
+  font-size: 0.66rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Cross-section / construction layers */
+.surface-layers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.surface-layer {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius);
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+  align-items: start;
+}
+.surface-layer-color {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.surface-layer-name {
+  font-size: 0.78rem;
+  color: var(--fg);
+  font-weight: 500;
+}
+.surface-layer-role {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* SurfaceLAB — Library search input */
+.surface-search-wrap {
+  margin: 6px 0 10px;
+}
+.surface-search-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--fg);
+  outline: none;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.surface-search-input::placeholder { color: var(--muted); }
+.surface-search-input:focus {
+  border-color: rgba(116, 208, 255, 0.45);
+  background: rgba(116, 208, 255, 0.06);
+}
+
+/* SurfaceLAB — Filter panel (chip cloud) */
+.surface-filter-group {
+  margin-bottom: 14px;
+}
+.surface-filter-group h3 {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+.surface-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.surface-filter-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.7rem;
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+.surface-filter-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.surface-filter-chip.active {
+  background: rgba(116, 208, 255, 0.18);
+  border-color: rgba(116, 208, 255, 0.5);
+  color: #cfe8ff;
+}
+.surface-filter-actions {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+.surface-filter-clear {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: pointer;
+  width: 100%;
+  transition: color 100ms ease, border-color 100ms ease;
+}
+.surface-filter-clear:hover {
+  color: var(--fg);
+  border-color: rgba(255, 255, 255, 0.2);
 }

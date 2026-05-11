@@ -499,20 +499,40 @@ body.is-pdf-export .vp-tabs {
     margin: 0;
   }
 
-  /* RT60-vs-frequency sparkline (page 3) */
-  #print-report .pr-sparkline {
-    width: 60mm;
-    height: 12mm;
+  /* RT60-vs-frequency analytical chart (page 3 hero figure) — Sofia
+     spec. 100×70mm vector with axes, target band, dual-series. The
+     SVG itself carries inline stroke/fill so it survives any
+     rasterisation pipeline; the wrap rules are layout-only. */
+  #print-report .pr-rt60-chart {
     display: block;
-    margin: 4pt 0 6pt 0;
+    width: 100mm;
+    height: 70mm;
+    margin: 0;
   }
-  #print-report .pr-sparkline path,
-  #print-report .pr-sparkline circle {
-    stroke: var(--ink);
-    fill: none;
+  /* Two-column layout for the geometry block: chart left, kv-table
+     right. Stack on narrow viewports just-in-case (this is a print
+     stylesheet so really just a guard). */
+  #print-report .pr-rt60-grid {
+    display: grid;
+    grid-template-columns: 100mm 1fr;
+    gap: 6mm;
+    align-items: start;
+    margin-bottom: 8pt;
   }
-  #print-report .pr-sparkline circle {
-    fill: var(--ink);
+  #print-report .pr-rt60-chart-wrap { min-width: 0; }
+  #print-report .pr-rt60-kv-wrap {
+    min-width: 0;
+    /* Make the kv table sit a hair below the chart's top edge so the
+       baselines align visually. */
+    padding-top: 2mm;
+  }
+  /* When .pr-kv lives inside the rt60 layout, tighten the row height
+     so all 9 rows fit alongside the 70mm-tall chart without
+     overflowing the chart's bottom. */
+  #print-report .pr-rt60-kv-wrap .pr-table.pr-kv th,
+  #print-report .pr-rt60-kv-wrap .pr-table.pr-kv td {
+    padding: 2pt 0;
+    font-size: 8pt;
   }
 
   /* ----------- SECTIONS ----------- */

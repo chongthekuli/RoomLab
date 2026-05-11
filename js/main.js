@@ -20,6 +20,7 @@ startRouter({
     room:    () => import('./labs/roomlab/main.js').then(m => m.mountRoomLab()),
     speaker: () => import('./labs/speakerlab/main.js').then(m => m.mountSpeakerLab()),
     device:  () => import('./labs/devicelab/main.js').then(m => m.mountDeviceLab()),
+    surface: () => import('./labs/surfacelab/main.js').then(m => m.mountSurfaceLab()),
   },
 });
 

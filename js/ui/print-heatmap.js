@@ -22,7 +22,10 @@ import { colorForMetric } from '../graphics/colour-ramps.js';
 import { computeTicks, formatTickLabel, legendHeader } from '../graphics/legend-ticks.js';
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
 
-const MARGIN_M = 1.0;
+// 1.5m margin gives the North arrow + scale bar enough room to live
+// fully inside the margin band without overlapping the room outline,
+// even for tiny (1-2m wide) rooms. Matches print-plan-svg.js.
+const MARGIN_M = 1.5;
 const NICE_BAR_M = [0.5, 1, 2, 5, 10, 20, 50];
 
 function escapeText(s) {
@@ -205,23 +208,24 @@ export function buildHeatmapPageSVG(state, splGrid) {
       + `<text x="${(p.sx + 0.55).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28" stroke="#fff" stroke-width="0.06" paint-order="stroke">${escapeText(l.label || l.id)}</text>`;
   }).join('');
 
-  // Scale bar + north arrow — same as the cover plan so the two pages
-  // share a single set of conventions.
+  // Scale bar + north arrow — both placed fully inside the SVG margin
+  // bands so they never overlap the room outline. Geometry mirrors
+  // print-plan-svg.js so the two pages share one visual convention.
   const barLen = pickScaleBar(room.width_m);
-  const barX = offsetX + 0.3;
-  const barY = viewH - 0.5;
-  const tickH = 0.18;
+  const barX = offsetX;
+  const barY = viewH - MARGIN_M * 0.35;
+  const tickH = 0.15;
   const scaleBarEl = `
     <g class="pr-plan-scalebar">
       <line x1="${barX.toFixed(3)}" y1="${barY.toFixed(3)}" x2="${(barX + barLen).toFixed(3)}" y2="${barY.toFixed(3)}" stroke="#000" stroke-width="0.07" />
       <line x1="${barX.toFixed(3)}" y1="${(barY - tickH).toFixed(3)}" x2="${barX.toFixed(3)}" y2="${(barY + tickH).toFixed(3)}" stroke="#000" stroke-width="0.07" />
       <line x1="${(barX + barLen).toFixed(3)}" y1="${(barY - tickH).toFixed(3)}" x2="${(barX + barLen).toFixed(3)}" y2="${(barY + tickH).toFixed(3)}" stroke="#000" stroke-width="0.07" />
-      <text x="${(barX + barLen / 2).toFixed(3)}" y="${(barY - 0.3).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">${barLen} m</text>
+      <text x="${(barX + barLen / 2).toFixed(3)}" y="${(barY - 0.28).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">${barLen} m</text>
     </g>`;
 
-  const naSize = 0.65;
-  const naX = viewW - 0.8;
-  const naY = offsetY + 0.55;
+  const naSize = 0.55;
+  const naX = viewW - 0.7;
+  const naY = MARGIN_M * 0.5;
   const northArrowEl = `
     <g class="pr-plan-northarrow">
       <polygon points="${naX.toFixed(3)},${(naY - naSize).toFixed(3)} ${(naX + naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)} ${naX.toFixed(3)},${(naY + naSize * 0.05).toFixed(3)} ${(naX - naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)}" fill="#000" />

@@ -1747,6 +1747,7 @@ async function handleDxfImport(file) {
 
 // Listen for room:changed to re-render panel when draw mode finishes
 import { on } from './events.js';
+import { openPanel, getOpenPanel } from './rail-system.js';
 on('room:changed', () => {
   const root = document.getElementById('panel-room');
   if (!root) return;
@@ -1815,27 +1816,44 @@ on('surface:picked', ({ surface_id } = {}) => {
   if (!surface_id) return;
   const root = document.getElementById('panel-room');
   if (!root) return;
-  // Auto-expand the Room panel if it's collapsed (collapsibles.js sets
-  // section.classList = 'collapsed' to hide the body). Otherwise the
-  // pulse animation would fire on an invisible element.
+
+  // P1-overhaul rail-panel system: the Room panel only renders when
+  // <html data-rail-left="room">. If the user is on a different panel
+  // (or has no panel open), the wall row is display:none and
+  // scrollIntoView is a no-op. Open the Room panel first; if it's
+  // already open, openPanel is a cheap a11y refresh.
+  const railWasOpen = (getOpenPanel('left') === 'room');
+  if (!railWasOpen) openPanel('left', 'room');
+
+  // Legacy collapsibles fallback (in case any older route wraps
+  // panel-room in a collapsible section).
   if (root.classList.contains('collapsed')) {
     root.classList.remove('collapsed');
     const h2 = root.querySelector(':scope > h2, :scope > * > h2');
     h2?.setAttribute('aria-expanded', 'true');
   }
-  const wrap = root.querySelector(`label[data-surface-id="${cssEscape(surface_id)}"]`);
-  if (!wrap) return;
-  wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  wrap.classList.remove('surface-pulse');
-  // Force reflow so re-adding the class restarts the animation when the user
-  // clicks the same wall twice in a row.
-  void wrap.offsetWidth;
-  wrap.classList.add('surface-pulse');
-  setTimeout(() => wrap.classList.remove('surface-pulse'), 1400);
-  const sel = wrap.querySelector('select');
-  if (sel) {
-    try { sel.focus(); } catch {}
-  }
+
+  // Wait for the rail-panel slide-in animation before measuring +
+  // scrolling. ANIM_WINDOW_MS in rail-system.js is 380ms; we use 400
+  // to give layout one frame past the transition end. When the panel
+  // is already open we just defer one rAF so any pending re-render
+  // settles before we scroll.
+  const delayMs = railWasOpen ? 0 : 400;
+  setTimeout(() => {
+    const wrap = root.querySelector(`label[data-surface-id="${cssEscape(surface_id)}"]`);
+    if (!wrap) return;
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    wrap.classList.remove('surface-pulse');
+    // Force reflow so re-adding the class restarts the animation when
+    // the user clicks the same wall twice in a row.
+    void wrap.offsetWidth;
+    wrap.classList.add('surface-pulse');
+    setTimeout(() => wrap.classList.remove('surface-pulse'), 1400);
+    const sel = wrap.querySelector('select');
+    if (sel) {
+      try { sel.focus({ preventScroll: true }); } catch {}
+    }
+  }, delayMs);
 });
 
 // CSS.escape isn't available on IE / older WebViews; this is a safe subset
@@ -1852,7 +1870,9 @@ function cssEscape(s) {
 on('sub_structure:selected', () => {
   const root = document.getElementById('panel-room');
   if (!root) return;
-  // Auto-expand the panel if collapsed so the newly-active chip is visible.
+  // Mirror the surface:picked flow — open the rail Room panel so the
+  // chip row is actually visible to scroll to.
+  if (getOpenPanel('left') !== 'room') openPanel('left', 'room');
   if (root.classList.contains('collapsed')) {
     root.classList.remove('collapsed');
     const h2 = root.querySelector(':scope > h2, :scope > * > h2');

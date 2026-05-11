@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en" class="no-transitions-yet">
 <head>
   <meta charset="utf-8" />
@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=280" />
-  <link rel="stylesheet" href="css/theme.css?v=280" />
-  <link rel="stylesheet" href="css/print.css?v=280" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=302" />
+  <link rel="stylesheet" href="css/theme.css?v=302" />
+  <link rel="stylesheet" href="css/print.css?v=302" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -34,7 +34,7 @@
        * #app-root grid:  rail-left (56) | viewport (1fr) | rail-right (56)
        * Side panels are POSITIONED OVERLAYS, not grid columns. They
          start hidden; the rail icons toggle them.
-       * Each panel section (room / sources / listeners / â€¦) lives
+       * Each panel section (room / sources / listeners / …) lives
          inside #panel-left or #panel-right, but only ONE per side
          is shown at a time, controlled by a body data-attribute.
        * Glass / animation / submenus arrive in P2 / P3. -->
@@ -56,48 +56,48 @@
         <section id="panel-ambient"><h2>Environment noise</h2></section>
         <section id="panel-library">
           <h2>Library</h2>
-          <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files â€” coming later.</div>
+          <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files — coming later.</div>
         </section>
       </aside>
       <section id="viewport">
-        <!-- P8 â€” Maya's 3-cluster top layout. Persistent segmented
+        <!-- P8 — Maya's 3-cluster top layout. Persistent segmented
              control (2D/3D/Walk) stays one-click for the most-used
              action. Fullscreen separate (single-tap toggle, doesn't
              belong in a menu). Everything else (layers + tools +
-             keyboard shortcuts) tucks into the "â€¢â€¢â€¢" slide-down
+             keyboard shortcuts) tucks into the "•••" slide-down
              panel for low-frequency settings. -->
         <div class="vp-mode-segment" role="group" aria-label="Viewport mode">
-          <button class="vp-tab" data-view="2d" title="2D floor plan view â€” shortcut 1">2D</button>
-          <button class="vp-tab active" data-view="3d" title="3D perspective view â€” shortcut 2">3D</button>
-          <button class="vp-tab" data-view="walk" title="First-person walkthrough â€” shortcut 3">Walk</button>
-          <button class="vp-tab vp-fullscreen-btn" id="btn-fullscreen" title="Toggle fullscreen â€” useful for tablet walk mode" type="button">â›¶</button>
+          <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D</button>
+          <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D</button>
+          <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walk</button>
+          <button class="vp-tab vp-fullscreen-btn" id="btn-fullscreen" title="Toggle fullscreen — useful for tablet walk mode" type="button">⛶</button>
+          <button class="vp-tab vp-more-trigger" id="btn-more-menu" title="Layers, tools, keyboard shortcuts" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="vp-more-panel">⋯</button>
         </div>
-        <button class="vp-corner-btn vp-more-trigger" id="btn-more-menu" title="Layers, tools, keyboard shortcuts" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="vp-more-panel">â‹¯</button>
         <div class="vp-more-panel" id="vp-more-panel" hidden>
           <div class="vp-more-section">
             <h4>Layers</h4>
             <div class="vp-more-grid">
-              <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer â€” shortcut H">Heatmap</button>
-              <button class="vp-toggle active" id="toggle-isobars" title="Show/hide contour lines â€” shortcut I">Isobars</button>
-              <button class="vp-toggle" id="toggle-stipa-mode" title="Switch heatmap metric: SPL (dB) â†” STIPA â€” shortcut M">STIPA mode</button>
-              <button class="vp-toggle" id="toggle-reverb" title="Include statistical reverberant field â€” shortcut R">Reverb field</button>
+              <button class="vp-toggle active" id="toggle-heatmaps" title="Show/hide SPL/STIPA heatmap layer — shortcut H">Heatmap</button>
+              <button class="vp-toggle active" id="toggle-isobars" title="Show/hide contour lines — shortcut I">Isobars</button>
+              <button class="vp-toggle" id="toggle-stipa-mode" title="Switch heatmap metric: SPL (dB) ↔ STIPA — shortcut M">STIPA mode</button>
+              <button class="vp-toggle" id="toggle-reverb" title="Include statistical reverberant field — shortcut R">Reverb field</button>
             </div>
           </div>
           <div class="vp-more-section">
             <h4>Tools</h4>
             <div class="vp-more-grid">
-              <button class="vp-toggle" id="toggle-aim-lines" title="Show/hide speaker aim direction indicators â€” shortcut L"><span class="vp-icon" aria-hidden="true">â†—</span><span class="vp-label">Aim lines</span></button>
-              <button class="vp-toggle" id="toggle-rays" title="Show/hide ray-tracing visualisation â€” shortcut Y"><span class="vp-icon" aria-hidden="true">â‹°</span><span class="vp-label">Rays</span></button>
-              <button class="vp-toggle" id="toggle-probe" title="Hover viewport for XYZ + SPL readout â€” shortcut P"><span class="vp-icon" aria-hidden="true">âŠ•</span><span class="vp-label">Probe</span></button>
+              <button class="vp-toggle" id="toggle-aim-lines" title="Show/hide speaker aim direction indicators — shortcut L"><span class="vp-icon" aria-hidden="true">↗</span><span class="vp-label">Aim lines</span></button>
+              <button class="vp-toggle" id="toggle-rays" title="Show/hide ray-tracing visualisation — shortcut Y"><span class="vp-icon" aria-hidden="true">⋰</span><span class="vp-label">Rays</span></button>
+              <button class="vp-toggle" id="toggle-probe" title="Hover viewport for XYZ + SPL readout — shortcut P"><span class="vp-icon" aria-hidden="true">⊕</span><span class="vp-label">Probe</span></button>
             </div>
           </div>
           <div class="vp-more-footer">
-            <button id="btn-show-help" type="button">Keyboard shortcuts â†’</button>
+            <button id="btn-show-help" type="button">Keyboard shortcuts →</button>
           </div>
         </div>
         <div id="view-2d" class="viewport-view" hidden></div>
         <div id="view-3d" class="viewport-view">
-          <div class="viewport-loading">Loading 3D viewâ€¦</div>
+          <div class="viewport-loading">Loading 3D view…</div>
           <!-- Walk-mode touch controls. Hidden by default; scene.js's
                setWalkthroughMode(true) reveals them. Mobile-Legends-
                style: virtual joystick on the left for movement, action
@@ -112,8 +112,8 @@
               <div class="walk-joystick-nub" id="walk-joystick-nub"></div>
             </div>
             <div class="walk-rotate-buttons">
-              <button class="walk-rot-btn" data-key="ArrowLeft" type="button" aria-label="Rotate left">â†º</button>
-              <button class="walk-rot-btn" data-key="ArrowRight" type="button" aria-label="Rotate right">â†»</button>
+              <button class="walk-rot-btn" data-key="ArrowLeft" type="button" aria-label="Rotate left">↺</button>
+              <button class="walk-rot-btn" data-key="ArrowRight" type="button" aria-label="Rotate right">↻</button>
             </div>
             <div class="walk-actions">
               <button class="walk-btn walk-btn-jump"   data-key="Space"      data-keyup-fires="false" type="button" aria-label="Jump"><span>JUMP</span></button>
@@ -136,11 +136,11 @@
   </div>
 
   <!-- SPEAKERLAB ROUTE
-       P4 â€” same rail grammar as RoomLAB. Catalogue + Filter on the
+       P4 — same rail grammar as RoomLAB. Catalogue + Filter on the
        left rail; Spec sheet + Polar/Frequency on the right. The
        existing #view-speaker stays as the centre full-bleed surface;
        the rail panels OVERLAY on top when toggled (same pattern as
-       RoomLAB). Panel content is intentionally minimal in P4 â€” the
+       RoomLAB). Panel content is intentionally minimal in P4 — the
        content reorganisation lands as a follow-up; this phase is
        about visual consistency across the suite. -->
   <div class="lab-route" id="route-speaker" data-route="speaker">
@@ -150,7 +150,7 @@
         <button class="rail-icon" data-panel="filter" data-side="left" type="button" aria-label="Filter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4"/></svg></button>
       </nav>
       <aside id="panel-left" class="rail-panel rail-panel-left" aria-hidden="true">
-        <section id="panel-catalogue"><h2>Catalogue</h2><div class="phase-placeholder">Browse the loudspeaker catalogue. Coming in next iteration â€” for now, use the central card grid.</div></section>
+        <section id="panel-catalogue"><h2>Catalogue</h2><div class="phase-placeholder">Browse the loudspeaker catalogue. Coming in next iteration — for now, use the central card grid.</div></section>
         <section id="panel-filter"><h2>Filter</h2><div class="phase-placeholder">Filter by manufacturer, kind, max SPL. Coming in next iteration.</div></section>
       </aside>
       <div id="view-speaker" class="speakerlab-view"></div>
@@ -169,7 +169,7 @@
     </main>
   </div>
 
-  <!-- DEVICELAB ROUTE â€” same rail grammar as RoomLAB / SpeakerLAB. -->
+  <!-- DEVICELAB ROUTE — same rail grammar as RoomLAB / SpeakerLAB. -->
   <div class="lab-route" id="route-device" data-route="device">
     <main id="devicelab-root">
       <nav class="rail rail-left" id="rail-left-device" aria-label="Left tools">
@@ -192,11 +192,42 @@
     </main>
   </div>
 
+  <!-- SURFACELAB ROUTE — Lab #4. Browseable library of acoustic surface
+       materials (gypsum, brick, carpet, wood…) AND engineered treatment
+       products (QRD diffusers, bass traps, broadband absorbers). Same
+       rail grammar as the other Labs; full-viewport 3D preview with
+       glass title overlay (matches SpeakerLAB layout). -->
+  <div class="lab-route" id="route-surface" data-route="surface">
+    <main id="surfacelab-root">
+      <nav class="rail rail-left" id="rail-left-surface" aria-label="Left tools">
+        <button class="rail-icon" data-panel="library" data-side="left" type="button" aria-label="Library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3"/><path d="M9 8h7M9 12h7"/></svg></button>
+        <button class="rail-icon" data-panel="filter" data-side="left" type="button" aria-label="Filter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4"/></svg></button>
+      </nav>
+      <aside id="panel-left" class="rail-panel rail-panel-left" aria-hidden="true">
+        <section id="panel-library"><h2>Library</h2><div class="phase-placeholder">Browse surfaces &amp; treatment products. Loading…</div></section>
+        <section id="panel-filter"><h2>Filter</h2><div class="phase-placeholder">Filter by mounting, frequency range, manufacturer.</div></section>
+      </aside>
+      <div id="view-surface" class="surfacelab-view"></div>
+      <aside id="panel-right" class="rail-panel rail-panel-right" aria-hidden="true">
+        <section id="panel-specs"><h2>Specs</h2><div class="phase-placeholder">Pick a surface from the library to see specs here.</div></section>
+        <section id="panel-absorption"><h2>Absorption α(f)</h2><div class="phase-placeholder">Pick a surface to see its octave-band absorption curve.</div></section>
+        <section id="panel-polardiffusion"><h2>Polar diffusion</h2><div class="phase-placeholder">Diffusers only — pick one to see the polar dispersion plot.</div></section>
+        <section id="panel-construction"><h2>Cross-section</h2><div class="phase-placeholder">Construction layers + materials of build.</div></section>
+      </aside>
+      <nav class="rail rail-right" id="rail-right-surface" aria-label="Right tools">
+        <button class="rail-icon" data-panel="specs" data-side="right" type="button" aria-label="Specs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6Z"/><path d="M14 3v5h5M9 13h7M9 17h5"/></svg></button>
+        <button class="rail-icon" data-panel="absorption" data-side="right" type="button" aria-label="Absorption α(f)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18c2-2 3-8 5-8s3 6 4 6 2-10 4-10 3 8 5 8"/></svg></button>
+        <button class="rail-icon" data-panel="polardiffusion" data-side="right" type="button" aria-label="Polar diffusion"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5 5l14 14M19 5L5 19"/></svg></button>
+        <button class="rail-icon" data-panel="construction" data-side="right" type="button" aria-label="Cross-section"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="1"/><path d="M3 10h18M3 14h18M9 6v12M15 6v12"/></svg></button>
+      </nav>
+    </main>
+  </div>
+
   <div id="help-overlay" hidden>
     <div class="help-modal">
       <div class="help-head">
         <h2>Keyboard shortcuts</h2>
-        <button id="btn-close-help" class="btn-close" title="Close (Esc)">Ã—</button>
+        <button id="btn-close-help" class="btn-close" title="Close (Esc)">×</button>
       </div>
       <div class="help-body">
         <div class="help-col">
@@ -209,8 +240,8 @@
           <h3>Walkthrough</h3>
           <dl class="help-keys">
             <dt>W A S D</dt><dd>Move forward / strafe / back</dd>
-            <dt>â† â†’</dt><dd>Rotate (turn left / right)</dd>
-            <dt>â†‘ â†“</dt><dd>Move forward / back (same as W / S)</dd>
+            <dt>← →</dt><dd>Rotate (turn left / right)</dd>
+            <dt>↑ ↓</dt><dd>Move forward / back (same as W / S)</dd>
             <dt>Space</dt><dd>Jump</dd>
             <dt>Shift</dt><dd>Run</dd>
             <dt>C</dt><dd>Crouch</dd>
@@ -222,7 +253,7 @@
           <h3>Display layers</h3>
           <dl class="help-keys">
             <dt>H</dt><dd>Heatmap on/off</dd>
-            <dt>M</dt><dd>Toggle SPL â†” STIPA metric</dd>
+            <dt>M</dt><dd>Toggle SPL ↔ STIPA metric</dd>
             <dt>I</dt><dd>Isobars (contour lines)</dd>
             <dt>R</dt><dd>Reverb field in heatmap</dd>
           </dl>
@@ -238,11 +269,11 @@
         </div>
       </div>
       <div class="help-foot">
-        <button id="btn-show-welcome" class="btn-show-welcome">â†º Show welcome tour</button>
+        <button id="btn-show-welcome" class="btn-show-welcome">↺ Show welcome tour</button>
         Shortcuts are disabled while typing in text fields. Click <strong>?</strong> in the viewport or press <strong>?</strong> anywhere to reopen.
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=280"></script>
+  <script type="module" src="js/main.js?v=302"></script>
 </body>
 </html>

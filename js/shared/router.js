@@ -20,7 +20,7 @@
 // base64 blob. It now bails early when the hash starts with `#/`
 // (route prefix).
 
-const ROUTES = ['room', 'speaker', 'device'];
+const ROUTES = ['room', 'speaker', 'device', 'surface'];
 const DEFAULT_ROUTE = 'room';
 
 /**

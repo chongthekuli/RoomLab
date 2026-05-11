@@ -17,7 +17,10 @@
 
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
 
-const MARGIN_M = 1.0;
+// 1.5m margin gives the North arrow + scale bar enough room to live
+// fully inside the top-right and bottom-left margin bands without ever
+// overlapping the room outline — even for tiny (1-2m wide) rooms.
+const MARGIN_M = 1.5;
 const NICE_BAR_M = [0.5, 1, 2, 5, 10, 20, 50];
 
 function escapeText(s) {
@@ -157,24 +160,30 @@ export function buildFloorPlanSVG(state, opts = {}) {
   }).join('');
 
   // Scale bar — chosen from a "nice" set so the labelled length is
-  // legible (1 m / 5 m / 10 m). Bar is positioned bottom-left INSIDE
-  // the SVG margin so it doesn't intrude on the room outline.
+  // legible (1 m / 5 m / 10 m). Lives in the BOTTOM margin band, fully
+  // below the room outline — bar + label + ticks all clear the room
+  // edge by ≥0.2m for any room size.
   const barLen = pickScaleBar(room.width_m);
-  const barX = offsetX + 0.3;
-  const barY = viewH - 0.5;
-  const tickH = 0.18;
+  const barX = offsetX;                   // left-aligned with room
+  const barY = viewH - MARGIN_M * 0.35;   // bar in bottom margin (0.525m up from bottom edge)
+  const tickH = 0.15;
   const scaleBarEl = `
     <g class="pr-plan-scalebar">
       <line x1="${barX.toFixed(3)}" y1="${barY.toFixed(3)}" x2="${(barX + barLen).toFixed(3)}" y2="${barY.toFixed(3)}" stroke="#000" stroke-width="0.07" />
       <line x1="${barX.toFixed(3)}" y1="${(barY - tickH).toFixed(3)}" x2="${barX.toFixed(3)}" y2="${(barY + tickH).toFixed(3)}" stroke="#000" stroke-width="0.07" />
       <line x1="${(barX + barLen).toFixed(3)}" y1="${(barY - tickH).toFixed(3)}" x2="${(barX + barLen).toFixed(3)}" y2="${(barY + tickH).toFixed(3)}" stroke="#000" stroke-width="0.07" />
-      <text x="${(barX + barLen / 2).toFixed(3)}" y="${(barY - 0.3).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">${barLen} m</text>
+      <text x="${(barX + barLen / 2).toFixed(3)}" y="${(barY - 0.28).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">${barLen} m</text>
     </g>`;
 
-  // North arrow — top-right inside the SVG margin.
-  const naSize = 0.65;
-  const naX = viewW - 0.8;
-  const naY = offsetY + 0.55;
+  // North arrow — top-right corner. Center placed in the top margin
+  // band so the arrow tip + body + 'N' label all clear the room top
+  // edge. With MARGIN=1.5 and naSize=0.55: tip at y=0.2, body bottom
+  // at y≈0.78, N text baseline at y≈1.16 — room top is at y=1.5, so
+  // ~0.34m clearance. Horizontally placed 0.7m from right SVG edge,
+  // which keeps the arrow body fully past the room's right edge.
+  const naSize = 0.55;
+  const naX = viewW - 0.7;
+  const naY = MARGIN_M * 0.5;             // = 0.75 with MARGIN=1.5
   const northArrowEl = `
     <g class="pr-plan-northarrow">
       <polygon points="${naX.toFixed(3)},${(naY - naSize).toFixed(3)} ${(naX + naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)} ${naX.toFixed(3)},${(naY + naSize * 0.05).toFixed(3)} ${(naX - naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)}" fill="#000" />
