@@ -11,16 +11,26 @@ import { startRouter } from './shared/router.js';
 
 mountHeaderNav();
 
+// Cache-bust dynamic imports with the same ?v= that index.html uses on
+// the top-level <script>. Without this, a deploy that ships new HTML
+// (e.g. new panel IDs) plus new lab JS can hit a stale cached lab
+// module — the new HTML has new selectors but the cached JS writes
+// to the OLD IDs, so panels appear stuck on "Loading…".
+// `import.meta.url` here is the URL js/main.js was fetched from,
+// which INCLUDES the cache-bust param.
+const _v = new URL(import.meta.url).searchParams.get('v');
+const _vQ = _v ? `?v=${_v}` : '';
+
 // Lab mounts are dynamic-imported lazily so each Lab's modules don't
 // load until the route is visited. Visiting #/speaker doesn't pull
 // in scene.js; visiting #/room doesn't pull in speaker-detail.js.
 // The router caches the mount Promise so a repeat visit is a no-op.
 startRouter({
   mounts: {
-    room:    () => import('./labs/roomlab/main.js').then(m => m.mountRoomLab()),
-    speaker: () => import('./labs/speakerlab/main.js').then(m => m.mountSpeakerLab()),
-    device:  () => import('./labs/devicelab/main.js').then(m => m.mountDeviceLab()),
-    surface: () => import('./labs/surfacelab/main.js').then(m => m.mountSurfaceLab()),
+    room:    () => import(`./labs/roomlab/main.js${_vQ}`).then(m => m.mountRoomLab()),
+    speaker: () => import(`./labs/speakerlab/main.js${_vQ}`).then(m => m.mountSpeakerLab()),
+    device:  () => import(`./labs/devicelab/main.js${_vQ}`).then(m => m.mountDeviceLab()),
+    surface: () => import(`./labs/surfacelab/main.js${_vQ}`).then(m => m.mountSurfaceLab()),
   },
 });
 
