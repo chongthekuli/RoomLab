@@ -350,8 +350,16 @@ function buildQRDPanel(entry, is2D, visual) {
   const hMm = entry.geometry?.height_mm ?? 600;
   const dMaxMm = entry.diffuser?.max_well_depth_mm ?? entry.geometry?.max_well_depth_mm ?? entry.geometry?.depth_mm ?? 100;
   const N      = entry.diffuser?.prime_N           ?? entry.geometry?.prime_N           ?? 7;
+  const periodWidthMm = entry.diffuser?.period_width_mm ?? entry.geometry?.period_width_mm ?? wMm;
   const wellCount = entry.diffuser?.well_count     ?? entry.geometry?.well_count        ?? 49;
-  const wellsAcross = is2D ? Math.max(7, Math.round(Math.sqrt(wellCount))) : N;
+
+  // Real QRDs repeat the prime-root sequence across multiple periods
+  // (e.g. QRD-734: 600 mm panel × 122 mm period → ~5 periods of 7 wells
+  // each = 35 wells across). Previously we stretched a single period
+  // across the full panel width which made wells look 5× too wide.
+  const periodsAcross = Math.max(1, Math.round(wMm / periodWidthMm));
+  const wellsAcross = is2D ? Math.max(N, Math.round(Math.sqrt(wellCount))) : (N * periodsAcross);
+  const periodsDown = is2D ? periodsAcross : 1;
   const wellsDown   = is2D ? wellsAcross : 1;
 
   const W = wMm / 1000, H = hMm / 1000, D = dMaxMm / 1000;
@@ -469,26 +477,31 @@ function buildBADPanel(entry, visual) {
   const fabricMat = new THREE.MeshStandardMaterial({
     color: 0x322f2c, roughness: 0.95, metalness: 0.0,
   });
-  // Fabric back
+  // Fabric back — spans z = [-D*0.7, 0]
   const fabric = new THREE.Mesh(new THREE.BoxGeometry(W, H, D * 0.7), fabricMat);
   fabric.position.z = -D * 0.35;
   g.add(fabric);
-  // Front mask — checkerboard pattern of small blocks
+  // Front mask — binary tiles, each block thickness D*0.25 sitting
+  // flush on the fabric front (z=0). Block centred at z=D*0.125 →
+  // spans [0, D*0.25]. The previous z=D*0.15 left a 0.025·D gap
+  // behind the blocks (Viktor audit).
   const cells = 12;
   const cellW = W / cells, cellH = H / cells;
+  const blockThickness = D * 0.25;
   for (let i = 0; i < cells; i++) {
     for (let j = 0; j < cells; j++) {
-      // pseudo-binary mask via hash
+      // pseudo-binary mask via hash — not a real binary-Schroeder
+      // sequence, but visually plausible for the catalogue preview.
       const on = ((i * 13 + j * 7) % 5) < 3;
       if (!on) continue;
       const block = new THREE.Mesh(
-        new THREE.BoxGeometry(cellW * 0.92, cellH * 0.92, D * 0.25),
+        new THREE.BoxGeometry(cellW * 0.92, cellH * 0.92, blockThickness),
         baseMat,
       );
       block.position.set(
         -W / 2 + cellW * (i + 0.5),
         -H / 2 + cellH * (j + 0.5),
-         D * 0.15,
+         blockThickness / 2,            // flush on fabric front at z=0
       );
       g.add(block);
     }
@@ -518,19 +531,37 @@ function buildFoamWedgePanel(entry, visual) {
   back.position.z = -D * 0.4;
   g.add(back);
 
+  // Each row is a horizontal triangular ridge with apex pointing +Z
+  // (out of the panel face toward the viewer). Real Auralex Studiofoam
+  // Wedge has the peaks-out-of-the-panel orientation.
+  //
+  // Triangle defined in shape (X, Y) plane with X = vertical span of
+  // one row, Y = depth toward camera. ExtrudeGeometry extrudes along
+  // shape +Z (= panel width). Rotations XYZ='XYZ' applied X then Z
+  // permute shape (X,Y,Z) → world (Y,Z,X), giving:
+  //   ridge runs along world X (horizontal), apex at +Z (toward camera).
   const rows = 8;
   const rowH = H / rows;
-  // Each row is a triangular prism running horizontally
+  const peak = D * 0.85;
+  const backerFrontZ = -D * 0.3;
   for (let i = 0; i < rows; i++) {
+    const yBase = -H / 2 + i * rowH;
     const tri = new THREE.Shape();
-    tri.moveTo(0, 0);
-    tri.lineTo(rowH, 0);
-    tri.lineTo(rowH / 2, D * 0.85);
+    tri.moveTo(0, 0);                 // base bottom
+    tri.lineTo(rowH, 0);              // base top
+    tri.lineTo(rowH / 2, peak);       // apex toward camera
     tri.lineTo(0, 0);
     const extr = new THREE.ExtrudeGeometry(tri, { depth: W, bevelEnabled: false });
     const mesh = new THREE.Mesh(extr, mat);
-    mesh.rotation.y = -Math.PI / 2;
-    mesh.position.set(W / 2, -H / 2 + i * rowH, -D * 0.3);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.rotation.z = Math.PI / 2;
+    // After the cyclic permutation:
+    //   shape X-extent [0, rowH] → world Y-extent
+    //   shape Y-extent [0, peak] → world Z-extent
+    //   shape Z-extent [0, W]    → world X-extent
+    // Translate so the prism sits at y=yBase, z=backerFrontZ, centred
+    // on x.
+    mesh.position.set(-W / 2, yBase, backerFrontZ);
     g.add(mesh);
   }
   return g;
@@ -554,25 +585,36 @@ function buildFoamPyramidPanel(entry, visual) {
   back.position.z = -D * 0.4;
   g.add(back);
 
-  // ConeGeometry(radius, height, 4) is a square-base pyramid with the
-  // apex along +Y by default. The Z rotation (45°) the old code used
-  // made the bases diamond-oriented (corners pointing N/S/E/W),
-  // which looked "tilted" from the auto-fit camera angle. Real
-  // Auralex Studiofoam pyramids have axis-aligned bases (edges
-  // parallel to the panel edges, ridges running diagonally), so we
-  // drop the Z rotation entirely. Apex still points +Z (out of the
-  // panel face) via the X-axis rotation.
+  // ConeGeometry(radius, height, 4) is a 4-sided pyramid with apex
+  // along +Y by default; corners of the base are at angles 0°, 90°,
+  // 180°, 270° around the apex axis — DIAMOND-oriented in the
+  // perpendicular plane. After rotation.x = π/2 (apex → +Z) the
+  // diamond is in the XY plane, with base corners at world (±R, 0)
+  // and (0, ±R). Real Auralex Studiofoam Pyramid has axis-aligned
+  // bases (edges parallel to panel edges), so we rotate the cone an
+  // additional 45° around the apex axis (now world Z) to put edges
+  // axis-aligned and corners at ±45°.
+  //
+  // Radius sized so square side = cellW × 0.95 (5% gap between
+  // adjacent pyramids for definition). side = R × √2 → R = cellW × 0.67.
+  const radius = cellW * 0.67;
   for (let i = 0; i < cells; i++) {
     for (let j = 0; j < cells; j++) {
       const pyr = new THREE.Mesh(
-        new THREE.ConeGeometry(cellW * 0.55, D * 0.85, 4),
+        new THREE.ConeGeometry(radius, D * 0.85, 4),
         mat,
       );
       pyr.rotation.x = Math.PI / 2;
+      pyr.rotation.z = Math.PI / 4;     // axis-align the square base
+      // Backer spans z = -D*0.5 to z = -D*0.3 (centered at -D*0.4,
+      // thickness D*0.2). After rotation.x = +π/2 the cone's base is
+      // at local z = -h/2 = -D*0.425 (where h = D*0.85). To sit the
+      // pyramid base exactly on the backer front face (z = -D*0.3):
+      //   pyr.z = -D*0.3 - (-D*0.425) = D*0.125
       pyr.position.set(
         -W / 2 + cellW * (i + 0.5),
         -H / 2 + cellH * (j + 0.5),
-        D * 0.4,    // sit base of pyramid right at the panel front face
+        D * 0.125,
       );
       g.add(pyr);
     }
@@ -622,12 +664,16 @@ function buildCornerTrap(entry, visual) {
   const h = (entry.geometry?.height_mm ?? 1219) / 1000;
   const d = (entry.geometry?.depth_mm  ?? 305) / 1000;
 
-  // Wedge: right-triangle prism with the right angle at the back
-  // (where the wall corner would be).
+  // Isoceles wedge with the right-angle corner pointing AWAY from
+  // camera (back), and the hypotenuse face front (sloping symmetric
+  // sides). Previously the right-angle was at back-left which made
+  // the trap look like a wedge-slab rather than a corner trap.
+  // Vertices in (X, Z) — the prism is extruded vertically along Y
+  // after a -π/2 rotation around X.
   const tri = new THREE.Shape();
-  tri.moveTo(-w / 2, -d / 2);
-  tri.lineTo( w / 2, -d / 2);
-  tri.lineTo(-w / 2,  d / 2);
+  tri.moveTo(-w / 2, -d / 2);      // front-left
+  tri.lineTo( w / 2, -d / 2);      // front-right
+  tri.lineTo( 0,      d / 2);      // back-centre (apex away from camera)
   tri.lineTo(-w / 2, -d / 2);
   const tex = makePatternTexture({ ...visual, pattern: 'fabric' });
   const mat = new THREE.MeshStandardMaterial({
@@ -661,16 +707,22 @@ function buildMembraneTrap(entry, visual) {
     color: visual.color || 0x5a5550, roughness: 0.4, metalness: 0.1,
   });
   const membrane = new THREE.Mesh(new THREE.PlaneGeometry(W * 0.96, H * 0.96), membraneMat);
-  membrane.position.z = D / 2 + 0.001;
+  // Cabinet center at z=-D*0.025, thickness D*0.95 → front face at
+  // z = -D*0.025 + D*0.475 = D*0.45. Membrane sits +0.001 in front
+  // of that. The previous z=D/2+0.001 left the membrane floating
+  // ~5mm in front of the cabinet face (Viktor audit).
+  const cabinetFrontZ = D * 0.45;
+  membrane.position.z = cabinetFrontZ + 0.001;
   g.add(membrane);
 
   // Tuning callout — small chrome ring on the face indicating the
-  // tuned port position (visual cue, not functional).
+  // tuned port position (visual cue, not functional). Sits +0.001 in
+  // front of the membrane so it doesn't z-fight.
   const dot = new THREE.Mesh(
     new THREE.CircleGeometry(W * 0.04, 32),
     new THREE.MeshStandardMaterial({ color: 0xc0c0c0, roughness: 0.2, metalness: 0.9 }),
   );
-  dot.position.set(W * 0.32, H * 0.32, D / 2 + 0.002);
+  dot.position.set(W * 0.32, H * 0.32, cabinetFrontZ + 0.002);
   g.add(dot);
   return g;
 }
