@@ -554,6 +554,14 @@ function buildFoamPyramidPanel(entry, visual) {
   back.position.z = -D * 0.4;
   g.add(back);
 
+  // ConeGeometry(radius, height, 4) is a square-base pyramid with the
+  // apex along +Y by default. The Z rotation (45°) the old code used
+  // made the bases diamond-oriented (corners pointing N/S/E/W),
+  // which looked "tilted" from the auto-fit camera angle. Real
+  // Auralex Studiofoam pyramids have axis-aligned bases (edges
+  // parallel to the panel edges, ridges running diagonally), so we
+  // drop the Z rotation entirely. Apex still points +Z (out of the
+  // panel face) via the X-axis rotation.
   for (let i = 0; i < cells; i++) {
     for (let j = 0; j < cells; j++) {
       const pyr = new THREE.Mesh(
@@ -561,11 +569,10 @@ function buildFoamPyramidPanel(entry, visual) {
         mat,
       );
       pyr.rotation.x = Math.PI / 2;
-      pyr.rotation.z = Math.PI / 4;
       pyr.position.set(
         -W / 2 + cellW * (i + 0.5),
         -H / 2 + cellH * (j + 0.5),
-        D * 0.05,
+        D * 0.4,    // sit base of pyramid right at the panel front face
       );
       g.add(pyr);
     }
