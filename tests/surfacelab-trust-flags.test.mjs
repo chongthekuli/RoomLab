@@ -158,12 +158,12 @@ function hasFlag(flags, id) {
 {
   const entry = {
     id: 'plain-finish-no-mounting',
-    category: 'finish',
+    category: 'surface.hard',
     absorption: [0.02, 0.03, 0.04, 0.05, 0.05, 0.05, 0.05],
   };
   const flags = runTrustFlagAudit(entry);
   assert(!hasFlag(flags, 'mounting_unclear'),
-    'plain finish without mounting should NOT flag mounting_unclear (rule skips finishes)');
+    'surface.* finish without mounting should NOT flag mounting_unclear (rule skips surface category)');
 }
 
 // ---- Rule 7: untested / self-reported ---------------------------------

@@ -27,6 +27,16 @@ function $$(sel) {
   return document.querySelectorAll(`#route-surface ${sel}`);
 }
 
+// Schema v2 uses dotted-path categories — `diffuser.qrd_1d`,
+// `bass.membrane`, `absorber.porous.panel`, etc. Several render paths
+// previously compared `entry.category === 'diffuser'` (schema v1 flat
+// value) which always returns false now and breaks per-category UI.
+// Use this helper everywhere instead of equality.
+function inSegment(entry, segment) {
+  const c = entry?.category;
+  return typeof c === 'string' && (c === segment || c.startsWith(segment + '.'));
+}
+
 // ---------------------------------------------------------------------
 // Mount — called once on first SurfaceLAB visit
 // ---------------------------------------------------------------------
@@ -279,8 +289,8 @@ function renderSpecsPanel(entry) {
     return;
   }
   const headline = formatHeadlineNumber(entry, true);
-  const isDiffuser = entry.category === 'diffuser';
-  const isTrap = entry.category === 'trap';
+  const isDiffuser = inSegment(entry, 'diffuser');
+  const isTrap = inSegment(entry, 'bass');
   const isMembrane = entry.kind === 'trap_membrane' || entry.kind === 'trap_helmholtz';
 
   const flagsHtml = (entry.trust_flags || []).map(f => `
@@ -349,8 +359,8 @@ function renderAbsorptionPanel(entry) {
 function renderPolarPanel(entry) {
   const root = $('panel-polardiffusion');
   if (!root) return;
-  if (entry?.category !== 'diffuser' || !entry.diffusion_d) {
-    root.innerHTML = `<h2>Polar diffusion</h2><div class="phase-placeholder">${entry?.category === 'diffuser' ? 'No polar diffusion data measured for this product.' : 'Diffusers only — pick one to see the polar dispersion plot.'}</div>`;
+  if (!inSegment(entry, 'diffuser') || !entry.diffusion_d) {
+    root.innerHTML = `<h2>Polar diffusion</h2><div class="phase-placeholder">${inSegment(entry, 'diffuser') ? 'No polar diffusion data measured for this product.' : 'Diffusers only — pick one to see the polar dispersion plot.'}</div>`;
     return;
   }
   root.innerHTML = `
@@ -501,7 +511,7 @@ function renderPolarRoseSVG(entry) {
 }
 
 function renderNRCStripe(entry) {
-  if (entry.nrc == null && entry.category !== 'finish' && entry.category !== 'absorber' && entry.category !== 'ceiling') return '';
+  if (entry.nrc == null && !inSegment(entry, 'surface') && !inSegment(entry, 'absorber') && !inSegment(entry, 'ceiling')) return '';
   if (entry.nrc == null) return '';
   return `<div class="surface-nrc-stripe">
     <span class="surface-nrc-label">NRC</span>
@@ -516,14 +526,14 @@ function renderNRCStripe(entry) {
 
 function formatHeadlineNumber(entry, big = false) {
   if (!entry) return '';
-  if (entry.category === 'diffuser') {
+  if (inSegment(entry, 'diffuser')) {
     const d1k = entry.diffusion_d?.[3];
     if (Number.isFinite(d1k)) {
       return big ? `<span class="surface-h-big">${d1k.toFixed(2)}</span><span class="surface-h-unit">D(1 kHz)</span>` : `D ${d1k.toFixed(2)}`;
     }
     return big ? `<span class="surface-h-unit">No diffusion data</span>` : '—';
   }
-  if (entry.category === 'trap') {
+  if (inSegment(entry, 'bass')) {
     const a125 = entry.absorption?.[0];
     if (Number.isFinite(a125)) {
       return big ? `<span class="surface-h-big">${a125.toFixed(2)}</span><span class="surface-h-unit">α(125 Hz)</span>` : `α₁₂₅ ${a125.toFixed(2)}`;

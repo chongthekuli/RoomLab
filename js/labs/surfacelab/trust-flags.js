@@ -96,8 +96,10 @@ const RULES = [
 
   // 5. "Diffusion" claimed but only one-octave d(f) data. Real
   //    broadband-diffusion claims need ≥ 4 octaves of test data.
+  //    Schema v2: dotted-path categories — match any diffuser.*
   function diffusionFromOneOctave(entry) {
-    if (entry.category !== 'diffuser') return null;
+    const cat = entry.category;
+    if (typeof cat !== 'string' || !cat.startsWith('diffuser')) return null;
     const d = entry.diffusion_d || [];
     const finite = d.filter(v => Number.isFinite(v)).length;
     if (finite > 0 && finite < 3) {
@@ -114,7 +116,10 @@ const RULES = [
   //    Without it the α curve is ambiguous (Type A vs E-400 changes
   //    LF α by 3×).
   function mountingMissing(entry) {
-    if (entry.category === 'finish') return null;     // raw materials are fine without mounting
+    const cat = entry.category;
+    // Plain surface finishes don't need mounting designation — they
+    // are the substrate, not an applied treatment.
+    if (typeof cat === 'string' && cat.startsWith('surface')) return null;
     if (!entry.mounting || entry.mounting === 'null' || entry.mounting === '') {
       return {
         id: 'mounting_unclear',
