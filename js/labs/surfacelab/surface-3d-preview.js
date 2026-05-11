@@ -19,6 +19,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createStudioRig, createStage, applyAutoFit, applyShadowFlags } from '../../shared/product-stage.js';
 
 let renderer = null;
 let scene = null;
@@ -30,68 +31,53 @@ let lastEntryId = null;
 
 // ---------------------------------------------------------------------
 // Mount / dispose
+//
+// First call sets up renderer + scene + studio rig + walnut stage
+// (one-time init; persists across product switches). Subsequent calls
+// remove the previous product group and add a new one — stage and
+// rig stay alive so the env-map / shadow-map allocations aren't
+// rebuilt on every selection (Viktor's perf budget).
 // ---------------------------------------------------------------------
 
 export function mountSurfacePreview(canvas, entry) {
-  if (lastEntryId === entry?.id && renderer) return;
-  disposePreview();
   if (!entry) return;
-  lastEntryId = entry.id;
+  if (lastEntryId === entry.id && renderer) return;
 
+  if (!renderer) {
+    initStage(canvas);
+  }
+  swapProduct(entry);
+  lastEntryId = entry.id;
+}
+
+function initStage(canvas) {
   const w = canvas.clientWidth || canvas.width || 800;
   const h = canvas.clientHeight || canvas.height || 600;
 
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(w, h, false);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
 
   scene = new THREE.Scene();
-  scene.background = null;
 
-  camera = new THREE.PerspectiveCamera(32, w / h, 0.05, 20);
+  camera = new THREE.PerspectiveCamera(35, w / h, 0.05, 20);
   camera.position.set(0.9, 0.55, 1.4);
   camera.lookAt(0, 0, 0);
 
-  // Lighting — soft key + cool fill + warm rim. Same family as the
-  // SpeakerLAB preview so two Labs feel one-of-a-kind.
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  const key = new THREE.DirectionalLight(0xffffff, 1.1);
-  key.position.set(2.5, 3.0, 2.5);
-  scene.add(key);
-  const fill = new THREE.DirectionalLight(0x6aa0ff, 0.4);
-  fill.position.set(-2, 0.8, 1.2);
-  scene.add(fill);
-  const rim = new THREE.DirectionalLight(0xffcc88, 0.3);
-  rim.position.set(0, 1.5, -2.5);
-  scene.add(rim);
-
-  // Soft turntable disc beneath the sample so it floats over a base
-  // rather than freely in space — a common product-photography idiom.
-  const disc = new THREE.Mesh(
-    new THREE.CircleGeometry(0.8, 64),
-    new THREE.MeshStandardMaterial({ color: 0x0c0f13, roughness: 0.95, metalness: 0.0 }),
-  );
-  disc.rotation.x = -Math.PI / 2;
-  disc.position.y = -0.32;
-  scene.add(disc);
-
-  // Build the sample. Returned group is centred on (0, 0, 0).
-  group = buildSampleGroup(entry);
-  scene.add(group);
+  // Shared studio rig: 3-light + RoomEnvironment PMREM + AgX tone map.
+  createStudioRig(renderer, scene);
+  // Walnut disc + contact shadow + gradient cyc background.
+  createStage(scene);
 
   // OrbitControls — drag to rotate, scroll to zoom, auto-rotate idle.
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.minDistance = 0.6;
-  controls.maxDistance = 3.5;
+  controls.minDistance = 0.4;
+  controls.maxDistance = 4.0;
   controls.maxPolarAngle = Math.PI * 0.55;
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.8;
-  controls.target.set(0, 0, 0);
 
   // Pause auto-rotate while the user is interacting; resume after a
   // short idle window so the model keeps moving when they walk away.
@@ -103,6 +89,35 @@ export function mountSurfacePreview(canvas, entry) {
   canvas.addEventListener('wheel', () => { pause(); resume(); }, { passive: true });
 
   animate();
+}
+
+function swapProduct(entry) {
+  // Remove previous product group (keep stage + lights + env map).
+  if (group) {
+    scene.remove(group);
+    disposeGroup(group);
+    group = null;
+  }
+  // Build new product group. Builders return native-dimensions geometry;
+  // applyAutoFit handles per-product centring + camera framing so
+  // every product fills the viewport consistently.
+  group = buildSampleGroup(entry);
+  applyShadowFlags(group);
+  scene.add(group);
+  applyAutoFit(camera, controls, group);
+}
+
+function disposeGroup(g) {
+  g.traverse(obj => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of mats) {
+        if (m.map) m.map.dispose();
+        m.dispose();
+      }
+    }
+  });
 }
 
 export function disposePreview() {
@@ -547,12 +562,7 @@ function buildFabricPanel(entry, visual) {
   );
   frame.position.z = -D / 2;
   g.add(frame);
-  // Constrain max draw size so 1219mm tall doesn't dominate
-  const maxDim = Math.max(W, H);
-  if (maxDim > 0.7) {
-    const k = 0.7 / maxDim;
-    g.scale.set(k, k, k);
-  }
+  // Sizing handled by applyAutoFit() in mountSurfacePreview.
   return g;
 }
 
@@ -583,13 +593,7 @@ function buildCornerTrap(entry, visual) {
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.y = -h / 2;
   g.add(mesh);
-
-  // Scale to fit ~0.7m max
-  const maxDim = Math.max(w, h, d);
-  if (maxDim > 0.7) {
-    const k = 0.7 / maxDim;
-    g.scale.set(k, k, k);
-  }
+  // Sizing handled by applyAutoFit() in mountSurfacePreview.
   return g;
 }
 

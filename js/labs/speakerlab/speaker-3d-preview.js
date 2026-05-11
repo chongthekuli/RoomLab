@@ -11,6 +11,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createStudioRig, createStage, applyAutoFit, applyShadowFlags } from '../../shared/product-stage.js';
 
 let renderer = null;
 let scene = null;
@@ -58,55 +59,31 @@ export function mountSpeaker3DPreview(canvas, def) {
   const width = canvas.clientWidth || canvas.width;
   const height = canvas.clientHeight || canvas.height;
 
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(width, height, false);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
 
   scene = new THREE.Scene();
-  scene.background = null;  // transparent so the parent CSS can tint
 
   const aspect = width / height;
-  camera = new THREE.PerspectiveCamera(28, aspect, 0.1, 20);
+  camera = new THREE.PerspectiveCamera(35, aspect, 0.05, 20);
   camera.position.set(1.3, 0.45, 1.9);
   camera.lookAt(0, 0, 0);
 
-  // Lighting — soft key + blueish fill + rim from behind for silhouette.
-  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-  const key = new THREE.DirectionalLight(0xffffff, 1.0);
-  key.position.set(2.5, 3.5, 2.5);
-  scene.add(key);
-  const fill = new THREE.DirectionalLight(0x6aa0ff, 0.35);
-  fill.position.set(-2, 0.8, 1.2);
-  scene.add(fill);
-  const rim = new THREE.DirectionalLight(0xffcc88, 0.45);
-  rim.position.set(-1.5, 1.6, -2.2);
-  scene.add(rim);
-
-  // Turntable under the speaker — subtle disk.
-  const turntable = new THREE.Mesh(
-    new THREE.CircleGeometry(0.7, 64),
-    new THREE.MeshStandardMaterial({ color: 0x0c0f13, roughness: 0.9, metalness: 0.05 }),
-  );
-  turntable.rotation.x = -Math.PI / 2;
-  turntable.position.y = -0.6;
-  scene.add(turntable);
+  // Shared studio rig + walnut stage — same visual language as
+  // SurfaceLAB so the Suite feels unified across labs.
+  createStudioRig(renderer, scene);
+  createStage(scene);
 
   cabinetGroup = buildCabinet(def);
+  applyShadowFlags(cabinetGroup);
   scene.add(cabinetGroup);
-
-  // Frame model in the camera — compute bounding box, move camera out so it
-  // fits nicely with some padding.
-  fitCameraToModel(cabinetGroup, camera);
 
   // Orbit controls — users can drag to rotate, right-drag to pan, scroll
   // to zoom. Auto-rotate keeps the cabinet turning when the mouse is
   // idle, and pauses when the user interacts. Damping gives a natural
   // inertial feel.
   controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 0, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.autoRotate = true;
@@ -114,10 +91,13 @@ export function mountSpeaker3DPreview(canvas, def) {
   controls.enablePan = true;
   controls.panSpeed = 0.6;
   controls.zoomSpeed = 0.9;
-  // Pick sensible zoom limits from the framed camera distance.
-  const initDist = camera.position.length();
-  controls.minDistance = initDist * 0.4;
-  controls.maxDistance = initDist * 3.5;
+  controls.maxPolarAngle = Math.PI * 0.55;
+
+  // Auto-fit camera + controls target to the cabinet's actual bbox so
+  // a 0.3 m bookshelf monitor and a 1.2 m tall line-array element both
+  // fill the viewport consistently (Viktor spec §6).
+  applyAutoFit(camera, controls, cabinetGroup);
+
   // Stop auto-rotate when the user grabs the canvas — restart when they
   // let go so the model keeps showing itself off in idle.
   let userInteracting = false;
