@@ -1,26 +1,27 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000],
-  "_notes": "Acoustic treatment product catalogue — engineered diffusers, broadband absorbers, bass traps. Specs from public manufacturer datasheets and lab reports (ISO 354 / ASTM C423 / ISO 17497-1 / ISO 17497-2). Absorption values are mean-Sabine α at the cited mounting (Type A unless noted). Diffusion coefficient d(f) per ISO 17497-2 where available, else null. Trust-flag validator (js/labs/surfacelab/trust-flags.js) inspects each entry on load and chips the spec card with a caution glyph when datasheet claims clash with physical limits.",
+  "_notes": "Schema v2 — dotted-path categories per Dr. Chen + Sofia taxonomy. Mandatory fields per category enforced by trust-flags.js (Flag 8: missing-mandatory-field; Flag 9: diffuser-without-ISO-17497-2-scattering). Specs from public manufacturer datasheets and lab reports (ISO 354 / ASTM C423 / ISO 17497-1 / ISO 17497-2). Ceiling-mounted items live under absorber.porous.* with mounting set to ceiling_*; the SurfaceLAB ceiling rail icon is a VIEW that filters them in.",
   "products": [
     {
       "id": "rpg-skyline-2d",
       "name": "Skyline",
       "manufacturer": "RPG Diffusor Systems",
-      "kind": "diffuser_skyline",
-      "category": "diffuser",
+      "category": "diffuser.qrd_2d",
       "description": "2D pseudo-random scatterer — 16×16 well array on a 600 mm period. The original Skyline; benchmark for broadband mid-HF diffusion.",
       "absorption": [0.05, 0.10, 0.15, 0.20, 0.20, 0.15, 0.10],
-      "scattering": [0.20, 0.30, 0.50, 0.85, 0.90, 0.85, 0.70],
+      "scattering_coefficient": [0.20, 0.30, 0.50, 0.85, 0.90, 0.85, 0.70],
       "diffusion_d":  [null, 0.30, 0.50, 0.78, 0.82, 0.75, 0.60],
       "geometry": {
-        "shape": "panel_2d",
         "width_mm": 600, "height_mm": 600, "depth_mm": 100,
-        "max_well_depth_mm": 100, "period_width_mm": 600,
-        "well_count": 256, "prime_N": null,
         "weight_kg_m2": 11
       },
-      "operating_range_hz": [490, 1700],
+      "diffuser": {
+        "prime_N": null, "period_width_mm": 600,
+        "max_well_depth_mm": 100, "well_count": 256,
+        "fmin_hz": 490, "fmax_hz": 1700,
+        "sequence_type": "pseudo_random_2d"
+      },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ISO 17497-2",
       "test_lab": "RPG Reverb Chamber",
@@ -32,20 +33,21 @@
       "id": "rpg-qrd-734",
       "name": "QRD-734",
       "manufacturer": "RPG Diffusor Systems",
-      "kind": "diffuser_qrd_1d",
-      "category": "diffuser",
+      "category": "diffuser.qrd_1d",
       "description": "1D Schroeder QRD, prime-7 root sequence, 122 mm period. Vertical wells diffuse horizontally — typical control-room rear-wall treatment.",
       "absorption": [0.10, 0.15, 0.20, 0.25, 0.20, 0.15, 0.10],
-      "scattering": [0.15, 0.25, 0.50, 0.85, 0.85, 0.70, 0.50],
+      "scattering_coefficient": [0.15, 0.25, 0.50, 0.85, 0.85, 0.70, 0.50],
       "diffusion_d":  [null, null, 0.55, 0.80, 0.75, 0.60, 0.40],
       "geometry": {
-        "shape": "panel_1d",
         "width_mm": 600, "height_mm": 600, "depth_mm": 175,
-        "max_well_depth_mm": 175, "period_width_mm": 122,
-        "well_count": 7, "prime_N": 7,
         "weight_kg_m2": 9
       },
-      "operating_range_hz": [490, 1400],
+      "diffuser": {
+        "prime_N": 7, "period_width_mm": 122,
+        "max_well_depth_mm": 175, "well_count": 7,
+        "fmin_hz": 490, "fmax_hz": 1400,
+        "sequence_type": "schroeder_qrd"
+      },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ISO 17497-2",
       "test_lab": "RPG Reverb Chamber",
@@ -57,18 +59,23 @@
       "id": "rpg-bad-panel",
       "name": "B.A.D. Panel",
       "manufacturer": "RPG Diffusor Systems",
-      "kind": "hybrid_diffsorber",
-      "category": "diffuser",
+      "category": "diffuser.hybrid",
       "description": "Binary Amplitude Diffsorber — hybrid that absorbs LF (porous backing) and diffuses MF/HF (binary perforation mask). Solves the typical control-room \"absorb here, diffuse there\" trade.",
       "absorption": [0.30, 0.55, 0.85, 0.85, 0.80, 0.70, 0.60],
-      "scattering": [0.15, 0.20, 0.40, 0.65, 0.70, 0.60, 0.50],
+      "scattering_coefficient": [0.15, 0.20, 0.40, 0.65, 0.70, 0.60, 0.50],
       "diffusion_d":  [null, null, 0.45, 0.65, 0.65, 0.55, 0.40],
       "geometry": {
-        "shape": "panel_flat",
         "width_mm": 600, "height_mm": 600, "depth_mm": 50,
         "weight_kg_m2": 7
       },
-      "operating_range_hz": [250, 4000],
+      "diffuser": {
+        "prime_N": null, "period_width_mm": 600,
+        "max_well_depth_mm": 50, "well_count": 144,
+        "fmin_hz": 250, "fmax_hz": 4000,
+        "sequence_type": "binary_amplitude",
+        "crossover_hz": 500
+      },
+      "porous": { "panel_thickness_mm": 50, "density_kgm3": 48 },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ASTM C423 + ISO 17497-2",
       "test_lab": "Riverbank Acoustical Labs",
@@ -80,19 +87,21 @@
       "id": "rpg-modffuser",
       "name": "Modffuser",
       "manufacturer": "RPG Diffusor Systems",
-      "kind": "diffuser_poly",
-      "category": "diffuser",
+      "category": "diffuser.geometric",
       "description": "Modular polycylindrical diffuser. Geometric (not number-theoretic) — broadband but with shallower diffusion peak than QRD.",
       "absorption": [0.10, 0.10, 0.10, 0.10, 0.05, 0.05, 0.05],
-      "scattering": [0.30, 0.50, 0.60, 0.65, 0.60, 0.55, 0.45],
+      "scattering_coefficient": [0.30, 0.50, 0.60, 0.65, 0.60, 0.55, 0.45],
       "diffusion_d":  [0.30, 0.45, 0.55, 0.55, 0.50, 0.45, 0.35],
       "geometry": {
-        "shape": "polycylindrical",
         "width_mm": 600, "height_mm": 600, "depth_mm": 100,
-        "radius_mm": 450, "rise_mm": 100,
         "weight_kg_m2": 5
       },
-      "operating_range_hz": [200, 3000],
+      "diffuser": {
+        "period_mm": 600, "depth_mm": 100,
+        "radius_mm": 450, "rise_mm": 100,
+        "fmin_hz": 200, "fmax_hz": 3000,
+        "sequence_type": "polycylindrical"
+      },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ISO 17497-2",
       "test_lab": "manufacturer self-report",
@@ -104,15 +113,18 @@
       "id": "auralex-studiofoam-wedge-2",
       "name": "Studiofoam Wedge 2\"",
       "manufacturer": "Auralex Acoustics",
-      "kind": "absorber_foam_wedge",
-      "category": "absorber",
+      "category": "absorber.porous.foam",
       "description": "2-inch (50 mm) wedged melamine foam. Standard project-studio absorber. Limited LF absorption — pair with bass traps for full-range control.",
       "absorption": [0.08, 0.20, 0.66, 1.00, 1.04, 1.05, 1.00],
-      "scattering": [0.10, 0.15, 0.15, 0.20, 0.20, 0.15, 0.10],
+      "scattering_coefficient": [0.10, 0.15, 0.15, 0.20, 0.20, 0.15, 0.10],
       "geometry": {
-        "shape": "panel_wedge",
         "width_mm": 610, "height_mm": 610, "depth_mm": 50,
         "weight_kg_m2": 0.6
+      },
+      "porous": {
+        "panel_thickness_mm": 50, "airgap_mm": 0,
+        "flow_resistivity_kPa_s_m2": 8,
+        "cell_structure": "open"
       },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ASTM C423",
@@ -126,15 +138,18 @@
       "id": "auralex-studiofoam-pyramid-4",
       "name": "Studiofoam Pyramid 4\"",
       "manufacturer": "Auralex Acoustics",
-      "kind": "absorber_foam_pyramid",
-      "category": "absorber",
+      "category": "absorber.porous.foam",
       "description": "4-inch (100 mm) pyramid melamine foam. Better LF reach than the 2\" wedge but still light absorber — needs traps in corners.",
       "absorption": [0.18, 0.50, 1.10, 1.10, 1.05, 1.00, 0.95],
-      "scattering": [0.15, 0.20, 0.25, 0.30, 0.25, 0.20, 0.15],
+      "scattering_coefficient": [0.15, 0.20, 0.25, 0.30, 0.25, 0.20, 0.15],
       "geometry": {
-        "shape": "panel_pyramid",
         "width_mm": 610, "height_mm": 610, "depth_mm": 100,
         "weight_kg_m2": 1.2
+      },
+      "porous": {
+        "panel_thickness_mm": 100, "airgap_mm": 0,
+        "flow_resistivity_kPa_s_m2": 8,
+        "cell_structure": "open"
       },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ASTM C423",
@@ -148,23 +163,20 @@
       "id": "auralex-lenrd",
       "name": "LENRD Bass Trap",
       "manufacturer": "Auralex Acoustics",
-      "kind": "trap_corner_porous",
-      "category": "trap",
+      "category": "bass.porous",
       "description": "Quarter-cylinder corner bass trap, 305 mm radius. Targets sub-200 Hz — NRC reported elsewhere is misleading for this product.",
       "absorption": [0.85, 1.20, 1.05, 1.00, 1.00, 1.00, 0.95],
-      "scattering": [0.10, 0.10, 0.15, 0.20, 0.25, 0.30, 0.30],
+      "scattering_coefficient": [0.10, 0.10, 0.15, 0.20, 0.25, 0.30, 0.30],
       "geometry": {
-        "shape": "corner_wedge",
         "width_mm": 305, "height_mm": 1219, "depth_mm": 305,
         "weight_kg_m2": 0.9
       },
-      "trap": {
-        "type": "porous_corner",
-        "f0_hz": null,
-        "bandwidth_alpha05_hz": [80, 8000],
-        "porous_depth_mm": 305,
-        "density_kgm3": 22
+      "porous": {
+        "panel_thickness_mm": 305, "density_kgm3": 22,
+        "flow_resistivity_kPa_s_m2": 6, "airgap_mm": 0,
+        "corner_mounted": true
       },
+      "bass": { "bandwidth_alpha05_hz": [80, 8000] },
       "mounting": "corner_2D",
       "test_standard": "ASTM C423",
       "test_lab": "Riverbank Acoustical Labs",
@@ -176,18 +188,20 @@
       "id": "auralex-t-fusor",
       "name": "T-Fusor",
       "manufacturer": "Auralex Acoustics",
-      "kind": "diffuser_skyline",
-      "category": "diffuser",
+      "category": "diffuser.geometric",
       "description": "Geometric diffuser (not Schroeder). Wide-band scattering, easy install. Lower max diffusion than a true QRD.",
       "absorption": [0.05, 0.10, 0.10, 0.15, 0.15, 0.10, 0.05],
-      "scattering": [0.20, 0.30, 0.45, 0.65, 0.70, 0.60, 0.45],
+      "scattering_coefficient": [0.20, 0.30, 0.45, 0.65, 0.70, 0.60, 0.45],
       "diffusion_d":  [null, null, 0.40, 0.55, 0.60, 0.50, 0.35],
       "geometry": {
-        "shape": "panel_2d",
         "width_mm": 610, "height_mm": 610, "depth_mm": 64,
         "weight_kg_m2": 3.2
       },
-      "operating_range_hz": [500, 3500],
+      "diffuser": {
+        "period_mm": 610, "depth_mm": 64,
+        "fmin_hz": 500, "fmax_hz": 3500,
+        "sequence_type": "faceted_pyramidal"
+      },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "manufacturer self-report",
       "test_lab": "Auralex internal",
@@ -199,15 +213,17 @@
       "id": "auralex-dst-114",
       "name": "DST-114 Broadband Absorber",
       "manufacturer": "Auralex Acoustics",
-      "kind": "absorber_panel",
-      "category": "absorber",
+      "category": "absorber.porous.panel",
       "description": "Mineral fibre panel, fabric-wrapped. The default broadband-absorber project-studio panel.",
       "absorption": [0.65, 1.00, 1.10, 1.05, 1.00, 1.00, 0.95],
-      "scattering": [0.10, 0.10, 0.10, 0.15, 0.20, 0.20, 0.20],
+      "scattering_coefficient": [0.10, 0.10, 0.10, 0.15, 0.20, 0.20, 0.20],
       "geometry": {
-        "shape": "panel_flat",
         "width_mm": 610, "height_mm": 1219, "depth_mm": 51,
         "weight_kg_m2": 4.5
+      },
+      "porous": {
+        "panel_thickness_mm": 51, "density_kgm3": 48,
+        "flow_resistivity_kPa_s_m2": 12, "airgap_mm": 0
       },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ASTM C423",
@@ -221,15 +237,17 @@
       "id": "gik-244",
       "name": "244 Bass Trap",
       "manufacturer": "GIK Acoustics",
-      "kind": "absorber_panel",
-      "category": "absorber",
+      "category": "absorber.porous.panel",
       "description": "Broadband panel — 102 mm thick fibreglass core. Despite the \"bass trap\" name it's a flat absorber; corner mounting recommended for actual LF gain.",
       "absorption": [0.55, 1.20, 1.30, 1.20, 1.10, 1.05, 1.00],
-      "scattering": [0.10, 0.10, 0.15, 0.15, 0.20, 0.20, 0.20],
+      "scattering_coefficient": [0.10, 0.10, 0.15, 0.15, 0.20, 0.20, 0.20],
       "geometry": {
-        "shape": "panel_flat",
         "width_mm": 610, "height_mm": 1219, "depth_mm": 102,
         "weight_kg_m2": 5
+      },
+      "porous": {
+        "panel_thickness_mm": 102, "density_kgm3": 48,
+        "flow_resistivity_kPa_s_m2": 13, "airgap_mm": 0
       },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ASTM C423",
@@ -243,23 +261,20 @@
       "id": "gik-soffit",
       "name": "Soffit Bass Trap",
       "manufacturer": "GIK Acoustics",
-      "kind": "trap_corner_porous",
-      "category": "trap",
+      "category": "bass.porous",
       "description": "Soffit-mount corner trap, 432 mm depth × 1219 mm × 1219 mm triangular. Targets 40–200 Hz — proper LF treatment for control rooms.",
       "absorption": [1.45, 1.30, 1.10, 1.00, 0.95, 0.90, 0.85],
-      "scattering": [0.10, 0.10, 0.15, 0.20, 0.25, 0.30, 0.30],
+      "scattering_coefficient": [0.10, 0.10, 0.15, 0.20, 0.25, 0.30, 0.30],
       "geometry": {
-        "shape": "corner_soffit",
         "width_mm": 1219, "height_mm": 1219, "depth_mm": 432,
         "weight_kg_m2": 7
       },
-      "trap": {
-        "type": "porous_corner",
-        "f0_hz": null,
-        "bandwidth_alpha05_hz": [40, 8000],
-        "porous_depth_mm": 432,
-        "density_kgm3": 32
+      "porous": {
+        "panel_thickness_mm": 432, "density_kgm3": 32,
+        "flow_resistivity_kPa_s_m2": 9, "airgap_mm": 0,
+        "corner_mounted": true
       },
+      "bass": { "bandwidth_alpha05_hz": [40, 8000] },
       "mounting": "corner_3D",
       "test_standard": "ASTM C423",
       "test_lab": "Riverbank Acoustical Labs",
@@ -271,20 +286,21 @@
       "id": "gik-q7d",
       "name": "Q7d Diffuser",
       "manufacturer": "GIK Acoustics",
-      "kind": "diffuser_qrd_1d",
-      "category": "diffuser",
+      "category": "diffuser.qrd_1d",
       "description": "1D QRD-7, all-wood construction. Direct competitor to RPG QRD-734 at lower price tier.",
       "absorption": [0.10, 0.15, 0.20, 0.20, 0.20, 0.15, 0.10],
-      "scattering": [0.15, 0.25, 0.45, 0.80, 0.80, 0.65, 0.45],
+      "scattering_coefficient": [0.15, 0.25, 0.45, 0.80, 0.80, 0.65, 0.45],
       "diffusion_d":  [null, null, 0.50, 0.75, 0.70, 0.55, 0.35],
       "geometry": {
-        "shape": "panel_1d",
         "width_mm": 596, "height_mm": 596, "depth_mm": 178,
-        "max_well_depth_mm": 178, "period_width_mm": 119,
-        "well_count": 7, "prime_N": 7,
         "weight_kg_m2": 8
       },
-      "operating_range_hz": [475, 1400],
+      "diffuser": {
+        "prime_N": 7, "period_width_mm": 119,
+        "max_well_depth_mm": 178, "well_count": 7,
+        "fmin_hz": 475, "fmax_hz": 1400,
+        "sequence_type": "schroeder_qrd"
+      },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "manufacturer self-report",
       "test_lab": "GIK internal",
@@ -296,18 +312,22 @@
       "id": "gik-alpha-pro",
       "name": "Alpha Pro Series",
       "manufacturer": "GIK Acoustics",
-      "kind": "hybrid_diffsorber",
-      "category": "diffuser",
+      "category": "diffuser.hybrid",
       "description": "Hybrid panel + diffuser. Slatted wood face over fibreglass core — diffuses MF/HF, absorbs LF/MF.",
       "absorption": [0.40, 0.65, 0.85, 0.80, 0.65, 0.55, 0.45],
-      "scattering": [0.20, 0.30, 0.45, 0.55, 0.55, 0.45, 0.35],
+      "scattering_coefficient": [0.20, 0.30, 0.45, 0.55, 0.55, 0.45, 0.35],
       "diffusion_d":  [null, null, 0.40, 0.55, 0.55, 0.45, 0.30],
       "geometry": {
-        "shape": "panel_flat",
         "width_mm": 610, "height_mm": 1219, "depth_mm": 102,
         "weight_kg_m2": 6.5
       },
-      "operating_range_hz": [400, 3500],
+      "diffuser": {
+        "period_mm": 610, "depth_mm": 102,
+        "fmin_hz": 400, "fmax_hz": 3500,
+        "sequence_type": "slatted_hybrid",
+        "crossover_hz": 800
+      },
+      "porous": { "panel_thickness_mm": 102, "density_kgm3": 48 },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ASTM C423",
       "test_lab": "Riverbank Acoustical Labs",
@@ -319,15 +339,17 @@
       "id": "gik-monster",
       "name": "Monster Bass Trap",
       "manufacturer": "GIK Acoustics",
-      "kind": "absorber_panel",
-      "category": "absorber",
+      "category": "absorber.porous.panel",
       "description": "152 mm-thick mineral wool panel — deepest broadband panel in the GIK line. Mounted flat against wall, but excellent on-wall LF reach.",
       "absorption": [0.95, 1.30, 1.30, 1.20, 1.10, 1.05, 1.00],
-      "scattering": [0.10, 0.10, 0.15, 0.15, 0.20, 0.20, 0.20],
+      "scattering_coefficient": [0.10, 0.10, 0.15, 0.15, 0.20, 0.20, 0.20],
       "geometry": {
-        "shape": "panel_flat",
         "width_mm": 610, "height_mm": 1219, "depth_mm": 152,
         "weight_kg_m2": 8
+      },
+      "porous": {
+        "panel_thickness_mm": 152, "density_kgm3": 48,
+        "flow_resistivity_kPa_s_m2": 13, "airgap_mm": 0
       },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ASTM C423",
@@ -341,20 +363,21 @@
       "id": "vicoustic-multifuser-dc2",
       "name": "Multifuser DC2",
       "manufacturer": "Vicoustic",
-      "kind": "diffuser_skyline",
-      "category": "diffuser",
+      "category": "diffuser.qrd_2d",
       "description": "2D Schroeder-style skyline diffuser, prime-7 base sequence on a 595 × 595 mm panel.",
       "absorption": [0.10, 0.10, 0.15, 0.15, 0.15, 0.10, 0.10],
-      "scattering": [0.20, 0.30, 0.55, 0.85, 0.90, 0.85, 0.70],
+      "scattering_coefficient": [0.20, 0.30, 0.55, 0.85, 0.90, 0.85, 0.70],
       "diffusion_d":  [null, 0.30, 0.55, 0.80, 0.82, 0.75, 0.60],
       "geometry": {
-        "shape": "panel_2d",
         "width_mm": 595, "height_mm": 595, "depth_mm": 117,
-        "max_well_depth_mm": 117, "period_width_mm": 595,
-        "well_count": 49, "prime_N": 7,
         "weight_kg_m2": 7
       },
-      "operating_range_hz": [600, 3500],
+      "diffuser": {
+        "prime_N": 7, "period_width_mm": 595,
+        "max_well_depth_mm": 117, "well_count": 49,
+        "fmin_hz": 600, "fmax_hz": 3500,
+        "sequence_type": "schroeder_skyline_2d"
+      },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ISO 17497-2",
       "test_lab": "Vicoustic R&D",
@@ -366,20 +389,20 @@
       "id": "vicoustic-wavewood-ultra",
       "name": "Wavewood Ultra",
       "manufacturer": "Vicoustic",
-      "kind": "diffuser_qrd_1d",
-      "category": "diffuser",
-      "description": "1D wood-grooved diffuser; pseudo-QRD with non-prime sequence. Mid-HF performance only — claims of broadband diffusion below 600 Hz are exaggerated.",
+      "category": "diffuser.parametric",
+      "description": "1D wood-grooved diffuser; non-prime sequence makes it parametric rather than Schroeder. Mid-HF performance only — claims of broadband diffusion below 600 Hz are exaggerated.",
       "absorption": [0.10, 0.15, 0.20, 0.20, 0.20, 0.15, 0.10],
-      "scattering": [0.10, 0.20, 0.35, 0.65, 0.75, 0.60, 0.45],
+      "scattering_coefficient": [0.10, 0.20, 0.35, 0.65, 0.75, 0.60, 0.45],
       "diffusion_d":  [null, null, 0.30, 0.55, 0.65, 0.50, 0.30],
       "geometry": {
-        "shape": "panel_1d",
         "width_mm": 595, "height_mm": 595, "depth_mm": 50,
-        "max_well_depth_mm": 50, "period_width_mm": 119,
-        "well_count": 5, "prime_N": null,
         "weight_kg_m2": 4
       },
-      "operating_range_hz": [1700, 3500],
+      "diffuser": {
+        "period_mm": 119, "depth_mm": 50,
+        "fmin_hz": 1700, "fmax_hz": 3500,
+        "sequence_type": "non_prime_periodic"
+      },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "manufacturer self-report",
       "test_lab": "Vicoustic R&D",
@@ -391,22 +414,20 @@
       "id": "vicoustic-super-bass-extreme",
       "name": "Super Bass Extreme",
       "manufacturer": "Vicoustic",
-      "kind": "trap_membrane",
-      "category": "trap",
+      "category": "bass.membrane",
       "description": "Pressure-zone membrane trap tuned ~75 Hz. Tight Q — peak narrow-band absorption around f₀, falls off fast above 200 Hz. NRC is meaningless for this product.",
       "absorption": [0.92, 0.45, 0.20, 0.10, 0.05, 0.05, 0.05],
-      "scattering": [0.05, 0.10, 0.10, 0.15, 0.15, 0.15, 0.15],
+      "scattering_coefficient": [0.05, 0.10, 0.10, 0.15, 0.15, 0.15, 0.15],
       "geometry": {
-        "shape": "panel_membrane",
         "width_mm": 600, "height_mm": 600, "depth_mm": 100,
         "weight_kg_m2": 11
       },
-      "trap": {
-        "type": "membrane",
+      "bass": {
         "f0_hz": 75,
         "bandwidth_alpha05_hz": [55, 130],
-        "porous_depth_mm": 60,
-        "membrane_mass_kg_m2": 4
+        "membrane_mass_kg_m2": 4,
+        "cavity_depth_mm": 60,
+        "Q": 3.5
       },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ISO 354",
@@ -419,15 +440,17 @@
       "id": "vicoustic-flexi-a30",
       "name": "Flexi A30",
       "manufacturer": "Vicoustic",
-      "kind": "absorber_panel",
-      "category": "absorber",
+      "category": "absorber.porous.panel",
       "description": "Free-standing folding absorber, 3 panels × ~50 mm fibreglass core. Mobile broadband solution for project studios.",
       "absorption": [0.30, 0.55, 0.85, 1.00, 0.95, 0.90, 0.85],
-      "scattering": [0.10, 0.15, 0.15, 0.20, 0.20, 0.20, 0.20],
+      "scattering_coefficient": [0.10, 0.15, 0.15, 0.20, 0.20, 0.20, 0.20],
       "geometry": {
-        "shape": "panel_flat",
         "width_mm": 610, "height_mm": 1700, "depth_mm": 50,
         "weight_kg_m2": 4
+      },
+      "porous": {
+        "panel_thickness_mm": 50, "density_kgm3": 48,
+        "flow_resistivity_kPa_s_m2": 12, "airgap_mm": 0
       },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ISO 354",
@@ -441,17 +464,19 @@
       "id": "vicoustic-vicpattern-ultra",
       "name": "VicPattern Ultra (ceiling)",
       "manufacturer": "Vicoustic",
-      "kind": "ceiling_tile",
-      "category": "ceiling",
-      "description": "Suspended ceiling tile, mineral fibre core. Standard drop-ceiling treatment; performance depends heavily on plenum depth (test in E-400 or E-405 mounting).",
+      "category": "absorber.porous.panel",
+      "description": "Suspended ceiling tile, mineral fibre core. Performance scales with plenum depth — tested in E-400 / T-bar mounting.",
       "absorption": [0.65, 0.75, 0.85, 0.95, 0.95, 0.90, 0.85],
-      "scattering": [0.05, 0.10, 0.10, 0.15, 0.15, 0.15, 0.15],
+      "scattering_coefficient": [0.05, 0.10, 0.10, 0.15, 0.15, 0.15, 0.15],
       "geometry": {
-        "shape": "ceiling_tile",
         "width_mm": 600, "height_mm": 600, "depth_mm": 22,
         "weight_kg_m2": 3
       },
-      "mounting": "E-400",
+      "porous": {
+        "panel_thickness_mm": 22, "density_kgm3": 40,
+        "flow_resistivity_kPa_s_m2": 10, "airgap_mm": 400
+      },
+      "mounting": "ceiling_tbar_E400",
       "test_standard": "ISO 354",
       "test_lab": "Vicoustic R&D",
       "test_report_id": "datasheet 2021",
@@ -463,15 +488,17 @@
       "id": "primacoustic-broadway",
       "name": "Broadway Broadband Panel",
       "manufacturer": "Primacoustic",
-      "kind": "absorber_panel",
-      "category": "absorber",
+      "category": "absorber.porous.panel",
       "description": "Edge-stiffened glass-wool panel, 50 mm thick. Studio-grade broadband absorber.",
       "absorption": [0.30, 0.85, 1.15, 1.10, 1.05, 1.00, 0.95],
-      "scattering": [0.10, 0.10, 0.15, 0.15, 0.20, 0.20, 0.20],
+      "scattering_coefficient": [0.10, 0.10, 0.15, 0.15, 0.20, 0.20, 0.20],
       "geometry": {
-        "shape": "panel_flat",
         "width_mm": 610, "height_mm": 1219, "depth_mm": 50,
         "weight_kg_m2": 4.2
+      },
+      "porous": {
+        "panel_thickness_mm": 50, "density_kgm3": 64,
+        "flow_resistivity_kPa_s_m2": 15, "airgap_mm": 0
       },
       "mounting": "ASTM_C423_TypeA",
       "test_standard": "ASTM C423",

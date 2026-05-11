@@ -1,28 +1,38 @@
-// SurfaceLAB catalogue loader — merges the existing `data/materials.json`
-// (plain finishes: gypsum, brick, carpet, wood, etc.) with the new
-// `data/treatment-products.json` (engineered diffusers, absorbers,
-// bass traps from RPG / Auralex / GIK / Vicoustic / Primacoustic) into
-// one unified browseable list, grouped by Sofia's primary axis:
+// SurfaceLAB catalogue loader — merges plain finishes from
+// `data/materials.json` (inferred to surface.{hard,soft,wood}) with
+// engineered products from `data/treatment-products.json` (already
+// carry dotted-path categories per Dr. Chen's schema v2.0). Returns
+// a unified browseable list grouped by **first segment** of the
+// dotted path — that segment maps 1:1 to a left-rail icon in the
+// SurfaceLAB navigation.
 //
-//   1. Surfaces & finishes  — plain materials from materials.json
-//   2. Broadband absorbers  — fabric-wrapped panels, foam panels
-//   3. Bass traps           — corner traps, membrane traps, Helmholtz
-//   4. Diffusers            — 1D QRD, 2D skyline, polycylindrical, hybrids
-//   5. Ceiling systems      — drop tiles, suspended baffles, clouds
+// Sofia + Dr. Chen taxonomy (Oct 2026):
+//   surface.{hard, soft, wood}
+//   absorber.porous.{panel, foam, curtain}
+//   absorber.microperf
+//   bass.{porous, membrane, helmholtz, tuned_array}
+//   diffuser.{qrd_1d, qrd_2d, geometric, parametric, hybrid}
+//   opening.{door, window, vent}
+//   system.{partition, modular, active}
 //
-// Each entry is normalised to a single shape so the renderer doesn't
-// have to switch on data source. The `category` field drives grouping;
-// `kind` drives 3D-preview geometry + spec-card layout.
+// The `ceiling` rail icon is a VIEW, not a storage class — it filters
+// in any entry whose `mounting` starts with `ceiling_`. Decision made
+// to avoid fragmenting mounting metadata between identical products
+// mounted on a wall vs overhead.
 
 import { runTrustFlagAudit } from './trust-flags.js';
 
-const CATEGORY_ORDER = ['finish', 'absorber', 'trap', 'diffuser', 'ceiling'];
-const CATEGORY_LABELS = {
-  finish:   'Surfaces & finishes',
+// Rail navigation order — Sofia's "most-used first" arrangement.
+const RAIL_ORDER = ['absorber', 'bass', 'diffuser', 'ceiling', 'surface', 'opening', 'system'];
+
+const RAIL_LABELS = {
   absorber: 'Broadband absorbers',
-  trap:     'Bass traps',
+  bass:     'Bass control',
   diffuser: 'Diffusers',
-  ceiling:  'Ceiling systems',
+  ceiling:  'Ceiling (view)',
+  surface:  'Surfaces & finishes',
+  opening:  'Openings',
+  system:   'Systems',
 };
 
 let _cached = null;
@@ -35,25 +45,22 @@ export async function loadSurfaceCatalogue() {
     fetch('./data/treatment-products.json').then(r => r.json()),
   ]);
 
-  // Normalise plain materials to the unified shape. Default category:
-  // 'finish' for everything except entries whose existing id starts
-  // with 'bass-trap-' or 'broadband-' (those get re-categorised so
-  // the bass-trap-broadband-corner that's already in materials.json
-  // doesn't end up under "finishes").
+  // Plain materials → surface.{hard,soft,wood} or absorber.* /
+  // bass.* / etc. inferred from the id pattern. Existing entries
+  // with names like "bass-trap-broadband-corner" route correctly.
   const finishEntries = (materials.materials || []).map(m => {
-    const inferredCategory = inferCategoryFromId(m.id);
+    const category = inferCategoryFromId(m.id);
     return {
       id: m.id,
       name: m.name,
       manufacturer: m.manufacturer || 'Generic',
-      kind: m.kind || (inferredCategory === 'finish' ? 'finish' : 'absorber_legacy'),
-      category: inferredCategory,
+      category,
       description: m._source || '',
       absorption: m.absorption,
-      scattering: m.scattering,
+      scattering_coefficient: m.scattering,
       diffusion_d: null,
-      geometry: { shape: 'sample_panel', width_mm: 600, height_mm: 600, depth_mm: 10 },
-      mounting: m.mounting || 'ASTM_C423_TypeA',
+      geometry: { width_mm: 600, height_mm: 600, depth_mm: 10 },
+      mounting: m.mounting || 'reference',
       test_standard: m._source ? 'ISO 354 / Beranek' : 'reference',
       test_lab: m._test_lab || null,
       test_report_id: m._test_report_id || null,
@@ -67,25 +74,34 @@ export async function loadSurfaceCatalogue() {
 
   const productEntries = (products.products || []).map(p => ({
     ...p,
-    visual: p.visual || inferVisualFromKind(p.kind),
+    visual: p.visual || inferVisualFromCategory(p.category),
     _source: 'treatment-products',
   }));
 
   const all = [...finishEntries, ...productEntries].map(entry => ({
     ...entry,
+    railSegment: railSegmentFor(entry.category),
     trust_flags: runTrustFlagAudit(entry),
   }));
 
-  // Group by category, preserving CATEGORY_ORDER for stable section
-  // ordering. Within each section, sort by manufacturer then name.
-  const groups = CATEGORY_ORDER.map(cat => ({
-    id: cat,
-    label: CATEGORY_LABELS[cat],
-    entries: all.filter(e => e.category === cat).sort((a, b) => {
-      const mfr = (a.manufacturer || '').localeCompare(b.manufacturer || '');
-      return mfr !== 0 ? mfr : (a.name || '').localeCompare(b.name || '');
-    }),
-  })).filter(g => g.entries.length > 0);
+  // Build per-rail groups. `ceiling` is special — it aliases over
+  // entries from other rails whose mounting begins with `ceiling_`.
+  const groups = RAIL_ORDER.map(seg => {
+    let entries;
+    if (seg === 'ceiling') {
+      entries = all.filter(e => typeof e.mounting === 'string' && /^ceiling/i.test(e.mounting));
+    } else {
+      entries = all.filter(e => e.railSegment === seg);
+    }
+    return {
+      id: seg,
+      label: RAIL_LABELS[seg],
+      entries: entries.sort((a, b) => {
+        const mfr = (a.manufacturer || '').localeCompare(b.manufacturer || '');
+        return mfr !== 0 ? mfr : (a.name || '').localeCompare(b.name || '');
+      }),
+    };
+  });
 
   _cached = { all, groups };
   return _cached;
@@ -96,18 +112,31 @@ export function findCatalogueEntry(id) {
   return _cached.all.find(e => e.id === id) || null;
 }
 
-function inferCategoryFromId(id) {
-  if (/bass.?trap|membrane|helmholtz/i.test(id)) return 'trap';
-  if (/^broadband|absorber|panel.*absorb|fibreglass|rockwool/i.test(id)) return 'absorber';
-  if (/qrd|diffuser|skyline|diffractal|polycyl/i.test(id)) return 'diffuser';
-  if (/ceiling.?tile|suspended|baffle|cloud/i.test(id)) return 'ceiling';
-  return 'finish';
+export function railSegmentFor(category) {
+  if (!category || typeof category !== 'string') return 'surface';
+  return category.split('.')[0];
 }
 
-// Visual descriptor used by the 3D preview to colour the textured
-// sample panel for plain finishes. Conservative palette pulled from
-// real-world building-material samples; not photorealistic but
-// recognisable across a 7-category catalogue.
+// Map free-form material id strings to dotted-path categories. Used
+// only for the legacy materials.json entries; treatment-products.json
+// supplies category fields directly.
+function inferCategoryFromId(id) {
+  if (/membrane|helmholtz/i.test(id))            return 'bass.membrane';
+  if (/^bass.?trap|^broadband.?bass/i.test(id))  return 'bass.porous';
+  if (/^broadband|panel.?absorb|rockwool|fibreglass/i.test(id)) return 'absorber.porous.panel';
+  if (/foam.*(wedge|pyramid)/i.test(id))         return 'absorber.porous.foam';
+  if (/qrd|skyline|diffractal/i.test(id))        return 'diffuser.qrd_1d';
+  if (/polycyl/i.test(id))                       return 'diffuser.geometric';
+  if (/ceiling.?tile|suspended|baffle|cloud/i.test(id)) return 'absorber.porous.panel';
+  if (/curtain|drape/i.test(id))                 return 'absorber.porous.curtain';
+  if (/door/i.test(id))                          return 'opening.door';
+  if (/window|glazing/i.test(id))                return 'opening.window';
+  if (/carpet|vinyl/i.test(id))                  return 'surface.soft';
+  if (/wood|timber|veneer|panel.?wood/i.test(id)) return 'surface.wood';
+  // Default: hard surface (concrete, gypsum, brick, plaster, glass, paint, metal, etc.)
+  return 'surface.hard';
+}
+
 function inferVisualFromId(id) {
   const v = (color, roughness = 0.85, metalness = 0.0, pattern = null) => ({ color, roughness, metalness, pattern });
   if (/concrete/.test(id))        return v('#bdb6a8', 0.92);
@@ -122,20 +151,14 @@ function inferVisualFromId(id) {
   return v('#9a9590', 0.85);
 }
 
-function inferVisualFromKind(kind) {
-  // Treatment products get geometry rather than texture, so the visual
-  // is mostly fallback colour for the procedural mesh.
-  switch (kind) {
-    case 'diffuser_qrd_1d':
-    case 'diffuser_skyline':
-    case 'diffuser_poly':
-    case 'hybrid_diffsorber':   return { color: '#b69b6e', roughness: 0.65, metalness: 0.05 };
-    case 'absorber_foam_wedge':
-    case 'absorber_foam_pyramid': return { color: '#7a7570', roughness: 0.95, metalness: 0.0 };
-    case 'absorber_panel':      return { color: '#3d3a36', roughness: 0.92, metalness: 0.0, pattern: 'fabric' };
-    case 'trap_corner_porous':  return { color: '#3d3a36', roughness: 0.95, metalness: 0.0, pattern: 'fabric' };
-    case 'trap_membrane':       return { color: '#5a5550', roughness: 0.40, metalness: 0.10 };
-    case 'ceiling_tile':        return { color: '#e8e6df', roughness: 0.92, metalness: 0.0 };
-    default:                    return { color: '#888', roughness: 0.85 };
+function inferVisualFromCategory(category) {
+  const seg = railSegmentFor(category);
+  switch (seg) {
+    case 'diffuser':    return { color: '#b69b6e', roughness: 0.65, metalness: 0.05 };
+    case 'absorber':    return { color: '#3d3a36', roughness: 0.92, metalness: 0.0, pattern: 'fabric' };
+    case 'bass':        return { color: '#3d3a36', roughness: 0.95, metalness: 0.0, pattern: 'fabric' };
+    case 'opening':     return { color: '#7a6a5a', roughness: 0.55, metalness: 0.1, pattern: 'wood' };
+    case 'system':      return { color: '#9aa0a8', roughness: 0.6, metalness: 0.3 };
+    default:            return { color: '#9a9590', roughness: 0.85 };
   }
 }

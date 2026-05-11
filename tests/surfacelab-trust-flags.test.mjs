@@ -198,5 +198,91 @@ function hasFlag(flags, id) {
   assert(Array.isArray(flags), 'partial entry should return an array, not throw');
 }
 
+// ---- Rule 8: mandatory fields per category (Dr. Chen §3) --------------
+{
+  // bass.membrane needs f0_hz + bandwidth_alpha05_hz + membrane_mass_kg_m2 + cavity_depth_mm
+  const entry = {
+    id: 'bare-membrane',
+    category: 'bass.membrane',
+    absorption: [0.9, 0.5, 0.2, 0.1, 0.05, 0.05, 0.05],
+    // Missing the bass.* sub-object entirely
+  };
+  const flags = runTrustFlagAudit(entry);
+  assert(hasFlag(flags, 'mandatory_fields_missing'),
+    'bass.membrane without f0_hz / bandwidth / membrane_mass / cavity_depth should flag mandatory_fields_missing');
+}
+{
+  // Fully-spec'd bass.membrane should NOT flag rule 8
+  const entry = {
+    id: 'full-membrane',
+    category: 'bass.membrane',
+    absorption: [0.9, 0.5, 0.2, 0.1, 0.05, 0.05, 0.05],
+    bass: {
+      f0_hz: 75,
+      bandwidth_alpha05_hz: [55, 130],
+      membrane_mass_kg_m2: 4,
+      cavity_depth_mm: 60,
+      Q: 3.5,
+    },
+  };
+  const flags = runTrustFlagAudit(entry);
+  assert(!hasFlag(flags, 'mandatory_fields_missing'),
+    'fully-spec\'d bass.membrane should NOT flag mandatory_fields_missing');
+}
+{
+  // diffuser.qrd_1d without prime_N and operating range
+  const entry = {
+    id: 'bare-qrd',
+    category: 'diffuser.qrd_1d',
+    absorption: [0.1, 0.15, 0.2, 0.25, 0.2, 0.15, 0.1],
+    scattering_coefficient: [0.15, 0.25, 0.5, 0.85, 0.85, 0.7, 0.5],
+    diffusion_d: [null, null, 0.55, 0.8, 0.75, 0.6, 0.4],
+    // No diffuser.* sub-object
+  };
+  const flags = runTrustFlagAudit(entry);
+  assert(hasFlag(flags, 'mandatory_fields_missing'),
+    'diffuser.qrd_1d without prime_N / period_width / max_well_depth / fmin / fmax should flag');
+}
+
+// ---- Rule 9: diffuser without scattering coefficient ------------------
+{
+  // Diffuser with NO scattering_coefficient data — high severity
+  const entry = {
+    id: 'fake-diffuser-no-s',
+    category: 'diffuser.qrd_1d',
+    absorption: [0.1, 0.15, 0.2, 0.25, 0.2, 0.15, 0.1],
+    diffusion_d: [null, null, 0.55, 0.8, 0.75, 0.6, 0.4],
+    // No scattering_coefficient
+  };
+  const flags = runTrustFlagAudit(entry);
+  assert(hasFlag(flags, 'diffuser_no_scattering'),
+    'diffuser without scattering_coefficient[] should flag diffuser_no_scattering');
+}
+{
+  // Diffuser WITH scattering data (5 octaves) should not flag
+  const entry = {
+    id: 'real-diffuser-with-s',
+    category: 'diffuser.qrd_1d',
+    absorption: [0.1, 0.15, 0.2, 0.25, 0.2, 0.15, 0.1],
+    scattering_coefficient: [0.15, 0.25, 0.5, 0.85, 0.85, 0.7, 0.5],
+    diffusion_d: [null, null, 0.55, 0.8, 0.75, 0.6, 0.4],
+  };
+  const flags = runTrustFlagAudit(entry);
+  assert(!hasFlag(flags, 'diffuser_no_scattering'),
+    'diffuser with full scattering_coefficient[7] should NOT flag diffuser_no_scattering');
+}
+{
+  // Non-diffuser category should never trigger rule 9
+  const entry = {
+    id: 'absorber-no-s',
+    category: 'absorber.porous.panel',
+    absorption: [0.3, 0.6, 0.9, 0.95, 0.9, 0.85, 0.8],
+    // no scattering_coefficient
+  };
+  const flags = runTrustFlagAudit(entry);
+  assert(!hasFlag(flags, 'diffuser_no_scattering'),
+    'absorber.porous.panel without scattering should NOT flag diffuser_no_scattering');
+}
+
 if (failed === 0) console.log('\nAll SurfaceLAB trust-flag tests passed.');
 else { console.log(`\n${failed} test(s) FAILED.`); process.exit(1); }

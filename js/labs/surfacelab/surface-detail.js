@@ -55,90 +55,150 @@ export async function mountSurfaceView() {
     </div>
   `;
 
-  // Load catalogue and render groups into #panel-library.
+  // Load catalogue and render each rail panel independently.
   state.catalogue = await loadSurfaceCatalogue();
-  renderCatalogueList();
-  renderFilterPanel();
+  renderAllRailPanels();
   renderTitleBar();        // initial empty state
   renderRightRailPanels();
 
   // Auto-select the first entry so the workbench isn't empty on first
-  // visit. The user can pick anything else from the catalogue rail.
+  // visit. The user can pick anything else from the rail panels.
   if (!state.selectedId && state.catalogue.all.length > 0) {
     selectSurface(state.catalogue.all[0].id);
   }
 }
 
 // ---------------------------------------------------------------------
-// Catalogue (left rail, #panel-library)
+// Per-rail catalogue panels — one panel per rail icon, each with its
+// own in-panel filter (search + manufacturer chips) so the user can
+// narrow within a category without leaving it.
 // ---------------------------------------------------------------------
 
-function visibleEntries(entries) {
-  const f = state.filter;
+const SEGMENT_TO_PANEL = {
+  absorber: 'panel-absorbers',
+  bass:     'panel-bass',
+  diffuser: 'panel-diffusers',
+  ceiling:  'panel-ceiling',
+  surface:  'panel-surfaces',
+  opening:  'panel-openings',
+  system:   'panel-systems',
+};
+
+function panelFilterState(segment) {
+  if (!state.panelFilters) state.panelFilters = {};
+  if (!state.panelFilters[segment]) state.panelFilters[segment] = { search: '', manufacturer: null };
+  return state.panelFilters[segment];
+}
+
+function visibleEntriesForPanel(group) {
+  const f = panelFilterState(group.id);
   const q = (f.search || '').trim().toLowerCase();
-  return entries.filter(e => {
+  return group.entries.filter(e => {
     if (f.manufacturer && e.manufacturer !== f.manufacturer) return false;
-    if (f.kind && e.kind !== f.kind) return false;
-    if (f.mounting && e.mounting !== f.mounting) return false;
     if (q) {
-      const hay = `${e.name} ${e.manufacturer} ${e.kind}`.toLowerCase();
+      const hay = `${e.name} ${e.manufacturer} ${e.category}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
   });
 }
 
-function renderCatalogueList() {
-  const panel = $('panel-library');
-  if (!panel || !state.catalogue) return;
+function renderAllRailPanels() {
+  if (!state.catalogue) return;
+  for (const group of state.catalogue.groups) {
+    renderRailPanel(group);
+  }
+}
 
-  const groupsHtml = state.catalogue.groups.map(group => {
-    const filtered = visibleEntries(group.entries);
-    if (filtered.length === 0) return '';
-    return `
-      <details class="surface-cat-group" ${group.id === 'finish' ? 'open' : ''}>
-        <summary><span class="surface-cat-label">${group.label}</span><span class="surface-cat-count">${filtered.length}</span></summary>
-        <div class="surface-cat-list">
-          ${filtered.map(e => renderCatalogueRow(e)).join('')}
-        </div>
-      </details>
-    `;
-  }).join('');
+function renderRailPanel(group) {
+  const panel = $(SEGMENT_TO_PANEL[group.id]);
+  if (!panel) return;
+
+  const visible = visibleEntriesForPanel(group);
+  const manufacturers = [...new Set(group.entries.map(e => e.manufacturer).filter(Boolean))].sort();
+  const f = panelFilterState(group.id);
+
+  // Ceiling is a VIEW alias over other categories — show a note so the
+  // user understands these products are stored under absorber.* / system.*
+  const ceilingNote = group.id === 'ceiling'
+    ? `<p class="surface-note">Ceiling is a view — entries here are absorbers and systems mounted overhead, filtered by mounting.</p>`
+    : '';
+
+  // Empty-state placeholder for branches without seed products yet
+  // (Openings, Systems day-one). Keeps the rail icon visible so the
+  // taxonomy is discoverable.
+  const emptyState = group.entries.length === 0
+    ? `<div class="surface-empty">
+         <p>No ${group.label.toLowerCase()} in the catalogue yet.</p>
+         <p class="surface-empty-sub">Future products in this branch will appear here as they're added.</p>
+       </div>`
+    : '';
+
+  const mfrChips = manufacturers.length > 1 ? `
+    <div class="surface-filter-chips">
+      ${manufacturers.map(m => `
+        <button type="button" class="surface-filter-chip${f.manufacturer === m ? ' active' : ''}"
+                data-segment="${group.id}" data-mfr="${escapeAttr(m)}">${escapeHtml(m)}</button>
+      `).join('')}
+    </div>
+  ` : '';
+
+  const rowsHtml = visible.map(e => renderCatalogueRow(e)).join('');
+  const noMatchEmpty = group.entries.length > 0 && visible.length === 0
+    ? `<div class="phase-placeholder">No products match the current filter.</div>`
+    : '';
 
   panel.innerHTML = `
-    <h2>Library</h2>
-    <div class="surface-search-wrap">
-      <input id="surface-search" type="search" class="surface-search-input"
-             placeholder="Search by name / manufacturer / kind…"
-             value="${escapeAttr(state.filter.search)}" />
-    </div>
-    ${groupsHtml || '<div class="phase-placeholder">No surfaces match the current filter.</div>'}
+    <h2>${escapeHtml(group.label)} <span class="surface-panel-count">${group.entries.length}</span></h2>
+    ${ceilingNote}
+    ${group.entries.length > 1 ? `
+      <div class="surface-search-wrap">
+        <input class="surface-search-input" type="search"
+               data-segment="${group.id}"
+               placeholder="Search ${escapeAttr(group.label.toLowerCase())}…"
+               value="${escapeAttr(f.search)}" />
+      </div>
+      ${mfrChips}
+    ` : ''}
+    ${emptyState}
+    ${noMatchEmpty}
+    <div class="surface-cat-list">${rowsHtml}</div>
   `;
 
+  // Wire row clicks
   panel.querySelectorAll('.surface-cat-row').forEach(btn => {
     btn.addEventListener('click', () => selectSurface(btn.dataset.id));
   });
-  const searchEl = panel.querySelector('#surface-search');
+  // Wire search input
+  const searchEl = panel.querySelector('.surface-search-input');
   if (searchEl) {
     searchEl.addEventListener('input', (e) => {
-      state.filter.search = e.target.value;
-      renderCatalogueList();
-      // Restore focus + caret to the input after the re-render.
-      const next = $('panel-library')?.querySelector('#surface-search');
-      if (next) {
-        next.focus();
-        const len = next.value.length;
-        next.setSelectionRange(len, len);
-      }
+      const seg = e.target.dataset.segment;
+      panelFilterState(seg).search = e.target.value;
+      renderRailPanel(group);
+      // Restore focus + caret to the same input across re-render
+      const next = $(SEGMENT_TO_PANEL[seg])?.querySelector('.surface-search-input');
+      if (next) { next.focus(); const len = next.value.length; next.setSelectionRange(len, len); }
     });
   }
+  // Wire manufacturer chips
+  panel.querySelectorAll('.surface-filter-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const seg = btn.dataset.segment;
+      const mfr = btn.dataset.mfr;
+      const fs = panelFilterState(seg);
+      fs.manufacturer = (fs.manufacturer === mfr) ? null : mfr;
+      renderRailPanel(group);
+    });
+  });
 }
 
 function renderCatalogueRow(entry) {
   const headline = formatHeadlineNumber(entry);
   const flagCount = (entry.trust_flags || []).length;
+  const hasHighFlag = (entry.trust_flags || []).some(f => f.severity === 'high');
   const flagChip = flagCount > 0
-    ? `<span class="surface-cat-flag" title="${flagCount} caution flag${flagCount === 1 ? '' : 's'}">⚠</span>`
+    ? `<span class="surface-cat-flag${hasHighFlag ? ' surface-cat-flag-high' : ''}" title="${flagCount} caution flag${flagCount === 1 ? '' : 's'}">⚠</span>`
     : '';
   const isActive = state.selectedId === entry.id;
   return `
@@ -149,58 +209,6 @@ function renderCatalogueRow(entry) {
       ${flagChip}
     </button>
   `;
-}
-
-// ---------------------------------------------------------------------
-// Filter panel — chip cloud across manufacturer / kind / mounting
-// ---------------------------------------------------------------------
-
-function renderFilterPanel() {
-  const panel = $('panel-filter');
-  if (!panel || !state.catalogue) return;
-
-  const all = state.catalogue.all;
-  const manufacturers = [...new Set(all.map(e => e.manufacturer).filter(Boolean))].sort();
-  const kinds = [...new Set(all.map(e => e.kind).filter(Boolean))].sort();
-  const mountings = [...new Set(all.map(e => e.mounting).filter(Boolean))].sort();
-
-  const f = state.filter;
-  const chipGroup = (title, values, key, humanise = (x) => x) => `
-    <div class="surface-filter-group">
-      <h3>${title}</h3>
-      <div class="surface-filter-chips">
-        ${values.map(v => `
-          <button type="button" class="surface-filter-chip${f[key] === v ? ' active' : ''}" data-key="${key}" data-value="${escapeAttr(v)}">${escapeHtml(humanise(v))}</button>
-        `).join('')}
-      </div>
-    </div>
-  `;
-
-  panel.innerHTML = `
-    <h2>Filter</h2>
-    <p class="surface-note">Click a chip to narrow the library. Click again to clear that axis.</p>
-    ${chipGroup('Manufacturer', manufacturers, 'manufacturer')}
-    ${chipGroup('Kind', kinds, 'kind', humaniseKind)}
-    ${chipGroup('Mounting', mountings, 'mounting', humanMounting)}
-    <div class="surface-filter-actions">
-      <button type="button" id="surface-filter-clear" class="surface-filter-clear">Clear all filters</button>
-    </div>
-  `;
-
-  panel.querySelectorAll('.surface-filter-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const k = btn.dataset.key;
-      const v = btn.dataset.value;
-      state.filter[k] = (state.filter[k] === v) ? null : v;
-      renderFilterPanel();
-      renderCatalogueList();
-    });
-  });
-  panel.querySelector('#surface-filter-clear')?.addEventListener('click', () => {
-    state.filter = { manufacturer: null, kind: null, mounting: null, search: '' };
-    renderFilterPanel();
-    renderCatalogueList();
-  });
 }
 
 // ---------------------------------------------------------------------

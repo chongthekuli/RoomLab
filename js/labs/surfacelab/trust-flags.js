@@ -145,4 +145,105 @@ const RULES = [
     }
     return null;
   },
+
+  // 8. Mandatory fields per category per Dr. Chen §3. Catches catalogue
+  //    entries that don't carry the per-mechanism fields needed to be
+  //    physically defensible (e.g. a bass.membrane without f0_hz, or a
+  //    diffuser.qrd_1d without prime_N + max_well_depth_mm).
+  //
+  //    Returns one flag listing every missing field — one row in the
+  //    spec card rather than seven separate chips for the same entry.
+  function mandatoryFieldsMissing(entry) {
+    const cat = entry.category;
+    if (typeof cat !== 'string') return null;
+    const requirements = MANDATORY_FIELDS[cat] || MANDATORY_FIELDS_BY_SEGMENT[cat.split('.')[0]] || null;
+    if (!requirements) return null;
+    const missing = [];
+    for (const path of requirements) {
+      if (!hasNonNullPath(entry, path)) missing.push(path);
+    }
+    if (missing.length === 0) return null;
+    return {
+      id: 'mandatory_fields_missing',
+      severity: 'high',
+      message: `Category ${cat} requires ${requirements.join(', ')}. Missing: ${missing.join(', ')}.`,
+    };
+  },
+
+  // 9. Diffuser without scattering coefficient data. A diffuser entry
+  //    that cannot show s(f) per ISO 17497-1 is asking the reviewer to
+  //    trust a manufacturer's marketing copy — flag as high severity
+  //    because diffusion is the entire product claim.
+  function diffuserWithoutScattering(entry) {
+    const cat = entry.category;
+    if (typeof cat !== 'string' || !cat.startsWith('diffuser.')) return null;
+    const s = entry.scattering_coefficient;
+    const validCount = Array.isArray(s) ? s.filter(v => Number.isFinite(v)).length : 0;
+    if (validCount < 3) {
+      return {
+        id: 'diffuser_no_scattering',
+        severity: 'high',
+        message: `Diffuser claim unverified — scattering_coefficient[] has ${validCount} octave value${validCount === 1 ? '' : 's'} (ISO 17497-1 requires multi-band testing for a credible diffusion claim).`,
+      };
+    }
+    return null;
+  },
 ];
+
+// Mandatory fields per category. Dotted-path keys allow nested lookups
+// like `bass.f0_hz` (entry.bass.f0_hz). Most exact matches; fall back
+// to MANDATORY_FIELDS_BY_SEGMENT for the first segment if no exact key.
+const MANDATORY_FIELDS = {
+  'surface.hard': ['geometry.width_mm', 'mounting'],
+  'surface.soft': ['geometry.width_mm', 'mounting'],
+  'surface.wood': ['geometry.width_mm', 'mounting'],
+
+  'absorber.porous.panel':   ['porous.panel_thickness_mm', 'porous.density_kgm3', 'mounting'],
+  'absorber.porous.foam':    ['porous.panel_thickness_mm', 'porous.cell_structure', 'mounting'],
+  'absorber.porous.curtain': ['porous.areal_density_kg_m2', 'porous.distance_from_wall_mm'],
+  'absorber.microperf':      ['porous.hole_diameter_mm', 'porous.perforation_ratio_pct', 'porous.panel_thickness_mm', 'porous.cavity_depth_mm'],
+
+  'bass.porous':       ['porous.panel_thickness_mm', 'porous.corner_mounted', 'bass.bandwidth_alpha05_hz'],
+  'bass.membrane':     ['bass.f0_hz', 'bass.bandwidth_alpha05_hz', 'bass.membrane_mass_kg_m2', 'bass.cavity_depth_mm'],
+  'bass.helmholtz':    ['bass.f0_hz', 'bass.neck_area_mm2', 'bass.neck_length_mm', 'bass.cavity_volume_L'],
+  'bass.tuned_array':  ['bass.f0_hz', 'bass.bandwidth_alpha05_hz'],
+
+  'diffuser.qrd_1d':     ['diffuser.prime_N', 'diffuser.period_width_mm', 'diffuser.max_well_depth_mm', 'diffuser.fmin_hz', 'diffuser.fmax_hz'],
+  'diffuser.qrd_2d':     ['diffuser.prime_N', 'diffuser.period_width_mm', 'diffuser.max_well_depth_mm', 'diffuser.fmin_hz', 'diffuser.fmax_hz'],
+  'diffuser.geometric':  ['diffuser.period_mm', 'diffuser.depth_mm', 'diffuser.fmin_hz', 'diffuser.fmax_hz', 'diffuser.sequence_type'],
+  'diffuser.parametric': ['diffuser.period_mm', 'diffuser.depth_mm', 'diffuser.fmin_hz', 'diffuser.fmax_hz', 'diffuser.sequence_type'],
+  'diffuser.hybrid':     ['diffuser.fmin_hz', 'diffuser.fmax_hz', 'diffuser.crossover_hz'],
+
+  'opening.door':   ['opening.Rw_dB', 'opening.leaf_mass_kg_m2', 'opening.seal'],
+  'opening.window': ['opening.Rw_dB', 'opening.glazing_mm'],
+  'opening.vent':   ['opening.Rw_dB', 'opening.aperture_mm2'],
+
+  'system.partition': ['system.Rw_dB', 'system.construction_layers'],
+  'system.modular':   ['system.module_dimensions_mm'],
+  'system.active':    ['system.processor_model'],
+};
+
+// Per first-segment fallback so adding a new sub-kind doesn't need a
+// schema edit on day one — at least the segment-level required fields
+// still get enforced.
+const MANDATORY_FIELDS_BY_SEGMENT = {
+  // Already covered exhaustively by MANDATORY_FIELDS above; keep this
+  // map so future additions (e.g. new diffuser sub-kinds) inherit a
+  // sensible baseline.
+};
+
+// Resolve a dotted path against an object. Returns the leaf value, or
+// undefined if any intermediate is missing. Treats empty strings and
+// `null` as missing; preserves `false` and `0` (legitimate values).
+function hasNonNullPath(obj, path) {
+  const parts = path.split('.');
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return false;
+    cur = cur[p];
+  }
+  if (cur == null) return false;
+  if (cur === '') return false;
+  if (Array.isArray(cur) && cur.length === 0) return false;
+  return true;
+}

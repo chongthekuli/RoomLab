@@ -515,9 +515,16 @@ html[data-rail-left="rackbrowser"]   #panel-rackbrowser,
 html[data-rail-left="devicelibrary"] #panel-devicelibrary,
 html[data-rail-right="signalflow"]   #panel-signalflow,
 html[data-rail-right="bom"]          #panel-bom,
-/* SurfaceLAB (Lab #4) — `library` and `filter` and `specs` selectors
-   reuse rules above by panel id; the three new right-rail panels
-   register here. */
+/* SurfaceLAB (Lab #4) — seven left-rail icons by mechanism, four
+   right-rail panels (specs / absorption / polar diffusion / construction).
+   `specs` reuses the SpeakerLAB selector. */
+html[data-rail-left="absorbers"]        #panel-absorbers,
+html[data-rail-left="bass"]             #panel-bass,
+html[data-rail-left="diffusers"]        #panel-diffusers,
+html[data-rail-left="ceiling"]          #panel-ceiling,
+html[data-rail-left="surfaces"]         #panel-surfaces,
+html[data-rail-left="openings"]         #panel-openings,
+html[data-rail-left="systems"]          #panel-systems,
 html[data-rail-right="absorption"]      #panel-absorption,
 html[data-rail-right="polardiffusion"]  #panel-polardiffusion,
 html[data-rail-right="construction"]    #panel-construction {
@@ -4056,41 +4063,31 @@ section h3 {
    SurfaceLAB — Lab #4
    ==================================================================== */
 
-/* Catalogue rail (left) — accordion of grouped surfaces. Each <details>
-   is a category section; each row is a clickable button. */
-#panel-library .surface-cat-group {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  margin-bottom: 4px;
-}
-#panel-library .surface-cat-group:last-child { border-bottom: none; }
-#panel-library .surface-cat-group > summary {
-  cursor: pointer;
-  padding: 8px 4px;
-  font-size: 0.74rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--fg);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  user-select: none;
-  list-style: none;
-}
-#panel-library .surface-cat-group > summary::-webkit-details-marker { display: none; }
-#panel-library .surface-cat-group > summary::before {
-  content: '▸';
-  display: inline-block;
-  width: 10px;
-  font-size: 0.7rem;
-  color: var(--muted);
-  transition: transform 120ms ease;
-  margin-right: 4px;
-}
-#panel-library .surface-cat-group[open] > summary::before { transform: rotate(90deg); }
-.surface-cat-count {
+/* Per-rail catalogue list — one list per panel (seven panels, one per
+   mechanism). Each rail icon opens a separate panel; previously a
+   single Library panel held a 5-deep accordion which was too long to
+   scroll. */
+.surface-panel-count {
   font-size: 0.66rem;
   color: var(--muted);
   font-weight: 400;
+  margin-left: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+.surface-empty {
+  padding: 16px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.surface-empty p { margin: 0; }
+.surface-empty-sub {
+  font-size: 0.7rem;
+  font-style: italic;
+  margin-top: 6px !important;
+  color: var(--muted);
 }
 .surface-cat-list {
   display: flex;
@@ -4144,6 +4141,9 @@ section h3 {
   color: #ffaa55;
   font-size: 0.85rem;
   grid-column: 3;
+}
+.surface-cat-flag-high {
+  color: #ff7070;
 }
 
 /* Title bar headline figure — appended to the right of the title block
