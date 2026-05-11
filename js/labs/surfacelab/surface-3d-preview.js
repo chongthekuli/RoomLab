@@ -157,30 +157,60 @@ function animate() {
 }
 
 // ---------------------------------------------------------------------
-// Sample builder — picks the right geometry family per entry kind
+// Sample builder — picks the right geometry family per entry category.
+//
+// Schema v2 (Oct 2026) uses dotted-path categories like
+// "absorber.porous.foam" / "diffuser.qrd_1d". Some categories collapse
+// physically-distinct shapes (wedge vs pyramid foam; cylinder vs
+// triangle corner trap; polycylindrical vs faceted geometric diffuser),
+// so we sub-discriminate by entry id pattern when the category alone
+// isn't specific enough.
 // ---------------------------------------------------------------------
 
 function buildSampleGroup(entry) {
-  const kind = entry.kind || '';
   const visual = entry.visual || { color: '#888', roughness: 0.85, metalness: 0 };
 
+  // Plain finishes from materials.json always render as textured panels.
   if (entry._source === 'materials' || entry.geometry?.shape === 'sample_panel') {
     return buildTexturedPanel(visual);
   }
 
-  switch (kind) {
-    case 'diffuser_qrd_1d':     return buildQRDPanel(entry, false, visual);
-    case 'diffuser_skyline':    return buildQRDPanel(entry, true, visual);
-    case 'diffuser_poly':       return buildPolycylPanel(entry, visual);
-    case 'hybrid_diffsorber':   return buildBADPanel(entry, visual);
-    case 'absorber_foam_wedge':   return buildFoamWedgePanel(entry, visual);
-    case 'absorber_foam_pyramid': return buildFoamPyramidPanel(entry, visual);
-    case 'absorber_panel':      return buildFabricPanel(entry, visual);
-    case 'trap_corner_porous':  return buildCornerTrap(entry, visual);
-    case 'trap_membrane':       return buildMembraneTrap(entry, visual);
-    case 'ceiling_tile':        return buildCeilingTile(entry, visual);
-    default:                    return buildTexturedPanel(visual);
+  const cat = entry.category || '';
+  const id = (entry.id || '').toLowerCase();
+
+  if (cat.startsWith('surface.'))          return buildTexturedPanel(visual);
+
+  if (cat === 'absorber.porous.foam') {
+    if (/pyramid/.test(id))                return buildFoamPyramidPanel(entry, visual);
+    return buildFoamWedgePanel(entry, visual);
   }
+  if (cat === 'absorber.porous.panel')     return buildFabricPanel(entry, visual);
+  if (cat === 'absorber.porous.curtain')   return buildFabricPanel(entry, visual);   // stand-in
+  if (cat === 'absorber.microperf')        return buildFabricPanel(entry, visual);   // stand-in (perf mask later)
+
+  if (cat === 'bass.porous')               return buildCornerTrap(entry, visual);
+  if (cat === 'bass.membrane')             return buildMembraneTrap(entry, visual);
+  if (cat === 'bass.helmholtz')            return buildMembraneTrap(entry, visual);  // similar cabinet look
+  if (cat === 'bass.tuned_array')          return buildMembraneTrap(entry, visual);
+
+  if (cat === 'diffuser.qrd_1d')           return buildQRDPanel(entry, false, visual);
+  if (cat === 'diffuser.qrd_2d')           return buildQRDPanel(entry, true,  visual);
+  if (cat === 'diffuser.parametric')       return buildQRDPanel(entry, false, visual);   // non-prime well sequence
+  if (cat === 'diffuser.hybrid')           return buildBADPanel(entry, visual);
+  if (cat === 'diffuser.geometric') {
+    // Polycylindrical (curved) vs faceted-pyramidal (T-Fusor-style)
+    if (/t-fusor|fusor|faceted|pyramid/.test(id)) return buildFoamPyramidPanel(entry, visual);
+    return buildPolycylPanel(entry, visual);
+  }
+
+  // Future branches — placeholder panels until the catalogue ships
+  // doors / partitions / etc. Returning a textured panel keeps the
+  // viewport populated rather than empty for these empty-day-one
+  // categories.
+  if (cat.startsWith('opening.'))          return buildTexturedPanel(visual);
+  if (cat.startsWith('system.'))           return buildTexturedPanel(visual);
+
+  return buildTexturedPanel(visual);
 }
 
 // ---------------------------------------------------------------------
