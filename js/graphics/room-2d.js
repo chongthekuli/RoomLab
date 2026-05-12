@@ -1210,10 +1210,15 @@ function onSourcePointerDown(e) {
 
   const group = findSourceGroupFromEvent(e);
   if (!group) {
-    // Click on empty 2D area dismisses any open context menu but does
-    // NOT clear the selection (the panel needs the selection sticky
-    // for the user to edit fields without losing focus context).
+    // Click on empty 2D area (heatmap, room background, walls) —
+    // close any open context menu AND clear the source selection.
+    // The matching panel card un-highlights via the same
+    // source:selected event so the UI stays consistent.
     closeSourceContextMenu();
+    if (state.selectedSourceIdx != null) {
+      state.selectedSourceIdx = null;
+      emit('source:selected', { idx: null });
+    }
     return;
   }
   e.preventDefault();
