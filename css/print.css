@@ -845,6 +845,41 @@ body.is-pdf-export .vp-tabs {
     text-align: justify;
     hyphens: auto;
   }
+  #print-report .pr-accept-operator {
+    font-weight: 700;
+    color: var(--ink);
+  }
+  /* Signature grid — operator / IP / time / browser / timezone laid
+     out as 3 columns of label+value pairs. Sits above the prose so a
+     reviewer's eye lands on the captured signature first. */
+  #print-report .pr-accept-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2pt 8pt;
+    margin: 2pt 0 3pt 0;
+    padding: 2pt 4pt;
+    background: var(--paper-2);
+    border-radius: 1.5pt;
+    break-inside: avoid;
+  }
+  #print-report .pr-accept-kv {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+  }
+  #print-report .pr-accept-k {
+    font-size: 5pt;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  #print-report .pr-accept-v {
+    font-size: 6.5pt;
+    font-weight: 600;
+    color: var(--ink);
+    word-break: break-word;
+  }
   #print-report .pr-accept-ts {
     font-size: 6.4pt;
     padding: 0.2pt 2pt;
