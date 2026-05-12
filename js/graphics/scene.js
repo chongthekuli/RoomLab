@@ -397,6 +397,20 @@ export async function mount3DViewport({ materials }) {
   document.addEventListener('viewport:tab-changed', e => {
     if (e.detail.view === '3d') requestAnimationFrame(onResize);
   });
+  // Side-panel open / close (and any other layout change) shifts the
+  // container's clientWidth without firing window resize. Without a
+  // matching renderer.setSize the canvas drawing buffer stays at the
+  // old size and gets stretched onto the new visual rect — cursor →
+  // NDC math drifts off the visible speaker by the stretch ratio,
+  // producing the "hover highlights the wrong speaker" symptom.
+  //
+  // ResizeObserver fires whenever the container's content rect
+  // changes for ANY reason, so the renderer + camera aspect always
+  // match what's actually on screen.
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => requestAnimationFrame(onResize));
+    ro.observe(container);
+  }
 }
 
 function initScene() {
