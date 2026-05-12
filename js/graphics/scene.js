@@ -17,6 +17,7 @@ import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics
 import { roomPlanVertices, domeGeometry, isInsideRoom3D, normalizeWallSlot } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
+import { openPanel } from '../ui/rail-system.js';
 import { loadCharacterRig } from './character-loader.js';
 import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode } from '../audio/audition.js';
 import { showWalkTouchHUD, hideWalkTouchHUD } from '../ui/walk-touch-hud.js';
@@ -729,11 +730,16 @@ function onSpeakerClick(e) {
     const srcIdx = h.object.userData?.sourceIndex;
     state.selectedSpeakerUrl = url;
     emit('speaker:selected');
-    // Jump the Sources side-panel to this speaker's config card so the
-    // user can immediately edit position, aim, power, group for this
-    // specific instance. Also carry a world position for any future
-    // consumers that want to tag it.
+    // Persistent selection — same flow as the 2D click. Sets state,
+    // opens the Sources panel, paints the matching card with the
+    // cyan ring, scrolls it into view, AND fires the transient flash
+    // pulse so the user catches the move.
     if (typeof srcIdx === 'number') {
+      try { openPanel('left', 'sources'); } catch (_) {}
+      if (state.selectedSourceIdx !== srcIdx) {
+        state.selectedSourceIdx = srcIdx;
+        emit('source:selected', { idx: srcIdx });
+      }
       emit('source:highlight', { index: srcIdx });
     }
     return;

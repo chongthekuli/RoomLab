@@ -103,18 +103,26 @@ function patchPositionInputs({ idx, x, y, kind }) {
 
 function focusSourceCard(idx) {
   if (typeof idx !== 'number' || idx < 0) return;
-  const listRoot = document.getElementById('sources-list');
-  if (!listRoot) return;
-  const card = listRoot.querySelector(`.source-card[data-source-idx="${idx}"]`);
+  // The panel was split into two accordions (#sources-list-speakers and
+  // #sources-list-arrays) when line-arrays got their own section. The
+  // selected card lives in whichever list matches the source's kind —
+  // querySelector over the whole #panel-sources root finds it either
+  // way, and also expands the right accordion if it happens to be
+  // collapsed.
+  const panelRoot = document.getElementById('panel-sources');
+  if (!panelRoot) return;
+  const card = panelRoot.querySelector(`.source-card[data-source-idx="${idx}"]`);
   if (!card) return;
+  // Expand the parent <details> accordion if the user had it closed,
+  // otherwise scrollIntoView would target a height-collapsed element.
+  const acc = card.closest('details.acc');
+  if (acc && !acc.open) acc.open = true;
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
   // Strip any stale pulse so rapid repeats re-trigger the animation.
-  listRoot.querySelectorAll('.source-card.source-card-flash').forEach(c => {
+  panelRoot.querySelectorAll('.source-card.source-card-flash').forEach(c => {
     c.classList.remove('source-card-flash');
   });
   // Force reflow before re-adding so the browser restarts the animation.
-  // Reading offsetHeight is the standard idiomatic way to flush pending
-  // style + restart a CSS animation on the same element.
   void card.offsetHeight;
   card.classList.add('source-card-flash');
   setTimeout(() => card.classList.remove('source-card-flash'), 1400);
