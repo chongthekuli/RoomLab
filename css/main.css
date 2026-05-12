@@ -4444,3 +4444,265 @@ section h3 {
   color: var(--fg);
   border-color: rgba(255, 255, 255, 0.2);
 }
+
+/* ====================================================================
+   Terms-of-use modal — Sofia spec, Lin copy. Mounted from js/main.js
+   on every page load. Heavier glass than the rail/header chrome
+   (28px blur vs 18px) so the modal feels like an interruption worth
+   reading, not another floating panel.
+   ==================================================================== */
+
+.terms-modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;                /* above everything: header (30), rails (10), modal (10000) */
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  animation: terms-scrim-in 240ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+@supports not ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
+  .terms-modal-scrim { background: rgba(8, 10, 14, 0.92); }
+}
+.terms-modal-scrim.terms-modal-exit {
+  animation: terms-scrim-out 300ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes terms-scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes terms-scrim-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+.terms-card {
+  position: relative;
+  width: min(560px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 80px));
+  overflow-y: auto;
+  padding: 36px 40px 28px;
+  border-radius: 18px;
+  background: rgba(20, 22, 28, 0.58);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 30px 80px -20px rgba(0, 0, 0, 0.55);
+  color: #f1f4f8;
+  font-family: "Inter Tight", "IBM Plex Sans", -apple-system, system-ui, sans-serif;
+  transform: translateY(-2%);     /* Sofia §1 — 2% above optical centre */
+  transition: opacity 280ms cubic-bezier(0.4, 0, 0.2, 1),
+              transform 280ms cubic-bezier(0.4, 0, 0.2, 1),
+              max-height 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@supports not ((backdrop-filter: blur(28px)) or (-webkit-backdrop-filter: blur(28px))) {
+  .terms-card { background: rgba(20, 22, 28, 0.96); }
+}
+.terms-card.terms-card-fade-out {
+  opacity: 0;
+  transform: translateY(calc(-2% - 6px));
+}
+.terms-card.terms-card-relax {
+  max-height: 280px;              /* compresses to the acknowledgement card */
+  opacity: 1;
+  transform: translateY(-2%);
+}
+
+.terms-heading {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.30;
+  letter-spacing: -0.01em;
+  color: #f1f4f8;
+  margin: 0 0 16px 0;
+}
+.terms-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 0 0 18px 0;
+}
+.terms-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 28px 0;
+}
+.terms-bullets li {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: #aab3bf;
+  margin-bottom: 18px;
+}
+.terms-bullets li:last-child { margin-bottom: 0; }
+.terms-bullets li strong {
+  font-weight: 600;
+  color: #e6ebf2;
+  display: block;
+  margin-bottom: 4px;
+}
+.terms-callout {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #8a94a3;
+  margin-top: 8px;
+  line-height: 1.50;
+}
+
+/* Accept button — countdown disabled state + activated state */
+.terms-btn {
+  position: relative;
+  width: 100%;
+  height: 48px;
+  border-radius: 10px;
+  border: 1px solid rgba(116, 208, 255, 0.22);
+  background: rgba(116, 208, 255, 0.10);
+  color: rgba(241, 244, 248, 0.55);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: not-allowed;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+.terms-btn-counter {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+.terms-btn-underline {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: rgba(116, 208, 255, 0.85);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 4000ms linear, opacity 320ms ease, background 320ms ease;
+}
+/* Auto-trigger the underline fill on mount */
+.terms-modal-scrim .terms-btn-underline {
+  transform: scaleX(1);
+}
+.terms-btn-no-anim .terms-btn-underline {
+  transition: none;
+  transform: scaleX(0);
+  opacity: 0;
+}
+.terms-btn.terms-btn-enabled {
+  background: rgba(116, 208, 255, 0.18);
+  border-color: rgba(116, 208, 255, 0.55);
+  color: #e6f5ff;
+  cursor: pointer;
+  animation: terms-btn-pulse 320ms ease-out;
+}
+.terms-btn.terms-btn-enabled .terms-btn-underline {
+  height: 1px;
+  background: rgba(116, 208, 255, 0.45);
+}
+@keyframes terms-btn-pulse {
+  0%   { box-shadow: 0 0 0 1px rgba(116,208,255,0.65), 0 0 36px -2px rgba(116,208,255,0.55); }
+  100% { box-shadow: 0 0 0 1px rgba(116,208,255,0.35), 0 0 24px -4px rgba(116,208,255,0.28); }
+}
+.terms-btn.terms-btn-enabled:hover {
+  background: rgba(116, 208, 255, 0.28);
+  border-color: rgba(116, 208, 255, 0.7);
+}
+.terms-btn:focus-visible {
+  outline: 2px solid #74d0ff;
+  outline-offset: 3px;
+}
+
+/* Post-acceptance acknowledgement card */
+.terms-ack-block {
+  padding: 8px 0 4px;
+}
+.terms-ack-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.terms-ack-dot {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #74d0ff;
+  opacity: 0.85;
+  margin-top: 4px;
+  animation: terms-ack-pulse 600ms cubic-bezier(0.4, 0, 0.2, 1) 520ms;
+}
+@keyframes terms-ack-pulse {
+  0%   { transform: scale(1);    opacity: 0.85; }
+  50%  { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1);    opacity: 0.85; }
+}
+.terms-ack-line {
+  font-size: 15px;
+  line-height: 1.55;
+  color: #d8dde5;
+  display: block;
+  margin-bottom: 10px;
+}
+.terms-ack-ts {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 500;
+  color: #74d0ff;
+}
+.terms-ack-stagger {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: terms-ack-in 320ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation-delay: var(--terms-ack-delay, 0ms);
+}
+@keyframes terms-ack-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Mobile — narrower card, smaller bullet font, taller touch target */
+@media (max-width: 480px) {
+  .terms-card {
+    width: calc(100vw - 24px);
+    padding: 28px 24px 22px;
+    transform: translateY(0);
+  }
+  .terms-card.terms-card-fade-out { transform: translateY(-6px); }
+  .terms-card.terms-card-relax { transform: translateY(0); }
+  .terms-heading { font-size: 18px; }
+  .terms-bullets li { font-size: 13px; margin-bottom: 14px; }
+  .terms-callout { font-size: 11px; }
+  .terms-btn { height: 52px; }
+}
+
+/* Reduced motion — kill stagger / typewriter / pulses; keep the
+   countdown numeric (it's a legal control, not motion flourish). */
+@media (prefers-reduced-motion: reduce) {
+  .terms-modal-scrim,
+  .terms-modal-scrim.terms-modal-exit { animation-duration: 120ms; }
+  .terms-card,
+  .terms-card.terms-card-fade-out,
+  .terms-card.terms-card-relax { transition: none; }
+  .terms-btn-underline { transition: none; transform: scaleX(0); opacity: 0; }
+  .terms-ack-dot { animation: none; }
+  .terms-ack-stagger {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+}

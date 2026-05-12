@@ -26,7 +26,8 @@ import { mountZonesPanel } from '../../ui/panel-zones.js';
 import { mountAmbientPanel } from '../../ui/panel-ambient.js';
 import { mountResultsPanel } from '../../ui/panel-results.js';
 import { mountPrecisionPanel } from '../../ui/panel-precision.js';
-import { mountWelcomeCard } from '../../ui/welcome-card.js';
+// mountWelcomeCard import removed — terms-of-use modal is now
+// mounted from js/main.js at page load.
 import { mount2DViewport } from '../../graphics/room-2d.js';
 import {
   mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe,
@@ -128,10 +129,9 @@ function setupTabs() {
   const closeHelp = () => { if (helpOverlay) helpOverlay.hidden = true; };
   document.getElementById('btn-show-help')?.addEventListener('click', openHelp);
   document.getElementById('btn-close-help')?.addEventListener('click', closeHelp);
-  document.getElementById('btn-show-welcome')?.addEventListener('click', () => {
-    closeHelp();
-    mountWelcomeCard({ force: true });
-  });
+  // btn-show-welcome was removed when the mandatory terms-of-use modal
+  // replaced the old soft welcome tour (modal now shows every load
+  // from js/main.js).
   helpOverlay?.addEventListener('click', e => { if (e.target === helpOverlay) closeHelp(); });
 
   // Walk-mode touch HUD (joystick + action buttons). One-time mount;
@@ -371,7 +371,8 @@ export async function mountRoomLab() {
     if (v3) v3.innerHTML = `<div class="viewport-2d"><div class="vp-header">3D view unavailable: ${err.message}</div></div>`;
   }
 
-  mountWelcomeCard();
+  // Terms-of-use modal now mounted from js/main.js at page load — no
+  // need to mount it again on RoomLAB-specific lifecycle.
   mountPrintReport({ materials });
 
   // When RoomLAB becomes visible again after the user was elsewhere,

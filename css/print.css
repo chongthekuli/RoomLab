@@ -823,6 +823,38 @@ body.is-pdf-export .vp-tabs {
     margin: 0 0 2pt 0;
     break-inside: avoid;
   }
+  /* Acceptance addendum — the legal seal of the document. Sits
+     directly under the disclaimers (which are themselves pinned to
+     page bottom via margin-top: auto). Hairline above + below, body
+     slightly larger than the disclaimer body so this attestation
+     reads as the formal "this user agreed" block. UTC timestamp is
+     monospaced + faintly highlighted so a reviewer's eye lands on
+     it immediately. */
+  #print-report .pr-credentials-acceptance {
+    flex: 0 0 auto;
+    margin-top: 3pt;
+    padding: 3pt 0 0 0;
+    border-top: 0.4pt solid var(--rule);
+    break-inside: avoid;
+  }
+  #print-report .pr-acceptance-body {
+    font-size: 6.6pt;
+    line-height: 1.35;
+    color: var(--ink);
+    margin: 0;
+    text-align: justify;
+    hyphens: auto;
+  }
+  #print-report .pr-accept-ts {
+    font-size: 6.4pt;
+    padding: 0.2pt 2pt;
+    background: var(--paper-2);
+    border-radius: 1pt;
+    color: var(--ink);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
   /* Footer: references strip + reviewer note — sits directly below
      the disclaimer block (both pinned to page bottom together). */
   #print-report .pr-credentials-footer {

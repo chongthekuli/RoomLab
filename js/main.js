@@ -8,8 +8,16 @@
 import { state } from './app-state.js';
 import { mountHeaderNav } from './shared/header-nav.js';
 import { startRouter } from './shared/router.js';
+import { mountTermsModal } from './ui/welcome-card.js';
 
 mountHeaderNav();
+
+// Mandatory terms-of-use acceptance — shown on EVERY page load.
+// Lin (docs-writer) drafted the copy, Sofia (designer) spec'd the
+// glass card + 1.8 s acceptance animation. The router still starts
+// concurrently so the active route mounts behind the scrim; user
+// can't interact until the modal dismisses.
+mountTermsModal();
 
 // Cache-bust dynamic imports with the same ?v= that index.html uses on
 // the top-level <script>. Without this, a deploy that ships new HTML

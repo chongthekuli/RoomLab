@@ -32,6 +32,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { buildHeatmapPageSVG, buildHeatmapLegend } from './print-heatmap.js';
+import { getAcceptanceTimestamp } from './welcome-card.js';
 
 // ---------------------------------------------------------------------------
 // buildPrintModel — pure data function (testable without a headless browser).
@@ -719,6 +720,14 @@ function renderPrintReport(model, { splGrid = null } = {}) {
 
   const disclaimerBody = DISCLAIMER_BODY.map(p => `<p>${escapeHtml(p)}</p>`).join('');
 
+  // Terms-of-use acceptance addendum — reads the timestamp captured by
+  // the mandatory terms modal at app load. If the user somehow reaches
+  // the print pipeline without an acceptance on record (race, manual
+  // sessionStorage clear), fall back to "Not on record" — the report
+  // is still printable but the legal trail is flagged as broken.
+  const acceptedAtUTC = getAcceptanceTimestamp() || 'Not on record for this session';
+  const acceptanceParagraph = `The named user accessed RoomLAB Suite and accepted its terms of use at <span class="pr-mono pr-accept-ts">${escapeHtml(acceptedAtUTC)}</span>. All predictions in this document — including reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance and are simulations executed by the browser-side engine described in the methodology section of this report. The standards referenced therein are implemented, not certified; RoomLAB is not a measurement instrument. Engineering responsibility for the application of these results rests with the named user and their organisation. Where this report informs an emergency public-address, voice-alarm or other safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is required before commissioning.`;
+
   // Methodology + disclaimers are on TWO separate .pr-page blocks so
   // each is forced to the top of its own physical page. Earlier draft
   // packed both into one page; on short scenes (1–2 listeners, no
@@ -753,6 +762,11 @@ function renderPrintReport(model, { splGrid = null } = {}) {
       <section class="pr-credentials-disclaimer">
         <h3 class="pr-credentials-section-h">Disclaimers — known limits of this model</h3>
         <div class="pr-disclaimer-grid">${disclaimerBody}</div>
+      </section>
+
+      <section class="pr-credentials-acceptance">
+        <h3 class="pr-credentials-section-h">Acceptance of terms of use</h3>
+        <p class="pr-acceptance-body">${acceptanceParagraph}</p>
       </section>
 
       <footer class="pr-credentials-footer">
