@@ -9,10 +9,11 @@
   <link rel="icon" href="data:," />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=314" />
-  <link rel="stylesheet" href="css/theme.css?v=314" />
-  <link rel="stylesheet" href="css/print.css?v=314" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=315" />
+  <link rel="stylesheet" href="css/theme.css?v=315" />
+  <link rel="stylesheet" href="css/print.css?v=315" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -21,6 +22,20 @@
     }
   }
   </script>
+  <!-- Module-preload the Three.js core + the addons that scene.js
+       and the shared product-stage rig import. Without these, the
+       browser has to wait for js/main.js → labs/roomlab/main.js →
+       scene.js to resolve before it even discovers it needs Three.js,
+       and then loads 8 addons serially as it parses scene.js's imports.
+       With modulepreload the browser kicks off all these fetches in
+       parallel during HTML parsing — measured cold-start saving on
+       typical broadband: 800-1500ms. -->
+  <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/build/three.module.js" crossorigin>
+  <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js" crossorigin>
+  <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/environments/RoomEnvironment.js" crossorigin>
+  <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js" crossorigin>
+  <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/RenderPass.js" crossorigin>
+  <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/OutputPass.js" crossorigin>
 </head>
 <body class="lab-body">
   <header id="app-header"></header>
@@ -285,6 +300,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=314"></script>
+  <script type="module" src="js/main.js?v=315"></script>
 </body>
 </html>
