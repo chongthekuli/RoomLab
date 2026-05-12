@@ -5002,3 +5002,91 @@ section h3 {
     animation: none;
   }
 }
+
+/* ====================================================================
+   Lab loading overlay — js/shared/lab-loading-overlay.js
+   Fires on every route transition. Lighter glass than the terms modal
+   (blur 14px vs the terms' 8px scrim+heavy-card combo) because this
+   is a 200-1500 ms transient, not a hold-for-attention dialogue. Sits
+   at z-index 9500 so the terms modal at 10000 still wins if both are
+   somehow live at the same time.
+   ==================================================================== */
+.lab-loading-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 14, 0.42);
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+  opacity: 0;
+  pointer-events: none;     /* hidden state — clicks pass through */
+  transition: opacity 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  .lab-loading-scrim { background: rgba(8, 10, 14, 0.78); }
+}
+.lab-loading-scrim.is-visible {
+  opacity: 1;
+  pointer-events: auto;     /* eat stray clicks on the stale lab UI */
+}
+.lab-loading-scrim.is-exiting {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.lab-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  min-width: 220px;
+  background: rgba(20, 24, 32, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  transform: scale(0.96);
+  transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.lab-loading-scrim.is-visible .lab-loading-card { transform: scale(1); }
+.lab-loading-indicator {
+  position: relative;
+  width: 28px;
+  height: 28px;
+}
+.lab-loading-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(74, 163, 255, 0.18);   /* track — dim accent */
+  border-top-color: var(--accent);              /* sweep — bright accent */
+  animation: lab-loading-spin 900ms linear infinite;
+}
+.lab-loading-ring-2 {
+  inset: 5px;
+  border-color: rgba(74, 163, 255, 0.10);
+  border-top-color: rgba(74, 163, 255, 0.55);
+  animation-duration: 1400ms;
+  animation-direction: reverse;
+}
+.lab-loading-label {
+  font-family: 'Inter Tight', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: 0.2px;
+}
+@keyframes lab-loading-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-loading-scrim,
+  .lab-loading-scrim.is-exiting { transition-duration: 120ms; }
+  .lab-loading-card { transition: none; transform: none; }
+  .lab-loading-ring,
+  .lab-loading-ring-2 { animation: none; border-top-color: rgba(74, 163, 255, 0.18); }
+}

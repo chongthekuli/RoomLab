@@ -20,8 +20,20 @@
 // base64 blob. It now bails early when the hash starts with `#/`
 // (route prefix).
 
+import { showLoadingOverlay, hideLoadingOverlay } from './lab-loading-overlay.js';
+
 const ROUTES = ['room', 'speaker', 'device', 'surface'];
 const DEFAULT_ROUTE = 'room';
+
+// Human-readable labels for the loading overlay. Match header-nav.js
+// so "Loading SpeakerLAB…" reads identically to the tab pill the user
+// just clicked.
+const ROUTE_LABELS = {
+  room:    'RoomLAB',
+  speaker: 'SpeakerLAB',
+  device:  'DeviceLAB',
+  surface: 'SurfaceLAB',
+};
 
 /**
  * Parse the route id out of a hash. `#/speaker` → 'speaker'.
@@ -56,6 +68,11 @@ export function startRouter({ mounts, onRouteChange } = {}) {
   }
   const mounted = new Set();
   let current = null;
+  // Monotonic counter so a stale (out-flight) show() doesn't hide the
+  // overlay while a NEWER click is still loading. User clicks Room →
+  // Speaker → Device fast: three show() calls overlap, only the last
+  // one ("Device") should drive hide().
+  let transitionSeq = 0;
 
   async function show(routeId) {
     const target = ROUTES.includes(routeId) ? routeId : DEFAULT_ROUTE;
@@ -63,32 +80,44 @@ export function startRouter({ mounts, onRouteChange } = {}) {
 
     const from = current;
     current = target;
+    const seq = ++transitionSeq;
 
-    // Lazy-mount the route on first visit.
-    if (!mounted.has(target) && typeof mounts[target] === 'function') {
-      mounted.add(target);   // mark eagerly so concurrent route-change events don't double-mount
-      try {
-        await mounts[target]();
-      } catch (err) {
-        console.error(`router: mount(${target}) failed`, err);
+    // Loading overlay — fires on every transition (cold mount + warm
+    // swap). The module's own PRESHOW_MS delay keeps warm swaps from
+    // visibly flickering. Hide in `finally` so a failed mount doesn't
+    // leave the user staring at a stuck "Loading…" scrim. A stale call
+    // (an earlier click that's still resolving) skips hide so the
+    // newest transition's overlay stays up.
+    showLoadingOverlay(ROUTE_LABELS[target] || target);
+    try {
+      // Lazy-mount the route on first visit.
+      if (!mounted.has(target) && typeof mounts[target] === 'function') {
+        mounted.add(target);   // mark eagerly so concurrent route-change events don't double-mount
+        try {
+          await mounts[target]();
+        } catch (err) {
+          console.error(`router: mount(${target}) failed`, err);
+        }
       }
+
+      // Toggle visibility. Done AFTER the mount completes so the user
+      // doesn't see an empty container flash.
+      document.querySelectorAll('.lab-route').forEach(el => {
+        el.classList.toggle('active', el.dataset.route === target);
+      });
+
+      // Header nav active state.
+      document.querySelectorAll('#app-header .lab-tab').forEach(el => {
+        el.classList.toggle('active', el.dataset.lab === target);
+        if (el.dataset.lab === target) el.setAttribute('aria-current', 'page');
+        else el.removeAttribute('aria-current');
+      });
+
+      document.dispatchEvent(new CustomEvent('route:change', { detail: { from, to: target } }));
+      if (typeof onRouteChange === 'function') onRouteChange(target, from);
+    } finally {
+      if (seq === transitionSeq) hideLoadingOverlay();
     }
-
-    // Toggle visibility. Done AFTER the mount completes so the user
-    // doesn't see an empty container flash.
-    document.querySelectorAll('.lab-route').forEach(el => {
-      el.classList.toggle('active', el.dataset.route === target);
-    });
-
-    // Header nav active state.
-    document.querySelectorAll('#app-header .lab-tab').forEach(el => {
-      el.classList.toggle('active', el.dataset.lab === target);
-      if (el.dataset.lab === target) el.setAttribute('aria-current', 'page');
-      else el.removeAttribute('aria-current');
-    });
-
-    document.dispatchEvent(new CustomEvent('route:change', { detail: { from, to: target } }));
-    if (typeof onRouteChange === 'function') onRouteChange(target, from);
   }
 
   function onHashChange() {
