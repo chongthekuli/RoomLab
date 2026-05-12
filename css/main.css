@@ -4482,10 +4482,10 @@ section h3 {
 
 .terms-card {
   position: relative;
-  width: min(560px, calc(100vw - 48px));
-  max-height: min(680px, calc(100vh - 80px));
+  width: min(860px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
   overflow-y: auto;
-  padding: 36px 40px 28px;
+  padding: 30px 44px 24px;
   border-radius: 18px;
   background: rgba(20, 22, 28, 0.58);
   backdrop-filter: blur(28px) saturate(160%);
@@ -4521,26 +4521,32 @@ section h3 {
   line-height: 1.30;
   letter-spacing: -0.01em;
   color: #f1f4f8;
-  margin: 0 0 16px 0;
+  margin: 0 0 12px 0;
 }
 .terms-divider {
   height: 1px;
   background: rgba(255, 255, 255, 0.06);
-  margin: 0 0 18px 0;
+  margin: 0 0 14px 0;
 }
 .terms-bullets {
   list-style: none;
   padding: 0;
-  margin: 0 0 28px 0;
+  margin: 0 0 20px 0;
+  /* 2-column layout on the wide card. The 4 bullets read as 2 rows
+     of 2, which fits without scrolling on a standard laptop viewport
+     while keeping each line at a comfortable ~60-70 char measure. */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 32px;
+  row-gap: 16px;
 }
 .terms-bullets li {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 400;
-  line-height: 1.55;
+  line-height: 1.50;
   color: #aab3bf;
-  margin-bottom: 18px;
+  margin: 0;
 }
-.terms-bullets li:last-child { margin-bottom: 0; }
 .terms-bullets li strong {
   font-weight: 600;
   color: #e6ebf2;
@@ -4549,12 +4555,12 @@ section h3 {
 }
 .terms-callout {
   font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   letter-spacing: 0.02em;
   color: #8a94a3;
-  margin-top: 8px;
-  line-height: 1.50;
+  margin-top: 6px;
+  line-height: 1.45;
 }
 
 /* Accept button — countdown disabled state + activated state */
@@ -4675,17 +4681,25 @@ section h3 {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Tablet / narrow desktop — collapse to single-column bullets so each
+   item gets full reading width rather than two cramped columns. */
+@media (max-width: 720px) {
+  .terms-bullets {
+    grid-template-columns: 1fr;
+    row-gap: 14px;
+  }
+}
 /* Mobile — narrower card, smaller bullet font, taller touch target */
 @media (max-width: 480px) {
   .terms-card {
     width: calc(100vw - 24px);
-    padding: 28px 24px 22px;
+    padding: 24px 22px 20px;
     transform: translateY(0);
   }
   .terms-card.terms-card-fade-out { transform: translateY(-6px); }
   .terms-card.terms-card-relax { transform: translateY(0); }
   .terms-heading { font-size: 18px; }
-  .terms-bullets li { font-size: 13px; margin-bottom: 14px; }
+  .terms-bullets li { font-size: 13px; }
   .terms-callout { font-size: 11px; }
   .terms-btn { height: 52px; }
 }
