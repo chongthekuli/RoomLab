@@ -3450,9 +3450,16 @@ section h3 {
 .draw-mode {
   background: #0e1116;
   color: #ccd;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  /* Flex column overrides .viewport-2d's grid-template-areas (which
+     declares 3 rows: header/svg+legend/note) cleanly. Mixing the
+     two grid templates collapsed the canvas to a thin strip because
+     the row count and area names didn't match. */
+  display: flex;
+  flex-direction: column;
+  grid-template-areas: none;     /* defensive: cancel the inherited template */
 }
+.draw-mode > .draw-toolbar { flex: 0 0 auto; }
+.draw-mode > .draw-canvas { flex: 1 1 auto; min-height: 0; }
 .draw-toolbar {
   display: flex;
   justify-content: space-between;
