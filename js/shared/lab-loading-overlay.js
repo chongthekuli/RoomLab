@@ -17,9 +17,12 @@
 // fires; router.show() runs again; we update the label in-place. No
 // queue data structure needed — the last hashchange wins naturally.
 //
-// Initial-load policy: suppressed while the terms modal is mounted.
-// The terms scrim is already a hold-screen ("Loading workbench…" tail
-// line), no point stacking another overlay underneath it.
+// Initial-load policy: DEFERRED while the terms modal is mounted —
+// not suppressed. The terms scrim is its own hold-screen so we don't
+// stack a second one underneath, but if the initial RoomLAB mount is
+// still in flight when the user clicks Accept, the overlay takes
+// over until mount resolves. A MutationObserver watches for the
+// terms scrim leaving the DOM and runs the deferred show.
 //
 // Accessibility: role="status" + aria-live="polite" on the label,
 // aria-busy on <body>, prefers-reduced-motion drops the spin + scale
@@ -32,15 +35,28 @@ let scrimEl = null;
 let labelEl = null;
 let showTimer = null;          // rAF / setTimeout id for the deferred paint
 let visible = false;           // true once the scrim has been promoted to .is-visible
+let pendingLabel = null;       // non-null = "overlay is wanted." Cleared by hideLoadingOverlay.
+let termsObserver = null;      // MutationObserver watching for the terms scrim to leave the DOM
 
 /**
  * Show the overlay for `labLabel`. Idempotent — repeat calls update
  * the label text in place (handy when the user pile-clicks a third tab
  * while the second is still mounting).
+ *
+ * Deferred case: if the terms modal is up, the request is remembered
+ * (pendingLabel) and a one-shot observer waits for the terms scrim to
+ * leave the DOM. If hideLoadingOverlay runs first, pendingLabel is
+ * cleared and the observer self-cancels — no paint ever happens.
  */
 export function showLoadingOverlay(labLabel = 'lab') {
-  // Suppress while the terms modal is present — it's already a scrim.
-  if (document.getElementById('terms-modal-scrim')) return;
+  pendingLabel = labLabel;
+
+  if (document.getElementById('terms-modal-scrim')) {
+    // Terms modal is on screen. Don't paint, but remember the request
+    // and arm a one-shot watcher for the terms scrim's removal.
+    armTermsWatcher();
+    return;
+  }
 
   ensureMounted();
   setLabel(labLabel);
@@ -51,7 +67,7 @@ export function showLoadingOverlay(labLabel = 'lab') {
 
   showTimer = window.setTimeout(() => {
     showTimer = null;
-    if (!scrimEl) return;
+    if (!scrimEl || pendingLabel === null) return;
     scrimEl.classList.add('is-visible');
     visible = true;
   }, PRESHOW_MS);
@@ -63,6 +79,8 @@ export function showLoadingOverlay(labLabel = 'lab') {
  * mechanism that keeps warm swaps flicker-free.
  */
 export function hideLoadingOverlay() {
+  pendingLabel = null;
+  disarmTermsWatcher();
   document.body.removeAttribute('aria-busy');
 
   if (showTimer) {
@@ -82,6 +100,35 @@ export function hideLoadingOverlay() {
   window.setTimeout(() => {
     if (scrimEl && !visible) scrimEl.classList.remove('is-exiting');
   }, FADE_OUT_MS + 20);
+}
+
+// One-shot observer for the terms scrim leaving the DOM. When it goes,
+// we replay the most recent showLoadingOverlay call — picking up the
+// latest pendingLabel in case multiple show() calls stacked during the
+// terms gate (in practice only one does, but cheap to be correct).
+function armTermsWatcher() {
+  if (termsObserver) return;
+  termsObserver = new MutationObserver(() => {
+    if (document.getElementById('terms-modal-scrim')) return;
+    // Terms gone. Stop watching, and if the overlay is still wanted,
+    // run the normal show path.
+    disarmTermsWatcher();
+    const label = pendingLabel;
+    if (label !== null) {
+      // Reset pending so the recursive call doesn't re-arm the watcher
+      // (terms is gone) — showLoadingOverlay sets pendingLabel again
+      // before painting.
+      pendingLabel = null;
+      showLoadingOverlay(label);
+    }
+  });
+  termsObserver.observe(document.body, { childList: true, subtree: false });
+}
+
+function disarmTermsWatcher() {
+  if (!termsObserver) return;
+  termsObserver.disconnect();
+  termsObserver = null;
 }
 
 function ensureMounted() {
