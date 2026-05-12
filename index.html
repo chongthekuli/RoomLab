@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=338" />
-  <link rel="stylesheet" href="css/theme.css?v=338" />
-  <link rel="stylesheet" href="css/print.css?v=338" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=339" />
+  <link rel="stylesheet" href="css/theme.css?v=339" />
+  <link rel="stylesheet" href="css/print.css?v=339" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -36,6 +36,35 @@
   <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js" crossorigin>
   <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/RenderPass.js" crossorigin>
   <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/OutputPass.js" crossorigin>
+
+  <!-- Prefetch RoomLAB's catalog JSONs at idle priority. The router starts
+       the RoomLAB mount concurrently with the terms-of-use modal (see
+       js/main.js comment block), but the user typically takes 5-10 s on
+       the modal — long enough that these can land in the HTTP cache before
+       mountRoomLab() needs them. Saves 1-3 s of post-Accept "Loading…"
+       on cold loads. Costs ~200-500 KB if the user bounces from the modal.
+       Keep this list in sync with js/shared/speaker-catalog.js plus the
+       three other JSONs awaited in labs/roomlab/main.js mountRoomLab(). -->
+  <link rel="prefetch" href="data/materials.json" as="fetch">
+  <link rel="prefetch" href="data/racks/catalogue.json" as="fetch">
+  <link rel="prefetch" href="data/amplifiers/catalog.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/generic-12inch.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/compact-6inch.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/line-array-element.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs210.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs343.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs510.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs515.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs516.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs518.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs520.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs606.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs606fr-e.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs610.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs610b.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs620.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs630.json" as="fetch">
+  <link rel="prefetch" href="data/loudspeakers/amperes-cs840.json" as="fetch">
 </head>
 <body class="lab-body">
   <header id="app-header"></header>
@@ -299,6 +328,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=338"></script>
+  <script type="module" src="js/main.js?v=339"></script>
 </body>
 </html>
