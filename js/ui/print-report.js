@@ -727,34 +727,44 @@ function renderPrintReport(model, { splGrid = null } = {}) {
   // ("page break in the middle of legalese reads sloppy"). Per Sofia
   // v1 + user request: ALWAYS new page for methodology AND for
   // disclaimers, regardless of scene length.
-  const methodologyPage = `
-    <div class="pr-page pr-page-methodology">
-      ${sec('', 'Methodology', `
-        <p class="pr-note">The metrics below describe how each figure in this report is computed, the standard it follows, and the assumptions baked into the model. Citations are given inline so a reviewing engineer can trace any number back to its source.</p>
-        ${methodRows}
-      `)}
-    </div>`;
+  // Methodology + disclaimers + references + reviewer's note all on
+  // ONE page. User request: "squeeze into 1 page, small letter also
+  // nevermind. But make sure its professional addressing how we
+  // measure the results, and what standard this apps is following.
+  // Because people will challenge us." Layout: methodology as a
+  // 3-column compact grid (15 entries × ~3 lines each), disclaimers
+  // as a 2-column flow below, references inline at the bottom,
+  // reviewer's note as a left-accent-bar sidebar. Font 7–8pt body,
+  // 10pt section headings.
+  const combinedPage = `
+    <div class="pr-page pr-page-methodology pr-page-credentials">
+      <header class="pr-credentials-header">
+        <h2>Methodology, Standards &amp; Disclaimers</h2>
+        <p class="pr-credentials-intro">${escapeHtml(DISCLAIMER_INTRO)} Each metric below names the standard it follows and the assumption baked in, so a reviewing engineer can trace any number back to its source.</p>
+      </header>
 
-  // Per Sofia: reviewer's note sits with the disclaimers (it's the same
-  // legal-tone block); references become a 2-column block at 8 pt —
-  // comma-separated lists at this length are amateurish.
-  const disclaimerPage = `
-    <div class="pr-page pr-page-disclaimer">
-      ${sec('', 'Disclaimers', `
-        <p class="pr-disclaimer-intro">${escapeHtml(DISCLAIMER_INTRO)}</p>
-        ${disclaimerBody}
-      `)}
-      <div class="pr-reviewer-note">
-        <span class="pr-eyebrow">Reviewer's note</span>
-        Before issuing this report, confirm three items.
-        The project name on page 1 matches the tendered scheme.
-        The ambient noise floor reflects the venue's measured or specified condition, not a placeholder.
-        Listener positions correspond to the seating, standing, or circulation intent of the design.
-        Amend the scene and re-export if any item drifts.
-      </div>
-      ${sec('', 'References', `
-        <div class="pr-references">${DISCLAIMER_REFERENCES.map(r => `<div>${escapeHtml(r)}</div>`).join('')}</div>
-      `)}
+      <section class="pr-credentials-method">
+        <h3 class="pr-credentials-section-h">Methodology — how each figure is computed</h3>
+        <div class="pr-method-grid">
+          ${methodRows}
+        </div>
+      </section>
+
+      <section class="pr-credentials-disclaimer">
+        <h3 class="pr-credentials-section-h">Disclaimers — known limits of this model</h3>
+        <div class="pr-disclaimer-grid">${disclaimerBody}</div>
+      </section>
+
+      <footer class="pr-credentials-footer">
+        <div class="pr-references-inline">
+          <strong>Standards &amp; sources cited:</strong>
+          ${DISCLAIMER_REFERENCES.map(r => escapeHtml(r)).join(' · ')}
+        </div>
+        <div class="pr-reviewer-note pr-reviewer-compact">
+          <span class="pr-eyebrow">Reviewer's note —</span>
+          Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.
+        </div>
+      </footer>
     </div>`;
 
   root.innerHTML = `
@@ -764,8 +774,7 @@ function renderPrintReport(model, { splGrid = null } = {}) {
     ${sourcePage}
     ${listenerPage}
     ${precisionPage}
-    ${methodologyPage}
-    ${disclaimerPage}
+    ${combinedPage}
     <footer class="pr-foot">
       RoomLAB · <span class="pr-mono">chongthekuli.github.io/RoomLab</span> · generated ${escapeHtml(model.project.generatedAt)} · schema v${model.project.schemaVersion}
     </footer>
