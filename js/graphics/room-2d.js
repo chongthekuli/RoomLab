@@ -1258,12 +1258,20 @@ function onSourcePointerDown(e) {
     pointerId: e.pointerId,
     didMove: false,
   };
-  // Bind move + up to the WINDOW. The SVG element gets swapped out on
-  // every source:changed render so listeners bound to the SVG would
-  // be detached mid-drag. Window listeners survive innerHTML rebuilds.
-  window.addEventListener('pointermove', onSourcePointerMove);
-  window.addEventListener('pointerup',   onSourcePointerUp);
+  // Bind move + up to BOTH window and document — window catches events
+  // bubbling from any element; document is the safety net for the
+  // (rare) case where a stopPropagation upstream prevents window-level
+  // delivery. SVG-level listeners would be detached mid-drag by the
+  // source:changed innerHTML rebuild, so neither target is the SVG.
+  window.addEventListener('pointermove',   onSourcePointerMove);
+  window.addEventListener('pointerup',     onSourcePointerUp);
   window.addEventListener('pointercancel', onSourcePointerUp);
+  document.addEventListener('pointerup',   onSourcePointerUp);
+  document.addEventListener('pointercancel', onSourcePointerUp);
+  // Auto-cancel safety net — if no pointerup arrives in 30 s (window
+  // backgrounded, OS event dropped, extension interference), clear
+  // the drag rather than leaving the speaker stuck in yellow 2x mode.
+  sourceDrag.safetyTimer = setTimeout(() => onSourcePointerUp(), 30000);
 }
 
 function onSourcePointerMove(e) {
@@ -1284,29 +1292,26 @@ function onSourcePointerMove(e) {
   // Re-acquire the LIVE SVG element — the previous one was destroyed
   // by the source:changed re-render. clientToWorldXY relies on the
   // current SVG's getScreenCTM, so a stale reference would yield
-  // ever-drifting world coords (the symptom the user reported).
+  // ever-drifting world coords (the runaway-to-corner symptom).
   const svg = document.querySelector('#view-2d svg');
   if (!svg) return;
-  const world = clientToWorldXY(svg, e.clientX, e.clientY);
-  if (!world) return;
 
-  // Calibrate start-world on the FIRST move — by now openPanel has
-  // animated, layout has stabilised, and the SVG's screen rect is
-  // consistent with what subsequent moves will see. Using the
-  // pointerdown's pre-shift world would offset every subsequent
-  // delta by the panel-open width and the speaker would lurch.
-  if (sourceDrag.startCursorWorldX == null) {
-    const startWorld = clientToWorldXY(svg, sourceDrag.startClientX, sourceDrag.startClientY);
-    if (!startWorld) return;
-    sourceDrag.startCursorWorldX = startWorld.x;
-    sourceDrag.startCursorWorldY = startWorld.y;
-  }
+  // Compute BOTH the start-cursor world and the live-cursor world
+  // through the CURRENT SVG's CTM, every tick. Otherwise a layout
+  // shift mid-drag (panel open, heatmap toggle, anything that resizes
+  // the viewport) leaves the cached calibration out of step with the
+  // live readings — the delta inflates and the speaker teleports to
+  // the room edge. Pixel coords from pointerdown are stable; their
+  // world translation is what drifts, so we redo it.
+  const startWorld = clientToWorldXY(svg, sourceDrag.startClientX, sourceDrag.startClientY);
+  const liveWorld  = clientToWorldXY(svg, e.clientX, e.clientY);
+  if (!startWorld || !liveWorld) return;
 
   // Delta math: new source pos = original source pos + cursor delta.
-  // Robust to SVG re-renders, viewport pan, heatmap toggle — the
-  // speaker stays under the cursor regardless of layout churn.
-  const targetX = sourceDrag.startSrcWorldX + (world.x - sourceDrag.startCursorWorldX);
-  const targetY = sourceDrag.startSrcWorldY + (world.y - sourceDrag.startCursorWorldY);
+  // The original src position is captured ONCE at pointerdown so the
+  // speaker always returns to its true starting point if dragged back.
+  const targetX = sourceDrag.startSrcWorldX + (liveWorld.x - startWorld.x);
+  const targetY = sourceDrag.startSrcWorldY + (liveWorld.y - startWorld.y);
 
   // Snap to the 0.5 m grid. Clamp to room footprint with a half-grid
   // margin so the icon never disappears under the wall labels.
@@ -1333,16 +1338,20 @@ function onSourcePointerMove(e) {
 
 function onSourcePointerUp() {
   if (!sourceDrag) return;
-  window.removeEventListener('pointermove', onSourcePointerMove);
-  window.removeEventListener('pointerup',   onSourcePointerUp);
+  window.removeEventListener('pointermove',   onSourcePointerMove);
+  window.removeEventListener('pointerup',     onSourcePointerUp);
   window.removeEventListener('pointercancel', onSourcePointerUp);
+  document.removeEventListener('pointerup',   onSourcePointerUp);
+  document.removeEventListener('pointercancel', onSourcePointerUp);
+  if (sourceDrag.safetyTimer) clearTimeout(sourceDrag.safetyTimer);
   const wasDragging = sourceDrag.didMove;
   sourceDrag = null;
-  if (wasDragging) {
-    // Re-render once more to drop the 2x scale + yellow fill — the
-    // position itself was already committed by the last pointermove.
-    emit('source:changed');
-  }
+  // Always re-render on pointerup so the 2x/yellow drag visual drops
+  // back to the resting state. Doing this unconditionally protects
+  // against the "stuck large yellow" symptom — if any earlier render
+  // left the dragging class on the SVG, this final render clears it
+  // because draggingSrcIdx is now -1.
+  emit('source:changed');
 }
 
 function onSourceContextMenu(e) {
