@@ -130,6 +130,10 @@ export function mountTermsModal() {
     let nameValid = nameInput.value.trim().length > 0;
     let enabled = false;
 
+    // refreshEnable NEVER moves focus — that's the caller's job. Moving
+    // focus on input-change yanks the caret out of the field on the
+    // first keystroke (the input flips from empty to non-empty and the
+    // gate opens). We move focus only on countdown completion (below).
     const refreshEnable = () => {
       const shouldEnable = countdownDone && nameValid;
       if (shouldEnable === enabled) return;
@@ -139,11 +143,6 @@ export function mountTermsModal() {
         btn.classList.add('terms-btn-enabled');
         btn.querySelector('.terms-btn-label').textContent = 'I accept and continue';
         btnCounter.textContent = '';
-        // Move focus to the button only if focus is still on the input
-        // and the input is non-empty — don't yank focus mid-typing.
-        if (document.activeElement === nameInput && nameValid) {
-          btn.focus();
-        }
       } else {
         btn.disabled = true;
         btn.classList.remove('terms-btn-enabled');
@@ -162,7 +161,16 @@ export function mountTermsModal() {
         countdownDone = true;
         btnCounter.textContent = '';
         clearInterval(intervalId);
+        const wasEnabled = enabled;
         refreshEnable();
+        // Only move focus to the button if the countdown just made
+        // the gate flip open AND the user isn't actively typing in
+        // the name field. The name-filled-from-localStorage case
+        // benefits from focus jumping to the button so the user can
+        // hit Enter; the "user is still typing" case must not.
+        if (!wasEnabled && enabled && document.activeElement !== nameInput) {
+          btn.focus();
+        }
       } else {
         btnCounter.textContent = `(${secondsLeft})`;
       }
