@@ -785,7 +785,7 @@ function renderNormal(vp) {
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;
-      splSvg = renderHeatmapSVG(splResult, x0, y0, pxW, pxD);
+      splSvg = renderHeatmapSVG(splResult, x0, y0, pxW, pxD, state.room);
     } else {
       state.results.splGrid = null;
       splResult = null;
@@ -1073,16 +1073,40 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
   return { floorFill, walls, labels };
 }
 
-function renderHeatmapSVG(splResult, x0, y0, pxW, pxD) {
-  const { grid, cellsX, cellsY } = splResult;
-  const cw = pxW / cellsX;
-  const ch = pxD / cellsY;
+// Render the SPL/STI grid as colored rectangles.
+//
+// IMPORTANT: computeSPLGrid samples over the polygon's effective
+// bounding box (origin = bounds.minX, bounds.minY; extent = totalW,
+// totalD), which can differ from the room's nominal [0, width_m] ×
+// [0, depth_m] window — especially after a vertex-drag reshape that
+// leaves minX > 0 or maxX < width_m. The cells must be placed at
+// their true WORLD coords (via originX_m + cellW_m) and then mapped
+// through the same world→screen function speakers and listeners use,
+// or the heatmap will visibly drift away from the source it belongs to.
+function renderHeatmapSVG(splResult, x0, y0, pxW, pxD, room) {
+  const { grid, cellsX, cellsY, cellW_m, cellD_m, originX_m, originY_m } = splResult;
+  if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
+  const w = room.width_m, d = room.depth_m;
+  const ox = Number.isFinite(originX_m) ? originX_m : 0;
+  const oy = Number.isFinite(originY_m) ? originY_m : 0;
+  const cwm = Number.isFinite(cellW_m) ? cellW_m : (w / cellsX);
+  const cdm = Number.isFinite(cellD_m) ? cellD_m : (d / cellsY);
+  // Each world-metre maps to pxW / width_m screen pixels (same scale
+  // the speaker / listener renderers use).
+  const sxPerM = pxW / w;
+  const syPerM = pxD / d;
+  const cwPx = cwm * sxPerM;
+  const chPx = cdm * syPerM;
   let s = '';
   for (let j = 0; j < cellsY; j++) {
     for (let i = 0; i < cellsX; i++) {
       const spl = grid[j][i];
       if (!isFinite(spl)) continue;
-      s += `<rect x="${(x0 + i * cw).toFixed(2)}" y="${(y0 + j * ch).toFixed(2)}" width="${(cw + 0.5).toFixed(2)}" height="${(ch + 0.5).toFixed(2)}" fill="${splColor(spl)}" fill-opacity="0.55" />`;
+      const wxm = ox + i * cwm;
+      const wym = oy + j * cdm;
+      const sx = x0 + wxm * sxPerM;
+      const sy = y0 + wym * syPerM;
+      s += `<rect x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" width="${(cwPx + 0.5).toFixed(2)}" height="${(chPx + 0.5).toFixed(2)}" fill="${splColor(spl)}" fill-opacity="0.55" />`;
     }
   }
   return s;
