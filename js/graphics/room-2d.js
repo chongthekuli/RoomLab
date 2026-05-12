@@ -39,7 +39,15 @@ function interp(hex1, hex2, t) {
 }
 
 // --- Draw mode (generic polygon draw) ---
-const CUSTOM_VB_W = 800, CUSTOM_VB_H = 500;
+// Default viewBox dimensions — used as a fallback if the parent
+// container can't be measured (e.g., first render before mount).
+// The actual viewBox is computed dynamically from the .draw-canvas
+// parent container size on every render, so the grid fills the full
+// viewport regardless of aspect ratio and the cursor math doesn't
+// suffer letterbox offsets.
+const CUSTOM_VB_DEFAULT_W = 800, CUSTOM_VB_DEFAULT_H = 500;
+let CUSTOM_VB_W = CUSTOM_VB_DEFAULT_W;
+let CUSTOM_VB_H = CUSTOM_VB_DEFAULT_H;
 const CUSTOM_SCALE = 40;             // 1 m = 40 px → 0.5 m = 20 px
 const CUSTOM_ORIGIN = { x: 60, y: 60 };
 const SNAP_M = 0.5;                  // Maya §3: pros work to 0.5 m, not 0.1 m
@@ -382,9 +390,25 @@ function drawCoordsFromEvent(event) {
   // Detached / hidden / not-yet-laid-out SVG → bail out cleanly so we
   // never produce Infinity or NaN coords downstream.
   if (rect.width <= 0 || rect.height <= 0) return null;
+
+  // Convert client (pixel) coords → SVG user-space coords via the
+  // browser's native CTM. This correctly handles preserveAspectRatio
+  // letterbox/pillarbox, transforms, scrolling, devicePixelRatio,
+  // and any future viewBox change — the previous manual math (sx =
+  // (clientX - rect.left) * vbW / rect.width) assumed the element
+  // rect mapped 1:1 to the viewBox, which is wrong as soon as the
+  // viewBox aspect ratio differs from the element aspect ratio.
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return null;
+  const inv = ctm.inverse();
+  const pt = svg.createSVGPoint();
+  pt.x = event.clientX;
+  pt.y = event.clientY;
+  const userPt = pt.matrixTransform(inv);
+  const sx = userPt.x;
+  const sy = userPt.y;
+
   if (drawConfig.mode === 'room-shape') {
-    const sx = (event.clientX - rect.left) * (CUSTOM_VB_W / rect.width);
-    const sy = (event.clientY - rect.top)  * (CUSTOM_VB_H / rect.height);
     const rx = (sx - CUSTOM_ORIGIN.x - drawPan.dx) / CUSTOM_SCALE;
     const ry = (sy - CUSTOM_ORIGIN.y - drawPan.dy) / CUSTOM_SCALE;
     if (!Number.isFinite(rx) || !Number.isFinite(ry)) return null;
@@ -393,8 +417,6 @@ function drawCoordsFromEvent(event) {
   }
   // zone mode: use current room scale
   const geom = currentRoomGeom();
-  const sx = (event.clientX - rect.left) * (800 / rect.width);
-  const sy = (event.clientY - rect.top)  * (500 / rect.height);
   const rx = (sx - geom.x0) / geom.scale;
   const ry = (sy - geom.y0) / geom.scale;
   if (!Number.isFinite(rx) || !Number.isFinite(ry)) return null;
@@ -449,6 +471,19 @@ function drawGuideText() {
 }
 
 function renderCustomDraw(vp) {
+  // Dynamic viewBox sized to the parent container so the grid fills
+  // the full available area instead of being letterboxed. Read the
+  // .draw-canvas slot if a previous render already created it,
+  // otherwise fall back to the #view-2d parent's content rect.
+  const prevCanvas = vp.querySelector('.draw-canvas');
+  const measureEl = prevCanvas && prevCanvas.clientHeight > 0 ? prevCanvas : vp;
+  const r = measureEl.getBoundingClientRect();
+  // Subtract toolbar height from total when measuring vp (vp includes
+  // both toolbar and canvas; .draw-canvas is canvas-only).
+  const toolbarH = (measureEl === vp) ? 50 : 0;
+  CUSTOM_VB_W = Math.max(400, Math.round(r.width));
+  CUSTOM_VB_H = Math.max(300, Math.round(r.height - toolbarH));
+
   // Maya §3: origin shifted by viewport pan offset
   const x0 = CUSTOM_ORIGIN.x + drawPan.dx;
   const y0 = CUSTOM_ORIGIN.y + drawPan.dy;
