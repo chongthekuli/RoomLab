@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener } from '../app-state.js';
 import { openPanel } from '../ui/rail-system.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
@@ -101,7 +101,11 @@ let edgePanSampler = null;            // { svg, clientX, clientY }
 // ---------------------------------------------------------------------
 const SOURCE_SNAP_M = 0.5;             // 0.5 m grid for drag-to-position
 const DRAG_THRESHOLD_PX = 3;           // clicks within this radius = select-only
-let sourceDrag = null;                 // { sourceIdx, kind, startClientX, startClientY, startSrcWorldX, startSrcWorldY, pointerId, didMove }
+// Unified drag state for BOTH speakers and listeners. The `kind` field
+// is 'source' or 'listener'; for sources we keep sourceIdx + posKey
+// (point speakers use 'position', line-arrays use 'origin'); for
+// listeners we keep listenerId. Same drag math; different state slot.
+let pickableDrag = null;
 let sourceContextMenuEl = null;        // open right-click menu DOM ref (null when closed)
 
 // Window-level keyboard handler — registered when draw mode starts,
@@ -800,11 +804,12 @@ function renderNormal(vp) {
   // inline and all share the parent index — dragging any element moves
   // the whole array as a unit.
   const selectedSrcIdx = (typeof state.selectedSourceIdx === 'number') ? state.selectedSourceIdx : -1;
-  const draggingSrcIdx = sourceDrag?.didMove ? sourceDrag.sourceIdx : -1;
+  const draggingSrcIdx = (pickableDrag?.kind === 'source' && pickableDrag?.didMove) ? pickableDrag.sourceIdx : -1;
   const speakerSvg = state.sources.length > 0
     ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, state.room, selectedSrcIdx, draggingSrcIdx)
     : '';
-  const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room) : '';
+  const draggingListenerId = (pickableDrag?.kind === 'listener' && pickableDrag?.didMove) ? pickableDrag.id : null;
+  const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room, draggingListenerId) : '';
   const subSvg = renderSubStructures(state.room.subStructures, x0, y0, pxW, pxD, state.room);
   const encSvg = renderStandaloneEnclosures(state.room.standaloneEnclosures, x0, y0, pxW, pxD, state.room);
   const wsegSvg = renderSharedWallSegments(state.room.wallSegments, x0, y0, pxW, pxD, state.room);
@@ -1172,14 +1177,27 @@ function renderOneSpeakerSymbol(src, parentIdx, elemIdx, x0, y0, pxW, pxD, room,
 function wireSourceInteraction(vp) {
   const svg = vp.querySelector('svg');
   if (!svg) return;
-  svg.addEventListener('pointerdown', onSourcePointerDown);
-  svg.addEventListener('contextmenu', onSourceContextMenu);
+  svg.addEventListener('pointerdown', onPickablePointerDown);
+  svg.addEventListener('contextmenu', onPickableContextMenu);
 }
 
-function findSourceGroupFromEvent(e) {
+// Find a pickable target (speaker OR listener) from an event. Returns
+// `{ kind, el, sourceIdx?, listenerId? }` or null if the event hit the
+// floor-plan background.
+function findPickableFromEvent(e) {
   const target = e.target;
   if (!(target instanceof Element)) return null;
-  return target.closest('.r2d-source');
+  const srcEl = target.closest('.r2d-source');
+  if (srcEl) {
+    const i = parseInt(srcEl.dataset.sourceIdx, 10);
+    if (Number.isFinite(i)) return { kind: 'source', el: srcEl, sourceIdx: i };
+  }
+  const lstEl = target.closest('.r2d-listener');
+  if (lstEl) {
+    const id = lstEl.dataset.listenerId;
+    if (id) return { kind: 'listener', el: lstEl, listenerId: id };
+  }
+  return null;
 }
 
 // Convert a client (mouse) pixel coordinate into world metres using
@@ -1201,125 +1219,116 @@ function clientToWorldXY(svg, clientX, clientY) {
 
 function snapToGrid(v) { return Math.round(v / SOURCE_SNAP_M) * SOURCE_SNAP_M; }
 
-function onSourcePointerDown(e) {
+function onPickablePointerDown(e) {
   // Right-click is handled by contextmenu, not pointerdown.
   if (e.button === 2) return;
   // Left-click only — middle-click stays free for the existing pan
   // gesture (and isn't bound on the normal-mode SVG yet).
   if (e.button !== 0) return;
 
-  const group = findSourceGroupFromEvent(e);
-  if (!group) {
-    // Click on empty 2D area (heatmap, room background, walls) —
-    // close any open context menu AND clear the source selection.
-    // The matching panel card un-highlights via the same
-    // source:selected event so the UI stays consistent.
+  const pick = findPickableFromEvent(e);
+  if (!pick) {
+    // Click on empty 2D area — close any open context menu AND clear
+    // both source AND listener selections (whichever the user had
+    // active). Click-to-deselect mirrors the standard pick-tool
+    // behaviour across CAD-style apps.
     closeSourceContextMenu();
+    let changed = false;
     if (state.selectedSourceIdx != null) {
       state.selectedSourceIdx = null;
       emit('source:selected', { idx: null });
+      changed = true;
     }
+    if (state.selectedListenerId != null) {
+      state.selectedListenerId = null;
+      emit('listener:selected', { id: null });
+      changed = true;
+    }
+    if (!changed) return;
     return;
   }
+
   e.preventDefault();
   e.stopPropagation();
   closeSourceContextMenu();
 
-  const sourceIdx = parseInt(group.dataset.sourceIdx, 10);
-  if (!Number.isFinite(sourceIdx)) return;
-  const src = state.sources[sourceIdx];
-  if (!src) return;
-
-  // Auto-open the Sources panel so the matching card is visible. The
-  // panel might be hidden behind the left rail; openPanel handles the
-  // case where it's already open (cheap idempotent call).
-  try { openPanel('left', 'sources'); } catch (_) {}
-
-  // Eagerly mark the source selected on press — feels snappier than
-  // waiting for pointerup.
-  if (state.selectedSourceIdx !== sourceIdx) {
-    state.selectedSourceIdx = sourceIdx;
-    emit('source:selected', { idx: sourceIdx });
+  // Resolve the pickable into the source/listener state object + the
+  // panel it belongs in. Both branches set up identical drag bookkeeping
+  // — only the start position and selection event differ.
+  let startWorldX, startWorldY;
+  if (pick.kind === 'source') {
+    const src = state.sources[pick.sourceIdx];
+    if (!src) return;
+    try { openPanel('left', 'sources'); } catch (_) {}
+    if (state.selectedSourceIdx !== pick.sourceIdx) {
+      state.selectedSourceIdx = pick.sourceIdx;
+      emit('source:selected', { idx: pick.sourceIdx });
+    }
+    const posKey = (src.kind === 'line-array') ? 'origin' : 'position';
+    startWorldX = src[posKey].x;
+    startWorldY = src[posKey].y;
+    pickableDrag = {
+      kind: 'source',
+      sourceIdx: pick.sourceIdx,
+      posKey,
+      startClientX: e.clientX, startClientY: e.clientY,
+      startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
+      pointerId: e.pointerId, didMove: false,
+    };
+  } else { // 'listener'
+    const lst = state.listeners.find(l => l.id === pick.listenerId);
+    if (!lst) return;
+    try { openPanel('left', 'listeners'); } catch (_) {}
+    if (state.selectedListenerId !== pick.listenerId) {
+      state.selectedListenerId = pick.listenerId;
+      emit('listener:selected', { id: pick.listenerId });
+    }
+    startWorldX = lst.position.x;
+    startWorldY = lst.position.y;
+    pickableDrag = {
+      kind: 'listener',
+      listenerId: pick.listenerId,
+      startClientX: e.clientX, startClientY: e.clientY,
+      startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
+      pointerId: e.pointerId, didMove: false,
+    };
   }
 
-  // Capture click position + source's current world coords. We
-  // intentionally do NOT capture startCursorWorldX here — opening the
-  // sources panel may shift the SVG's on-screen rect, which would
-  // make a pre-shift start-world inconsistent with post-shift
-  // live-world readings. Instead we calibrate on the FIRST pointermove
-  // after layout has settled, so the delta math is always internally
-  // consistent.
-  const posKey = (src.kind === 'line-array') ? 'origin' : 'position';
-  sourceDrag = {
-    sourceIdx,
-    kind: src.kind || 'speaker',
-    posKey,
-    startClientX: e.clientX,
-    startClientY: e.clientY,
-    startCursorWorldX: null,
-    startCursorWorldY: null,
-    startSrcWorldX: src[posKey].x,
-    startSrcWorldY: src[posKey].y,
-    pointerId: e.pointerId,
-    didMove: false,
-  };
-  // Bind move + up to BOTH window and document — window catches events
-  // bubbling from any element; document is the safety net for the
-  // (rare) case where a stopPropagation upstream prevents window-level
-  // delivery. SVG-level listeners would be detached mid-drag by the
-  // source:changed innerHTML rebuild, so neither target is the SVG.
-  window.addEventListener('pointermove',   onSourcePointerMove);
-  window.addEventListener('pointerup',     onSourcePointerUp);
-  window.addEventListener('pointercancel', onSourcePointerUp);
-  document.addEventListener('pointerup',   onSourcePointerUp);
-  document.addEventListener('pointercancel', onSourcePointerUp);
-  // Auto-cancel safety net — if no pointerup arrives in 30 s (window
-  // backgrounded, OS event dropped, extension interference), clear
-  // the drag rather than leaving the speaker stuck in yellow 2x mode.
-  sourceDrag.safetyTimer = setTimeout(() => onSourcePointerUp(), 30000);
+  // Window + document listeners — SVG-level listeners would be
+  // detached by the source/listener:changed innerHTML rebuilds, so
+  // neither target is the SVG. Document is the safety net.
+  window.addEventListener('pointermove',   onPickablePointerMove);
+  window.addEventListener('pointerup',     onPickablePointerUp);
+  window.addEventListener('pointercancel', onPickablePointerUp);
+  document.addEventListener('pointerup',   onPickablePointerUp);
+  document.addEventListener('pointercancel', onPickablePointerUp);
+  pickableDrag.safetyTimer = setTimeout(() => onPickablePointerUp(), 30000);
 }
 
-function onSourcePointerMove(e) {
-  if (!sourceDrag) return;
-  const dx = e.clientX - sourceDrag.startClientX;
-  const dy = e.clientY - sourceDrag.startClientY;
-  if (!sourceDrag.didMove) {
-    // Stay in click-mode until the cursor crosses the threshold —
-    // otherwise tiny tremors during a click would reposition the
-    // speaker when the user only meant to select.
+function onPickablePointerMove(e) {
+  if (!pickableDrag) return;
+  const dx = e.clientX - pickableDrag.startClientX;
+  const dy = e.clientY - pickableDrag.startClientY;
+  if (!pickableDrag.didMove) {
     if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
-    sourceDrag.didMove = true;
-    // First move — re-render so the dragged source switches to the
-    // 2x scale + yellow fill before the position update lands.
-    emit('source:changed');
+    pickableDrag.didMove = true;
+    // First move — re-render so the dragged item switches to the
+    // 2x scale visual before the position update lands.
+    emit(pickableDrag.kind === 'listener' ? 'listener:changed' : 'source:changed');
   }
 
-  // Re-acquire the LIVE SVG element — the previous one was destroyed
-  // by the source:changed re-render. clientToWorldXY relies on the
-  // current SVG's getScreenCTM, so a stale reference would yield
-  // ever-drifting world coords (the runaway-to-corner symptom).
+  // Re-acquire the LIVE SVG. Compute start-world and live-world
+  // through the SAME current CTM, every tick — robust against any
+  // layout shift mid-drag.
   const svg = document.querySelector('#view-2d svg');
   if (!svg) return;
-
-  // Compute BOTH the start-cursor world and the live-cursor world
-  // through the CURRENT SVG's CTM, every tick. Otherwise a layout
-  // shift mid-drag (panel open, heatmap toggle, anything that resizes
-  // the viewport) leaves the cached calibration out of step with the
-  // live readings — the delta inflates and the speaker teleports to
-  // the room edge. Pixel coords from pointerdown are stable; their
-  // world translation is what drifts, so we redo it.
-  const startWorld = clientToWorldXY(svg, sourceDrag.startClientX, sourceDrag.startClientY);
+  const startWorld = clientToWorldXY(svg, pickableDrag.startClientX, pickableDrag.startClientY);
   const liveWorld  = clientToWorldXY(svg, e.clientX, e.clientY);
   if (!startWorld || !liveWorld) return;
 
-  // Delta math: new source pos = original source pos + cursor delta.
-  // The original src position is captured ONCE at pointerdown so the
-  // speaker always returns to its true starting point if dragged back.
-  const targetX = sourceDrag.startSrcWorldX + (liveWorld.x - startWorld.x);
-  const targetY = sourceDrag.startSrcWorldY + (liveWorld.y - startWorld.y);
+  const targetX = pickableDrag.startSrcWorldX + (liveWorld.x - startWorld.x);
+  const targetY = pickableDrag.startSrcWorldY + (liveWorld.y - startWorld.y);
 
-  // Snap to the 0.5 m grid. Clamp to room footprint with a half-grid
-  // margin so the icon never disappears under the wall labels.
   const w = state.room.width_m;
   const d = state.room.depth_m;
   const margin = SOURCE_SNAP_M;
@@ -1328,54 +1337,68 @@ function onSourcePointerMove(e) {
   if (Number.isFinite(w)) nx = Math.max(margin, Math.min(w - margin, nx));
   if (Number.isFinite(d)) ny = Math.max(margin, Math.min(d - margin, ny));
 
-  const src = state.sources[sourceDrag.sourceIdx];
-  if (!src) return;
-  const key = sourceDrag.posKey;
-  if (src[key].x !== nx || src[key].y !== ny) {
-    src[key].x = nx;
-    src[key].y = ny;
-    emit('source:changed');
-    // Lightweight side channel for the sources panel — patches only
-    // the X/Y inputs of the affected card, no innerHTML rebuild.
-    emit('source:position', { idx: sourceDrag.sourceIdx, x: nx, y: ny, kind: src.kind || 'speaker' });
+  if (pickableDrag.kind === 'source') {
+    const src = state.sources[pickableDrag.sourceIdx];
+    if (!src) return;
+    const key = pickableDrag.posKey;
+    if (src[key].x !== nx || src[key].y !== ny) {
+      src[key].x = nx;
+      src[key].y = ny;
+      emit('source:changed');
+      emit('source:position', { idx: pickableDrag.sourceIdx, x: nx, y: ny, kind: src.kind || 'speaker' });
+    }
+  } else {
+    const lst = state.listeners.find(l => l.id === pickableDrag.listenerId);
+    if (!lst) return;
+    if (lst.position.x !== nx || lst.position.y !== ny) {
+      lst.position.x = nx;
+      lst.position.y = ny;
+      emit('listener:changed');
+      // Same side-channel pattern — surgical X/Y patch in the panel
+      // so a drag doesn't yank focus from inputs the user might be
+      // editing on another listener card.
+      emit('listener:position', { id: pickableDrag.listenerId, x: nx, y: ny });
+    }
   }
 }
 
-function onSourcePointerUp() {
-  if (!sourceDrag) return;
-  window.removeEventListener('pointermove',   onSourcePointerMove);
-  window.removeEventListener('pointerup',     onSourcePointerUp);
-  window.removeEventListener('pointercancel', onSourcePointerUp);
-  document.removeEventListener('pointerup',   onSourcePointerUp);
-  document.removeEventListener('pointercancel', onSourcePointerUp);
-  if (sourceDrag.safetyTimer) clearTimeout(sourceDrag.safetyTimer);
-  const wasDragging = sourceDrag.didMove;
-  sourceDrag = null;
-  // Always re-render on pointerup so the 2x/yellow drag visual drops
-  // back to the resting state. Doing this unconditionally protects
-  // against the "stuck large yellow" symptom — if any earlier render
-  // left the dragging class on the SVG, this final render clears it
-  // because draggingSrcIdx is now -1.
-  emit('source:changed');
+function onPickablePointerUp() {
+  if (!pickableDrag) return;
+  window.removeEventListener('pointermove',   onPickablePointerMove);
+  window.removeEventListener('pointerup',     onPickablePointerUp);
+  window.removeEventListener('pointercancel', onPickablePointerUp);
+  document.removeEventListener('pointerup',   onPickablePointerUp);
+  document.removeEventListener('pointercancel', onPickablePointerUp);
+  if (pickableDrag.safetyTimer) clearTimeout(pickableDrag.safetyTimer);
+  const kind = pickableDrag.kind;
+  pickableDrag = null;
+  // Always re-render on pointerup so the drag visual drops back to
+  // resting state.
+  emit(kind === 'listener' ? 'listener:changed' : 'source:changed');
 }
 
-function onSourceContextMenu(e) {
-  const group = findSourceGroupFromEvent(e);
-  if (!group) {
+function onPickableContextMenu(e) {
+  const pick = findPickableFromEvent(e);
+  if (!pick) {
     closeSourceContextMenu();
     return;
   }
   e.preventDefault();
-  const sourceIdx = parseInt(group.dataset.sourceIdx, 10);
-  if (!Number.isFinite(sourceIdx)) return;
-  // Select on right-click so the panel reflects what the menu acts on,
-  // and open the Sources panel for visibility.
-  try { openPanel('left', 'sources'); } catch (_) {}
-  if (state.selectedSourceIdx !== sourceIdx) {
-    state.selectedSourceIdx = sourceIdx;
-    emit('source:selected', { idx: sourceIdx });
+  if (pick.kind === 'source') {
+    try { openPanel('left', 'sources'); } catch (_) {}
+    if (state.selectedSourceIdx !== pick.sourceIdx) {
+      state.selectedSourceIdx = pick.sourceIdx;
+      emit('source:selected', { idx: pick.sourceIdx });
+    }
+    openSourceContextMenu(e.clientX, e.clientY, pick.sourceIdx);
+  } else {
+    try { openPanel('left', 'listeners'); } catch (_) {}
+    if (state.selectedListenerId !== pick.listenerId) {
+      state.selectedListenerId = pick.listenerId;
+      emit('listener:selected', { id: pick.listenerId });
+    }
+    openListenerContextMenu(e.clientX, e.clientY, pick.listenerId);
   }
-  openSourceContextMenu(e.clientX, e.clientY, sourceIdx);
 }
 
 function openSourceContextMenu(clientX, clientY, sourceIdx) {
@@ -1385,7 +1408,36 @@ function openSourceContextMenu(clientX, clientY, sourceIdx) {
   const label = (src.kind === 'line-array')
     ? `${src.id || `Line array ${sourceIdx + 1}`}`
     : `Speaker ${sourceIdx + 1}`;
+  openPickableMenu(clientX, clientY, label, () => {
+    const newIdx = duplicateSource(sourceIdx);
+    closeSourceContextMenu();
+    if (newIdx >= 0) {
+      state.selectedSourceIdx = newIdx;
+      emit('source:changed');
+      emit('source:selected', { idx: newIdx });
+    }
+  });
+}
 
+function openListenerContextMenu(clientX, clientY, listenerId) {
+  closeSourceContextMenu();
+  const lst = state.listeners.find(l => l.id === listenerId);
+  if (!lst) return;
+  const label = lst.label || lst.id || 'Listener';
+  openPickableMenu(clientX, clientY, label, () => {
+    const newId = duplicateListener(listenerId);
+    closeSourceContextMenu();
+    if (newId) {
+      state.selectedListenerId = newId;
+      emit('listener:changed');
+      emit('listener:selected', { id: newId });
+    }
+  });
+}
+
+// Shared menu builder — same chrome for sources and listeners. The
+// `onDuplicate` callback is the only behavioural difference.
+function openPickableMenu(clientX, clientY, label, onDuplicate) {
   const menu = document.createElement('div');
   menu.className = 'r2d-ctx-menu';
   menu.setAttribute('role', 'menu');
@@ -1405,25 +1457,15 @@ function openSourceContextMenu(clientX, clientY, sourceIdx) {
   menu.style.left = `${Math.max(8, left)}px`;
   menu.style.top  = `${Math.max(8, top)}px`;
 
-  menu.querySelector('[data-action="duplicate"]').addEventListener('click', () => {
-    const newIdx = duplicateSource(sourceIdx);
-    closeSourceContextMenu();
-    if (newIdx >= 0) {
-      state.selectedSourceIdx = newIdx;
-      emit('source:changed');
-      emit('source:selected', { idx: newIdx });
-    }
-  });
+  menu.querySelector('[data-action="duplicate"]').addEventListener('click', onDuplicate);
 
-  // Dismiss on outside click / Escape / scroll.
+  // Dismiss on outside click / Escape.
   const onWinDown = (ev) => {
     if (!menu.contains(ev.target)) closeSourceContextMenu();
   };
   const onKey = (ev) => {
     if (ev.key === 'Escape') closeSourceContextMenu();
   };
-  // Defer so the contextmenu event's own bubbling doesn't close the
-  // menu we just opened.
   setTimeout(() => {
     window.addEventListener('pointerdown', onWinDown, true);
     window.addEventListener('keydown', onKey, true);
@@ -1447,20 +1489,36 @@ function escapeMenuHtml(s) {
   }[c]));
 }
 
-function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room) {
+// Render listener dots as interactive <g> groups — mirrors the speaker
+// pickable groups so the same delegated pointer handlers can drive
+// click-select, drag-to-move, and right-click-duplicate for both.
+//
+// Group transform = translate(sx, sy) with children at (0, 0). Drag
+// state appends `scale(2)` to grow the dot around its own centre.
+function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId) {
   let s = '';
   listeners.forEach((lst) => {
     const sx = x0 + (lst.position.x / room.width_m) * pxW;
     const sy = y0 + (lst.position.y / room.depth_m) * pxD;
     const isSel = lst.id === selectedId;
+    const isDragging = lst.id === draggingId;
     const radius = isSel ? 10 : 7;
     const fill = isSel ? '#ffd000' : '#4a8ff0';
     const stroke = isSel ? '#ffffff' : '#13161c';
     const strokeW = isSel ? 2.5 : 1.5;
-    s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" />`;
-    const lblMatch = String(lst.label).match(/\d+/);
-    const short = lblMatch ? lblMatch[0] : String(lst.label).slice(0, 2);
-    s += `<text x="${sx.toFixed(1)}" y="${(sy + 3).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-listener">${short}</text>`;
+    const transform = `translate(${sx.toFixed(1)},${sy.toFixed(1)})${isDragging ? ' scale(2)' : ''}`;
+    const cls = ['r2d-listener']
+      .concat(isSel       ? ['r2d-listener-selected'] : [])
+      .concat(isDragging  ? ['r2d-listener-dragging'] : [])
+      .join(' ');
+    s += `<g class="${cls}" data-listener-id="${escapeMenuHtml(lst.id)}" transform="${transform}">`;
+    s += `<circle class="r2d-lst-dot" cx="0" cy="0" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" />`;
+    if (!isDragging) {
+      const lblMatch = String(lst.label).match(/\d+/);
+      const short = lblMatch ? lblMatch[0] : String(lst.label).slice(0, 2);
+      s += `<text x="0" y="3" text-anchor="middle" class="vp-lbl vp-lbl-listener">${escapeMenuHtml(short)}</text>`;
+    }
+    s += `</g>`;
   });
   return s;
 }

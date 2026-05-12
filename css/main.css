@@ -2903,6 +2903,23 @@ section h3 {
   stroke: #b48000 !important;
 }
 
+/* 2D listener icon — same interaction states as the speakers, mirrored
+   for the listener circle + label group. Selected state keeps the
+   existing yellow fill (from renderListenersSVG) so it's distinct
+   from the cyan speaker-selected ring; dragging adds the 2x scale
+   + glow + amber tint. */
+.r2d-listener { cursor: grab; transition: filter 120ms ease; }
+.r2d-listener:hover .r2d-lst-dot { filter: brightness(1.18); }
+.r2d-listener-dragging {
+  cursor: grabbing;
+  filter: drop-shadow(0 0 8px rgba(255, 200, 60, 0.7));
+}
+.r2d-listener-dragging .r2d-lst-dot {
+  fill: #ffd24a !important;
+  stroke: #b48000 !important;
+}
+
+
 /* Right-click context menu opened on a 2D speaker. Glass card matching
    the rail aesthetic so it feels native to the floor-plan canvas. */
 .r2d-ctx-menu {

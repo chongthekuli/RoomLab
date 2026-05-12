@@ -101,6 +101,51 @@ export function duplicateSource(idx) {
   return state.sources.length - 1;
 }
 
+// Duplicate the listener with id `id`. Mirrors duplicateSource: keeps
+// label/posture/elevation/ear-height/etc.; places the copy 0.5 m to
+// the right (clamped + mirrored if room edge blocks); assigns a fresh
+// unique id. Returns the new listener's id, or null on failure.
+export function duplicateListener(id) {
+  const idx = state.listeners.findIndex(l => l.id === id);
+  if (idx < 0) return null;
+  const original = state.listeners[idx];
+  const copy = JSON.parse(JSON.stringify(original));
+
+  const usedIds = new Set(state.listeners.map(l => l.id).filter(Boolean));
+  let base = (copy.id || 'L').replace(/\d+$/, '') || 'L';
+  let n = state.listeners.length + 1;
+  while (usedIds.has(`${base}${n}`)) n++;
+  copy.id = `${base}${n}`;
+  // Bump the visible label too if it ends in a number (matches the
+  // panel's "Listener N" convention).
+  if (typeof copy.label === 'string') {
+    copy.label = copy.label.replace(/\d+$/, '') || copy.label;
+    copy.label = `${copy.label}${n}`;
+  }
+
+  const STEP = 0.5;
+  const snap = v => Math.round(v / STEP) * STEP;
+  const w = Number.isFinite(state.room?.width_m) ? state.room.width_m : Infinity;
+  const d = Number.isFinite(state.room?.depth_m) ? state.room.depth_m : Infinity;
+  const margin = STEP;
+  const origX = snap(copy.position.x);
+  const origY = snap(copy.position.y);
+  let nx = origX + STEP;
+  let ny = origY;
+  if (nx > w - margin) {
+    nx = origX - STEP;
+    if (nx < margin) {
+      nx = origX;
+      ny = origY + STEP;
+      if (ny > d - margin) ny = origY - STEP;
+    }
+  }
+  copy.position.x = nx;
+  copy.position.y = ny;
+  state.listeners.push(copy);
+  return copy.id;
+}
+
 export const ZONE_COLORS = [
   '#a855f7', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#6366f1',
 ];

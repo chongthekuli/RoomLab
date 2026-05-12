@@ -18,6 +18,51 @@ export function mountListenersPanel() {
   if (nums.length) nextIdNum = Math.max(...nums) + 1;
   render();
   on('scene:reset', render);
+  // External selection (2D click / right-click) → repaint cards so
+  // the matching one paints with the 'selected' class.
+  on('listener:selected', payload => {
+    render();
+    if (payload?.id) focusListenerCard(payload.id);
+  });
+  // Drag-from-2D position updates — surgical patch of only the X/Y
+  // input values of the affected card so number inputs stay in sync
+  // without losing focus on a different listener's input. We do NOT
+  // listen to listener:changed wholesale — that fires every drag
+  // tick AND on every panel input change, so re-rendering the whole
+  // list would yank focus from inputs the user is typing in.
+  on('listener:position', payload => patchListenerPosition(payload));
+}
+
+function focusListenerCard(id) {
+  if (!id) return;
+  const listRoot = document.getElementById('listeners-list');
+  if (!listRoot) return;
+  const card = listRoot.querySelector(`.listener-card[data-listener-id="${CSS.escape(id)}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Strip any stale pulse so rapid repeats re-trigger the animation.
+  listRoot.querySelectorAll('.listener-card.source-card-flash').forEach(c => {
+    c.classList.remove('source-card-flash');
+  });
+  void card.offsetHeight;
+  card.classList.add('source-card-flash');
+  setTimeout(() => card.classList.remove('source-card-flash'), 1400);
+}
+
+function patchListenerPosition({ id, x, y }) {
+  if (!id) return;
+  const listRoot = document.getElementById('listeners-list');
+  if (!listRoot) return;
+  const card = listRoot.querySelector(`.listener-card[data-listener-id="${CSS.escape(id)}"]`);
+  if (!card) return;
+  const xInput = card.querySelector('input[data-f="x"]');
+  const yInput = card.querySelector('input[data-f="y"]');
+  if (xInput && document.activeElement !== xInput && Number.isFinite(x)) {
+    xInput.value = x.toFixed(2);
+  }
+  if (yInput && document.activeElement !== yInput && Number.isFinite(y)) {
+    yInput.value = y.toFixed(2);
+  }
 }
 
 function addListener() {
