@@ -58,6 +58,7 @@ export function resetSceneState({ state, defaultRoomState, deepClone, projectNam
   // the previous scene.
   state.selectedSubStructureId = null;
   state.selectedSurfaceId = null;
+  state.selectedSourceIdx = null;
 
   state.rackSystem = { racks: [] };
   state.projectName = projectName;

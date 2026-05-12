@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource } from '../app-state.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
@@ -79,6 +79,29 @@ let edgePanRAF = 0;
 // `event.currentTarget` is nulled after the handler returns, so we
 // cache the SVG element directly.
 let edgePanSampler = null;            // { svg, clientX, clientY }
+
+// ---------------------------------------------------------------------
+// Source interaction state — 2D click-to-select, drag-to-move, and the
+// right-click context menu used to duplicate a speaker.
+//
+// Drag mechanics:
+//   - mousedown on a .r2d-source group captures the parent source-idx
+//     plus the cursor's starting world coords.
+//   - mousemove only enters "drag" mode after the cursor crosses
+//     DRAG_THRESHOLD_PX in screen pixels — otherwise the press is
+//     treated as a click (select only).
+//   - In drag mode every move updates the source's world XY, snapped
+//     to the 0.5 m grid, and triggers a re-render via source:changed.
+//   - mouseup ends the drag. If `didMove` is false the click-select
+//     fires.
+//
+// Selection persists in state.selectedSourceIdx so the sources panel
+// can mirror it.
+// ---------------------------------------------------------------------
+const SOURCE_SNAP_M = 0.5;             // 0.5 m grid for drag-to-position
+const DRAG_THRESHOLD_PX = 3;           // clicks within this radius = select-only
+let sourceDrag = null;                 // { sourceIdx, kind, startClientX, startClientY, startSrcWorldX, startSrcWorldY, pointerId, didMove }
+let sourceContextMenuEl = null;        // open right-click menu DOM ref (null when closed)
 
 // Window-level keyboard handler — registered when draw mode starts,
 // removed when it ends. Lets shortcuts (Esc / Backspace / Ctrl-Z / R /
@@ -481,6 +504,7 @@ export function mount2DViewport({ materials }) {
   on('room:changed', render);
   on('source:changed', render);
   on('source:model_changed', render);
+  on('source:selected', render);
   on('listener:changed', render);
   on('listener:selected', render);
   on('scene:reset', render);
@@ -769,7 +793,16 @@ function renderNormal(vp) {
   const clipPathSvg = renderClipPath(state.room, x0, y0, pxW, pxD);
 
   const zonesSvg = renderZones(state.zones, state.selectedZoneId, x0, y0, pxW, pxD, state.room, false);
-  const speakerSvg = flatSources.length > 0 ? renderSpeakersSVG(flatSources, x0, y0, pxW, pxD, state.room) : '';
+  // Render speakers from state.sources DIRECTLY (not the flat-element
+  // list) so each rendered group is tagged with its parent-source index
+  // for click-to-select and drag-to-move. Line-array elements expand
+  // inline and all share the parent index — dragging any element moves
+  // the whole array as a unit.
+  const selectedSrcIdx = (typeof state.selectedSourceIdx === 'number') ? state.selectedSourceIdx : -1;
+  const draggingSrcIdx = sourceDrag?.didMove ? sourceDrag.sourceIdx : -1;
+  const speakerSvg = state.sources.length > 0
+    ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, state.room, selectedSrcIdx, draggingSrcIdx)
+    : '';
   const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room) : '';
   const subSvg = renderSubStructures(state.room.subStructures, x0, y0, pxW, pxD, state.room);
   const encSvg = renderStandaloneEnclosures(state.room.standaloneEnclosures, x0, y0, pxW, pxD, state.room);
@@ -817,6 +850,12 @@ function renderNormal(vp) {
       ${renderLegend(splResult)}
     </div>
   `;
+
+  // Wire source interaction AFTER innerHTML — the new SVG elements
+  // exist now and event delegation can find .r2d-source groups via
+  // closest(). Re-runs on every render() so listeners always point
+  // at the live SVG (the old SVG was thrown out with the innerHTML).
+  wireSourceInteraction(vp);
 }
 
 function renderZones(zones, selectedId, x0, y0, pxW, pxD, room, isDrawBackdrop) {
@@ -1036,35 +1075,328 @@ function renderHeatmapSVG(splResult, x0, y0, pxW, pxD) {
   return s;
 }
 
-function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room) {
+// Render the speakers + line-array elements as interactive <g> groups.
+//
+// Each group is tagged with data-source-idx (parent index in
+// state.sources) and data-elem-idx (0 for point sources; 0..N-1 for
+// line-array elements). Groups carry `transform="translate(sx,sy)"`
+// with all children at relative (0,0) coords so a CSS / inline scale
+// during drag enlarges the icon about its visual centre.
+//
+// Selection + drag highlight:
+//   .r2d-source-selected — cyan ring around the group's source icon
+//   .r2d-source-dragging — 2x scale + yellow fill (transform appended)
+function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room, selectedIdx, draggingIdx) {
   let s = '';
+  // Iterate state.sources DIRECTLY (not the expanded list) so we know
+  // each rendered element's parent source-idx for click/drag wiring.
+  // Line arrays expand inline; every element shares the parent idx
+  // because drag moves the whole array as a unit.
   sources.forEach((src, i) => {
-    const sx = x0 + (src.position.x / room.width_m) * pxW;
-    const sy = y0 + (src.position.y / room.depth_m) * pxD;
-    const outside = !isInsideRoom3D(src.position, room);
-    const groupColor = src.groupId ? colorForGroup(src.groupId) : null;
-    const fill = outside ? '#ff5a3c' : (groupColor || '#fff');
-    const stroke = outside ? '#8a1200' : '#000';
-    const yaw_rad = src.aim.yaw * Math.PI / 180;
-    const size = 13;
-    const aimX = Math.sin(yaw_rad), aimY = Math.cos(yaw_rad);
-    const rightX = Math.cos(yaw_rad), rightY = -Math.sin(yaw_rad);
-    const tip = { x: sx + size * aimX, y: sy + size * aimY };
-    const bl  = { x: sx - size * 0.5 * aimX - size * 0.6 * rightX, y: sy - size * 0.5 * aimY - size * 0.6 * rightY };
-    const br  = { x: sx - size * 0.5 * aimX + size * 0.6 * rightX, y: sy - size * 0.5 * aimY + size * 0.6 * rightY };
-    if (groupColor && !outside) {
-      s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${size + 3}" fill="none" stroke="${groupColor}" stroke-width="2" opacity="0.6"/>`;
+    const isSelected = (i === selectedIdx);
+    const isDragging = (i === draggingIdx);
+    if (src && src.kind === 'line-array') {
+      const elements = expandLineArrayToElements(src);
+      elements.forEach((el, k) => {
+        s += renderOneSpeakerSymbol(el, i, k, x0, y0, pxW, pxD, room, isSelected, isDragging, `LA${i + 1}-${k + 1}`);
+      });
+    } else if (src && src.position) {
+      s += renderOneSpeakerSymbol(src, i, 0, x0, y0, pxW, pxD, room, isSelected, isDragging, `S${i + 1}`);
     }
-    s += `<polygon points="${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${bl.x.toFixed(1)},${bl.y.toFixed(1)} ${br.x.toFixed(1)},${br.y.toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" />`;
-    s += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2" fill="${stroke}" />`;
-    // Maya v9 audit §5 — drop the `[A]` group tag from the label
-    // text. Group identity is COLOUR (the ring around the triangle),
-    // not text. The bracketed letter was decorative noise.
-    const lblFill = outside ? '#ff5a3c' : (groupColor || '#e8ecf2');
-    const lblText = outside ? `S${i + 1} ⚠` : `S${i + 1}`;
-    s += `<text x="${sx.toFixed(1)}" y="${(sy - 18).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-spk" fill="${lblFill}">${lblText}</text>`;
   });
   return s;
+}
+
+// Render a single speaker icon as an interactive <g> group. `src` is
+// the already-resolved element (point source OR line-array expanded
+// element with position + aim + groupId). `parentIdx` is the index in
+// state.sources used for click-select / drag. `elemIdx` distinguishes
+// line-array elements (0..N-1).
+function renderOneSpeakerSymbol(src, parentIdx, elemIdx, x0, y0, pxW, pxD, room, isSelected, isDragging, labelText) {
+  const sx = x0 + (src.position.x / room.width_m) * pxW;
+  const sy = y0 + (src.position.y / room.depth_m) * pxD;
+  const outside = !isInsideRoom3D(src.position, room);
+  const groupColor = src.groupId ? colorForGroup(src.groupId) : null;
+  const baseFill = outside ? '#ff5a3c' : (groupColor || '#fff');
+  const baseStroke = outside ? '#8a1200' : '#000';
+  const yaw_rad = (src.aim?.yaw ?? 0) * Math.PI / 180;
+  const size = 13;
+  const aimX = Math.sin(yaw_rad), aimY = Math.cos(yaw_rad);
+  const rightX = Math.cos(yaw_rad), rightY = -Math.sin(yaw_rad);
+  // Vertices are written relative to (0, 0) so the parent <g>'s
+  // transform=translate(sx,sy) places them in the viewport AND so a
+  // scale(2) appended during drag scales about the icon's centre.
+  const tip = { x:  size * aimX,           y:  size * aimY };
+  const bl  = { x: -size * 0.5 * aimX - size * 0.6 * rightX, y: -size * 0.5 * aimY - size * 0.6 * rightY };
+  const br  = { x: -size * 0.5 * aimX + size * 0.6 * rightX, y: -size * 0.5 * aimY + size * 0.6 * rightY };
+
+  const transform = `translate(${sx.toFixed(1)},${sy.toFixed(1)})${isDragging ? ' scale(2)' : ''}`;
+  const cls = ['r2d-source']
+    .concat(isSelected ? ['r2d-source-selected'] : [])
+    .concat(isDragging ? ['r2d-source-dragging'] : [])
+    .join(' ');
+
+  let s = `<g class="${cls}" data-source-idx="${parentIdx}" data-elem-idx="${elemIdx}" transform="${transform}">`;
+
+  // Selection ring — soft cyan halo behind the icon. Sized so the
+  // 2x-scaled dragging state stays visible and the selected state is
+  // unambiguous against the heatmap.
+  if (isSelected) {
+    s += `<circle class="r2d-spk-selring" cx="0" cy="0" r="${size + 7}" fill="none" stroke="#ffd24a" stroke-width="2.2" />`;
+  }
+  // Speaker-group colour ring (unchanged from the previous render).
+  if (groupColor && !outside) {
+    s += `<circle cx="0" cy="0" r="${size + 3}" fill="none" stroke="${groupColor}" stroke-width="2" opacity="0.6"/>`;
+  }
+  // Body triangle + centre dot.
+  s += `<polygon class="r2d-spk-poly" points="${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${bl.x.toFixed(1)},${bl.y.toFixed(1)} ${br.x.toFixed(1)},${br.y.toFixed(1)}" fill="${baseFill}" stroke="${baseStroke}" stroke-width="1.5" />`;
+  s += `<circle class="r2d-spk-dot" cx="0" cy="0" r="2" fill="${baseStroke}" />`;
+  // Label sits above the icon. We hide it during drag so the moving
+  // text doesn't blur — the cyan ring + colour are enough during the
+  // 100-ms drag operation.
+  if (!isDragging) {
+    const lblFill = outside ? '#ff5a3c' : (groupColor || '#e8ecf2');
+    const lblText = outside ? `${labelText} ⚠` : labelText;
+    s += `<text x="0" y="-18" text-anchor="middle" class="vp-lbl vp-lbl-spk" fill="${lblFill}">${lblText}</text>`;
+  }
+  s += `</g>`;
+  return s;
+}
+
+// ---------------------------------------------------------------------
+// 2D source interaction — click-select, drag-move, right-click context
+// menu. Wired via event delegation on the floor-plan SVG so a single
+// listener set covers every speaker rendered into the viewport.
+// ---------------------------------------------------------------------
+function wireSourceInteraction(vp) {
+  const svg = vp.querySelector('svg');
+  if (!svg) return;
+  svg.addEventListener('pointerdown', onSourcePointerDown);
+  svg.addEventListener('contextmenu', onSourceContextMenu);
+}
+
+function findSourceGroupFromEvent(e) {
+  const target = e.target;
+  if (!(target instanceof Element)) return null;
+  return target.closest('.r2d-source');
+}
+
+// Convert a client (mouse) pixel coordinate into world metres using
+// the same room-fitted geometry the renderer uses. Returns null if
+// the SVG has been removed or the conversion can't be performed.
+function clientToWorldXY(svg, clientX, clientY) {
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return null;
+  const pt = svg.createSVGPoint();
+  pt.x = clientX;
+  pt.y = clientY;
+  const local = pt.matrixTransform(ctm.inverse());
+  const geom = currentRoomGeom();
+  const room = state.room;
+  const rx = ((local.x - geom.x0) / geom.pxW) * room.width_m;
+  const ry = ((local.y - geom.y0) / geom.pxD) * room.depth_m;
+  return { x: rx, y: ry };
+}
+
+function snapToGrid(v) { return Math.round(v / SOURCE_SNAP_M) * SOURCE_SNAP_M; }
+
+function onSourcePointerDown(e) {
+  // Right-click is handled by contextmenu, not pointerdown.
+  if (e.button === 2) return;
+  // Left-click only — middle-click stays free for the existing pan
+  // gesture (and isn't bound on the normal-mode SVG yet).
+  if (e.button !== 0) return;
+
+  const group = findSourceGroupFromEvent(e);
+  if (!group) {
+    // Click on empty 2D area dismisses any open context menu but does
+    // NOT clear the selection (the panel needs the selection sticky
+    // for the user to edit fields without losing focus context).
+    closeSourceContextMenu();
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  closeSourceContextMenu();
+
+  const sourceIdx = parseInt(group.dataset.sourceIdx, 10);
+  if (!Number.isFinite(sourceIdx)) return;
+  const src = state.sources[sourceIdx];
+  if (!src) return;
+
+  // Eagerly mark the source selected on press — feels snappier than
+  // waiting for pointerup, and the SVG re-render won't fire until
+  // the actual position changes (or the click completes).
+  if (state.selectedSourceIdx !== sourceIdx) {
+    state.selectedSourceIdx = sourceIdx;
+    emit('source:selected', { idx: sourceIdx });
+    // No source:changed here — the source itself didn't change,
+    // only the selection. The renderer subscribes to source:selected
+    // separately (added below in mount2DViewport).
+  }
+
+  const svg = e.currentTarget;
+  const startWorldKey = (src.kind === 'line-array') ? 'origin' : 'position';
+  sourceDrag = {
+    sourceIdx,
+    kind: src.kind || 'speaker',
+    startClientX: e.clientX,
+    startClientY: e.clientY,
+    startSrcWorldX: src[startWorldKey].x,
+    startSrcWorldY: src[startWorldKey].y,
+    pointerId: e.pointerId,
+    didMove: false,
+    svg,
+  };
+  try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+  // Bind move + up at the SVG level — pointer capture keeps events
+  // flowing here even if the cursor leaves the SVG.
+  svg.addEventListener('pointermove', onSourcePointerMove);
+  svg.addEventListener('pointerup',   onSourcePointerUp);
+  svg.addEventListener('pointercancel', onSourcePointerUp);
+}
+
+function onSourcePointerMove(e) {
+  if (!sourceDrag) return;
+  const dx = e.clientX - sourceDrag.startClientX;
+  const dy = e.clientY - sourceDrag.startClientY;
+  if (!sourceDrag.didMove) {
+    // Stay in click-mode until the cursor crosses the threshold —
+    // otherwise tiny tremors during a click would steal the
+    // intent and reposition the speaker on a select.
+    if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
+    sourceDrag.didMove = true;
+    // First move — re-render so the dragged source switches to the
+    // 2x scale + yellow fill before the position update lands.
+    emit('source:changed');
+  }
+
+  const world = clientToWorldXY(sourceDrag.svg, e.clientX, e.clientY);
+  if (!world) return;
+
+  // Snap to the 0.5 m grid. Clamp to room footprint with a half-grid
+  // margin so the speaker icon never disappears under the wall labels.
+  const w = state.room.width_m;
+  const d = state.room.depth_m;
+  const margin = SOURCE_SNAP_M;
+  let nx = snapToGrid(world.x);
+  let ny = snapToGrid(world.y);
+  if (Number.isFinite(w)) nx = Math.max(margin, Math.min(w - margin, nx));
+  if (Number.isFinite(d)) ny = Math.max(margin, Math.min(d - margin, ny));
+
+  const src = state.sources[sourceDrag.sourceIdx];
+  if (!src) return;
+  const key = (src.kind === 'line-array') ? 'origin' : 'position';
+  if (src[key].x !== nx || src[key].y !== ny) {
+    src[key].x = nx;
+    src[key].y = ny;
+    emit('source:changed');
+    // Lightweight side channel for the sources panel — patches only
+    // the X/Y inputs of the affected card, no innerHTML rebuild.
+    emit('source:position', { idx: sourceDrag.sourceIdx, x: nx, y: ny, kind: src.kind || 'speaker' });
+  }
+}
+
+function onSourcePointerUp(e) {
+  if (!sourceDrag) return;
+  const svg = sourceDrag.svg;
+  try { svg.releasePointerCapture(sourceDrag.pointerId); } catch (_) {}
+  svg.removeEventListener('pointermove', onSourcePointerMove);
+  svg.removeEventListener('pointerup',   onSourcePointerUp);
+  svg.removeEventListener('pointercancel', onSourcePointerUp);
+  const wasDragging = sourceDrag.didMove;
+  sourceDrag = null;
+  if (wasDragging) {
+    // Re-render once more to drop the 2x scale + yellow fill — the
+    // SVG already shows the snapped position from the last move.
+    emit('source:changed');
+  }
+}
+
+function onSourceContextMenu(e) {
+  const group = findSourceGroupFromEvent(e);
+  if (!group) {
+    closeSourceContextMenu();
+    return;
+  }
+  e.preventDefault();
+  const sourceIdx = parseInt(group.dataset.sourceIdx, 10);
+  if (!Number.isFinite(sourceIdx)) return;
+  // Select on right-click so the panel reflects what the menu acts on.
+  if (state.selectedSourceIdx !== sourceIdx) {
+    state.selectedSourceIdx = sourceIdx;
+    emit('source:selected', { idx: sourceIdx });
+  }
+  openSourceContextMenu(e.clientX, e.clientY, sourceIdx);
+}
+
+function openSourceContextMenu(clientX, clientY, sourceIdx) {
+  closeSourceContextMenu();
+  const src = state.sources[sourceIdx];
+  if (!src) return;
+  const label = (src.kind === 'line-array')
+    ? `${src.id || `Line array ${sourceIdx + 1}`}`
+    : `Speaker ${sourceIdx + 1}`;
+
+  const menu = document.createElement('div');
+  menu.className = 'r2d-ctx-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `
+    <div class="r2d-ctx-header">${escapeMenuHtml(label)}</div>
+    <button type="button" class="r2d-ctx-item" data-action="duplicate" role="menuitem">
+      <span class="r2d-ctx-glyph">⎘</span> Duplicate
+      <span class="r2d-ctx-hint">all settings, +0.5 m</span>
+    </button>
+  `;
+  // Position. Clamp into the viewport so menus near the right/bottom
+  // edge don't open off-screen.
+  document.body.appendChild(menu);
+  const r = menu.getBoundingClientRect();
+  const left = Math.min(clientX, window.innerWidth  - r.width  - 8);
+  const top  = Math.min(clientY, window.innerHeight - r.height - 8);
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top  = `${Math.max(8, top)}px`;
+
+  menu.querySelector('[data-action="duplicate"]').addEventListener('click', () => {
+    const newIdx = duplicateSource(sourceIdx);
+    closeSourceContextMenu();
+    if (newIdx >= 0) {
+      state.selectedSourceIdx = newIdx;
+      emit('source:changed');
+      emit('source:selected', { idx: newIdx });
+    }
+  });
+
+  // Dismiss on outside click / Escape / scroll.
+  const onWinDown = (ev) => {
+    if (!menu.contains(ev.target)) closeSourceContextMenu();
+  };
+  const onKey = (ev) => {
+    if (ev.key === 'Escape') closeSourceContextMenu();
+  };
+  // Defer so the contextmenu event's own bubbling doesn't close the
+  // menu we just opened.
+  setTimeout(() => {
+    window.addEventListener('pointerdown', onWinDown, true);
+    window.addEventListener('keydown', onKey, true);
+  }, 0);
+
+  sourceContextMenuEl = { el: menu, onWinDown, onKey };
+}
+
+function closeSourceContextMenu() {
+  if (!sourceContextMenuEl) return;
+  const { el, onWinDown, onKey } = sourceContextMenuEl;
+  try { el.remove(); } catch (_) {}
+  window.removeEventListener('pointerdown', onWinDown, true);
+  window.removeEventListener('keydown', onKey, true);
+  sourceContextMenuEl = null;
+}
+
+function escapeMenuHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
 function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room) {

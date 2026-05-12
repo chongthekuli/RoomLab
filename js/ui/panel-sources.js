@@ -62,6 +62,43 @@ export function mountSourcesPanel({ speakerCatalog }) {
   // Click-on-speaker in 3D viewport → scroll this panel to that speaker's
   // config card and briefly pulse it so the user knows where they landed.
   on('source:highlight', payload => focusSourceCard(payload?.index));
+  // 2D viewport click / right-click → mirror selection here. We re-render
+  // so the matching card paints with the .source-card-selected highlight,
+  // then scroll it into view.
+  on('source:selected', payload => {
+    render();
+    if (typeof payload?.idx === 'number') focusSourceCard(payload.idx);
+  });
+  // Drag-from-2D position updates — surgical patch of only the X/Y
+  // input values of the affected card so the number fields stay in
+  // sync with the speaker moving in the viewport. Skip full render()
+  // so a user typing into another card's input doesn't lose focus.
+  on('source:position', payload => patchPositionInputs(payload));
+}
+
+// Surgically update the X/Y number inputs of a single source card.
+// Called per drag-tick so the panel mirrors the 2D drag without
+// rebuilding the whole list (which would yank focus from any input
+// the user is editing in a different card).
+function patchPositionInputs({ idx, x, y, kind }) {
+  if (typeof idx !== 'number') return;
+  const root = document.getElementById('panel-sources');
+  if (!root) return;
+  const card = root.querySelector(`.source-card[data-source-idx="${idx}"]`);
+  if (!card) return;
+  const xField = kind === 'line-array' ? 'ox' : 'x';
+  const yField = kind === 'line-array' ? 'oy' : 'y';
+  const xInput = card.querySelector(`input[data-f="${xField}"]`);
+  const yInput = card.querySelector(`input[data-f="${yField}"]`);
+  // Skip writing into a field the user is currently focused in —
+  // dragging in 2D shouldn't fight a user editing a different axis
+  // in the panel (rare race but possible).
+  if (xInput && document.activeElement !== xInput && Number.isFinite(x)) {
+    xInput.value = x.toFixed(2);
+  }
+  if (yInput && document.activeElement !== yInput && Number.isFinite(y)) {
+    yInput.value = y.toFixed(2);
+  }
 }
 
 function focusSourceCard(idx) {
@@ -253,6 +290,16 @@ function render() {
         }
       });
     });
+    // Card-body click → select this source (mirrored to the 2D
+    // viewport via the source:selected event). Inputs / selects /
+    // buttons retain their own click semantics; the handler only
+    // fires when the user clicks the card chrome.
+    card.addEventListener('click', e => {
+      if (e.target.closest('input, select, textarea, button, label, a')) return;
+      if (state.selectedSourceIdx === idx) return;
+      state.selectedSourceIdx = idx;
+      emit('source:selected', { idx });
+    });
   });
 }
 
@@ -262,8 +309,9 @@ function renderSpeakerCard(src, i) {
     ? `<span class="group-badge" style="background:${escapeAttr(grp.color)}">${escapeHtml(grp.id)}</span>`
     : '';
   const grpBorder = grp ? `style="border-left: 4px solid ${escapeAttr(grp.color)}"` : '';
+  const isSelected = (state.selectedSourceIdx === i);
   return `
-    <div class="source-card" data-source-idx="${i}" ${grpBorder}>
+    <div class="source-card${isSelected ? ' source-card-selected' : ''}" data-source-idx="${i}" ${grpBorder}>
       <div class="source-header">
         <span>Speaker ${i + 1} ${groupBadge}</span>
         <div class="src-head-actions">
@@ -320,7 +368,7 @@ function renderLineArrayCard(src, i) {
     perElement.push(`#${k + 2}: ${cum.toFixed(1)}°`);
   }
   return `
-    <div class="source-card line-array-card" data-source-idx="${i}" ${grpBorder}>
+    <div class="source-card line-array-card${state.selectedSourceIdx === i ? ' source-card-selected' : ''}" data-source-idx="${i}" ${grpBorder}>
       <div class="source-header">
         <span>Line array ${escapeHtml(src.id ?? i + 1)} ${groupBadge} <span class="sub">${elementCount} elements</span></span>
         <button class="btn-remove" data-remove-idx="${i}" title="Remove this line array">×</button>

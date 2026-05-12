@@ -37,6 +37,70 @@ export function getSelectedListener() {
   return state.listeners.find(l => l.id === state.selectedListenerId) || null;
 }
 
+// Source selection — used by the 2D viewport click-select + drag-to-move
+// interaction and the matching highlight on the sources panel cards.
+// Index into state.sources (NOT into the expanded element list); line
+// arrays are addressed by their parent index since they move as a unit.
+export function getSelectedSourceIdx() {
+  if (typeof state.selectedSourceIdx !== 'number') return -1;
+  if (state.selectedSourceIdx < 0 || state.selectedSourceIdx >= state.sources.length) return -1;
+  return state.selectedSourceIdx;
+}
+export function getSelectedSource() {
+  const i = getSelectedSourceIdx();
+  return i >= 0 ? state.sources[i] : null;
+}
+
+// Duplicate the source at `idx`. Preserves model, group, aim, power,
+// height — every setting carried by the original. New source is placed
+// 0.5 m to the right (positive X) of the original, snapped to the
+// nearest 0.5 m grid line. If that placement would push the new source
+// outside the room footprint, the offset is mirrored to the negative-X
+// side; if both directions are out-of-bounds the new source is placed
+// at the original X but offset on Y so it never sits exactly on top.
+// Returns the index of the new source in state.sources.
+export function duplicateSource(idx) {
+  const src = state.sources[idx];
+  if (!src) return -1;
+  const copy = JSON.parse(JSON.stringify(src));
+  // Line arrays use `id` as a human-readable label ("LA1") that must be
+  // unique within the scene; bump the suffix or fall back to a count.
+  if (copy.kind === 'line-array') {
+    const usedIds = new Set(state.sources.map(s => s.id).filter(Boolean));
+    let base = (copy.id || 'LA').replace(/\d+$/, '') || 'LA';
+    let n = state.sources.filter(s => s.kind === 'line-array').length + 1;
+    while (usedIds.has(`${base}${n}`)) n++;
+    copy.id = `${base}${n}`;
+  }
+  const room = state.room;
+  const STEP = 0.5;
+  // Snap the source's CURRENT X to the grid first so the duplicate
+  // lands on a clean grid line regardless of where the user dragged
+  // the original to.
+  const posKey = (copy.kind === 'line-array') ? 'origin' : 'position';
+  const snap = v => Math.round(v / STEP) * STEP;
+  const origX = snap(copy[posKey].x);
+  const origY = snap(copy[posKey].y);
+  const w = Number.isFinite(room?.width_m) ? room.width_m : Infinity;
+  const d = Number.isFinite(room?.depth_m) ? room.depth_m : Infinity;
+  const margin = STEP;
+  let nx = origX + STEP;
+  let ny = origY;
+  if (nx > w - margin) {
+    nx = origX - STEP;
+    if (nx < margin) {
+      // Both X directions blocked — offset on Y instead.
+      nx = origX;
+      ny = origY + STEP;
+      if (ny > d - margin) ny = origY - STEP;
+    }
+  }
+  copy[posKey].x = nx;
+  copy[posKey].y = ny;
+  state.sources.push(copy);
+  return state.sources.length - 1;
+}
+
 export const ZONE_COLORS = [
   '#a855f7', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#6366f1',
 ];
@@ -251,6 +315,11 @@ export const state = {
   // edits the print-report project field. null = untitled.
   projectName: null,
   sources: [],
+  // Source selected in the 2D viewport (click-to-select). Index into
+  // `state.sources`. Drives the cyan highlight on the rendered SVG icon
+  // and the matching card highlight in the sources panel. Cleared by
+  // scene-reset and project load.
+  selectedSourceIdx: null,
   // Speaker being examined in the Speaker viewport tab. Holds the modelUrl
   // of the selected catalogue entry; null when no speaker is under review.
   selectedSpeakerUrl: null,
@@ -464,6 +533,7 @@ export function applyPresetToState(key) {
   if (Array.isArray(p.listeners)) state.listeners = p.listeners.map(deepClone);
   state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
+  state.selectedSourceIdx  = null;
 
   if (Array.isArray(p.rackSystem?.racks)) {
     state.rackSystem = { racks: p.rackSystem.racks.map(deepClone) };
@@ -532,6 +602,7 @@ export function applyTemplateToState(key, dimsOverride) {
   if (Array.isArray(generated.listeners)) state.listeners = generated.listeners.map(deepClone);
   state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
+  state.selectedSourceIdx  = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +747,7 @@ export function deserializeProject(obj) {
   state.selectedSpeakerUrl = typeof obj.selectedSpeakerUrl === 'string' ? obj.selectedSpeakerUrl : null;
   state.selectedListenerId = ('selectedListenerId' in obj) ? obj.selectedListenerId : (state.listeners[0]?.id ?? null);
   state.selectedZoneId     = ('selectedZoneId'     in obj) ? obj.selectedZoneId     : (state.zones[0]?.id     ?? null);
+  state.selectedSourceIdx  = null;
   // Sub-structure selection isn't persisted across save/load (the user's
   // last selection is a UI affordance, not part of the design). Reset it
   // here so a stale id from a long-saved file doesn't highlight a sub
