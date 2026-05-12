@@ -1438,24 +1438,48 @@ function onPickablePointerMove(e) {
       emit('listener:position', { id: pickableDrag.listenerId, x: nx, y: ny });
     }
   } else { // 'vertex'
-    // Vertex coords aren't clamped against the room footprint — the
-    // user IS the footprint here. Snapping to the 0.5 m grid stays
-    // (it's what every other 2D edit uses) but the value is allowed
-    // anywhere on the floor plan, including negative coords if the
-    // user drags outside the original bounds.
-    // The earlier nx/ny clamp DID restrict to [margin, w-margin] —
-    // restore the raw snapped target for vertex edits.
-    const targetSnapX = snapToGrid(targetX);
-    const targetSnapY = snapToGrid(targetY);
+    // Vertex coords aren't clamped against the OLD room footprint
+    // (the user IS reshaping that footprint), but they ARE clamped
+    // to non-negative space — origin (0,0) is the world reference,
+    // and the heatmap grid / SVG coord mapping only cover the
+    // positive quadrant. Letting verts drift past 0 would leave
+    // a region of the polygon uncovered by the heatmap.
+    const targetSnapX = Math.max(0, snapToGrid(targetX));
+    const targetSnapY = Math.max(0, snapToGrid(targetY));
     const verts = state.room.custom_vertices;
     if (!Array.isArray(verts) || pickableDrag.vertexIdx >= verts.length) return;
     const v = verts[pickableDrag.vertexIdx];
     if (v.x !== targetSnapX || v.y !== targetSnapY) {
       v.x = targetSnapX;
       v.y = targetSnapY;
+      // Resize the bounding box so the heatmap grid, 3D walls, and
+      // the SVG coord mapping all stretch to the new polygon.
+      recomputeRoomDimsFromPolygon(state.room);
       emit('room:changed');
     }
   }
+}
+
+// Recalculate room.width_m / room.depth_m from the polygon bounding
+// box. Called from the vertex drag handler so the heatmap grid (which
+// iterates [0, width_m] × [0, depth_m]) always covers the visible
+// shape after the user reshapes it.
+//
+// We round UP to the 0.5 m grid so widths land on clean numbers and
+// floor at 1 m so a degenerate polygon doesn't produce a zero-size
+// room. Negative coords are not considered — vertex drags are clamped
+// to >= 0 above.
+function recomputeRoomDimsFromPolygon(room) {
+  if (!room) return;
+  const verts = room.custom_vertices;
+  if (!Array.isArray(verts) || verts.length < 3) return;
+  let maxX = 0, maxY = 0;
+  for (const v of verts) {
+    if (v.x > maxX) maxX = v.x;
+    if (v.y > maxY) maxY = v.y;
+  }
+  room.width_m = Math.max(1, Math.ceil(maxX * 2) / 2);
+  room.depth_m = Math.max(1, Math.ceil(maxY * 2) / 2);
 }
 
 function onPickablePointerUp() {
