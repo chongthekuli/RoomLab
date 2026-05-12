@@ -3485,6 +3485,22 @@ section h3 {
   font-size: 0.76rem;
 }
 .draw-actions button:hover:not(:disabled) { background: #2a2f38; color: #fff; }
+/* Inline keyboard-shortcut chips inside the draw-action buttons. */
+.draw-actions button kbd {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: #cfd6e0;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.draw-actions button:disabled kbd { opacity: 0.5; }
 .draw-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
 .draw-actions #btn-draw-finish { background: #0a7b3e; border-color: #0a7b3e; color: #fff; }
 .draw-actions #btn-draw-finish:hover:not(:disabled) { background: #0c9249; }

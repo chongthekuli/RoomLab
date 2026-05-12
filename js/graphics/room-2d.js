@@ -80,14 +80,37 @@ let edgePanRAF = 0;
 // cache the SVG element directly.
 let edgePanSampler = null;            // { svg, clientX, clientY }
 
+// Window-level keyboard handler — registered when draw mode starts,
+// removed when it ends. Lets shortcuts (Esc / Backspace / Ctrl-Z / R /
+// Enter / Space) fire even when focus is on a button or elsewhere
+// outside the SVG.
+let _winKeyHandlerInstalled = false;
+function installWindowKeyHandler() {
+  if (_winKeyHandlerInstalled) return;
+  window.addEventListener('keydown', handleDrawKey);
+  window.addEventListener('keyup', handleDrawKeyUp);
+  _winKeyHandlerInstalled = true;
+}
+function removeWindowKeyHandler() {
+  if (!_winKeyHandlerInstalled) return;
+  window.removeEventListener('keydown', handleDrawKey);
+  window.removeEventListener('keyup', handleDrawKeyUp);
+  _winKeyHandlerInstalled = false;
+}
+function handleDrawKeyUp(event) {
+  if (!drawActive) return;
+  if (event.key === ' ') spaceHeld = false;
+}
+
 export function startDrawCustomShape() {
   // Build marker — if you see this in DevTools Console you have the
   // latest room-2d.js with snap-to-grid + edge auto-pan. If you DON'T
   // see this, your browser is serving a cached copy; do "Empty cache
   // and hard reload" (Chrome: right-click the reload button) or
   // toggle DevTools Network → "Disable cache".
-  console.info('[room-2d] draw started — snap-to-grid + edge auto-pan ENABLED (build 2026-04-28b)');
+  console.info('[room-2d] draw started — snap-to-grid + edge auto-pan + shortcuts (R/Backspace/Esc/Enter) ENABLED');
   drawActive = true;
+  installWindowKeyHandler();
   drawConfig = {
     mode: 'room-shape',
     label: 'Draw custom room shape',
@@ -111,6 +134,7 @@ export function startDrawCustomShape() {
 
 export function startDrawZone(opts = {}) {
   drawActive = true;
+  installWindowKeyHandler();
   drawConfig = {
     mode: 'zone',
     label: opts.existingId ? 'Redraw audience zone' : 'Draw audience zone (inside room)',
@@ -156,6 +180,7 @@ function finishDraw() {
   drawCursorNearStart = false;
   drawPan.dx = 0; drawPan.dy = 0;
   stopEdgePan();
+  removeWindowKeyHandler();
   cfg.onFinish(verts);
   emit('room:changed');
   // Maya §7: after auto-close, scroll the side panel to the height
@@ -172,6 +197,7 @@ function cancelDraw() {
   drawVertices = [];
   drawCursor = null;
   stopEdgePan();
+  removeWindowKeyHandler();
   render();
 }
 
@@ -374,10 +400,27 @@ function handleDrawPanEnd() {
 
 function handleDrawKey(event) {
   if (!drawActive) return;
-  if (event.key === 'Escape')      { cancelDraw(); event.preventDefault(); }
-  else if (event.key === 'Backspace') { undoDrawVertex(); event.preventDefault(); }
-  else if (event.key === 'Enter')  { if (drawVertices.length >= 3) finishDraw(); event.preventDefault(); }
-  else if (event.key === ' ')      { spaceHeld = true; event.preventDefault(); }
+  // Ignore key events that originate from a text input so the user can
+  // type into the room-name field etc. without nuking their polygon.
+  const t = event.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
+  const k = event.key;
+  if (k === 'Escape')          { cancelDraw(); event.preventDefault(); }
+  else if (k === 'Backspace')  { undoDrawVertex(); event.preventDefault(); }
+  else if (k === 'Enter')      { if (drawVertices.length >= 3) finishDraw(); event.preventDefault(); }
+  else if (k === ' ')          { spaceHeld = true; event.preventDefault(); }
+  else if (k === 'r' || k === 'R') {
+    // Recentre — same effect as clicking the recentre button or
+    // double-clicking the canvas. Reset pan only; keeps placed vertices.
+    drawPan.dx = 0; drawPan.dy = 0;
+    render();
+    event.preventDefault();
+  }
+  else if ((k === 'z' || k === 'Z') && (event.ctrlKey || event.metaKey)) {
+    undoDrawVertex();
+    event.preventDefault();
+  }
 }
 function handleDrawKeyUp(event) {
   if (event.key === ' ') spaceHeld = false;
@@ -636,10 +679,10 @@ function buildDrawHtml(svg) {
       <div class="draw-toolbar">
         <span class="draw-hint ${ready ? 'draw-hint-ready' : ''}">${guideText}</span>
         <div class="draw-actions">
-          <button id="btn-draw-recentre" title="reset pan (also: double-click empty canvas)">recentre</button>
-          <button id="btn-draw-undo" ${drawVertices.length === 0 ? 'disabled' : ''}>undo last point</button>
-          <button id="btn-draw-finish" ${drawVertices.length < 3 ? 'disabled' : ''}>finish (${drawVertices.length} pt${drawVertices.length === 1 ? '' : 's'})</button>
-          <button id="btn-draw-cancel">cancel</button>
+          <button id="btn-draw-recentre" title="reset pan — shortcut R (or double-click empty canvas)">recentre <kbd>R</kbd></button>
+          <button id="btn-draw-undo" ${drawVertices.length === 0 ? 'disabled' : ''} title="remove the last placed point — shortcut Backspace or Ctrl+Z">undo <kbd>Backspace</kbd></button>
+          <button id="btn-draw-finish" ${drawVertices.length < 3 ? 'disabled' : ''} title="close the polygon — shortcut Enter">finish (${drawVertices.length} pt${drawVertices.length === 1 ? '' : 's'}) <kbd>Enter</kbd></button>
+          <button id="btn-draw-cancel" title="discard and exit draw mode — shortcut Esc">cancel <kbd>Esc</kbd></button>
         </div>
       </div>
       <div class="draw-canvas">${svg}</div>
