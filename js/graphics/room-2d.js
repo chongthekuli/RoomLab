@@ -97,10 +97,7 @@ function removeWindowKeyHandler() {
   window.removeEventListener('keyup', handleDrawKeyUp);
   _winKeyHandlerInstalled = false;
 }
-function handleDrawKeyUp(event) {
-  if (!drawActive) return;
-  if (event.key === ' ') spaceHeld = false;
-}
+// handleDrawKey + handleDrawKeyUp are defined further down (~line 401).
 
 export function startDrawCustomShape() {
   // Build marker — if you see this in DevTools Console you have the
