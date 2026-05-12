@@ -2919,6 +2919,50 @@ section h3 {
   stroke: #b48000 !important;
 }
 
+/* Room-corner vertex handles — click to select, drag to reshape the
+   room polygon. Default state is a subtle white dot; selected vertex
+   gets a cyan ring; adjacent vertices (sharing an edge with the
+   selected) get a smaller cyan tint so the user sees which edges
+   they're about to edit. Drag scales the group 2x via SVG transform. */
+.r2d-vertex { cursor: pointer; transition: filter 120ms ease; }
+.r2d-vertex .r2d-vertex-hit  { fill: transparent; pointer-events: all; }
+.r2d-vertex .r2d-vertex-dot  {
+  fill: #d6dde6;
+  stroke: #13161c;
+  stroke-width: 1.4;
+  transition: fill 120ms ease, stroke 120ms ease;
+}
+.r2d-vertex:hover .r2d-vertex-dot { fill: #74d0ff; stroke: #0a3856; }
+.r2d-vertex-adjacent .r2d-vertex-dot {
+  fill: #74d0ff;
+  stroke: #0a3856;
+  opacity: 0.8;
+}
+.r2d-vertex-selected .r2d-vertex-dot {
+  fill: #74d0ff;
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+.r2d-vertex-dragging {
+  cursor: grabbing;
+  filter: drop-shadow(0 0 8px rgba(116, 208, 255, 0.85));
+}
+.r2d-vertex-dragging .r2d-vertex-dot {
+  fill: #ffd24a !important;
+  stroke: #b48000 !important;
+}
+/* Adjacent-edge overlay — drawn underneath the handles so the dots
+   sit on top. Cyan dash so it's distinguishable from the warm room
+   outline rendered by renderRoomOutline. */
+.r2d-vertex-edge {
+  stroke: #74d0ff;
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+  fill: none;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
 
 /* Right-click context menu opened on a 2D speaker. Glass card matching
    the rail aesthetic so it feels native to the floor-plan canvas. */

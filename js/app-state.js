@@ -146,6 +146,47 @@ export function duplicateListener(id) {
   return copy.id;
 }
 
+// Convert the current room into a free-form custom polygon and return
+// the vertex array. Idempotent: if shape is already 'custom' with a
+// valid vertex list, returns the existing list unchanged.
+//
+// Called by the 2D vertex editor on FIRST drag so the user can sculpt
+// rectangular / polygon rooms into arbitrary shapes (L-shapes, slanted
+// walls, etc.) without an explicit "convert" command. Round rooms are
+// rejected — circles have no editable corners.
+export function convertRoomToCustomPolygon(room) {
+  if (!room) return null;
+  // Round rooms have no corner vertices to edit.
+  if (room.shape === 'round') return null;
+  if (room.shape === 'custom'
+      && Array.isArray(room.custom_vertices)
+      && room.custom_vertices.length >= 3) {
+    return room.custom_vertices;
+  }
+  // Snapshot the current vertex positions and switch to custom mode.
+  // Inline the same computation that roomPlanVertices does so this
+  // module doesn't need to import from physics/room-shape.js.
+  const cx = (room.width_m ?? 8) / 2;
+  const cy = (room.depth_m ?? 8) / 2;
+  let verts;
+  if (room.shape === 'polygon') {
+    const n = room.polygon_sides ?? 6;
+    const r = room.polygon_radius_m ?? 3;
+    verts = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      verts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+    }
+  } else {
+    // Rectangular (or any unrecognised shape) — derive 4 corners.
+    const w = room.width_m, d = room.depth_m;
+    verts = [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }];
+  }
+  room.shape = 'custom';
+  room.custom_vertices = verts;
+  return verts;
+}
+
 export const ZONE_COLORS = [
   '#a855f7', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#6366f1',
 ];
@@ -365,6 +406,12 @@ export const state = {
   // and the matching card highlight in the sources panel. Cleared by
   // scene-reset and project load.
   selectedSourceIdx: null,
+  // Room-vertex selected in the 2D viewport. Index into the array
+  // returned by roomPlanVertices(room). Used by the corner-handle
+  // editor: drag any handle and the room polygon adjusts. A vertex
+  // selection paints the chosen corner + the two adjacent edges in
+  // cyan. Cleared by scene-reset, project load, and shape changes.
+  selectedVertexIdx: null,
   // Speaker being examined in the Speaker viewport tab. Holds the modelUrl
   // of the selected catalogue entry; null when no speaker is under review.
   selectedSpeakerUrl: null,
@@ -579,6 +626,7 @@ export function applyPresetToState(key) {
   state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
   state.selectedSourceIdx  = null;
+  state.selectedVertexIdx  = null;
 
   if (Array.isArray(p.rackSystem?.racks)) {
     state.rackSystem = { racks: p.rackSystem.racks.map(deepClone) };
@@ -647,6 +695,7 @@ export function applyTemplateToState(key, dimsOverride) {
   if (Array.isArray(generated.listeners)) state.listeners = generated.listeners.map(deepClone);
   state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
+  state.selectedVertexIdx  = null;
   state.selectedSourceIdx  = null;
 }
 
@@ -791,6 +840,7 @@ export function deserializeProject(obj) {
   // cleanly (the `??` form would replace it with the first item).
   state.selectedSpeakerUrl = typeof obj.selectedSpeakerUrl === 'string' ? obj.selectedSpeakerUrl : null;
   state.selectedListenerId = ('selectedListenerId' in obj) ? obj.selectedListenerId : (state.listeners[0]?.id ?? null);
+  state.selectedVertexIdx  = null;
   state.selectedZoneId     = ('selectedZoneId'     in obj) ? obj.selectedZoneId     : (state.zones[0]?.id     ?? null);
   state.selectedSourceIdx  = null;
   // Sub-structure selection isn't persisted across save/load (the user's

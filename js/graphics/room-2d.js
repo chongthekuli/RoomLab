@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, convertRoomToCustomPolygon } from '../app-state.js';
 import { openPanel } from '../ui/rail-system.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
@@ -808,8 +808,14 @@ function renderNormal(vp) {
   const speakerSvg = state.sources.length > 0
     ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, state.room, selectedSrcIdx, draggingSrcIdx)
     : '';
-  const draggingListenerId = (pickableDrag?.kind === 'listener' && pickableDrag?.didMove) ? pickableDrag.id : null;
+  const draggingListenerId = (pickableDrag?.kind === 'listener' && pickableDrag?.didMove) ? pickableDrag.listenerId : null;
   const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room, draggingListenerId) : '';
+
+  // Room-corner vertex handles. Skipped for 'round' rooms (no
+  // corners) and when room dims are zero. Shown only after the user
+  // is in 2D (where geometry edits make sense).
+  const draggingVertexIdx = (pickableDrag?.kind === 'vertex' && pickableDrag?.didMove) ? pickableDrag.vertexIdx : -1;
+  const vertexSvg = renderVertexHandlesSVG(state.room, state.selectedVertexIdx, draggingVertexIdx, x0, y0, pxW, pxD);
   const subSvg = renderSubStructures(state.room.subStructures, x0, y0, pxW, pxD, state.room);
   const encSvg = renderStandaloneEnclosures(state.room.standaloneEnclosures, x0, y0, pxW, pxD, state.room);
   const wsegSvg = renderSharedWallSegments(state.room.wallSegments, x0, y0, pxW, pxD, state.room);
@@ -849,6 +855,7 @@ function renderNormal(vp) {
         ${wsegSvg}
         ${listenerSvg}
         ${speakerSvg}
+        ${vertexSvg}
         ${renderOriginCrosshair(x0, y0, '#5a6677')}
         <text x="${x0 + pxW/2}" y="${500 - 18}" text-anchor="middle" class="vp-lbl vp-lbl-dim">${shapeMeta}  |  floor: ${nameOf(surfaces.floor)}  |  walls: ${wallsMeta}  |  ceiling: ${ceilMeta}</text>
         ${splResult ? '' : `<text x="${x0 + pxW/2}" y="${y0 + pxD/2}" text-anchor="middle" class="vp-lbl vp-lbl-empty">no sources placed</text><text x="${x0 + pxW/2}" y="${y0 + pxD/2 + 18}" text-anchor="middle" class="vp-lbl vp-lbl-empty-hint">add a speaker to compute SPL</text>`}
@@ -1187,6 +1194,14 @@ function wireSourceInteraction(vp) {
 function findPickableFromEvent(e) {
   const target = e.target;
   if (!(target instanceof Element)) return null;
+  // Vertex handles take priority — they sit above speakers/listeners
+  // and are smaller, so the user clicking a vertex shouldn't be
+  // hijacked by a speaker icon that happens to share the same spot.
+  const vEl = target.closest('.r2d-vertex');
+  if (vEl) {
+    const i = parseInt(vEl.dataset.vertexIdx, 10);
+    if (Number.isFinite(i)) return { kind: 'vertex', el: vEl, vertexIdx: i };
+  }
   const srcEl = target.closest('.r2d-source');
   if (srcEl) {
     const i = parseInt(srcEl.dataset.sourceIdx, 10);
@@ -1219,6 +1234,34 @@ function clientToWorldXY(svg, clientX, clientY) {
 
 function snapToGrid(v) { return Math.round(v / SOURCE_SNAP_M) * SOURCE_SNAP_M; }
 
+// Return the current room's vertex list in WORLD coords without
+// converting to 'custom' (read-only inspection). Used by the vertex
+// selection code paths that must NOT mutate the room shape just
+// because the user clicked a handle.
+function currentRoomVertices(room) {
+  if (!room) return null;
+  if (room.shape === 'round') return null;
+  const w = room.width_m, d = room.depth_m;
+  if (room.shape === 'polygon') {
+    const n = room.polygon_sides ?? 6;
+    const r = room.polygon_radius_m ?? 3;
+    const cx = (w ?? 8) / 2, cy = (d ?? 8) / 2;
+    const verts = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      verts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+    }
+    return verts;
+  }
+  if (room.shape === 'custom'
+      && Array.isArray(room.custom_vertices)
+      && room.custom_vertices.length >= 3) {
+    return room.custom_vertices.map(v => ({ x: v.x, y: v.y }));
+  }
+  if (!(w > 0) || !(d > 0)) return null;
+  return [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }];
+}
+
 function onPickablePointerDown(e) {
   // Right-click is handled by contextmenu, not pointerdown.
   if (e.button === 2) return;
@@ -1229,22 +1272,21 @@ function onPickablePointerDown(e) {
   const pick = findPickableFromEvent(e);
   if (!pick) {
     // Click on empty 2D area — close any open context menu AND clear
-    // both source AND listener selections (whichever the user had
-    // active). Click-to-deselect mirrors the standard pick-tool
-    // behaviour across CAD-style apps.
+    // all pickable selections (source / listener / vertex). Click-to-
+    // deselect mirrors the standard pick-tool behaviour.
     closeSourceContextMenu();
-    let changed = false;
     if (state.selectedSourceIdx != null) {
       state.selectedSourceIdx = null;
       emit('source:selected', { idx: null });
-      changed = true;
     }
     if (state.selectedListenerId != null) {
       state.selectedListenerId = null;
       emit('listener:selected', { id: null });
-      changed = true;
     }
-    if (!changed) return;
+    if (state.selectedVertexIdx != null) {
+      state.selectedVertexIdx = null;
+      emit('room:changed');
+    }
     return;
   }
 
@@ -1275,7 +1317,7 @@ function onPickablePointerDown(e) {
       startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
       pointerId: e.pointerId, didMove: false,
     };
-  } else { // 'listener'
+  } else if (pick.kind === 'listener') {
     const lst = state.listeners.find(l => l.id === pick.listenerId);
     if (!lst) return;
     try { openPanel('left', 'listeners'); } catch (_) {}
@@ -1288,6 +1330,27 @@ function onPickablePointerDown(e) {
     pickableDrag = {
       kind: 'listener',
       listenerId: pick.listenerId,
+      startClientX: e.clientX, startClientY: e.clientY,
+      startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
+      pointerId: e.pointerId, didMove: false,
+    };
+  } else { // 'vertex'
+    // Resolve the vertex's CURRENT world position from whatever shape
+    // the room is in right now. If/when the user actually drags, the
+    // shape gets converted to 'custom' before mutation.
+    const verts = currentRoomVertices(state.room);
+    if (!verts || pick.vertexIdx < 0 || pick.vertexIdx >= verts.length) return;
+    if (state.selectedVertexIdx !== pick.vertexIdx) {
+      state.selectedVertexIdx = pick.vertexIdx;
+      // No dedicated 'vertex:selected' event — the handles + adjacent
+      // highlight are part of the 2D renderer's room:changed path.
+      emit('room:changed');
+    }
+    startWorldX = verts[pick.vertexIdx].x;
+    startWorldY = verts[pick.vertexIdx].y;
+    pickableDrag = {
+      kind: 'vertex',
+      vertexIdx: pick.vertexIdx,
       startClientX: e.clientX, startClientY: e.clientY,
       startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
       pointerId: e.pointerId, didMove: false,
@@ -1312,9 +1375,24 @@ function onPickablePointerMove(e) {
   if (!pickableDrag.didMove) {
     if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
     pickableDrag.didMove = true;
+    // For VERTEX drags, ensure the room is in 'custom' mode before
+    // mutating coords. convertRoomToCustomPolygon is idempotent —
+    // calling it on an already-custom room is a no-op. After this
+    // call, room.custom_vertices is a live array we can write into.
+    if (pickableDrag.kind === 'vertex') {
+      const verts = convertRoomToCustomPolygon(state.room);
+      // If the conversion failed (round room) cancel the drag.
+      if (!verts || pickableDrag.vertexIdx >= verts.length) {
+        pickableDrag = null;
+        return;
+      }
+    }
     // First move — re-render so the dragged item switches to the
     // 2x scale visual before the position update lands.
-    emit(pickableDrag.kind === 'listener' ? 'listener:changed' : 'source:changed');
+    const firstEvt = pickableDrag.kind === 'listener' ? 'listener:changed'
+                   : pickableDrag.kind === 'vertex'   ? 'room:changed'
+                   : 'source:changed';
+    emit(firstEvt);
   }
 
   // Re-acquire the LIVE SVG. Compute start-world and live-world
@@ -1347,7 +1425,7 @@ function onPickablePointerMove(e) {
       emit('source:changed');
       emit('source:position', { idx: pickableDrag.sourceIdx, x: nx, y: ny, kind: src.kind || 'speaker' });
     }
-  } else {
+  } else if (pickableDrag.kind === 'listener') {
     const lst = state.listeners.find(l => l.id === pickableDrag.listenerId);
     if (!lst) return;
     if (lst.position.x !== nx || lst.position.y !== ny) {
@@ -1358,6 +1436,24 @@ function onPickablePointerMove(e) {
       // so a drag doesn't yank focus from inputs the user might be
       // editing on another listener card.
       emit('listener:position', { id: pickableDrag.listenerId, x: nx, y: ny });
+    }
+  } else { // 'vertex'
+    // Vertex coords aren't clamped against the room footprint — the
+    // user IS the footprint here. Snapping to the 0.5 m grid stays
+    // (it's what every other 2D edit uses) but the value is allowed
+    // anywhere on the floor plan, including negative coords if the
+    // user drags outside the original bounds.
+    // The earlier nx/ny clamp DID restrict to [margin, w-margin] —
+    // restore the raw snapped target for vertex edits.
+    const targetSnapX = snapToGrid(targetX);
+    const targetSnapY = snapToGrid(targetY);
+    const verts = state.room.custom_vertices;
+    if (!Array.isArray(verts) || pickableDrag.vertexIdx >= verts.length) return;
+    const v = verts[pickableDrag.vertexIdx];
+    if (v.x !== targetSnapX || v.y !== targetSnapY) {
+      v.x = targetSnapX;
+      v.y = targetSnapY;
+      emit('room:changed');
     }
   }
 }
@@ -1374,7 +1470,10 @@ function onPickablePointerUp() {
   pickableDrag = null;
   // Always re-render on pointerup so the drag visual drops back to
   // resting state.
-  emit(kind === 'listener' ? 'listener:changed' : 'source:changed');
+  const finalEvt = kind === 'listener' ? 'listener:changed'
+                 : kind === 'vertex'   ? 'room:changed'
+                 : 'source:changed';
+  emit(finalEvt);
 }
 
 function onPickableContextMenu(e) {
@@ -1520,6 +1619,91 @@ function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, dragg
     }
     s += `</g>`;
   });
+  return s;
+}
+
+// Render room-corner vertex handles for the click + drag editor.
+// Skipped for 'round' rooms (no corners) and when shape is invalid.
+//
+// Selection highlights:
+//   - Selected vertex: bigger cyan ring around the handle
+//   - Adjacent vertices (prev / next in the polygon): smaller cyan ring
+//   - Adjacent edges (the two edges touching the selected vertex):
+//     overlaid cyan stroke so the user sees what they're about to edit
+//
+// Handle group transform = translate(sx, sy); during drag a `scale(2)`
+// is appended for the same "grow into a draggable disk" feedback the
+// speakers and listeners use.
+function renderVertexHandlesSVG(room, selectedIdx, draggingIdx, x0, y0, pxW, pxD) {
+  if (!room) return '';
+  if (room.shape === 'round') return '';
+  const w = room.width_m, d = room.depth_m;
+  if (!(w > 0) || !(d > 0)) return '';
+
+  // Snapshot the current vertices in WORLD coords. Don't mutate state
+  // here — conversion to 'custom' only happens on actual drag.
+  let verts;
+  const cx = w / 2, cy = d / 2;
+  if (room.shape === 'polygon') {
+    const n = room.polygon_sides ?? 6;
+    const r = room.polygon_radius_m ?? 3;
+    verts = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      verts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+    }
+  } else if (room.shape === 'custom'
+             && Array.isArray(room.custom_vertices)
+             && room.custom_vertices.length >= 3) {
+    verts = room.custom_vertices.map(v => ({ x: v.x, y: v.y }));
+  } else {
+    verts = [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }];
+  }
+  if (verts.length === 0) return '';
+
+  const n = verts.length;
+  const toScreen = (v) => ({
+    x: x0 + (v.x / w) * pxW,
+    y: y0 + (v.y / d) * pxD,
+  });
+
+  let s = '';
+
+  // Selected vertex + adjacent vertices info
+  let selectedScreen = null, prevScreen = null, nextScreen = null;
+  if (typeof selectedIdx === 'number' && selectedIdx >= 0 && selectedIdx < n) {
+    selectedScreen = toScreen(verts[selectedIdx]);
+    prevScreen = toScreen(verts[(selectedIdx - 1 + n) % n]);
+    nextScreen = toScreen(verts[(selectedIdx + 1) % n]);
+    // Adjacent-edge overlays — drawn UNDER the handles so the dots sit
+    // on top. Cyan stroke 2.5 px so they're visible against the
+    // heatmap-warm room outline but don't overpower it.
+    s += `<line class="r2d-vertex-edge" x1="${prevScreen.x.toFixed(1)}" y1="${prevScreen.y.toFixed(1)}" x2="${selectedScreen.x.toFixed(1)}" y2="${selectedScreen.y.toFixed(1)}" />`;
+    s += `<line class="r2d-vertex-edge" x1="${selectedScreen.x.toFixed(1)}" y1="${selectedScreen.y.toFixed(1)}" x2="${nextScreen.x.toFixed(1)}" y2="${nextScreen.y.toFixed(1)}" />`;
+  }
+
+  // Vertex handles
+  for (let i = 0; i < n; i++) {
+    const v = verts[i];
+    const p = toScreen(v);
+    const isSel = (i === selectedIdx);
+    const isAdj = (selectedScreen != null && !isSel
+                   && (i === (selectedIdx - 1 + n) % n || i === (selectedIdx + 1) % n));
+    const isDragging = (i === draggingIdx);
+    const transform = `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})${isDragging ? ' scale(2)' : ''}`;
+    const cls = ['r2d-vertex']
+      .concat(isSel       ? ['r2d-vertex-selected']  : [])
+      .concat(isAdj       ? ['r2d-vertex-adjacent']  : [])
+      .concat(isDragging  ? ['r2d-vertex-dragging']  : [])
+      .join(' ');
+    s += `<g class="${cls}" data-vertex-idx="${i}" transform="${transform}">`;
+    // Hit-target — invisible larger circle so users don't have to be
+    // pixel-perfect on the visible 5 px dot. ~12 px radius.
+    s += `<circle class="r2d-vertex-hit" cx="0" cy="0" r="12" />`;
+    // Visible handle.
+    s += `<circle class="r2d-vertex-dot" cx="0" cy="0" r="${isSel ? 6 : 5}" />`;
+    s += `</g>`;
+  }
   return s;
 }
 
