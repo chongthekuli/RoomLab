@@ -1682,6 +1682,27 @@ function renderVertexHandlesSVG(room, selectedIdx, draggingIdx, x0, y0, pxW, pxD
     s += `<line class="r2d-vertex-edge" x1="${selectedScreen.x.toFixed(1)}" y1="${selectedScreen.y.toFixed(1)}" x2="${nextScreen.x.toFixed(1)}" y2="${nextScreen.y.toFixed(1)}" />`;
   }
 
+  // While any vertex is being dragged, show world-coord labels beside
+  // EVERY vertex so the user can read off the full polygon dimensions
+  // live as they reshape. Labels render OUTSIDE the handle groups so
+  // they aren't scaled by the dragged group's `scale(2)` transform.
+  // Position: top-right of each handle dot, ~12 px offset so it
+  // clears the hit-target. The dragged vertex's own label gets a
+  // brighter colour so it stands out from the read-only neighbours.
+  const showCoordLabels = (draggingIdx >= 0 && draggingIdx < n);
+  if (showCoordLabels) {
+    for (let i = 0; i < n; i++) {
+      const v = verts[i];
+      const p = toScreen(v);
+      const isDragging = (i === draggingIdx);
+      const tx = (p.x + 12).toFixed(1);
+      const ty = (p.y - 10).toFixed(1);
+      const label = `(${v.x.toFixed(2)}, ${v.y.toFixed(2)})`;
+      const cls = isDragging ? 'r2d-vertex-coord r2d-vertex-coord-active' : 'r2d-vertex-coord';
+      s += `<text x="${tx}" y="${ty}" class="${cls}">${label}</text>`;
+    }
+  }
+
   // Vertex handles
   for (let i = 0; i < n; i++) {
     const v = verts[i];
