@@ -1,4 +1,5 @@
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource } from '../app-state.js';
+import { openPanel } from '../ui/rail-system.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
@@ -1224,36 +1225,45 @@ function onSourcePointerDown(e) {
   const src = state.sources[sourceIdx];
   if (!src) return;
 
+  // Auto-open the Sources panel so the matching card is visible. The
+  // panel might be hidden behind the left rail; openPanel handles the
+  // case where it's already open (cheap idempotent call).
+  try { openPanel('left', 'sources'); } catch (_) {}
+
   // Eagerly mark the source selected on press — feels snappier than
-  // waiting for pointerup, and the SVG re-render won't fire until
-  // the actual position changes (or the click completes).
+  // waiting for pointerup.
   if (state.selectedSourceIdx !== sourceIdx) {
     state.selectedSourceIdx = sourceIdx;
     emit('source:selected', { idx: sourceIdx });
-    // No source:changed here — the source itself didn't change,
-    // only the selection. The renderer subscribes to source:selected
-    // separately (added below in mount2DViewport).
   }
 
-  const svg = e.currentTarget;
-  const startWorldKey = (src.kind === 'line-array') ? 'origin' : 'position';
+  // Capture click position + source's current world coords. We
+  // intentionally do NOT capture startCursorWorldX here — opening the
+  // sources panel may shift the SVG's on-screen rect, which would
+  // make a pre-shift start-world inconsistent with post-shift
+  // live-world readings. Instead we calibrate on the FIRST pointermove
+  // after layout has settled, so the delta math is always internally
+  // consistent.
+  const posKey = (src.kind === 'line-array') ? 'origin' : 'position';
   sourceDrag = {
     sourceIdx,
     kind: src.kind || 'speaker',
+    posKey,
     startClientX: e.clientX,
     startClientY: e.clientY,
-    startSrcWorldX: src[startWorldKey].x,
-    startSrcWorldY: src[startWorldKey].y,
+    startCursorWorldX: null,
+    startCursorWorldY: null,
+    startSrcWorldX: src[posKey].x,
+    startSrcWorldY: src[posKey].y,
     pointerId: e.pointerId,
     didMove: false,
-    svg,
   };
-  try { svg.setPointerCapture(e.pointerId); } catch (_) {}
-  // Bind move + up at the SVG level — pointer capture keeps events
-  // flowing here even if the cursor leaves the SVG.
-  svg.addEventListener('pointermove', onSourcePointerMove);
-  svg.addEventListener('pointerup',   onSourcePointerUp);
-  svg.addEventListener('pointercancel', onSourcePointerUp);
+  // Bind move + up to the WINDOW. The SVG element gets swapped out on
+  // every source:changed render so listeners bound to the SVG would
+  // be detached mid-drag. Window listeners survive innerHTML rebuilds.
+  window.addEventListener('pointermove', onSourcePointerMove);
+  window.addEventListener('pointerup',   onSourcePointerUp);
+  window.addEventListener('pointercancel', onSourcePointerUp);
 }
 
 function onSourcePointerMove(e) {
@@ -1262,8 +1272,8 @@ function onSourcePointerMove(e) {
   const dy = e.clientY - sourceDrag.startClientY;
   if (!sourceDrag.didMove) {
     // Stay in click-mode until the cursor crosses the threshold —
-    // otherwise tiny tremors during a click would steal the
-    // intent and reposition the speaker on a select.
+    // otherwise tiny tremors during a click would reposition the
+    // speaker when the user only meant to select.
     if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
     sourceDrag.didMove = true;
     // First move — re-render so the dragged source switches to the
@@ -1271,22 +1281,46 @@ function onSourcePointerMove(e) {
     emit('source:changed');
   }
 
-  const world = clientToWorldXY(sourceDrag.svg, e.clientX, e.clientY);
+  // Re-acquire the LIVE SVG element — the previous one was destroyed
+  // by the source:changed re-render. clientToWorldXY relies on the
+  // current SVG's getScreenCTM, so a stale reference would yield
+  // ever-drifting world coords (the symptom the user reported).
+  const svg = document.querySelector('#view-2d svg');
+  if (!svg) return;
+  const world = clientToWorldXY(svg, e.clientX, e.clientY);
   if (!world) return;
 
+  // Calibrate start-world on the FIRST move — by now openPanel has
+  // animated, layout has stabilised, and the SVG's screen rect is
+  // consistent with what subsequent moves will see. Using the
+  // pointerdown's pre-shift world would offset every subsequent
+  // delta by the panel-open width and the speaker would lurch.
+  if (sourceDrag.startCursorWorldX == null) {
+    const startWorld = clientToWorldXY(svg, sourceDrag.startClientX, sourceDrag.startClientY);
+    if (!startWorld) return;
+    sourceDrag.startCursorWorldX = startWorld.x;
+    sourceDrag.startCursorWorldY = startWorld.y;
+  }
+
+  // Delta math: new source pos = original source pos + cursor delta.
+  // Robust to SVG re-renders, viewport pan, heatmap toggle — the
+  // speaker stays under the cursor regardless of layout churn.
+  const targetX = sourceDrag.startSrcWorldX + (world.x - sourceDrag.startCursorWorldX);
+  const targetY = sourceDrag.startSrcWorldY + (world.y - sourceDrag.startCursorWorldY);
+
   // Snap to the 0.5 m grid. Clamp to room footprint with a half-grid
-  // margin so the speaker icon never disappears under the wall labels.
+  // margin so the icon never disappears under the wall labels.
   const w = state.room.width_m;
   const d = state.room.depth_m;
   const margin = SOURCE_SNAP_M;
-  let nx = snapToGrid(world.x);
-  let ny = snapToGrid(world.y);
+  let nx = snapToGrid(targetX);
+  let ny = snapToGrid(targetY);
   if (Number.isFinite(w)) nx = Math.max(margin, Math.min(w - margin, nx));
   if (Number.isFinite(d)) ny = Math.max(margin, Math.min(d - margin, ny));
 
   const src = state.sources[sourceDrag.sourceIdx];
   if (!src) return;
-  const key = (src.kind === 'line-array') ? 'origin' : 'position';
+  const key = sourceDrag.posKey;
   if (src[key].x !== nx || src[key].y !== ny) {
     src[key].x = nx;
     src[key].y = ny;
@@ -1297,18 +1331,16 @@ function onSourcePointerMove(e) {
   }
 }
 
-function onSourcePointerUp(e) {
+function onSourcePointerUp() {
   if (!sourceDrag) return;
-  const svg = sourceDrag.svg;
-  try { svg.releasePointerCapture(sourceDrag.pointerId); } catch (_) {}
-  svg.removeEventListener('pointermove', onSourcePointerMove);
-  svg.removeEventListener('pointerup',   onSourcePointerUp);
-  svg.removeEventListener('pointercancel', onSourcePointerUp);
+  window.removeEventListener('pointermove', onSourcePointerMove);
+  window.removeEventListener('pointerup',   onSourcePointerUp);
+  window.removeEventListener('pointercancel', onSourcePointerUp);
   const wasDragging = sourceDrag.didMove;
   sourceDrag = null;
   if (wasDragging) {
     // Re-render once more to drop the 2x scale + yellow fill — the
-    // SVG already shows the snapped position from the last move.
+    // position itself was already committed by the last pointermove.
     emit('source:changed');
   }
 }
@@ -1322,7 +1354,9 @@ function onSourceContextMenu(e) {
   e.preventDefault();
   const sourceIdx = parseInt(group.dataset.sourceIdx, 10);
   if (!Number.isFinite(sourceIdx)) return;
-  // Select on right-click so the panel reflects what the menu acts on.
+  // Select on right-click so the panel reflects what the menu acts on,
+  // and open the Sources panel for visibility.
+  try { openPanel('left', 'sources'); } catch (_) {}
   if (state.selectedSourceIdx !== sourceIdx) {
     state.selectedSourceIdx = sourceIdx;
     emit('source:selected', { idx: sourceIdx });
