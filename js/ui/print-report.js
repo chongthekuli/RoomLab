@@ -31,8 +31,9 @@ import { roomVolume, baseArea } from '../physics/room-shape.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
-import { buildHeatmapPageSVG, buildHeatmapLegend } from './print-heatmap.js';
+import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend } from './print-heatmap.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
+import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
 
 // ---------------------------------------------------------------------------
 // buildPrintModel — pure data function (testable without a headless browser).
@@ -114,6 +115,7 @@ export function buildPrintModel({ materials, nameHint } = {}) {
       groupId: s.groupId ?? null,
     })),
     bom: aggregateBOM(state.sources ?? []),
+    treatmentsBom: aggregateTreatmentsBOM(state.treatments ?? []),
     listeners: (state.listeners ?? []).map(l => ({
       id: l.id,
       label: l.label,
@@ -249,6 +251,47 @@ function aggregateBOM(sources) {
   })).sort((a, b) => b.qty - a.qty);
 }
 
+// Aggregate placed acoustic treatments into a Bill of Materials grouped
+// by productId × count. Each row carries the catalogue-resolved name,
+// manufacturer, per-unit area (width_m × height_m), total area and total
+// weight (from `weight_kg_m2` on the spec). The footer rows in the
+// renderer print grand totals across all rows.
+//
+// Falls back gracefully if the catalogue hasn't loaded yet (rare in
+// practice — print is user-triggered well after the panel mount).
+function aggregateTreatmentsBOM(treatments) {
+  if (!Array.isArray(treatments) || treatments.length === 0) return [];
+  const byPid = new Map();
+  for (const t of treatments) {
+    if (!t || !t.productId) continue;
+    const dim = t.dimensions || {};
+    const unitArea_m2 = (dim.width_m ?? 0) * (dim.height_m ?? 0);
+    const spec = t._cachedSpec || findCatalogueEntry(t.productId) || null;
+    const weightPerArea = spec?.geometry?.weight_kg_m2 ?? null;
+    const unitWeight_kg = weightPerArea != null ? weightPerArea * unitArea_m2 : null;
+    const key = t.productId;
+    let row = byPid.get(key);
+    if (!row) {
+      row = {
+        productId: t.productId,
+        name: spec?.name ?? t.productId,
+        manufacturer: spec?.manufacturer ?? '—',
+        count: 0,
+        unitArea_m2,
+        totalArea_m2: 0,
+        unitWeight_kg,
+        totalWeight_kg: 0,
+        hasWeight: weightPerArea != null,
+      };
+      byPid.set(key, row);
+    }
+    row.count += 1;
+    row.totalArea_m2 += unitArea_m2;
+    if (row.hasWeight) row.totalWeight_kg += unitWeight_kg ?? 0;
+  }
+  return Array.from(byPid.values()).sort((a, b) => b.count - a.count);
+}
+
 function getSpeakerLabel(url) {
   if (!url) return '—';
   const entry = SPEAKER_CATALOG.find(c => c.url === url);
@@ -335,6 +378,9 @@ const METHODOLOGY_ENTRIES = [
   ['SPL @ listener — reverberant field (toggle)',
     'Hopkins & Stryker 1948; Beranek eq. 6-3.',
     'Lₚ = L_w + 10·log₁₀(Q/4πr² + 4/R), R = (Sᾱ + 4mV) / (1 − ᾱ_eff); L_w = sens + 10·log₁₀P + 11 − DI per source.'],
+  ['Operating-range coverage',
+    'scene-design heuristic; BS 5839-8 §17 and IEC 60268-16 recommend programme-level intelligibility verification.',
+    'SPL recomputed at three system-input levels (−20 / −10 / 0 dB rel. rated). Levels represent background, programme, and max operating points typical of speech-reinforcement venues. Max-level plot assumes linear extrapolation from 1 W / 1 m sensitivity; real thermal compression (1–3 dB above ~50 % rated drive on compression drivers) is not modelled.'],
   ['STIPA per zone',
     'IEC 60268-16:2020 Annex A & C; Bradley 1986 (D/R-aware MTF); ISO 9921:2003.',
     'Per-band MTF(f_m) = (D + R·m_rev)/(D + R + N) with m_rev = 1/√(1 + (2π f_m T/13.8)²); apparent SNR clamped ±15 dB.'],
@@ -645,6 +691,59 @@ function renderPrintReport(model, { splGrid = null } = {}) {
       ${ambientStrip ? sec('', 'Ambient noise floor', ambientStrip) : ''}
     </div>`;
 
+  // ------ Appendix C: Acoustic treatments BOM -------------------------
+  // Aggregated by productId × count. Two grand-total rows close the
+  // table. Skipped entirely when no treatments are placed so the report
+  // stays compact for projects that don't use them.
+  //
+  // Lin's note: shipped as visual-only in v1 — these panels do NOT
+  // affect the RT60 / STI numbers above. The disclaimer below the
+  // table makes that explicit so a reviewing engineer can't assume
+  // they were folded into the acoustic model.
+  const treatmentsBom = model.treatmentsBom || [];
+  const treatmentsBomRows = treatmentsBom.map(r => `
+    <tr>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.manufacturer)}</td>
+      <td>${r.count}</td>
+      <td>${fmt(r.unitArea_m2, 2)} m²</td>
+      <td>${fmt(r.totalArea_m2, 2)} m²</td>
+      <td>${r.unitWeight_kg != null ? `${fmt(r.unitWeight_kg, 1)} kg` : '—'}</td>
+      <td>${r.hasWeight ? `${fmt(r.totalWeight_kg, 1)} kg` : '—'}</td>
+    </tr>`).join('');
+  const treatmentsGrandTotalArea = treatmentsBom.reduce((a, r) => a + (r.totalArea_m2 || 0), 0);
+  const treatmentsGrandTotalWeight = treatmentsBom.reduce(
+    (a, r) => a + (r.hasWeight ? (r.totalWeight_kg || 0) : 0), 0);
+  const treatmentsAnyWeight = treatmentsBom.some(r => r.hasWeight);
+  const treatmentsPage = treatmentsBom.length === 0 ? '' : `
+    <div class="pr-page pr-page-appendix">
+      <span class="pr-eyebrow">Appendix C · Acoustic treatment schedule</span>
+      ${sec('', `Bill of materials (${treatmentsBom.reduce((a, r) => a + r.count, 0)} panel${treatmentsBom.reduce((a, r) => a + r.count, 0) === 1 ? '' : 's'})`, `
+        <table class="pr-table pr-zebra">
+          <thead><tr>
+            <th>Product</th><th>Manufacturer</th><th>Qty</th>
+            <th>Unit area</th><th>Total area</th>
+            <th>Unit weight</th><th>Total weight</th>
+          </tr></thead>
+          <tbody>
+            ${treatmentsBomRows}
+            <tr class="pr-bom-total">
+              <td colspan="4" style="text-align:right;font-weight:600;">Grand total</td>
+              <td style="font-weight:600;">${fmt(treatmentsGrandTotalArea, 2)} m²</td>
+              <td>—</td>
+              <td style="font-weight:600;">${treatmentsAnyWeight ? `${fmt(treatmentsGrandTotalWeight, 1)} kg` : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="pr-note"><strong>Visual placement only.</strong>
+        The RT60 / STIPA values in this report do NOT yet include the
+        absorption contribution from these panels — that integration
+        is gated on Dr. Chen's placement-aware audit (RoomLAB v2). Use
+        this schedule for procurement and rigging; for a coupled
+        acoustic prediction with treatment, re-run after v2 ships.</p>
+      `)}
+    </div>`;
+
   // ------ Page 2: SCENE AT A GLANCE — coverage map + 12 KPI tiles ------
   // Per Sofia v2 (post-export-audit): the heatmap on the cover is the
   // headline composition; this page repeats it larger with the numeric
@@ -688,6 +787,64 @@ function renderPrintReport(model, { splGrid = null } = {}) {
           ${tile('Critical distance',       model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
           ${tile('Ambient preset',          escapeHtml(model.ambient.preset))}
         </div>
+      </div>`;
+  }
+
+  // ------ Drawing 02: operating-range coverage strip ------------------
+  // Per Sofia v3 + Dr. Chen: ONE physics solve, three shifted copies of
+  // the same grid at −20 / −10 / 0 dB rel. rated drive. Shared 5 dB-
+  // step integer legend below the strip; per-plot sub-caption with
+  // min/mean/max so the absolute numbers are in type as well as colour.
+  //
+  // Suppressed for STI heatmaps (drive offset has no linear meaning on
+  // an intelligibility metric) and for the empty-scene case.
+  let operatingRangePage = '';
+  const heatmapIsSpl = (model.heatmap?.metric ?? 'spl') === 'spl';
+  if (heatSvg && splGrid && heatmapIsSpl) {
+    const LEVELS = [
+      { offsetDb: -20, label: 'Background', sub: '−20 dB rel. rated' },
+      { offsetDb: -10, label: 'Programme',  sub: '−10 dB rel. rated' },
+      { offsetDb:   0, label: 'Max',        sub: '0 dB rel. rated' },
+    ];
+    const shifted = LEVELS.map(L => ({
+      ...L,
+      grid: shiftSplGridByDb(splGrid, L.offsetDb),
+    }));
+    // Shared integer range derived from the max-level plot (offsetDb=0).
+    // Rounded out to 5 dB ticks at both ends so all three plots map
+    // cleanly onto a single legend. The lower plots will have darker
+    // colours overall; that's the point of the comparison.
+    const topGrid = shifted[shifted.length - 1].grid;
+    const sharedMin = Math.floor(shifted[0].grid.minSPL_db / 5) * 5;
+    const sharedMax = Math.ceil(topGrid.maxSPL_db / 5) * 5;
+    const stripCells = shifted.map((L, idx) => {
+      const svg = buildHeatmapPageSVG(state, L.grid, { compact: true });
+      const sub = `${fmt(L.grid.minSPL_db, 0)} / ${fmt(L.grid.avgSPL_db, 0)} / ${fmt(L.grid.maxSPL_db, 0)} dB · ${L.sub}`;
+      return `
+        <div class="pr-strip-cell">
+          <div class="pr-strip-cell-label">
+            <span class="pr-strip-cell-tag">${String(idx + 1).padStart(2, '0')}</span>
+            <span class="pr-strip-cell-title">${escapeHtml(L.label)}</span>
+          </div>
+          <div class="pr-strip-cell-stage">${svg}</div>
+          <div class="pr-strip-cell-sub">${escapeHtml(sub)}</div>
+        </div>`;
+    }).join('');
+    const sharedLegend = buildHeatmapStripLegend({
+      minDb: sharedMin,
+      maxDb: sharedMax,
+      stepDb: 5,
+      header: `SPL @ 1 kHz · shared scale, ${sharedMin}–${sharedMax} dB`,
+    });
+    operatingRangePage = `
+      <div class="pr-page pr-page-operating-range">
+        <span class="pr-eyebrow">Drawing 02 · Operating-range coverage, top-down view</span>
+        <div class="pr-strip">${stripCells}</div>
+        <div class="pr-strip-legend-wrap">${sharedLegend}</div>
+        <p class="pr-caption">
+          SPL @ 1 kHz at three operating power levels, shared colour scale. Grey = outside footprint.
+          Levels per RoomLAB operating-range model; see methodology.
+        </p>
       </div>`;
   }
 
@@ -818,9 +975,11 @@ function renderPrintReport(model, { splGrid = null } = {}) {
   root.innerHTML = `
     ${cover}
     ${heatmapPage}
+    ${operatingRangePage}
     ${roomPage}
     ${sourcePage}
     ${listenerPage}
+    ${treatmentsPage}
     ${precisionPage}
     ${combinedPage}
     <footer class="pr-foot">

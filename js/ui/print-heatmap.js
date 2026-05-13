@@ -18,7 +18,7 @@
 // Coordinate frames mirror print-plan-svg.js exactly so the heatmap
 // page is layout-compatible with the cover plan.
 
-import { colorForMetric } from '../graphics/colour-ramps.js';
+import { colorForMetric, splColorRGB } from '../graphics/colour-ramps.js';
 import { computeTicks, formatTickLabel, legendHeader } from '../graphics/legend-ticks.js';
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
 
@@ -88,10 +88,59 @@ export function buildHeatmapDataURL(splGrid) {
   return canvas.toDataURL('image/png');
 }
 
+// Produce a shallow-copy splGrid with every finite cell value shifted
+// by `offsetDb`. Used by Drawing 02 (operating-range strip) to render
+// the same coverage map at −20 / −10 / 0 dB rel. rated drive without
+// re-running the full SPL solver. Physics: total SPL = direct +
+// reverberant, both proportional to source power, so a uniform power
+// offset is mathematically a uniform dB shift on every in-room cell.
+// Out-of-room cells (-Infinity) stay -Infinity. Min/mean/max are
+// recomputed so the caller can render sub-captions.
+//
+// IMPORTANT: this only works on an absolute-SPL grid. If a future grid
+// is ever switched to "SPL − ambient" (S/N), only the signal scales —
+// the caller would need to back the ambient out, shift, re-add. The
+// current SPL grid (computeSPLGrid → computeMultiSourceSPL) is pure
+// absolute SPL, no ambient subtraction — verified May 2026.
+export function shiftSplGridByDb(splGrid, offsetDb) {
+  if (!splGrid || !splGrid.grid) return null;
+  const offset = Number.isFinite(offsetDb) ? offsetDb : 0;
+  const newGrid = new Array(splGrid.cellsY);
+  let minVal = Infinity, maxVal = -Infinity, sum = 0, count = 0;
+  for (let j = 0; j < splGrid.cellsY; j++) {
+    const srcRow = splGrid.grid[j];
+    const dstRow = new Array(splGrid.cellsX);
+    for (let i = 0; i < splGrid.cellsX; i++) {
+      const v = srcRow[i];
+      if (!Number.isFinite(v)) { dstRow[i] = v; continue; }
+      const shifted = v + offset;
+      dstRow[i] = shifted;
+      if (shifted < minVal) minVal = shifted;
+      if (shifted > maxVal) maxVal = shifted;
+      sum += shifted;
+      count++;
+    }
+    newGrid[j] = dstRow;
+  }
+  const ok = count > 0;
+  return {
+    ...splGrid,
+    grid: newGrid,
+    minSPL_db: ok ? minVal : 0,
+    maxSPL_db: ok ? maxVal : 0,
+    avgSPL_db: ok ? sum / count : 0,
+  };
+}
+
 // Build the full hero heatmap SVG. Mirrors print-plan-svg.js exactly
 // so the proposal reads as one design system, then layers the heatmap
 // raster behind the linework.
-export function buildHeatmapPageSVG(state, splGrid) {
+//
+// Options:
+//   compact (default false) — drop the scale bar, north arrow, and
+//     source/listener labels for use in a small thumbnail (e.g.
+//     Drawing 02's 1×3 strip). Markers still draw but un-labeled.
+export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
   const room = state.room;
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
   if (!splGrid) return '';
@@ -167,7 +216,9 @@ export function buildHeatmapPageSVG(state, splGrid) {
     const sumX = z.vertices.reduce((a, v) => a + v.x, 0) / z.vertices.length;
     const sumY = z.vertices.reduce((a, v) => a + v.y, 0) / z.vertices.length;
     const c = projectXY(sumX, sumY, depth_m, offsetX, offsetY);
-    return `<polygon points="${pts}" fill="none" stroke="${color}" stroke-width="0.06" stroke-dasharray="0.3 0.18" />`
+    const polyEl = `<polygon points="${pts}" fill="none" stroke="${color}" stroke-width="0.06" stroke-dasharray="0.3 0.18" />`;
+    if (compact) return polyEl;
+    return polyEl
       + `<text x="${c.sx.toFixed(3)}" y="${c.sy.toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#111" stroke="#fff" stroke-width="0.05" paint-order="stroke">${escapeText(z.label || z.id)}</text>`;
   }).join('');
 
@@ -187,7 +238,9 @@ export function buildHeatmapPageSVG(state, splGrid) {
       const label = s.kind === 'line-array' ? `${srcCounter}.${eIdx + 1}` : `${srcCounter}`;
       sourcePieces.push(`<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="0.26" fill="${color}" stroke="#fff" stroke-width="0.07" />`);
       sourcePieces.push(`<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="0.26" fill="none" stroke="#000" stroke-width="0.04" />`);
-      sourcePieces.push(`<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#000" stroke="#fff" stroke-width="0.06" paint-order="stroke">${label}</text>`);
+      if (!compact) {
+        sourcePieces.push(`<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#000" stroke="#fff" stroke-width="0.06" paint-order="stroke">${label}</text>`);
+      }
     });
   }
   const sourcesEl = sourcePieces.join('');
@@ -203,8 +256,10 @@ export function buildHeatmapPageSVG(state, splGrid) {
     const tri = `${p.sx.toFixed(3)},${(p.sy - r).toFixed(3)} `
       + `${(p.sx + r * 0.866).toFixed(3)},${(p.sy + r * 0.5).toFixed(3)} `
       + `${(p.sx - r * 0.866).toFixed(3)},${(p.sy + r * 0.5).toFixed(3)}`;
-    return `<polygon points="${tri}" fill="#0a8a4a" stroke="#fff" stroke-width="0.08" />`
-      + `<polygon points="${tri}" fill="none" stroke="#000" stroke-width="0.04" />`
+    const triBase = `<polygon points="${tri}" fill="#0a8a4a" stroke="#fff" stroke-width="0.08" />`
+      + `<polygon points="${tri}" fill="none" stroke="#000" stroke-width="0.04" />`;
+    if (compact) return triBase;
+    return triBase
       + `<text x="${(p.sx + 0.55).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28" stroke="#fff" stroke-width="0.06" paint-order="stroke">${escapeText(l.label || l.id)}</text>`;
   }).join('');
 
@@ -232,7 +287,8 @@ export function buildHeatmapPageSVG(state, splGrid) {
       <text x="${naX.toFixed(3)}" y="${(naY + naSize * 0.75).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">N</text>
     </g>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-heatmap-svg">${heatEl}${zonesEl}${outlineEl}${sourcesEl}${listenersEl}${scaleBarEl}${northArrowEl}</svg>`;
+  const chromeEl = compact ? '' : `${scaleBarEl}${northArrowEl}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-heatmap-svg">${heatEl}${zonesEl}${outlineEl}${sourcesEl}${listenersEl}${chromeEl}</svg>`;
 }
 
 // Build the vertical legend that sits beside the heatmap. Same
@@ -261,6 +317,57 @@ export function buildHeatmapLegend(splGrid) {
       <div class="pr-heatmap-legend-stage">
         <div class="pr-heatmap-legend-bar" style="background:${gradient}"></div>
         <div class="pr-heatmap-legend-ticks">${tickRows}</div>
+      </div>
+    </div>`;
+}
+
+// Horizontal legend for the operating-range strip (Drawing 02). Three
+// plots share ONE legend centred below them. The tick range is FIXED
+// across all three plots so a reader can compare absolute SPL across
+// drive levels without re-mapping the gradient mentally. Caller passes
+// `min` / `max` already widened to a 5 dB-aligned integer envelope.
+//
+// Differs from buildHeatmapLegend() because:
+//   • horizontal (gradient is left→right, not bottom→top)
+//   • ticks are absolute integer values from a caller-supplied range,
+//     not auto-derived from min/max — Sofia spec "fixed integer ticks"
+//   • header is a plain label string (no metric/freq inference)
+export function buildHeatmapStripLegend({ minDb, maxDb, stepDb = 5, header = 'SPL @ 1 kHz' }) {
+  if (!Number.isFinite(minDb) || !Number.isFinite(maxDb) || maxDb <= minDb) return '';
+  const span = maxDb - minDb;
+  const first = Math.ceil(minDb / stepDb) * stepDb;
+  const last = Math.floor(maxDb / stepDb) * stepDb;
+  const ticks = [];
+  for (let v = first; v <= last + 1e-6; v += stepDb) {
+    const pct = ((v - minDb) / span) * 100;
+    ticks.push({ value: v, pct });
+  }
+  // The cell ramp (splColorRGB) is fixed-domain 60–110 dB. To make the
+  // legend bar's colour-at-position MATCH the cell colour for the same
+  // dB value, sample splColorRGB across [minDb, maxDb] and emit those
+  // stops. Otherwise the strip would be coloured blue→red end-to-end
+  // even when minDb=70 (which is actually cyan in the cell ramp), and
+  // the reader's eye would mis-map a 70 dB cell to "low" on the legend.
+  const NSTOPS = 9;
+  const stops = [];
+  for (let i = 0; i < NSTOPS; i++) {
+    const t = i / (NSTOPS - 1);
+    const db = minDb + t * span;
+    const [r, g, b] = splColorRGB(db);
+    stops.push(`rgb(${r},${g},${b}) ${(t * 100).toFixed(2)}%`);
+  }
+  const gradient = `linear-gradient(to right, ${stops.join(', ')})`;
+  const tickEls = ticks.map(t => `
+    <div class="pr-strip-legend-tick" style="left:${t.pct.toFixed(2)}%">
+      <span class="pr-strip-legend-tick-line"></span>
+      <span class="pr-strip-legend-tick-label">${Math.round(t.value)} dB</span>
+    </div>`).join('');
+  return `
+    <div class="pr-strip-legend">
+      <div class="pr-strip-legend-header">${escapeText(header)}</div>
+      <div class="pr-strip-legend-stage">
+        <div class="pr-strip-legend-bar" style="background:${gradient}"></div>
+        <div class="pr-strip-legend-ticks">${tickEls}</div>
       </div>
     </div>`;
 }

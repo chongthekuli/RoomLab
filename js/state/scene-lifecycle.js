@@ -49,6 +49,13 @@ export function resetSceneState({ state, defaultRoomState, deepClone, projectNam
   state.zones     = [];
   state.sources   = [];
   state.listeners = [];
+  // Acoustic-treatment panels — placed on walls/ceiling via panel-
+  // treatments.js. Visual-only in v1; physics integration deferred to
+  // v2 (Dr. Chen gate). Reset to empty alongside the other scene
+  // arrays so preset/template/blank-custom apply never leaks panels
+  // from the previous scene.
+  state.treatments = [];
+  state.selectedTreatmentId = null;
   state.selectedZoneId     = null;
   state.selectedListenerId = null;
   state.selectedSpeakerUrl = null;

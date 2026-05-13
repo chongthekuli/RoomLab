@@ -284,6 +284,12 @@ function buildScrim() {
           This acknowledgement is timestamped in UTC together with your operator label, public IP address, browser and platform, and is referenced on the methodology page of every PDF report generated in this session.
         </li>
       </ul>
+      <p class="terms-whatsnew" aria-label="What's new in this release">
+        <em>New in this build:</em> Treatments panel — drop acoustic absorbers,
+        bass traps and diffusers from a 20-product catalogue onto your walls
+        and ceiling, with placement carried through to the printed BOM.
+        Visual-only in this release; absorption is folded into RT60 in v2.
+      </p>
       <div class="terms-operator-row">
         <label class="terms-operator-label" for="terms-operator-name">
           Operator name / workstation label

@@ -1,5 +1,6 @@
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, convertRoomToCustomPolygon } from '../app-state.js';
 import { openPanel } from '../ui/rail-system.js';
+import { projectOntoWall } from '../ui/panel-treatments.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
@@ -512,6 +513,8 @@ export function mount2DViewport({ materials }) {
   on('source:selected', render);
   on('listener:changed', render);
   on('listener:selected', render);
+  on('treatment:changed', render);
+  on('treatment:selected', render);
   on('scene:reset', render);
   window.addEventListener('resize', render);
 }
@@ -810,6 +813,10 @@ function renderNormal(vp) {
     : '';
   const draggingListenerId = (pickableDrag?.kind === 'listener' && pickableDrag?.didMove) ? pickableDrag.listenerId : null;
   const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room, draggingListenerId) : '';
+  const draggingTreatId = (pickableDrag?.kind === 'treatment' && pickableDrag?.didMove) ? pickableDrag.treatmentId : null;
+  const treatmentSvg = (state.treatments && state.treatments.length > 0)
+    ? renderTreatmentsSVG(state.treatments, state.selectedTreatmentId, draggingTreatId, x0, y0, pxW, pxD, state.room)
+    : '';
 
   // Room-corner vertex handles. Skipped for 'round' rooms (no
   // corners) and when room dims are zero. Shown only after the user
@@ -853,6 +860,7 @@ function renderNormal(vp) {
         ${subSvg}
         ${encSvg}
         ${wsegSvg}
+        ${treatmentSvg}
         ${listenerSvg}
         ${speakerSvg}
         ${vertexSvg}
@@ -1236,6 +1244,13 @@ function findPickableFromEvent(e) {
     const id = lstEl.dataset.listenerId;
     if (id) return { kind: 'listener', el: lstEl, listenerId: id };
   }
+  // Treatments — lowest priority among pickables. A speaker / listener
+  // / vertex sitting on top of a treatment still claims the click first.
+  const treatEl = target.closest('.r2d-treatment');
+  if (treatEl) {
+    const id = treatEl.dataset.treatmentId;
+    if (id) return { kind: 'treatment', el: treatEl, treatmentId: id };
+  }
   return null;
 }
 
@@ -1311,6 +1326,10 @@ function onPickablePointerDown(e) {
       state.selectedVertexIdx = null;
       emit('room:changed');
     }
+    if (state.selectedTreatmentId != null) {
+      state.selectedTreatmentId = null;
+      emit('treatment:selected', { id: null });
+    }
     return;
   }
 
@@ -1354,6 +1373,23 @@ function onPickablePointerDown(e) {
     pickableDrag = {
       kind: 'listener',
       listenerId: pick.listenerId,
+      startClientX: e.clientX, startClientY: e.clientY,
+      startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
+      pointerId: e.pointerId, didMove: false,
+    };
+  } else if (pick.kind === 'treatment') {
+    const t = state.treatments?.find(x => x.id === pick.treatmentId);
+    if (!t) return;
+    try { openPanel('left', 'treatments'); } catch (_) {}
+    if (state.selectedTreatmentId !== pick.treatmentId) {
+      state.selectedTreatmentId = pick.treatmentId;
+      emit('treatment:selected', { id: pick.treatmentId });
+    }
+    startWorldX = t.position.x;
+    startWorldY = t.position.y;
+    pickableDrag = {
+      kind: 'treatment',
+      treatmentId: pick.treatmentId,
       startClientX: e.clientX, startClientY: e.clientY,
       startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
       pointerId: e.pointerId, didMove: false,
@@ -1415,6 +1451,7 @@ function onPickablePointerMove(e) {
     // 2x scale visual before the position update lands.
     const firstEvt = pickableDrag.kind === 'listener' ? 'listener:changed'
                    : pickableDrag.kind === 'vertex'   ? 'room:changed'
+                   : pickableDrag.kind === 'treatment' ? 'treatment:changed'
                    : 'source:changed';
     emit(firstEvt);
   }
@@ -1460,6 +1497,33 @@ function onPickablePointerMove(e) {
       // so a drag doesn't yank focus from inputs the user might be
       // editing on another listener card.
       emit('listener:position', { id: pickableDrag.listenerId, x: nx, y: ny });
+    }
+  } else if (pickableDrag.kind === 'treatment') {
+    // Treatments are constrained to their anchored surface plane —
+    // for wall anchors we re-project the un-snapped raw target onto
+    // the wall segment. For ceiling we let it float in X/Y at room
+    // height.
+    const t = state.treatments?.find(x => x.id === pickableDrag.treatmentId);
+    if (!t) return;
+    // Use the RAW (un-clamped, un-snapped) target so a small drag
+    // doesn't gridlock at 0.5 m intervals — panels are continuous,
+    // not on a grid.
+    if (t.anchor?.surface === 'ceiling') {
+      if (t.position.x !== targetX || t.position.y !== targetY) {
+        t.position.x = targetX;
+        t.position.y = targetY;
+        t.position.z = state.room.height_m ?? t.position.z;
+        emit('treatment:changed');
+      }
+    } else if (t.anchor?.surface === 'wall' && Number.isFinite(t.anchor.wallIndex)) {
+      const polygonVerts = roomPlanVertices(state.room);
+      const proj = projectOntoWall(polygonVerts, t.anchor.wallIndex,
+        { x: targetX, y: targetY }, t.position.z);
+      if (proj && (t.position.x !== proj.position.x || t.position.y !== proj.position.y)) {
+        t.position.x = proj.position.x;
+        t.position.y = proj.position.y;
+        emit('treatment:changed');
+      }
     }
   } else { // 'vertex'
     // Vertex coords aren't clamped against the OLD room footprint
@@ -1520,6 +1584,7 @@ function onPickablePointerUp() {
   // resting state.
   const finalEvt = kind === 'listener' ? 'listener:changed'
                  : kind === 'vertex'   ? 'room:changed'
+                 : kind === 'treatment' ? 'treatment:changed'
                  : 'source:changed';
   emit(finalEvt);
 }
@@ -1642,6 +1707,99 @@ function escapeMenuHtml(s) {
 //
 // Group transform = translate(sx, sy) with children at (0, 0). Drag
 // state appends `scale(2)` to grow the dot around its own centre.
+// Acoustic-treatment panels on the 2D plan — wall-anchored items render
+// as a tangent rectangle hugging the wall edge; ceiling-anchored items
+// render as a small dashed square at the world XY (the ceiling "view"
+// is the plan from above so a ceiling panel still has a recognisable
+// footprint). Both groups carry data-treatment-id so the click / drag
+// handlers can pick them up.
+function renderTreatmentsSVG(treatments, selectedId, draggingId, x0, y0, pxW, pxD, room) {
+  if (!Array.isArray(treatments) || treatments.length === 0) return '';
+  const stateToSvgX = (x) => x0 + (x / room.width_m) * pxW;
+  const stateToSvgY = (y) => y0 + (y / room.depth_m) * pxD;
+  // World-metres → SVG-pixels scale (uniform — assume the floor plan is
+  // aspect-correct because the renderer fits the room into pxW × pxD).
+  const px_per_m_x = pxW / Math.max(0.01, room.width_m);
+  const px_per_m_y = pxD / Math.max(0.01, room.depth_m);
+  // For wall panels we draw a rectangle whose long edge is `width_m`
+  // along the wall tangent, and whose short edge is `depth_m` projecting
+  // INTO the room. Use the average scale for the short edge so a
+  // skewed room aspect doesn't squash the panel visually.
+  const px_per_m_avg = (px_per_m_x + px_per_m_y) / 2;
+
+  let s = '';
+  for (const t of treatments) {
+    if (!t || !t.position || !t.dimensions) continue;
+    const isSel = t.id === selectedId;
+    const isDrag = t.id === draggingId;
+    const w = Math.max(0.05, t.dimensions.width_m ?? 0.6);
+    const d = Math.max(0.01, t.dimensions.depth_m ?? 0.05);
+    const cx = stateToSvgX(t.position.x);
+    const cy = stateToSvgY(t.position.y);
+
+    if (t.anchor?.surface === 'ceiling') {
+      // Dashed square — the ceiling panel viewed from above. Size is
+      // the panel's full width × height in state-XY plane.
+      const h = Math.max(0.05, t.dimensions.height_m ?? 0.6);
+      const wPx = w * px_per_m_x;
+      const hPx = h * px_per_m_y;
+      const rot = t.rotation_deg ?? 0;
+      s += `<g class="r2d-treatment ${isSel ? 'selected' : ''} ${isDrag ? 'dragging' : ''}"
+              data-treatment-id="${t.id}"
+              transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)}) rotate(${rot.toFixed(1)})">
+              ${isSel ? `<rect x="${(-wPx/2 - 4).toFixed(1)}" y="${(-hPx/2 - 4).toFixed(1)}"
+                              width="${(wPx + 8).toFixed(1)}" height="${(hPx + 8).toFixed(1)}"
+                              fill="none" stroke="#00d4ff" stroke-width="2" stroke-dasharray="4,2" />` : ''}
+              <rect x="${(-wPx/2).toFixed(1)}" y="${(-hPx/2).toFixed(1)}"
+                    width="${wPx.toFixed(1)}" height="${hPx.toFixed(1)}"
+                    fill="#7a89a0" fill-opacity="0.25" stroke="#a0afc0" stroke-width="1.2"
+                    stroke-dasharray="3,2" />
+              ${isDrag ? '' : `<text x="0" y="${(hPx/2 + 12).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#a0afc0">${escapeXml(t.label || t.id)}</text>`}
+            </g>`;
+      continue;
+    }
+    // Wall-anchored — orient along the polygon edge tangent.
+    // Recompute the edge tangent from the anchor's wallIndex.
+    const polygonVerts = roomPlanVertices(room);
+    let tangAngleDeg = 0;
+    if (Array.isArray(polygonVerts) && polygonVerts.length >= 2
+        && Number.isFinite(t.anchor?.wallIndex)) {
+      const idx = t.anchor.wallIndex % polygonVerts.length;
+      const a = polygonVerts[idx];
+      const b = polygonVerts[(idx + 1) % polygonVerts.length];
+      // SVG +Y is downward so flip the sign on dy when computing the
+      // tangent angle — this keeps the rectangle hugging the same edge
+      // the renderRoomOutline draws.
+      tangAngleDeg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+    }
+    const wPx = w * px_per_m_avg;
+    const dPx = Math.max(2, d * px_per_m_avg);
+    // Rectangle is laid out centered, long edge along local X (tangent
+    // direction), short edge along local Y (into the room). Shift along
+    // local +Y so the panel sits INSIDE the room (the wall sits at the
+    // anchor point, panel projects inward). Without the half-depth
+    // offset the panel straddles the wall line and looks tangential.
+    s += `<g class="r2d-treatment ${isSel ? 'selected' : ''} ${isDrag ? 'dragging' : ''}"
+            data-treatment-id="${t.id}"
+            transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)}) rotate(${tangAngleDeg.toFixed(1)})">
+            ${isSel ? `<rect x="${(-wPx/2 - 3).toFixed(1)}" y="-${(dPx + 3).toFixed(1)}"
+                            width="${(wPx + 6).toFixed(1)}" height="${(dPx + 6).toFixed(1)}"
+                            fill="none" stroke="#00d4ff" stroke-width="2" />` : ''}
+            <rect x="${(-wPx/2).toFixed(1)}" y="-${dPx.toFixed(1)}"
+                  width="${wPx.toFixed(1)}" height="${dPx.toFixed(1)}"
+                  fill="#7a89a0" fill-opacity="0.7" stroke="#cfd6df" stroke-width="1.2" />
+            ${isDrag ? '' : `<text x="0" y="-${(dPx + 4).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#cfd6df">${escapeXml(t.label || t.id)}</text>`}
+          </g>`;
+  }
+  return s;
+}
+
+function escapeXml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId) {
   let s = '';
   listeners.forEach((lst) => {

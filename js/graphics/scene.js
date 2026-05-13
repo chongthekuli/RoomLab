@@ -23,12 +23,24 @@ import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWal
 import { showWalkTouchHUD, hideWalkTouchHUD } from '../ui/walk-touch-hud.js';
 import { splColorRGB, stiColorRGB } from './colour-ramps.js';
 import { computeTicks, formatTickLabel } from './legend-ticks.js';
+import {
+  makeTreatmentEntry, projectOntoNearestWall, projectOntoWall,
+  wallYawDeg, rescueOrphanedTreatments,
+} from '../ui/panel-treatments.js';
+import { findCatalogueEntry, loadSurfaceCatalogue } from '../labs/surfacelab/catalog.js';
 
 let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
 let aimLinesGroup, audienceGroup;
 let racksGroup = null;
+// Acoustic-treatment panels — rebuilt on treatment:changed. Each child is
+// a Group tagged userData.tag='treatment' carrying:
+//   userData.treatmentId   — state.treatments[i].id (selection / drag pick)
+//   userData.surface       — 'wall' | 'ceiling' (drag-plane constraint)
+//   userData.wallIndex?    — polygon edge index when surface === 'wall'
+// v1 = visual-only; not part of any physics group.
+let treatmentsGroup = null;
 let _rackCatalogue = null;
 let _ampCatalog = null;
 let rayGroup = null;
@@ -308,6 +320,7 @@ export async function mount3DViewport({ materials }) {
   const REBUILD_AIM = 1 << 5;
   const REBUILD_ROOM_FULL = 1 << 6;
   const REBUILD_RACKS = 1 << 7;
+  const REBUILD_TREATMENTS = 1 << 8;
   const queueRebuild = (flags) => {
     _pendingRebuild = (_pendingRebuild ?? 0) | flags;
     if (_rebuildRAF) return;
@@ -323,6 +336,7 @@ export async function mount3DViewport({ materials }) {
       if (f & REBUILD_HEATMAP) rebuildHeatmap();
       if (f & REBUILD_AIM) rebuildAimLines();
       if (f & REBUILD_RACKS) rebuildRacks();
+      if (f & REBUILD_TREATMENTS) rebuildTreatments();
     });
   };
 
@@ -330,9 +344,30 @@ export async function mount3DViewport({ materials }) {
   // If they sit after the rebuilds, a preset-click that lands between
   // boot's Promise.all(loadLoudspeaker…) and mount3DViewport completing
   // emits scene:reset into the void and the 3D view shows stale geometry.
-  on('room:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_ROOM | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_AIM); });
+  on('room:changed', () => {
+    invalidateRayViz();
+    // Treatments anchored to walls must follow when vertices move. We
+    // rescue orphans (wallIndex now out of range) by re-projecting onto
+    // the nearest surviving wall, and re-project surviving anchors onto
+    // their (possibly moved) wall segment so they stay on the wall plane.
+    reanchorTreatmentsOnRoomChange();
+    queueRebuild(REBUILD_ROOM | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_AIM | REBUILD_TREATMENTS);
+  });
   on('source:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
   on('source:model_changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
+  on('treatment:changed', () => queueRebuild(REBUILD_TREATMENTS));
+  on('treatment:selected', () => queueRebuild(REBUILD_TREATMENTS));
+  // Treatments panel asks the 3D viewport to arm placement mode — the
+  // next click on a wall or the ceiling will drop a new entry of the
+  // chosen productId at the hit point.
+  on('treatment:arm_placement', ({ productId } = {}) => {
+    armTreatmentPlacement(productId).catch(err =>
+      console.warn('[scene] arm placement failed:', err));
+  });
+  on('treatment:cancel_placement', () => {
+    cancelTreatmentPlacement();
+    try { emit('treatment:placement_cancelled'); } catch (_) {}
+  });
   on('listener:changed', () => queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP));
   on('listener:selected', () => {
     queueRebuild(REBUILD_LISTENERS | REBUILD_HEATMAP);
@@ -359,10 +394,12 @@ export async function mount3DViewport({ materials }) {
     if (audienceGroup)    disposeGroup(audienceGroup);
     if (aimLinesGroup)    disposeGroup(aimLinesGroup);
     if (racksGroup)       disposeGroup(racksGroup);
+    if (treatmentsGroup)  disposeGroup(treatmentsGroup);
     // Drop any placement ghost left over from a cancelled-but-not-cleared
     // session — preset/template/load wipes the scene; the ghost cannot
     // outlive its parent room.
     clearPlacementGhost();
+    cancelTreatmentPlacement();
 
     // Auto-fit camera to the new room. Without this, a swap from a 60 m
     // arena to a 4.5 m hi-fi leaves the camera 80 m back and the user
@@ -371,7 +408,7 @@ export async function mount3DViewport({ materials }) {
     // calling synchronously here is correct — the camera lands the same
     // frame the rebuild renders.
     frameCameraToRoom();
-    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_RACKS);
+    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_RACKS | REBUILD_TREATMENTS);
   });
   // Rack-builder edits — user added/removed an amp or moved a rack.
   on('rack:changed', () => queueRebuild(REBUILD_RACKS));
@@ -392,6 +429,7 @@ export async function mount3DViewport({ materials }) {
   rebuildListeners();
   rebuildZones();
   rebuildHeatmap();
+  rebuildTreatments();
   animate();
 
   window.addEventListener('resize', onResize);
@@ -629,6 +667,12 @@ function initProbeTool() {
   // Hover-highlight + click-to-pivot on speakers.
   renderer.domElement.addEventListener('pointermove', onSpeakerHoverMove);
   renderer.domElement.addEventListener('pointerdown', onSpeakerPointerDown);
+  // Treatment drag — pointerdown on a placed treatment starts a
+  // surface-constrained drag. Registered AFTER the speaker handler so
+  // speakers stay clickable when one happens to overlap a panel; the
+  // treatment handler hit-tests treatmentsGroup, not sourcesGroup, so
+  // they don't compete.
+  renderer.domElement.addEventListener('pointerdown', onTreatmentPointerDown);
 }
 
 // ---- Speaker hover-highlight + click-to-pivot -------------------------
@@ -767,6 +811,15 @@ function onSurfaceClick(e) {
   _surfaceClickNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   _surfaceClickNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
   _surfaceClickRay.setFromCamera(_surfaceClickNdc, activeCamera || camera);
+
+  // Treatment placement — if the panel armed a productId, the next
+  // wall/ceiling click drops a new treatment there and consumes the
+  // click. Done BEFORE surface selection so the user doesn't get a
+  // sticky cyan wall highlight on top of the placement.
+  if (_pendingPlacementProductId) {
+    const roomHitsForPlace = _surfaceClickRay.intersectObject(roomGroup, true);
+    if (_handlePlacementClick(roomHitsForPlace)) return;
+  }
 
   // Closest valid room hit (skip heatmap layers, zone overlays, untagged
   // helper meshes). Hits arrive sorted near→far from intersectObject.
@@ -4193,6 +4246,442 @@ function rebuildListeners() { shadowsNeedRefresh = true;
       listenersGroup.add(chair);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Treatments — visual-only placement of acoustic panels on walls / ceiling.
+// Each entry in state.treatments renders as a thin rectangular Group facing
+// into the room, with a coloured frame, the product fill, and a selection
+// glow when state.selectedTreatmentId matches. Drag math (below) constrains
+// movement to the anchored surface plane so the panel can never fly free.
+// ---------------------------------------------------------------------------
+
+function _treatmentColorFor(category) {
+  // Match SurfaceLAB's per-rail palette intent: absorbers dark/charcoal,
+  // diffusers warm wood, bass dark+amber, ceiling neutral grey.
+  const seg = typeof category === 'string' ? category.split('.')[0] : 'absorber';
+  switch (seg) {
+    case 'diffuser': return 0xb69b6e;
+    case 'bass':     return 0x3d3a36;
+    case 'absorber': return 0x4a4742;
+    default:         return 0x8a8580;
+  }
+}
+
+function _buildTreatmentMesh(t, spec) {
+  // Group wraps the panel face + frame + selection ring so we can move /
+  // rotate as a unit. The group sits at the treatment's anchor point;
+  // the panel face is offset slightly along the surface normal so it
+  // doesn't z-fight with the wall mesh.
+  const group = new THREE.Group();
+  const w = Math.max(0.05, t.dimensions?.width_m ?? 0.6);
+  const h = Math.max(0.05, t.dimensions?.height_m ?? 0.6);
+  const d = Math.max(0.01, t.dimensions?.depth_m ?? 0.05);
+
+  const baseColor = _treatmentColorFor(spec?.category);
+  const visual = spec?.visual || {};
+  const matColor = typeof visual.color === 'string'
+    ? new THREE.Color(visual.color).getHex()
+    : baseColor;
+
+  // Body: thin box with the panel face oriented in the group-local XY
+  // plane, depth on +Z (back-of-panel sits at z=0, face at z=d).
+  const bodyGeo = new THREE.BoxGeometry(w, h, d);
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: matColor,
+    roughness: Number.isFinite(visual.roughness) ? visual.roughness : 0.85,
+    metalness: Number.isFinite(visual.metalness) ? visual.metalness : 0.05,
+  });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.z = d / 2;
+  body.userData.pickable = true;       // ONLY the solid body registers clicks
+  group.add(body);
+
+  // Front-face highlight strip so the panel reads as engineered (not
+  // a generic prop): a slightly darker frame around the face. Just an
+  // EdgesGeometry over the body so it tracks the box outline. Not
+  // pickable — line raycasting + a 1 m threshold would catch wall
+  // clicks near the panel edge.
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(bodyGeo),
+    new THREE.LineBasicMaterial({ color: 0xe8ecf2, transparent: true, opacity: 0.35 }),
+  );
+  edges.position.z = d / 2;
+  edges.userData.pickable = false;
+  edges.raycast = () => {};            // hard opt-out — no raycaster work, no hits
+  group.add(edges);
+
+  // Selection halo — a slightly larger transparent plane behind the
+  // panel face, cyan, only added when selected. Decoration only — DO
+  // NOT register clicks; otherwise a wall click 7 cm from the panel
+  // edge spuriously selects this treatment instead of the wall.
+  if (t.id === state.selectedTreatmentId) {
+    const haloGeo = new THREE.PlaneGeometry(w + 0.15, h + 0.15);
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0x00d4ff, transparent: true, opacity: 0.35,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    const halo = new THREE.Mesh(haloGeo, haloMat);
+    halo.position.z = -0.01;
+    halo.userData.pickable = false;
+    halo.raycast = () => {};           // hard opt-out — halo never wins a pick
+    group.add(halo);
+  }
+
+  // Tag every child so a raycast hit can find its parent treatment id.
+  // The pickable filter above is independent: pickable=false children
+  // never produce hits, but if they did the tag would still be correct.
+  group.userData.tag = 'treatment';
+  group.userData.treatmentId = t.id;
+  group.userData.surface = t.anchor?.surface ?? 'wall';
+  if (t.anchor?.wallIndex != null) group.userData.wallIndex = t.anchor.wallIndex;
+  group.traverse(child => {
+    child.userData.tag = child.userData.tag || 'treatment';
+    child.userData.treatmentId = t.id;
+  });
+  return group;
+}
+
+// State-coord (x=width, y=depth, z=height) → world-coord (Three.js x, z=h, y=depth)
+// helper. Applies the per-treatment orientation:
+//   wall: face normal = inward normal of the wall edge; the panel sits
+//         on the wall and projects into the room by d/2.
+//   ceiling: face normal = -Y (downward), roll = rotation_deg.
+function _placeTreatmentGroupOnSurface(group, t, polygonVerts) {
+  const px = t.position.x;
+  const py = t.position.y;
+  const pz = t.position.z;
+  if (t.anchor?.surface === 'ceiling') {
+    // Sit flush at room height; face pointing DOWN. Default panel
+    // orientation has face on +Z (group-local). Rotate -90° around X
+    // so the face points downward (world -Y).
+    group.position.set(px, pz, py);
+    group.rotation.set(Math.PI / 2, ((t.rotation_deg || 0) * Math.PI) / 180, 0, 'YXZ');
+    return;
+  }
+  // Wall anchor — orient so the panel face normal points INTO the room
+  // along the wall's inward normal.
+  if (!Array.isArray(polygonVerts) || polygonVerts.length < 2) {
+    group.position.set(px, pz, py);
+    return;
+  }
+  const idx = Number.isFinite(t.anchor?.wallIndex) ? t.anchor.wallIndex : 0;
+  const a = polygonVerts[idx % polygonVerts.length];
+  const b = polygonVerts[(idx + 1) % polygonVerts.length];
+  // Edge tangent in state coords (x, y). Inward normal for a CCW
+  // polygon in state coords is rotated 90° CCW from the tangent;
+  // in Three.js (x, _, z=stateY) that's the right-hand rule yaw.
+  const tx = b.x - a.x;
+  const ty = b.y - a.y;
+  const tlen = Math.hypot(tx, ty);
+  if (tlen < 1e-6) {
+    group.position.set(px, pz, py);
+    return;
+  }
+  // World yaw (around Three.js +Y) such that the group's local +Z aligns
+  // with the inward normal of the edge. In state coords the inward
+  // normal (CCW polygon) is (-ty, tx) / tlen. In Three.js coords
+  // (x → x, state-y → z) the normal points at world (-ty, _, tx).
+  // The default group +Z direction in world is (0, 0, 1). We want
+  // (-ty/tlen, 0, tx/tlen). Yaw = atan2(-ty, tx). Then roll = rotation_deg.
+  const yaw = Math.atan2(-ty, tx);
+  group.position.set(px, pz, py);
+  group.rotation.set(0, yaw, ((t.rotation_deg || 0) * Math.PI) / 180, 'YXZ');
+  // Translate the body forward along its own +Z by half-depth, but we
+  // already centred the body at z=d/2 inside the group, so the back of
+  // the panel sits on the wall plane. No extra offset needed.
+}
+
+function rebuildTreatments() {
+  shadowsNeedRefresh = true;
+  if (!scene) return;
+  if (!treatmentsGroup) {
+    treatmentsGroup = new THREE.Group();
+    treatmentsGroup.name = 'treatments';
+    scene.add(treatmentsGroup);
+  } else {
+    disposeGroup(treatmentsGroup);
+  }
+  const treatments = Array.isArray(state.treatments) ? state.treatments : [];
+  if (treatments.length === 0) return;
+  const polygonVerts = roomPlanVertices(state.room);
+
+  for (const t of treatments) {
+    if (!t || !t.position) continue;
+    let spec = t._cachedSpec;
+    if (!spec) {
+      spec = findCatalogueEntry(t.productId);
+      if (spec) t._cachedSpec = spec;
+    }
+    // spec may still be null on cold-boot before loadSurfaceCatalogue
+    // has resolved. Render with defaults; rebuild kicks again when the
+    // panel mount finishes and emits treatment:changed via its
+    // catalogue-resolved render.
+    const grp = _buildTreatmentMesh(t, spec);
+    _placeTreatmentGroupOnSurface(grp, t, polygonVerts);
+    treatmentsGroup.add(grp);
+  }
+}
+
+// Re-anchor + orphan-rescue every wall-anchored treatment after a
+// room change. Two cases:
+//   (a) wallIndex still exists, but its vertices moved → re-project
+//       the world XY onto the current segment so the panel stays
+//       glued to the wall plane rather than drifting through it.
+//   (b) wallIndex is out of range (room re-vertexed to fewer edges)
+//       → re-project onto the nearest surviving wall and update
+//       wallIndex. This is the "orphan rescue" path.
+function reanchorTreatmentsOnRoomChange() {
+  if (!Array.isArray(state.treatments) || state.treatments.length === 0) return;
+  const polygonVerts = roomPlanVertices(state.room);
+  if (!Array.isArray(polygonVerts) || polygonVerts.length < 3) return;
+  // Step 1: rescue out-of-range indices (returns count, but we just
+  // care that orphans got moved before step 2 runs).
+  rescueOrphanedTreatments(polygonVerts);
+  // Step 2: re-snap surviving wall anchors onto their (possibly moved)
+  // segment. Ceiling anchors stay put; their position.z must track
+  // room.height_m so a wall-shrink doesn't leave them hovering.
+  const ceilingZ = state.room.height_m ?? 0;
+  for (const t of state.treatments) {
+    if (t.anchor?.surface === 'ceiling') {
+      t.position.z = ceilingZ;
+      continue;
+    }
+    if (t.anchor?.surface !== 'wall') continue;
+    const idx = t.anchor.wallIndex;
+    if (!Number.isFinite(idx)) continue;
+    const proj = projectOntoWall(polygonVerts, idx,
+      { x: t.position.x, y: t.position.y }, t.position.z);
+    if (proj) {
+      t.position.x = proj.position.x;
+      t.position.y = proj.position.y;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Treatment placement — armed by the panel, the next click on a wall (or
+// the ceiling) drops a new treatment of the chosen productId at that
+// surface coord. Lives entirely in scene.js because the raycast against
+// the live roomGroup is here.
+// ---------------------------------------------------------------------------
+let _pendingPlacementProductId = null;
+let _pendingPlacementSpec = null;
+const _placeRay = new THREE.Raycaster();
+const _placeNdc = { x: 0, y: 0 };
+
+export async function armTreatmentPlacement(productId) {
+  if (!productId) return;
+  // Resolve the spec; we may need to load the catalogue first.
+  let spec = findCatalogueEntry(productId);
+  if (!spec) {
+    try {
+      await loadSurfaceCatalogue();
+      spec = findCatalogueEntry(productId);
+    } catch (_) {}
+  }
+  if (!spec) {
+    console.warn('[treatments] cannot place — productId not in catalogue:', productId);
+    return;
+  }
+  _pendingPlacementProductId = productId;
+  _pendingPlacementSpec = spec;
+  if (renderer) renderer.domElement.style.cursor = 'crosshair';
+  // Show a hint via the scene's existing toast pattern (panel emits
+  // treatment:placement_armed for any listener that cares).
+  try { emit('treatment:placement_armed', { productId, spec }); } catch (_) {}
+}
+
+export function cancelTreatmentPlacement() {
+  _pendingPlacementProductId = null;
+  _pendingPlacementSpec = null;
+  if (renderer) renderer.domElement.style.cursor = '';
+}
+
+// Called from onSurfaceClick (below) when placement is armed. Returns
+// true if the click was consumed by placement (caller should skip its
+// usual surface-selection path).
+function _handlePlacementClick(roomHits) {
+  if (!_pendingPlacementProductId || !_pendingPlacementSpec) return false;
+  // Find the FIRST wall or ceiling hit. Skip heatmaps, zone overlays,
+  // and any surface_id that isn't a wall/ceiling.
+  let hit = null;
+  let surface = null;
+  for (const h of roomHits) {
+    const tag = h.object.userData?.tag ?? '';
+    if (tag.startsWith('heatmap_')) continue;
+    if (h.object.userData?.zone_id) continue;
+    const surfId = h.object.userData?.surface_id;
+    if (!surfId) continue;
+    if (surfId === 'ceiling') {
+      surface = 'ceiling';
+      hit = h;
+      break;
+    }
+    // Anything starting with "wall_" (rectangular) or "edge_" (polygon)
+    // counts as a wall hit. Sub-structure / enclosure walls are skipped
+    // in v1 — treatments anchor to the OUTER room polygon only.
+    if (surfId.startsWith('wall_') || surfId.startsWith('edge_')) {
+      surface = 'wall';
+      hit = h;
+      break;
+    }
+  }
+  if (!hit) return false;
+  const polygonVerts = roomPlanVertices(state.room);
+  let anchor, position;
+  if (surface === 'ceiling') {
+    anchor = { surface: 'ceiling' };
+    position = {
+      x: hit.point.x,
+      y: hit.point.z,        // Three.js Z → state Y
+      z: state.room.height_m ?? hit.point.y,
+    };
+  } else {
+    // hit.point.x / .z = state X / Y; project onto nearest polygon edge.
+    const worldXY = { x: hit.point.x, y: hit.point.z };
+    const heightAbove = Math.max(0, hit.point.y); // state Z (elevation)
+    const proj = projectOntoNearestWall(state.room, polygonVerts, worldXY, heightAbove);
+    if (!proj) return false;
+    anchor = { surface: 'wall', wallIndex: proj.wallIndex };
+    position = proj.position;
+  }
+  const entry = makeTreatmentEntry(_pendingPlacementSpec, anchor, position, 0);
+  state.treatments = state.treatments || [];
+  state.treatments.push(entry);
+  state.selectedTreatmentId = entry.id;
+  cancelTreatmentPlacement();
+  try {
+    openPanel('left', 'treatments');
+  } catch (_) {}
+  emit('treatment:changed');
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Treatment drag — pointerdown on a placed treatment, drag along the
+// anchored surface plane. Wall anchors slide along the polygon edge;
+// ceiling anchors slide in the X/Y plane at room height.
+// ---------------------------------------------------------------------------
+const _treatPickRay = new THREE.Raycaster();
+const _treatPickNdc = { x: 0, y: 0 };
+let _treatDrag = null;        // { id, surface, wallIndex?, pointerId, didMove }
+
+function _findTreatmentFromHit(hit) {
+  let o = hit?.object;
+  while (o) {
+    if (o.userData?.tag === 'treatment' && typeof o.userData?.treatmentId === 'string') return o;
+    o = o.parent;
+    if (!o || o === scene) break;
+  }
+  return null;
+}
+
+function onTreatmentPointerDown(e) {
+  if (walkMode || probeActive) return;
+  if (e.button !== 0) return;
+  if (_pendingPlacementProductId) return;   // placement click takes priority
+  if (!treatmentsGroup || treatmentsGroup.children.length === 0) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  _treatPickNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  _treatPickNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  _treatPickRay.setFromCamera(_treatPickNdc, activeCamera || camera);
+  const hits = _treatPickRay.intersectObject(treatmentsGroup, true);
+  if (hits.length === 0) return;
+  // Speaker priority — if a speaker is closer, bail and let the speaker
+  // handler claim the click.
+  const treatGroup = _findTreatmentFromHit(hits[0]);
+  if (!treatGroup) return;
+  if (sourcesGroup) {
+    const sHits = _treatPickRay.intersectObject(sourcesGroup, true);
+    for (const h of sHits) {
+      if (h.object.userData?.speakerModelUrl && h.distance < hits[0].distance) return;
+    }
+  }
+  const tid = treatGroup.userData.treatmentId;
+  const t = state.treatments.find(x => x.id === tid);
+  if (!t) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (controls) controls.enabled = false;
+  state.selectedTreatmentId = tid;
+  _treatDrag = {
+    id: tid,
+    surface: t.anchor?.surface ?? 'wall',
+    wallIndex: t.anchor?.wallIndex,
+    pointerId: e.pointerId,
+    didMove: false,
+  };
+  try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+  renderer.domElement.addEventListener('pointermove', onTreatmentPointerMove);
+  renderer.domElement.addEventListener('pointerup', onTreatmentPointerUp);
+  renderer.domElement.addEventListener('pointercancel', onTreatmentPointerUp);
+  emit('treatment:selected', { id: tid });
+}
+
+function _raycastIntoSurfacePlane(e) {
+  if (!_treatDrag) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  _treatPickNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  _treatPickNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  _treatPickRay.setFromCamera(_treatPickNdc, activeCamera || camera);
+  // Intersect the live room geometry so we don't have to maintain a
+  // separate planar mesh for the drag.
+  if (!roomGroup) return null;
+  const hits = _treatPickRay.intersectObject(roomGroup, true);
+  if (_treatDrag.surface === 'ceiling') {
+    // Take the ceiling hit (any surface_id === 'ceiling' or similar).
+    for (const h of hits) {
+      if (h.object.userData?.surface_id === 'ceiling') {
+        return { worldXY: { x: h.point.x, y: h.point.z }, z: state.room.height_m ?? h.point.y };
+      }
+    }
+    return null;
+  }
+  // Wall — take the first wall hit (any wall_* / edge_*). Project the
+  // hit's XY onto the ANCHORED wall index so the panel can't hop walls
+  // mid-drag.
+  for (const h of hits) {
+    const surfId = h.object.userData?.surface_id;
+    if (!surfId) continue;
+    if (!(surfId.startsWith('wall_') || surfId.startsWith('edge_') || surfId === 'walls')) continue;
+    return { worldXY: { x: h.point.x, y: h.point.z }, z: Math.max(0, h.point.y) };
+  }
+  return null;
+}
+
+function onTreatmentPointerMove(e) {
+  if (!_treatDrag) return;
+  const t = state.treatments.find(x => x.id === _treatDrag.id);
+  if (!t) return;
+  const raw = _raycastIntoSurfacePlane(e);
+  if (!raw) return;
+  _treatDrag.didMove = true;
+  if (_treatDrag.surface === 'ceiling') {
+    t.position.x = raw.worldXY.x;
+    t.position.y = raw.worldXY.y;
+    t.position.z = raw.z;
+  } else {
+    // Constrain to the anchored wall edge.
+    const polygonVerts = roomPlanVertices(state.room);
+    const proj = projectOntoWall(polygonVerts, _treatDrag.wallIndex, raw.worldXY, raw.z);
+    if (proj) {
+      t.position.x = proj.position.x;
+      t.position.y = proj.position.y;
+      t.position.z = raw.z;
+    }
+  }
+  emit('treatment:changed');
+}
+
+function onTreatmentPointerUp(e) {
+  if (!_treatDrag) return;
+  if (controls) controls.enabled = true;
+  renderer.domElement.removeEventListener('pointermove', onTreatmentPointerMove);
+  renderer.domElement.removeEventListener('pointerup', onTreatmentPointerUp);
+  renderer.domElement.removeEventListener('pointercancel', onTreatmentPointerUp);
+  try { renderer.domElement.releasePointerCapture(_treatDrag.pointerId); } catch (_) {}
+  _treatDrag = null;
 }
 
 function rebuildZones() { shadowsNeedRefresh = true;

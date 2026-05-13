@@ -124,7 +124,8 @@ body.is-pdf-export .vp-tabs {
      belt-and-braces against future re-orderings of the page list. */
   #print-report .pr-page-methodology,
   #print-report .pr-page-disclaimer,
-  #print-report .pr-page-heatmap {
+  #print-report .pr-page-heatmap,
+  #print-report .pr-page-operating-range {
     page-break-before: always;
     break-before: page;
   }
@@ -158,6 +159,8 @@ body.is-pdf-export .vp-tabs {
      incidental background fills (zebra rows on muted-paper) which the
      proposal aesthetic already strips on purpose. */
   #print-report .pr-heatmap-legend-bar,
+  #print-report .pr-strip-legend-bar,
+  #print-report .pr-strip-cell-stage,
   #print-report .pr-tierstrip-cell.pr-tierstrip-active,
   #print-report .pr-precision-headline,
   #print-report .pr-reviewer-note,
@@ -452,6 +455,130 @@ body.is-pdf-export .vp-tabs {
     margin: 6pt 0 0 0;
     page-break-inside: avoid;
     break-inside: avoid;
+  }
+
+  /* ----------- DRAWING 02 — OPERATING-RANGE STRIP -----------
+     Three coverage plots side by side on one page (background /
+     programme / max drive). Shared colour scale below. The whole
+     page resists internal page-breaks so the strip never gets
+     split across sheets. */
+  #print-report .pr-page-operating-range {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  #print-report .pr-page-operating-range > .pr-eyebrow {
+    margin-bottom: 6pt;
+  }
+  #print-report .pr-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6pt;
+    margin: 2pt 0 8pt 0;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  #print-report .pr-strip-cell {
+    display: flex;
+    flex-direction: column;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  #print-report .pr-strip-cell-label {
+    display: flex;
+    align-items: baseline;
+    gap: 6pt;
+    border-bottom: 0.5pt solid var(--rule);
+    padding-bottom: 2pt;
+    margin-bottom: 4pt;
+  }
+  #print-report .pr-strip-cell-tag {
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  #print-report .pr-strip-cell-title {
+    font-size: 10pt;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.005em;
+  }
+  #print-report .pr-strip-cell-stage {
+    border: 0.5pt solid var(--rule);
+    padding: 2mm;
+    background: var(--paper);
+  }
+  #print-report .pr-strip-cell-stage svg {
+    width: 100%;
+    height: auto;
+    max-height: 11cm;
+    display: block;
+  }
+  #print-report .pr-strip-cell-sub {
+    margin-top: 4pt;
+    font-size: 8pt;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    letter-spacing: 0;
+    line-height: 1.35;
+  }
+
+  /* Shared horizontal legend, centred under the three plots. */
+  #print-report .pr-strip-legend-wrap {
+    display: flex;
+    justify-content: center;
+    margin: 2pt 0 4pt 0;
+  }
+  #print-report .pr-strip-legend {
+    width: 70%;
+    max-width: 130mm;
+  }
+  #print-report .pr-strip-legend-header {
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+    margin-bottom: 4pt;
+  }
+  #print-report .pr-strip-legend-stage {
+    position: relative;
+    width: 100%;
+  }
+  #print-report .pr-strip-legend-bar {
+    width: 100%;
+    height: 9pt;
+    border: 0.4pt solid var(--rule);
+    border-radius: 1pt;
+  }
+  #print-report .pr-strip-legend-ticks {
+    position: relative;
+    width: 100%;
+    height: 14pt;
+    margin-top: 1pt;
+  }
+  #print-report .pr-strip-legend-tick {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1pt;
+  }
+  #print-report .pr-strip-legend-tick-line {
+    width: 0.4pt;
+    height: 3pt;
+    background: var(--ink);
+  }
+  #print-report .pr-strip-legend-tick-label {
+    font-size: 7pt;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    white-space: nowrap;
   }
 
   /* Tile grid (moved off cover, lives below plan) */

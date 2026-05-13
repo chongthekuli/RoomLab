@@ -499,6 +499,7 @@ html[data-rail-left="room"]      #panel-room,
 html[data-rail-left="sources"]   #panel-sources,
 html[data-rail-left="listeners"] #panel-listeners,
 html[data-rail-left="zones"]     #panel-zones,
+html[data-rail-left="treatments"] #panel-treatments,
 html[data-rail-left="ambient"]   #panel-ambient,
 html[data-rail-left="library"]   #panel-library,
 html[data-rail-right="results"]   #panel-results,
@@ -5089,4 +5090,180 @@ section h3 {
   .lab-loading-card { transition: none; transform: none; }
   .lab-loading-ring,
   .lab-loading-ring-2 { animation: none; border-top-color: rgba(74, 163, 255, 0.18); }
+}
+
+/* ====================================================================
+   Treatments panel — js/ui/panel-treatments.js
+   Default panel typography sized for short labels overflows with long
+   product names + dense description text. Scope tighter sizes locally
+   and clamp descriptions to 2 lines. Catalogue is the bulk of the
+   panel — that's where the air comes out.
+   ==================================================================== */
+#panel-treatments .treatments-disclaimer {
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 6px 9px;
+  margin-bottom: 8px;
+  background: rgba(255, 200, 80, 0.06);
+  border-left: 2px solid rgba(255, 200, 80, 0.55);
+  color: var(--fg-mid, #b9bfc8);
+}
+#panel-treatments .treatments-disclaimer strong { color: var(--fg, #e6edf3); }
+
+#panel-treatments .treatments-armed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  margin-bottom: 10px;
+  background: rgba(74, 163, 255, 0.10);
+  border: 1px solid rgba(74, 163, 255, 0.45);
+  border-radius: 4px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--fg, #e6edf3);
+}
+#panel-treatments .treatments-armed-icon {
+  font-size: 14px; color: var(--accent, #4aa3ff);
+  flex: 0 0 auto;
+}
+#panel-treatments .treatments-armed-text { flex: 1; }
+#panel-treatments .treatments-armed-text strong { color: var(--fg-strong, #fff); }
+#panel-treatments .treatments-armed-cancel {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.18);
+  color: var(--fg-mid, #b9bfc8);
+  border-radius: 3px;
+  cursor: pointer;
+}
+#panel-treatments .treatments-armed-cancel:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--fg, #e6edf3);
+}
+
+#panel-treatments .treatments-h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--fg-mid, #8a929c);
+  margin: 12px 0 6px;
+}
+
+#panel-treatments .treatments-empty {
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 6px 9px;
+  color: var(--fg-mid, #8a929c);
+}
+
+#panel-treatments .treatments-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+#panel-treatments .treatments-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.10);
+  color: var(--fg-mid, #b9bfc8);
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#panel-treatments .treatments-tab:hover {
+  background: rgba(255,255,255,0.04);
+  color: var(--fg, #e6edf3);
+}
+#panel-treatments .treatments-tab.is-active {
+  background: rgba(74, 163, 255, 0.14);
+  border-color: rgba(74, 163, 255, 0.55);
+  color: var(--accent, #4aa3ff);
+}
+
+#panel-treatments .treatments-mfr {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--fg-mid, #8a929c);
+  margin: 8px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+#panel-treatments .treatments-products {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#panel-treatments .treatment-product-card {
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 3px;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+#panel-treatments .tp-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  align-items: baseline;
+}
+#panel-treatments .tp-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg, #e6edf3);
+  line-height: 1.25;
+  /* Long product names — wrap, don't ellipsis (user needs to read full name) */
+  word-break: break-word;
+}
+#panel-treatments .tp-tier {
+  font-size: 10.5px;
+  color: var(--fg-mid, #8a929c);
+  flex: 0 0 auto;
+  letter-spacing: 0.5px;
+}
+#panel-treatments .tp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--fg-mid, #8a929c);
+  font-variant-numeric: tabular-nums;
+}
+#panel-treatments .tp-desc {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--fg-mid, #b9bfc8);
+  /* Clamp long datasheet descriptions to 2 lines */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+#panel-treatments .treatment-product-card:hover .tp-desc {
+  -webkit-line-clamp: unset;        /* full text on hover */
+  overflow: visible;
+}
+#panel-treatments .tp-place {
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+}
+#panel-treatments .treatments-armed ~ .treatments-catalogue .tp-place {
+  opacity: 0.55;     /* dim other Place buttons while one is armed — still clickable to re-arm */
 }

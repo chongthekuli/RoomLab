@@ -23,6 +23,7 @@ import { mountPrintReport } from '../../ui/print-report.js';
 import { mountSourcesPanel } from '../../ui/panel-sources.js';
 import { mountListenersPanel } from '../../ui/panel-listeners.js';
 import { mountZonesPanel } from '../../ui/panel-zones.js';
+import { mountTreatmentsPanel } from '../../ui/panel-treatments.js';
 import { mountAmbientPanel } from '../../ui/panel-ambient.js';
 import { mountResultsPanel } from '../../ui/panel-results.js';
 import { mountPrecisionPanel } from '../../ui/panel-precision.js';
@@ -347,6 +348,7 @@ export async function mountRoomLab() {
     'room:changed',
     'rack:changed',
     'physics:eq_changed',
+    'treatment:changed',
   ]) on(ev, trigger);
   trigger();
   window.addEventListener('pagehide', flushAutosave);
@@ -356,6 +358,12 @@ export async function mountRoomLab() {
   mountSourcesPanel({ speakerCatalog: SPEAKER_CATALOG });
   mountListenersPanel();
   mountZonesPanel({ materials });
+  // Treatments panel mounts ASYNC because it awaits the SurfaceLAB
+  // catalogue fetch. We don't block other panel mounts on it — the
+  // panel renders a "Loading…" stub immediately and replaces it once
+  // the catalogue resolves.
+  mountTreatmentsPanel().catch(err =>
+    console.warn('[roomlab] treatments panel mount failed:', err));
   mountAmbientPanel();
   mountResultsPanel({ materials });
   mountPrecisionPanel({ materials });

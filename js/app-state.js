@@ -37,6 +37,55 @@ export function getSelectedListener() {
   return state.listeners.find(l => l.id === state.selectedListenerId) || null;
 }
 
+// Treatment selection — used by the 2D + 3D viewports' click-to-select
+// and the treatments panel's selected-card highlight. Holds the
+// treatment's `id` string ("T1", "T2"…) parallel to selectedListenerId.
+export function getSelectedTreatment() {
+  if (!state.selectedTreatmentId) return null;
+  return state.treatments?.find(t => t.id === state.selectedTreatmentId) || null;
+}
+
+// Duplicate the treatment with id `id`. Mirrors duplicateListener:
+// preserves productId/dimensions/rotation/anchor, generates a fresh
+// unique id, and offsets the world position slightly so the new panel
+// doesn't render exactly on top of the original. Wall-anchored panels
+// nudge along the wall edge (parallel offset); ceiling-anchored panels
+// nudge on +X. Returns the new id, or null on failure.
+export function duplicateTreatment(id) {
+  if (!Array.isArray(state.treatments)) return null;
+  const idx = state.treatments.findIndex(t => t.id === id);
+  if (idx < 0) return null;
+  const original = state.treatments[idx];
+  const copy = JSON.parse(JSON.stringify(original));
+  // The cached spec is a session-only reference — never copy it.
+  if (copy._cachedSpec) delete copy._cachedSpec;
+
+  const usedIds = new Set(state.treatments.map(t => t.id).filter(Boolean));
+  let n = state.treatments.length + 1;
+  while (usedIds.has(`T${n}`)) n++;
+  copy.id = `T${n}`;
+  if (typeof copy.label === 'string' && copy.label.length > 0) {
+    // If label ends in a number, bump it; otherwise append " copy".
+    copy.label = /\d+$/.test(copy.label)
+      ? copy.label.replace(/\d+$/, String(n))
+      : `${copy.label} copy`;
+  }
+
+  const STEP = 0.5;
+  if (copy.anchor?.surface === 'wall') {
+    // Slide along the wall: shift position perpendicular to the wall
+    // normal. Find the wall's tangent from the room polygon edges.
+    // We don't have polygon access here, so use a simple +X then +Y
+    // fallback — the 2D drag re-projection on next interaction will
+    // snap it back onto the segment.
+    copy.position.x = (copy.position.x ?? 0) + STEP;
+  } else if (copy.anchor?.surface === 'ceiling') {
+    copy.position.x = (copy.position.x ?? 0) + STEP;
+  }
+  state.treatments.push(copy);
+  return copy.id;
+}
+
 // Source selection — used by the 2D viewport click-select + drag-to-move
 // interaction and the matching highlight on the sources panel cards.
 // Index into state.sources (NOT into the expanded element list); line
@@ -427,6 +476,30 @@ export const state = {
   selectedListenerId: null,
   zones: [],
   selectedZoneId: null,
+  // Acoustic-treatment panels placed in the room — populated by
+  // panel-treatments.js. One entry = one panel (or one tile, one trap)
+  // pulled from data/treatment-products.json. v1 is VISUAL ONLY:
+  // the room renders the panel in 3D + 2D and the BOM appendix
+  // aggregates them, but the RT60 / STIPA math does NOT yet fold the
+  // panel surface into roomSurfaces(). v2 (Dr. Chen gate) will wire
+  // the absorption coefficients into Sabine/Eyring with placement-
+  // aware area accounting.
+  //
+  // Shape per entry:
+  //   {
+  //     id: "T1",                  // unique within scene
+  //     productId: "rpg-skyline-2d", // lookup key into surface catalogue
+  //     label: string,             // display name (defaults to product name)
+  //     anchor: { surface: 'wall'|'ceiling', wallIndex?: int },
+  //     position: { x, y, z },     // world metres — source of truth for drag
+  //     rotation_deg,              // yaw on wall, roll on ceiling
+  //     dimensions: { width_m, height_m, depth_m }, // catalogue-locked in v1
+  //     _cachedSpec                // session-only resolved catalogue entry — NOT serialized
+  //   }
+  treatments: [],
+  // Currently-selected treatment id (parallel to selectedListenerId).
+  // null = no treatment selected. Cleared by scene:reset and project load.
+  selectedTreatmentId: null,
   results: {
     // Draft-engine outputs (current Sabine / Hopkins-Stryker / STIPA) —
     // re-used names for backward compat; the entire block is conceptually
@@ -729,6 +802,14 @@ export function serializeProject(src = state) {
     selectedListenerId: src.selectedListenerId ?? null,
     zones: deepClone(src.zones ?? []),
     selectedZoneId: src.selectedZoneId ?? null,
+    // Acoustic-treatment panels. Strip the session-only _cachedSpec so
+    // it doesn't bloat the save file (the catalogue entry is re-resolved
+    // from productId on load).
+    treatments: (src.treatments ?? []).map(t => {
+      const { _cachedSpec, ...persistent } = t;
+      return deepClone(persistent);
+    }),
+    selectedTreatmentId: src.selectedTreatmentId ?? null,
     physics: {
       reverberantField: !!src.physics?.reverberantField,
       coherent:         !!src.physics?.coherent,
@@ -833,6 +914,25 @@ export function deserializeProject(obj) {
   if (Array.isArray(obj.sources))   state.sources   = obj.sources.map(deepClone);
   if (Array.isArray(obj.listeners)) state.listeners = obj.listeners.map(deepClone);
   if (Array.isArray(obj.zones))     state.zones     = obj.zones.map(deepClone);
+  // Treatments — schema v1.1 (additive only, no formatVersion bump).
+  // Filter out malformed entries defensively: id + productId + position
+  // are mandatory; anything missing them gets dropped rather than
+  // crashing the render path. _cachedSpec is intentionally NOT
+  // accepted from the file — it's resolved at first render after load.
+  if (Array.isArray(obj.treatments)) {
+    state.treatments = obj.treatments
+      .filter(t => t && typeof t === 'object'
+        && typeof t.id === 'string'
+        && typeof t.productId === 'string'
+        && t.position && Number.isFinite(t.position.x)
+        && Number.isFinite(t.position.y) && Number.isFinite(t.position.z))
+      .map(t => {
+        const { _cachedSpec, ...persistent } = t;
+        return deepClone(persistent);
+      });
+  } else {
+    state.treatments = [];
+  }
 
   // --- Selection ids — preserve the user's last hover/selection -------
   // `null` is a valid serialized value meaning "no selection". Use
@@ -850,6 +950,17 @@ export function deserializeProject(obj) {
   // defensive in case the canonical reset's contract drifts later.
   state.selectedSubStructureId = null;
   state.selectedSurfaceId = null;
+  // Treatment selection isn't persisted across save/load (the user's
+  // last selection is a UI affordance, not part of the design). If the
+  // saved file carried one we accept it ONLY if the corresponding
+  // treatment survived the filter above — otherwise null. This mirrors
+  // how listener/zone selection is handled.
+  if (typeof obj.selectedTreatmentId === 'string'
+      && state.treatments.some(t => t.id === obj.selectedTreatmentId)) {
+    state.selectedTreatmentId = obj.selectedTreatmentId;
+  } else {
+    state.selectedTreatmentId = null;
+  }
 
   // --- Physics + ambient + EQ — overlay scalars; arrays full replace ---
   if (obj.physics && typeof obj.physics === 'object') {
