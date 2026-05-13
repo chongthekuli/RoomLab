@@ -3792,44 +3792,51 @@ export function captureViewportImage(opts = {}) {
   let height = Math.max(150, Math.floor(opts.height ?? 900));
   const presetName = opts.preset ?? 'iso';
 
-  // ---- Adaptive capture aspect (so shallow rooms don't leave empty PNG margin) ----
-  // For iso preset, compute the room silhouette's natural aspect from
-  // projecting AABB extents onto the iso view basis. Then resize the
-  // capture to that aspect (keeping pixel area ~constant for quality)
-  // so the room fills the PNG. CSS displays the PNG at `width:165mm;
-  // height:auto` so the rendered hero is variable-height per room.
+  // ---- Adaptive capture aspect (so the room fills the PNG, no empty margin) ----
+  // Project the ROOM POLYGON VERTICES (not AABB corners) onto the iso view
+  // basis. For a circular dome, the polygon is inscribed in the AABB and
+  // the actual silhouette is narrower than the AABB silhouette — using
+  // AABB corners here previously over-estimated the silhouette width and
+  // produced a too-wide PNG with empty L/R margin.
+  // Uses the same roomPlanVertices(room) helper the iterative iso fit
+  // uses, so the capture aspect MATCHES the fit's binding axis.
   if (presetName === 'iso') {
     try {
+      const room = state.room;
       const aabb = _roomWorldAABB?.();
-      if (aabb && aabb.w > 0 && aabb.d > 0) {
+      if (room && aabb && aabb.w > 0 && aabb.d > 0) {
         const dirToCam = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
         const viewDir = dirToCam.clone().negate();
         const worldUp = new THREE.Vector3(0, 1, 0);
         const rightV = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();
         const upV    = new THREE.Vector3().crossVectors(viewDir, rightV).normalize();
+        const targetY = aabb.h * 0.4;
         const cx = aabb.cx, cz = aabb.cz, h = aabb.h;
+        // Build silhouette point set: polygon footprint × {floor, ceil}.
+        // Matches the iso preset's silhouette point set so the capture
+        // aspect agrees with the fit's binding axis.
+        const planVerts = roomPlanVertices(room);
         let maxOX = 0, maxOY = 0;
         const tmp = new THREE.Vector3();
-        for (let xi = 0; xi < 2; xi++) {
-          for (let yi = 0; yi < 2; yi++) {
-            for (let zi = 0; zi < 2; zi++) {
-              tmp.set(
-                xi === 0 ? aabb.minX : aabb.maxX,
-                yi === 0 ? 0 : h,
-                zi === 0 ? aabb.minZ : aabb.maxZ,
-              );
-              tmp.x -= cx; tmp.y -= h * 0.4; tmp.z -= cz;
-              maxOX = Math.max(maxOX, Math.abs(tmp.dot(rightV)));
-              maxOY = Math.max(maxOY, Math.abs(tmp.dot(upV)));
-            }
-          }
+        const project = (wx, wy, wz) => {
+          tmp.set(wx - cx, wy - targetY, wz - cz);
+          maxOX = Math.max(maxOX, Math.abs(tmp.dot(rightV)));
+          maxOY = Math.max(maxOY, Math.abs(tmp.dot(upV)));
+        };
+        for (const v of planVerts) {
+          // roomPlanVertices returns plan coords (x, y) where y is depth.
+          // World space: x→x, depth→z, height→y.
+          project(v.x, 0, v.y);
+          project(v.x, h, v.y);
         }
+        // Deliberately NOT unioning AABB corners here. For a circular dome
+        // the AABB corners ARE the empty L/R space we want to exclude
+        // from the capture aspect. The iterative iso fit handles its own
+        // union (polygon + visible-content Box3) to prevent clipping —
+        // this aspect calc only needs the room silhouette shape.
         if (maxOX > 0 && maxOY > 0) {
-          const silhouetteAspect = maxOX / maxOY;       // wide-shallow rooms > 1; tall narrow < 1
-          // Clamp aspect to a sane range so a degenerate room doesn't
-          // produce a 1×10000 strip.
+          const silhouetteAspect = maxOX / maxOY;
           const aspect = Math.max(0.6, Math.min(2.2, silhouetteAspect));
-          // Keep pixel area close to original — sqrt distributes it.
           const area = width * height;
           width  = Math.round(Math.sqrt(area * aspect));
           height = Math.round(Math.sqrt(area / aspect));
