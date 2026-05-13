@@ -42,6 +42,20 @@ body.is-pdf-export #print-report { display: block !important; }
   @page {
     size: A4 portrait;
     margin: 18mm 18mm 14mm 22mm;       /* outer / outer / footer / inner gutter */
+
+    /* Page number rendered INSIDE the printable area (not in the
+       browser chrome). Survives the user unchecking "Headers and
+       footers" in the print dialog. Chrome / Edge / Firefox / Safari
+       all support @page margin boxes + counter(page) / counter(pages).
+       Right-aligned in the bottom margin, hairline grey so it reads
+       as a chrome detail rather than competing with page content. */
+    @bottom-right {
+      content: counter(page) " / " counter(pages);
+      font-family: 'Inter Tight', system-ui, sans-serif;
+      font-size: 8pt;
+      color: #8a929c;
+      margin-top: 4mm;
+    }
   }
 
   /* Hide live-app chrome that lives outside #print-report. The
