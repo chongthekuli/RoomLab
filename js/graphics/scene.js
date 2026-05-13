@@ -3644,22 +3644,35 @@ function _cameraPresetTransform(name) {
           corners.push(new THREE.Vector3(v.x, ceilY,  v.y));
         }
       } catch (_) { /* no-op — fall through to bbox corners */ }
-      // Always include the visible-content Box3 corners too. For a
-      // rectangular room these match the plan vertices exactly (no
-      // change to existing behaviour). For round / polygon rooms they
-      // capture meshes that extend past the room footprint (e.g. a
-      // line-array flown above the ceiling Box3 max-y, or a speaker
-      // pole outside the polygon).
-      corners.push(
-        new THREE.Vector3(box.min.x, box.min.y, box.min.z),
-        new THREE.Vector3(box.max.x, box.min.y, box.min.z),
-        new THREE.Vector3(box.min.x, box.max.y, box.min.z),
-        new THREE.Vector3(box.max.x, box.max.y, box.min.z),
-        new THREE.Vector3(box.min.x, box.min.y, box.max.z),
-        new THREE.Vector3(box.max.x, box.min.y, box.max.z),
-        new THREE.Vector3(box.min.x, box.max.y, box.max.z),
-        new THREE.Vector3(box.max.x, box.max.y, box.max.z),
-      );
+      // Include Box3 corners only for RECTANGULAR rooms. For polygon /
+      // round / custom rooms the Box3 is the inscribed-cylinder's
+      // bounding square — its corners sit in EMPTY space outside the
+      // actual room footprint, and unioning them with the polygon
+      // vertices makes the fit pull the camera back to fit the empty
+      // corners. Result: room renders smaller than necessary inside
+      // the captured PNG with visible L/R margin.
+      //
+      // For non-rectangular rooms, polygon vertices alone define the
+      // silhouette. The capture-aspect pre-pass uses the same point
+      // set so both stages agree on the binding axis.
+      //
+      // Trade-off: a speaker positioned OUTSIDE the polygon footprint
+      // (rare — there's no UI to place sources outside the room) could
+      // theoretically clip. Acceptable in v1; we can union per-mesh
+      // bounding boxes later if it bites.
+      const isRect = state.room?.shape === 'rectangular' || corners.length === 0;
+      if (isRect) {
+        corners.push(
+          new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+          new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+          new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+          new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+          new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+          new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+          new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+          new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+        );
+      }
 
       const fovV = THREE.MathUtils.degToRad(camera.fov || 38);
       const aspect = Math.max(camera.aspect || 1, 0.1);
