@@ -3824,10 +3824,27 @@ export function captureViewportImage(opts = {}) {
         const rightV = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();
         const upV    = new THREE.Vector3().crossVectors(viewDir, rightV).normalize();
         const targetY = aabb.h * 0.4;
-        const cx = aabb.cx, cz = aabb.cz, h = aabb.h;
-        // Build silhouette point set: polygon footprint × {floor, ceil}.
-        // Matches the iso preset's silhouette point set so the capture
-        // aspect agrees with the fit's binding axis.
+        const cx = aabb.cx, cz = aabb.cz;
+        // Compute the actual visible-content Y range. room.height_m is
+        // the WALL height — for dome ceilings (ceiling_dome_rise_m) or
+        // arena scoreboards / catwalks, the visible mesh extends well
+        // above the wall top. Using room.height_m here under-estimated
+        // the y-extent → height-axis came up under-filled in the fit
+        // while the adaptive PNG was sized assuming a shorter room →
+        // L/R margin. Walk the same mesh groups the iso fit walks.
+        const contentBox = new THREE.Box3();
+        [roomGroup, sourcesGroup, listenersGroup, treatmentsGroup,
+         zonesGroup, racksGroup, aimLinesGroup].forEach(g => {
+          if (g && g.visible) contentBox.expandByObject(g);
+        });
+        const floorY = (contentBox.min && Number.isFinite(contentBox.min.y))
+          ? contentBox.min.y : 0;
+        const ceilY  = (contentBox.max && Number.isFinite(contentBox.max.y))
+          ? contentBox.max.y : (room.height_m ?? aabb.h);
+        // Silhouette point set: polygon footprint × {floor, ceil} where
+        // ceil now reflects the ACTUAL rendered top (dome apex, catwalk,
+        // etc) — matching the iso fit's silhouette so the two stages
+        // agree on the binding axis.
         const planVerts = roomPlanVertices(room);
         let maxOX = 0, maxOY = 0;
         const tmp = new THREE.Vector3();
@@ -3839,8 +3856,8 @@ export function captureViewportImage(opts = {}) {
         for (const v of planVerts) {
           // roomPlanVertices returns plan coords (x, y) where y is depth.
           // World space: x→x, depth→z, height→y.
-          project(v.x, 0, v.y);
-          project(v.x, h, v.y);
+          project(v.x, floorY, v.y);
+          project(v.x, ceilY,  v.y);
         }
         // Deliberately NOT unioning AABB corners here. For a circular dome
         // the AABB corners ARE the empty L/R space we want to exclude
