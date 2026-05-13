@@ -270,9 +270,10 @@ function buildScrim() {
         </li>
         <li>
           <strong>Standards are referenced, not certified.</strong>
-          The engine implements published methods (ISO 3382-1, ISO 9613-1, IEC 60268-16:2020, Sabine, Eyring, Schroeder, Beranek) with documented simplifications — including diffuse-field assumptions in draft mode and flat directivity indices for unspecified sources.
+          The engine implements published methods (ISO 3382-1, ISO 9613-1, IEC 60268-16:2020, ISO 17497-2, Sabine, Eyring, Schroeder, Beranek) with documented simplifications — including diffuse-field assumptions in draft mode, catalogue absorption coefficients taken as ASTM C423 Type-A flush mounting, and flat directivity indices for unspecified sources.
+          Scattering coefficients for placed treatments are applied per ISO 17497-2 in the precision ray tracer.
           Full methodology is printed in every generated report. RoomLAB itself is not certified against any of the standards it cites.
-          <div class="terms-callout">ISO 3382-1 · ISO 9613-1 · IEC 60268-16:2020 · Sabine · Beranek</div>
+          <div class="terms-callout">ISO 3382-1 · ISO 9613-1 · IEC 60268-16:2020 · ISO 17497-2 · ASTM C423 · Sabine · Beranek</div>
         </li>
         <li>
           <strong>No warranty; engineering judgement remains with you.</strong>
@@ -284,16 +285,6 @@ function buildScrim() {
           This acknowledgement is timestamped in UTC together with your operator label, public IP address, browser and platform, and is referenced on the methodology page of every PDF report generated in this session.
         </li>
       </ul>
-      <p class="terms-whatsnew" aria-label="What's new in this release">
-        <em>New in this build:</em> Treatments panel — drop acoustic absorbers,
-        bass traps and diffusers from a 20-product catalogue onto your walls
-        and ceiling. Per-band absorption is folded into the draft Sabine
-        engine (RT60 / STI live); each placed panel shows its &Delta;RT60 at
-        500&nbsp;Hz on its card. <strong>v3:</strong> scattering and absorption
-        are now wired into the precision ray tracer per ISO 17497-2 — STI,
-        C50, C80 and EDT reflect placed treatments. The printed BOM lists
-        every product.
-      </p>
       <div class="terms-operator-row">
         <label class="terms-operator-label" for="terms-operator-name">
           Operator name / workstation label
