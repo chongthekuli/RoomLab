@@ -1952,7 +1952,7 @@ export async function triggerPrint() {
   let coverImage = null;
   try {
     const captureFn = await _loadCaptureFn();
-    if (captureFn) coverImage = captureFn({ width: 1600, height: 1200, preset: 'iso' });
+    if (captureFn) coverImage = captureFn({ width: 1500, height: 1500, preset: 'iso' });
   } catch (err) { console.warn('[print-report] capture failed:', err); }
   const model = buildPrintModel({ materials: _printMaterialsRef });
   renderPrintReport(model, { splGrid, coverImage });
@@ -1991,7 +1991,7 @@ export function mountPrintReport({ materials }) {
     // import is still in flight and we fall back to the 2D plan.
     let coverImage = null;
     try {
-      if (_captureFn) coverImage = _captureFn({ width: 1600, height: 1200, preset: 'iso' });
+      if (_captureFn) coverImage = _captureFn({ width: 1500, height: 1500, preset: 'iso' });
     } catch (err) { console.warn('[print-report] capture failed:', err); }
     const model = buildPrintModel({ materials: _printMaterialsRef });
     renderPrintReport(model, { splGrid, coverImage });

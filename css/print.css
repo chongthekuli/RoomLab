@@ -289,11 +289,18 @@ body.is-pdf-export .vp-tabs {
     box-sizing: border-box;
   }
   #print-report .pr-cover-hero-image {
-    width: 100%;
-    height: auto;
-    max-height: 165mm;     /* leaves room for title block (~35mm) + detail (~45mm) + footer (~12mm) on A4 portrait */
+    /* Square 165 × 165 mm reservation in the cover. Capture is 1:1
+       (1500 × 1500) and object-fit:contain scales the iso silhouette
+       so whichever extent (width or height) hits the square first
+       sets the size — wider rooms fill the width and leave empty
+       space top/bottom; taller rooms fill the height. No crop, no
+       over-shrink past the binding edge. */
+    width: 165mm;
+    height: 165mm;
+    max-width: 100%;
     object-fit: contain;
     display: block;
+    margin: 0 auto;
   }
   #print-report .pr-cover-hero-plan {
     width: 100%;
