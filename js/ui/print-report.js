@@ -1436,7 +1436,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
           which stays as the SESSION-CAPTURED record. This block is for
           a printed wet signature when the PDF is countersigned offline.
           Using <table> for layout because print engines reliably honour
-          table cell widths + borders; flex `gap` is unsafe in print.
+          table cell widths + borders; flex 'gap' is unsafe in print.
           Three cells: Author / Company / Date. Each cell holds a sub-
           label (small caps) above a thin baseline for the wet signature.
         -->
