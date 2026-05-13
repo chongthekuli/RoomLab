@@ -167,7 +167,28 @@ function animate() {
 // isn't specific enough.
 // ---------------------------------------------------------------------
 
-function buildSampleGroup(entry) {
+// Pure — returns a fresh THREE.Group every call, no module-scope side
+// effects. Safe to import from outside SurfaceLAB. RoomLAB's
+// _buildTreatmentMesh in js/graphics/scene.js consumes this so placed
+// treatments render with the same procedural geometry as the SurfaceLAB
+// preview (QRD wells, foam wedges, polycyl arcs, etc.) instead of a
+// flat BoxGeometry. Builder convention: back face of the panel sits at
+// local z=0, body extends into +Z. RoomLAB places the wrapper Group so
+// its local +Z aligns with the inward wall normal — no extra offset.
+export function buildSampleGroup(entry) {
+  const g = _dispatchBuilder(entry);
+  // Enforce panel convention: bbox back face at local z=0, body extends
+  // into +Z. The per-builder code has historically been inconsistent
+  // (QRD centres itself at z=D/2; others centre at z=0). RoomLAB's
+  // placer expects back-flush so the panel sits on the wall instead of
+  // sinking half its depth into it. SurfaceLAB's mountSurfacePreview
+  // calls applyAutoFit() afterwards which re-centres X/Z and lifts to
+  // stage, so this z-shift is invisible to SurfaceLAB visuals.
+  _normalizePanelOriginToBack(g);
+  return g;
+}
+
+function _dispatchBuilder(entry) {
   const visual = entry.visual || { color: '#888', roughness: 0.85, metalness: 0 };
 
   // Plain finishes from materials.json always render as textured panels.
@@ -211,6 +232,17 @@ function buildSampleGroup(entry) {
   if (cat.startsWith('system.'))           return buildTexturedPanel(visual);
 
   return buildTexturedPanel(visual);
+}
+
+// Shift the group along its local Z so the rear-most vertex lands on
+// z=0 (back face flush, body extending into +Z). Measured from a fresh
+// world-matrix walk — caller must not have parented the group yet.
+function _normalizePanelOriginToBack(g) {
+  if (!g) return;
+  g.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(g);
+  if (bbox.isEmpty()) return;
+  g.position.z -= bbox.min.z;
 }
 
 // ---------------------------------------------------------------------

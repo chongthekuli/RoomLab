@@ -28,6 +28,7 @@ import {
   wallYawDeg, rescueOrphanedTreatments,
 } from '../ui/panel-treatments.js';
 import { findCatalogueEntry, loadSurfaceCatalogue } from '../labs/surfacelab/catalog.js';
+import { buildSampleGroup } from '../labs/surfacelab/surface-3d-preview.js';
 
 let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
@@ -4273,48 +4274,53 @@ function _treatmentColorFor(category) {
   }
 }
 
+let _treatmentMeshBuildLogged = false;
 function _buildTreatmentMesh(t, spec) {
-  // Group wraps the panel face + frame + selection ring so we can move /
-  // rotate as a unit. The group sits at the treatment's anchor point;
-  // the panel face is offset slightly along the surface normal so it
-  // doesn't z-fight with the wall mesh.
+  if (!_treatmentMeshBuildLogged) {
+    // One-time build stamp so a stale-cache report is distinguishable
+    // from a code bug. If you don't see this log, hard-refresh.
+    console.info('[scene] build 2026-05-13 v344 — treatment mesh uses SurfaceLAB buildSampleGroup');
+    _treatmentMeshBuildLogged = true;
+  }
+  // Group wraps the body (rich SurfaceLAB geometry) + selection halo so
+  // we can move / rotate as a unit. The group sits at the treatment's
+  // anchor point with local +Z pointing along the inward wall normal.
   const group = new THREE.Group();
   const w = Math.max(0.05, t.dimensions?.width_m ?? 0.6);
   const h = Math.max(0.05, t.dimensions?.height_m ?? 0.6);
   const d = Math.max(0.01, t.dimensions?.depth_m ?? 0.05);
 
-  const baseColor = _treatmentColorFor(spec?.category);
-  const visual = spec?.visual || {};
-  const matColor = typeof visual.color === 'string'
-    ? new THREE.Color(visual.color).getHex()
-    : baseColor;
-
-  // Body: thin box with the panel face oriented in the group-local XY
-  // plane, depth on +Z (back-of-panel sits at z=0, face at z=d).
-  const bodyGeo = new THREE.BoxGeometry(w, h, d);
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: matColor,
-    roughness: Number.isFinite(visual.roughness) ? visual.roughness : 0.85,
-    metalness: Number.isFinite(visual.metalness) ? visual.metalness : 0.05,
+  // Body: use the same procedural builders SurfaceLAB's 3D preview
+  // uses — QRD wells, foam wedges, polycyl arcs, BAD masks, corner-
+  // trap prisms, etc. — so the placed panel matches the catalogue
+  // preview instead of degrading to a flat box. buildSampleGroup
+  // returns a fresh Group with back face at local z=0, body
+  // extending into +Z — matches RoomLAB's placement convention.
+  let body;
+  if (spec) {
+    body = buildSampleGroup(spec);
+  } else {
+    // Catalogue not resolved yet (cold-boot before loadSurfaceCatalogue
+    // finishes). Fall back to a coloured box so the panel still appears;
+    // rebuildTreatments kicks again on treatment:changed once the spec
+    // arrives.
+    const matColor = _treatmentColorFor(undefined);
+    const stubGeo = new THREE.BoxGeometry(w, h, d);
+    const stubMat = new THREE.MeshStandardMaterial({ color: matColor, roughness: 0.85, metalness: 0.05 });
+    body = new THREE.Mesh(stubGeo, stubMat);
+    body.position.z = d / 2;
+  }
+  // Every mesh inside the body is a real surface — pickable. Decorative
+  // line segments (if any builder ever adds them) get opted out below.
+  body.traverse(child => {
+    if (child.isLineSegments || child.isLine) {
+      child.userData.pickable = false;
+      child.raycast = () => {};          // hard opt-out, line threshold is 1 m
+    } else if (child.isMesh) {
+      child.userData.pickable = true;
+    }
   });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.z = d / 2;
-  body.userData.pickable = true;       // ONLY the solid body registers clicks
   group.add(body);
-
-  // Front-face highlight strip so the panel reads as engineered (not
-  // a generic prop): a slightly darker frame around the face. Just an
-  // EdgesGeometry over the body so it tracks the box outline. Not
-  // pickable — line raycasting + a 1 m threshold would catch wall
-  // clicks near the panel edge.
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(bodyGeo),
-    new THREE.LineBasicMaterial({ color: 0xe8ecf2, transparent: true, opacity: 0.35 }),
-  );
-  edges.position.z = d / 2;
-  edges.userData.pickable = false;
-  edges.raycast = () => {};            // hard opt-out — no raycaster work, no hits
-  group.add(edges);
 
   // Selection halo — a slightly larger transparent plane behind the
   // panel face, cyan, only added when selected. Decoration only — DO
@@ -4333,9 +4339,10 @@ function _buildTreatmentMesh(t, spec) {
     group.add(halo);
   }
 
-  // Tag every child so a raycast hit can find its parent treatment id.
-  // The pickable filter above is independent: pickable=false children
-  // never produce hits, but if they did the tag would still be correct.
+  // Tag every child so a raycast hit on any sub-mesh (QRD block, wedge
+  // face, etc.) can walk up to find its parent treatment id. The
+  // pickable filter above is independent; tagging the whole tree keeps
+  // _findTreatmentFromHit's parent-chain walk fast.
   group.userData.tag = 'treatment';
   group.userData.treatmentId = t.id;
   group.userData.surface = t.anchor?.surface ?? 'wall';
