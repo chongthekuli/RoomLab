@@ -3541,16 +3541,24 @@ function _cameraPresetTransform(name) {
     }
     case 'iso':
     default: {
-      // Mirror frameCameraToRoom — `cx + d3*0.9, h + d3*0.5, maxZ + d3*0.4`.
-      // The original uses `d + d3*0.4` for the depth component, which on
-      // the default rect (minZ=0) equals maxZ + d3*0.4. Using maxZ keeps
-      // the same framing for polygons whose AABB doesn't start at z=0.
-      // Kept as a tween target so the user gets a smooth transition
-      // from any preset back to the default 3/4 view.
-      const d3 = Math.max(w, h, d);
+      // Bounding-sphere fit — robust across aspect ratios and across
+      // tall / wide / long rooms. The room's enclosing sphere has
+      // radius R = ½·√(w² + h² + d²); camera distance R / tan(minFov/2)
+      // ensures the sphere fits the narrower of horizontal and vertical
+      // FOV. Margin 1.15 keeps room edges clear of the frustum walls.
+      // Previous version used fixed `d3 × constant` offsets which clipped
+      // on rooms whose diagonal exceeded max(w,h,d) — that's most rooms
+      // bigger than a cube.
+      const targetPos = new THREE.Vector3(cx, h * 0.4, cz);
+      const dir = new THREE.Vector3(0.9, 0.5, 0.4).normalize();   // 3/4 view direction
+      const radius = 0.5 * Math.sqrt(w * w + h * h + d * d);
+      const fovV = THREE.MathUtils.degToRad(camera.fov || 38);
+      const fovH = 2 * Math.atan(Math.tan(fovV / 2) * Math.max(camera.aspect || 1, 0.1));
+      const minFov = Math.min(fovV, fovH);
+      const dist = (radius / Math.tan(minFov / 2)) * 1.15;
       return {
-        targetPos: new THREE.Vector3(cx, h * 0.4, cz),
-        targetCam: new THREE.Vector3(cx + d3 * 0.9, h + d3 * 0.5, maxZ + d3 * 0.4),
+        targetPos,
+        targetCam: targetPos.clone().add(dir.multiplyScalar(dist)),
       };
     }
   }
@@ -3633,13 +3641,12 @@ export function captureViewportImage(opts = {}) {
     if (t) {
       camera.position.copy(t.targetCam);
       if (controls) controls.target.copy(t.targetPos);
-      // Pull the camera back along the view direction so the entire
-      // room (walls, floor, contents) fits with breathing room — the
-      // interactive preset uses 1.20 margin, but the printed cover
-      // wants no clipping on any edge. 1.10 keeps a 10 % safety while
-      // letting the room fill most of the captured PNG — anything
-      // larger leaves the room looking small in the printed cover.
-      const CAPTURE_PULL_BACK = 1.10;
+      // Tiny extra pull-back on top of the preset's built-in margin —
+      // the iso preset already uses bounding-sphere fit with a 1.15
+      // margin, so 1.05 here just hardens against borderline cases
+      // (oblong rooms, far-from-default FOV). Effective iso margin
+      // ≈ 1.21 — close-cropped without clipping.
+      const CAPTURE_PULL_BACK = 1.05;
       const dir = new THREE.Vector3().subVectors(camera.position, t.targetPos);
       camera.position.copy(t.targetPos).addScaledVector(dir, CAPTURE_PULL_BACK);
       camera.lookAt(t.targetPos);
