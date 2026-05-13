@@ -179,7 +179,6 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-precision-headline,
   #print-report .pr-reviewer-note,
   #print-report .pr-empty-state,
-  #print-report .pr-cover-hero,
   #print-report .pr-table th,
   #print-report .pr-zebra tbody tr:nth-child(even) td,
   #print-report .pr-bandstrip-label,
@@ -284,8 +283,8 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-cover-hero {
     width: 100%;
-    background: var(--paper-2);
-    padding: 4mm;
+    background: transparent;
+    padding: 0;
     border-radius: 0;
     box-sizing: border-box;
   }

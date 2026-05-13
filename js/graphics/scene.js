@@ -42,6 +42,7 @@ let racksGroup = null;
 //   userData.wallIndex?    — polygon edge index when surface === 'wall'
 // v1 = visual-only; not part of any physics group.
 let treatmentsGroup = null;
+let _floorGrid = null;       // GridHelper backdrop; hidden during print capture
 let _rackCatalogue = null;
 let _ampCatalog = null;
 let rayGroup = null;
@@ -566,11 +567,11 @@ function initScene() {
   scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
 
   // Subtle floor grid only — no more axes helper (looked like a WIP viewport).
-  const grid = new THREE.GridHelper(60, 30, 0x262b33, 0x1a1d22);
-  grid.position.y = -0.01;
-  grid.material.transparent = true;
-  grid.material.opacity = 0.35;
-  scene.add(grid);
+  _floorGrid = new THREE.GridHelper(60, 30, 0x262b33, 0x1a1d22);
+  _floorGrid.position.y = -0.01;
+  _floorGrid.material.transparent = true;
+  _floorGrid.material.opacity = 0.35;
+  scene.add(_floorGrid);
 
   initWalkthrough();
   initProbeTool();
@@ -3606,6 +3607,7 @@ export function captureViewportImage(opts = {}) {
   const prevTarget = controls ? controls.target.clone() : null;
   const prevTween = _focusTween;
   const prevBackground = scene.background;        // swap to white for print, restore after
+  const prevGridVisible = _floorGrid ? _floorGrid.visible : null;
 
   let dataUrl = null;
   let rt = null;
@@ -3614,6 +3616,12 @@ export function captureViewportImage(opts = {}) {
     // the live viewport uses. Saves ink on the printed page and lets the
     // 2D-plan inset overlap the hero without a noisy contrast jump.
     scene.background = _printCaptureBackground;
+
+    // --- Hide the 60×60 GridHelper backdrop. In the live viewport it
+    // reads as a subtle floor reference; in the printed cover it
+    // extends past the room and looks like a cropped wood floor. The
+    // room is the subject — drop the surrounding noise.
+    if (_floorGrid) _floorGrid.visible = false;
 
     // --- Snap camera to preset (synchronous, bypasses the tween) ----
     // Set camera.aspect to MATCH the capture aspect so the preset's
@@ -3625,6 +3633,14 @@ export function captureViewportImage(opts = {}) {
     if (t) {
       camera.position.copy(t.targetCam);
       if (controls) controls.target.copy(t.targetPos);
+      // Pull the camera back along the view direction so the entire
+      // room (walls, floor, contents) fits with breathing room — the
+      // interactive preset uses 1.20 margin, but the printed cover
+      // wants no clipping on any edge. CAPTURE_PULL_BACK = 1.30 along
+      // the camera-to-target vector.
+      const CAPTURE_PULL_BACK = 1.30;
+      const dir = new THREE.Vector3().subVectors(camera.position, t.targetPos);
+      camera.position.copy(t.targetPos).addScaledVector(dir, CAPTURE_PULL_BACK);
       camera.lookAt(t.targetPos);
     }
     // Kill any in-flight tween so _tickCameraFocus on the next
@@ -3685,6 +3701,7 @@ export function captureViewportImage(opts = {}) {
       if (controls && prevTarget) controls.target.copy(prevTarget);
       _focusTween = prevTween;
       scene.background = prevBackground;
+      if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
       if (rt) rt.dispose();
       // No need to re-render — we never touched the live canvas's
       // back buffer (everything went to the off-screen render target).
