@@ -1111,5 +1111,170 @@ body.is-pdf-export .vp-tabs {
     margin-top: 10pt;
   }
 
+  /* ----------- CHAPTER 04: ACOUSTIC TREATMENT ----------- */
+  /* Chapter 04 hero page — paired-bar comparison chart sits between the
+     chapter opener and the KPI table. Layout mirrors Chapter 02 so a
+     reader flipping pages sees the same composition rhythm. */
+  #print-report .pr-page-treatment-hero,
+  #print-report .pr-page-treatment-plan {
+    break-before: page;
+  }
+
+  /* Dr. Chen's framing sentence — slightly more prominent than body
+     copy so it reads as the chapter's thesis, but not louder than the
+     chart that follows. */
+  #print-report .pr-lead-chen {
+    font-size: 10pt;
+    line-height: 1.55;
+    color: var(--ink);
+    border-left: 2pt solid var(--accent);
+    padding-left: 8pt;
+    margin: 6pt 0 8pt 0;
+    font-style: italic;
+  }
+
+  /* Comparison chart wrap — centred, white background, hairline frame
+     so the SVG bars read crisp on the page. */
+  #print-report .pr-compare-chart-wrap {
+    text-align: center;
+    margin: 4pt 0 2pt 0;
+  }
+  #print-report .pr-compare-chart {
+    display: block;
+    margin: 0 auto;
+    max-width: 100%;
+  }
+
+  /* KPI table — right-align numerics, tabular-nums for column alignment. */
+  #print-report .pr-compare-kpi td.pr-num,
+  #print-report .pr-compare-kpi th.pr-num,
+  #print-report .pr-treatment-schedule td.pr-num,
+  #print-report .pr-treatment-schedule th.pr-num,
+  #print-report .pr-alpha-matrix td.pr-num,
+  #print-report .pr-alpha-matrix th.pr-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Δ-cell colouring — green for improvement, red for regression,
+     muted grey when no change or insufficient data. */
+  #print-report .pr-delta-improve {
+    color: #2C7A4B;
+    font-weight: 600;
+  }
+  #print-report .pr-delta-regress {
+    color: #A8332B;
+    font-weight: 600;
+  }
+  #print-report .pr-delta-neutral {
+    color: var(--muted);
+  }
+
+  /* Drawing 03 — plan + legend in a 2-column grid. Plan takes the
+     larger column; the swatch legend on the right keeps the reader's
+     eye anchored to the colour code while they scan the schedule. */
+  #print-report .pr-treatment-plan-grid {
+    display: grid;
+    grid-template-columns: 1fr 38mm;
+    gap: 6mm;
+    align-items: start;
+    margin: 4pt 0 4pt 0;
+  }
+  #print-report .pr-treatment-plan-stage {
+    border: 0.4pt solid var(--rule);
+    padding: 2mm;
+    background: var(--paper);
+  }
+  #print-report .pr-treatment-plan-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  #print-report .pr-treatment-plan-key {
+    font-size: 8pt;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+  #print-report .pr-treatment-key-title {
+    font-size: 8.5pt;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 4pt;
+    color: var(--muted);
+  }
+  #print-report .pr-treatment-key-row {
+    display: flex;
+    align-items: center;
+    gap: 5pt;
+    margin-bottom: 3pt;
+  }
+  #print-report .pr-treatment-key-swatch {
+    display: inline-block;
+    width: 10pt;
+    height: 10pt;
+    border-radius: 1pt;
+    border: 0.4pt solid #1A1F24;
+    flex: 0 0 auto;
+  }
+  #print-report .pr-treatment-key-ceiling {
+    background: transparent;
+    border-style: dashed;
+    border-width: 0.8pt;
+  }
+
+  /* Treatment schedule — denser text + no horizontal overflow even
+     with 11 columns. NRC / α columns are 1-2 chars so we can afford
+     tight column widths. Manual column-padding override prevents the
+     fire-rating + weight columns from being squashed off the page. */
+  #print-report .pr-treatment-schedule {
+    font-size: 7.5pt;
+    line-height: 1.35;
+  }
+  #print-report .pr-treatment-schedule th,
+  #print-report .pr-treatment-schedule td {
+    padding: 2.5pt 3pt;
+  }
+
+  /* Per-band α matrix — denser still; 8 columns (Tag + 7 bands). */
+  #print-report .pr-alpha-matrix {
+    font-size: 7.5pt;
+    line-height: 1.35;
+    margin-top: 4pt;
+  }
+  #print-report .pr-alpha-matrix th,
+  #print-report .pr-alpha-matrix td {
+    padding: 2pt 3pt;
+  }
+
+  /* Aggregate strip — the "X panels · Y m² · Z kg" one-liner under
+     the schedule. Reads as a quiet receipt of the totals. */
+  #print-report .pr-aggregate {
+    font-size: 8.5pt;
+    color: var(--ink);
+    background: var(--paper-2);
+    padding: 5pt 8pt;
+    margin: 4pt 0 0 0;
+    border-left: 2pt solid var(--accent);
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* "clamped" badge inline in the schedule — pings the engineer that
+     the panel's catalogue area exceeded the host-wall budget and the
+     physics math applied a clamp. */
+  #print-report .pr-clamp-badge {
+    display: inline-block;
+    font-size: 6.5pt;
+    background: #F0E4C8;
+    color: #6B5610;
+    padding: 0.4pt 3pt;
+    border-radius: 2pt;
+    margin-left: 3pt;
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+    vertical-align: 1pt;
+  }
+
 /* (Chrome-hide rules moved to top of file — applied via @media print
    AND body.is-pdf-export so they cover both paths.) */

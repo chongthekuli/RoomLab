@@ -116,6 +116,13 @@ export function buildPrintModel({ materials, nameHint } = {}) {
     })),
     bom: aggregateBOM(state.sources ?? []),
     treatmentsBom: aggregateTreatmentsBOM(state.treatments ?? []),
+    treatmentsSchedule: buildTreatmentSchedule(state.treatments ?? [], state.room),
+    treatmentCompare: buildTreatmentCompareModel({
+      room: state.room,
+      materials,
+      zones: state.zones ?? [],
+      treatments: state.treatments ?? [],
+    }),
     listeners: (state.listeners ?? []).map(l => ({
       id: l.id,
       label: l.label,
@@ -298,6 +305,184 @@ function getSpeakerLabel(url) {
   if (entry?.label) return entry.label;
   // Fallback: basename stripped of .json + path.
   return url.replace(/.*\//, '').replace(/\.json$/, '');
+}
+
+// ---------------------------------------------------------------------------
+// Per-panel treatment placement schedule. Unlike aggregateTreatmentsBOM
+// (which groups by productId × count), this returns ONE ROW PER PLACED
+// panel — required by Dr. Chen for sign-off-grade reporting: each
+// treatment carries its own tag, location, mounting, parameters, fire
+// rating, and the full 7-band α vector so a reviewing engineer can
+// trace each absorption-budget contribution to a single physical panel.
+// ---------------------------------------------------------------------------
+function buildTreatmentSchedule(treatments, room) {
+  if (!Array.isArray(treatments) || treatments.length === 0) return [];
+  // Wall-index → readable location label. Rectangular rooms = N/S/E/W;
+  // custom + polygon rooms = "Wall n" (1-based for client-readability).
+  const wallLabel = (anchor) => {
+    if (!anchor) return '—';
+    if (anchor.surface === 'ceiling') return 'Ceiling';
+    if (anchor.surface !== 'wall') return '—';
+    const idx = Number.isFinite(anchor.wallIndex) ? anchor.wallIndex : null;
+    if (idx == null) return 'Wall';
+    if ((room?.shape ?? 'rectangular') === 'rectangular') {
+      return ['North wall', 'South wall', 'East wall', 'West wall'][idx] ?? `Wall ${idx + 1}`;
+    }
+    return `Wall ${idx + 1}`;
+  };
+  return treatments.map((t, i) => {
+    const spec = t?._cachedSpec || findCatalogueEntry(t?.productId) || null;
+    const dim = t?.dimensions || {};
+    const unitArea_m2 = (dim.width_m ?? 0) * (dim.height_m ?? 0);
+    const weightPerArea = spec?.geometry?.weight_kg_m2 ?? null;
+    const weight_kg = (weightPerArea != null) ? weightPerArea * unitArea_m2 : null;
+    const absorption = Array.isArray(spec?.absorption) ? spec.absorption : null;
+    // NRC = arithmetic mean of α at 250 / 500 / 1k / 2k Hz (ASTM C423).
+    // Band indices in materials.json: 0=125, 1=250, 2=500, 3=1k, 4=2k.
+    let nrc = null;
+    if (absorption && absorption.length >= 5) {
+      const vals = [absorption[1], absorption[2], absorption[3], absorption[4]];
+      if (vals.every(v => Number.isFinite(v))) {
+        nrc = Math.round((vals.reduce((a, b) => a + b, 0) / 4) * 100) / 100;
+      }
+    }
+    return {
+      tag: t.id || `T${i + 1}`,
+      productId: t.productId || '—',
+      name: spec?.name ?? t.productId ?? 'Unknown product',
+      manufacturer: spec?.manufacturer ?? '—',
+      category: spec?.category ?? '—',
+      mounting: spec?.mounting ?? '—',
+      location: wallLabel(t?.anchor),
+      position: {
+        x: t?.position?.x ?? null,
+        y: t?.position?.y ?? null,
+        z: t?.position?.z ?? null,
+      },
+      width_m: dim.width_m ?? null,
+      height_m: dim.height_m ?? null,
+      area_m2: unitArea_m2,
+      weight_kg,
+      fire_rating: spec?.fire_rating ?? null,
+      test_standard: spec?.test_standard ?? null,
+      test_lab: spec?.test_lab ?? null,
+      test_report_id: spec?.test_report_id ?? null,
+      scattering: Array.isArray(spec?.scattering_coefficient)
+        ? spec.scattering_coefficient
+        : (Number.isFinite(spec?.scattering_coefficient) ? spec.scattering_coefficient : null),
+      absorption,    // 7-band α vector or null
+      nrc,           // ASTM C423 mean of α(250/500/1k/2k), rounded to 2dp
+      alpha500: Number.isFinite(absorption?.[2]) ? absorption[2] : null,
+      alpha1k:  Number.isFinite(absorption?.[3]) ? absorption[3] : null,
+      clamped: !!t?._physicsClamped,
+    };
+  });
+}
+
+// Build a bare-vs-treated comparison model. Re-runs the RT60 solver
+// with treatments=[] for the baseline and with the actual placed
+// treatments for the proposed state, then derives the headline KPIs
+// Dr. Chen called out: RT60(Sabine+Eyring) per band, Eyring @ 1 kHz,
+// mean α @ 1 kHz, Schroeder cutoff. Returns null if no treatments are
+// placed — the caller suppresses Chapter 04 in that case.
+//
+// PURE function. Does NOT mutate state; reads from caller-supplied
+// inputs so unit tests can pass synthetic rooms / treatments.
+export function buildTreatmentCompareModel({ room, materials, zones, treatments } = {}) {
+  if (!Array.isArray(treatments) || treatments.length === 0) return null;
+  const bareBands    = computeAllBands({ room, materials, zones, treatments: [] });
+  const treatedBands = computeAllBands({ room, materials, zones, treatments });
+  const volume = roomVolume(room);
+
+  const eyringAt = (bands, i) => Number.isFinite(bands[i]?.eyring_s) ? bands[i].eyring_s : null;
+  const sabineAt = (bands, i) => Number.isFinite(bands[i]?.sabine_s) ? bands[i].sabine_s : null;
+
+  const bareT1k    = eyringAt(bareBands, 3);
+  const treatedT1k = eyringAt(treatedBands, 3);
+  const bareT500    = eyringAt(bareBands, 2);
+  const treatedT500 = eyringAt(treatedBands, 2);
+  const bareMidEyr    = (bareT500 != null && bareT1k != null)    ? (bareT500 + bareT1k) / 2    : null;
+  const treatedMidEyr = (treatedT500 != null && treatedT1k != null) ? (treatedT500 + treatedT1k) / 2 : null;
+
+  const bareAlpha1k    = bareBands[3]?.meanAbsorption ?? null;
+  const treatedAlpha1k = treatedBands[3]?.meanAbsorption ?? null;
+
+  const schroederOf = (t60, V) => (t60 && t60 > 0 && V > 0) ? 2000 * Math.sqrt(t60 / V) : null;
+  const bareSchroeder    = schroederOf(bareT1k, volume);
+  const treatedSchroeder = schroederOf(treatedT1k, volume);
+
+  // KPI rows for the headline comparison table. Each entry is an
+  // intentional pick — these are the numbers a non-technical client
+  // reads in a proposal: RT60 mid-band (the "headline second"), STI
+  // when available, α as a one-glance density metric, f_s shift to
+  // explain low-end behaviour.
+  // Δ sign convention: "improvement" is shorter RT60, higher STI,
+  // higher α, lower Schroeder. The renderer flips arrow + colour
+  // based on `improvementSign`: -1 = lower is better, +1 = higher.
+  const kpis = [
+    {
+      key: 'rt60_mid_eyring',
+      label: 'RT60 mid-band (500 Hz / 1 kHz mean) · Eyring',
+      unit: 's',
+      decimals: 2,
+      bare: bareMidEyr,
+      treated: treatedMidEyr,
+      improvementSign: -1,
+    },
+    {
+      key: 'rt60_1k_eyring',
+      label: 'RT60 @ 1 kHz · Eyring',
+      unit: 's',
+      decimals: 2,
+      bare: bareT1k,
+      treated: treatedT1k,
+      improvementSign: -1,
+    },
+    {
+      key: 'rt60_1k_sabine',
+      label: 'RT60 @ 1 kHz · Sabine (reference, ᾱ<0.2)',
+      unit: 's',
+      decimals: 2,
+      bare: sabineAt(bareBands, 3),
+      treated: sabineAt(treatedBands, 3),
+      improvementSign: -1,
+    },
+    {
+      key: 'mean_alpha_1k',
+      label: 'Mean absorption ᾱ @ 1 kHz',
+      unit: '',
+      decimals: 3,
+      bare: bareAlpha1k,
+      treated: treatedAlpha1k,
+      improvementSign: +1,
+    },
+    {
+      key: 'schroeder_hz',
+      label: 'Schroeder cutoff f_s',
+      unit: 'Hz',
+      decimals: 0,
+      bare: bareSchroeder,
+      treated: treatedSchroeder,
+      improvementSign: -1,
+    },
+  ];
+
+  return {
+    bareBands: bareBands.map(b => ({
+      freq_hz: b.frequency_hz,
+      sabine_s: Number.isFinite(b.sabine_s) ? b.sabine_s : null,
+      eyring_s: Number.isFinite(b.eyring_s) ? b.eyring_s : null,
+      meanAbsorption: b.meanAbsorption,
+    })),
+    treatedBands: treatedBands.map(b => ({
+      freq_hz: b.frequency_hz,
+      sabine_s: Number.isFinite(b.sabine_s) ? b.sabine_s : null,
+      eyring_s: Number.isFinite(b.eyring_s) ? b.eyring_s : null,
+      meanAbsorption: b.meanAbsorption,
+    })),
+    kpis,
+    panels_n: treatments.length,
+  };
 }
 
 // Pull precision results into the shape the renderer wants. Returns
@@ -691,58 +876,198 @@ function renderPrintReport(model, { splGrid = null } = {}) {
       ${ambientStrip ? sec('', 'Ambient noise floor', ambientStrip) : ''}
     </div>`;
 
-  // ------ Appendix C: Acoustic treatments BOM -------------------------
-  // Aggregated by productId × count. Two grand-total rows close the
-  // table. Skipped entirely when no treatments are placed so the report
-  // stays compact for projects that don't use them.
+  // ------ Chapter 04: Acoustic treatment ------------------------------
+  // Two pages, only when treatments are placed:
+  //   4a — Chapter opener + paired-bar comparison chart + KPI table
+  //   4b — Drawing 03 (treatment plan) + per-panel schedule + α matrix
   //
-  // Lin's note: shipped as visual-only in v1 — these panels do NOT
-  // affect the RT60 / STI numbers above. The disclaimer below the
-  // table makes that explicit so a reviewing engineer can't assume
-  // they were folded into the acoustic model.
+  // Page plan synthesised from Dr. Chen (acoustics) + Sofia (composition)
+  // for v2 treatment physics. Comparison metrics picked by Dr. Chen as
+  // the 4–6 a non-technical client actually reads: RT60 mid-band, RT60
+  // @1k Eyring, α̅, Schroeder f_s. Sabine retained as a reference row
+  // bounded by the ᾱ<0.2 caveat.
+  //
+  // The v1 "visual placement only" disclaimer is removed: as of v2
+  // (computeAllBands now folds treatments[]), the RT60/STIPA values
+  // ARE the treated values, and the bare-room comparison column lives
+  // alongside as the explicit before-state.
+  const compare = model.treatmentCompare;
+  const schedule = model.treatmentsSchedule || [];
   const treatmentsBom = model.treatmentsBom || [];
-  const treatmentsBomRows = treatmentsBom.map(r => `
-    <tr>
-      <td>${escapeHtml(r.name)}</td>
-      <td>${escapeHtml(r.manufacturer)}</td>
-      <td>${r.count}</td>
-      <td>${fmt(r.unitArea_m2, 2)} m²</td>
-      <td>${fmt(r.totalArea_m2, 2)} m²</td>
-      <td>${r.unitWeight_kg != null ? `${fmt(r.unitWeight_kg, 1)} kg` : '—'}</td>
-      <td>${r.hasWeight ? `${fmt(r.totalWeight_kg, 1)} kg` : '—'}</td>
-    </tr>`).join('');
-  const treatmentsGrandTotalArea = treatmentsBom.reduce((a, r) => a + (r.totalArea_m2 || 0), 0);
-  const treatmentsGrandTotalWeight = treatmentsBom.reduce(
-    (a, r) => a + (r.hasWeight ? (r.totalWeight_kg || 0) : 0), 0);
-  const treatmentsAnyWeight = treatmentsBom.some(r => r.hasWeight);
-  const treatmentsPage = treatmentsBom.length === 0 ? '' : `
-    <div class="pr-page pr-page-appendix">
-      <span class="pr-eyebrow">Appendix C · Acoustic treatment schedule</span>
-      ${sec('', `Bill of materials (${treatmentsBom.reduce((a, r) => a + r.count, 0)} panel${treatmentsBom.reduce((a, r) => a + r.count, 0) === 1 ? '' : 's'})`, `
-        <table class="pr-table pr-zebra">
-          <thead><tr>
-            <th>Product</th><th>Manufacturer</th><th>Qty</th>
-            <th>Unit area</th><th>Total area</th>
-            <th>Unit weight</th><th>Total weight</th>
-          </tr></thead>
-          <tbody>
-            ${treatmentsBomRows}
-            <tr class="pr-bom-total">
-              <td colspan="4" style="text-align:right;font-weight:600;">Grand total</td>
-              <td style="font-weight:600;">${fmt(treatmentsGrandTotalArea, 2)} m²</td>
-              <td>—</td>
-              <td style="font-weight:600;">${treatmentsAnyWeight ? `${fmt(treatmentsGrandTotalWeight, 1)} kg` : '—'}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p class="pr-note"><strong>Visual placement only.</strong>
-        The RT60 / STIPA values in this report do NOT yet include the
-        absorption contribution from these panels — that integration
-        is gated on Dr. Chen's placement-aware audit (RoomLAB v2). Use
-        this schedule for procurement and rigging; for a coupled
-        acoustic prediction with treatment, re-run after v2 ships.</p>
-      `)}
-    </div>`;
+  let treatmentPages = '';
+  if (compare && schedule.length > 0) {
+    // ---- Page 4a: comparison hero -------------------------------------
+    const compareChart = renderCompareChart(compare);
+    const kpiRows = compare.kpis.map(kpi => {
+      const bareStr    = (kpi.bare    != null && Number.isFinite(kpi.bare))    ? `${fmt(kpi.bare, kpi.decimals)}${kpi.unit ? ` ${kpi.unit}` : ''}`    : '—';
+      const treatedStr = (kpi.treated != null && Number.isFinite(kpi.treated)) ? `${fmt(kpi.treated, kpi.decimals)}${kpi.unit ? ` ${kpi.unit}` : ''}` : '—';
+      let deltaStr = '—';
+      let deltaClass = 'pr-delta-neutral';
+      if (Number.isFinite(kpi.bare) && Number.isFinite(kpi.treated)) {
+        const delta = kpi.treated - kpi.bare;
+        const sign = delta === 0 ? 0 : (delta > 0 ? +1 : -1);
+        const improved = sign === kpi.improvementSign;
+        deltaClass = sign === 0 ? 'pr-delta-neutral'
+                   : improved   ? 'pr-delta-improve'
+                                : 'pr-delta-regress';
+        const arrow = sign === 0 ? '·' : (sign > 0 ? '↑' : '↓');
+        deltaStr = `${arrow} ${Math.abs(delta).toFixed(kpi.decimals)}${kpi.unit ? ` ${kpi.unit}` : ''}`;
+      }
+      return `
+        <tr>
+          <td>${escapeHtml(kpi.label)}</td>
+          <td class="pr-num">${bareStr}</td>
+          <td class="pr-num">${treatedStr}</td>
+          <td class="pr-num ${deltaClass}">${deltaStr}</td>
+        </tr>`;
+    }).join('');
+
+    // Dr. Chen's framing sentence — opens the chapter so the reader
+    // understands WHY this section exists before reading any numbers.
+    const chenFrame = `Speech intelligibility and reverberation control are programme-level safety items in this venue; the treatment package below is a quantified intervention against the bare-room baseline — not a marketing description.`;
+
+    const compareCaption = `Fig. 04.1 — Octave-band RT60 (Eyring per ISO 3382-1) for the bare room (grey) versus the proposed treatment package (red). ${compare.panels_n} panel${compare.panels_n === 1 ? '' : 's'} folded in via the per-wall overlap-clamped Sabine budget (RoomLAB v2). The Sabine reference row in the KPI table is bounded by the ᾱ<0.2 assumption; once ᾱ exceeds 0.2 the Eyring values are the physical answer.`;
+
+    const ch04a = `
+      <div class="pr-page pr-page-treatment-hero">
+        <div class="pr-chapter-opener">
+          <span class="pr-chapter-number-ghost">04</span>
+          <span class="pr-eyebrow">Chapter 04</span>
+          <h2>Acoustic treatment</h2>
+        </div>
+        <p class="pr-lead pr-lead-chen">${escapeHtml(chenFrame)}</p>
+        <section class="pr-section">
+          <div class="pr-compare-chart-wrap">${compareChart}</div>
+          <p class="pr-caption">${escapeHtml(compareCaption)}</p>
+        </section>
+        <section class="pr-section">
+          <h3>Before / after — headline metrics</h3>
+          <table class="pr-table pr-zebra pr-compare-kpi">
+            <thead><tr><th>Metric</th><th class="pr-num">Bare room</th><th class="pr-num">With treatment</th><th class="pr-num">&Delta;</th></tr></thead>
+            <tbody>${kpiRows}</tbody>
+          </table>
+          <p class="pr-note">&Delta; signs follow improvement convention: arrow down ↓ on RT60 / Schroeder, arrow up ↑ on mean α. Green = improvement; red = regression. Sabine row shown for engineer cross-reference only — once ᾱ rises above 0.2 (which is typical for any meaningful treatment package), Eyring is the physical answer.</p>
+        </section>
+      </div>`;
+
+    // ---- Page 4b: Drawing 03 + per-panel schedule ---------------------
+    const planSvg = buildTreatmentPlanSVG(state);
+    const scheduleRows = schedule.map(r => {
+      const sizeStr = (r.width_m != null && r.height_m != null)
+        ? `${fmt(r.width_m, 2)} × ${fmt(r.height_m, 2)}`
+        : '—';
+      const a500 = Number.isFinite(r.alpha500) ? r.alpha500.toFixed(2) : '—';
+      const a1k  = Number.isFinite(r.alpha1k)  ? r.alpha1k.toFixed(2)  : '—';
+      const nrc  = Number.isFinite(r.nrc) ? r.nrc.toFixed(2) : '—';
+      const weight = (r.weight_kg != null) ? `${fmt(r.weight_kg, 1)} kg` : '—';
+      const clampedBadge = r.clamped ? ' <span class="pr-clamp-badge" title="Panel area clamped to host-wall remaining area">clamped</span>' : '';
+      return `
+        <tr>
+          <td class="pr-mono">${escapeHtml(r.tag)}</td>
+          <td>${escapeHtml(r.name)}${clampedBadge}</td>
+          <td>${escapeHtml(r.manufacturer)}</td>
+          <td>${escapeHtml(r.mounting)}</td>
+          <td>${escapeHtml(r.location)}</td>
+          <td class="pr-num">${sizeStr} m</td>
+          <td class="pr-num">${a500}</td>
+          <td class="pr-num">${a1k}</td>
+          <td class="pr-num">${nrc}</td>
+          <td>${escapeHtml(r.fire_rating ?? '—')}</td>
+          <td class="pr-num">${weight}</td>
+        </tr>`;
+    }).join('');
+
+    // Per-band α matrix (Tag × 7 octave bands). Only rendered when at
+    // least one panel has an absorption vector — otherwise it's a wall
+    // of em-dashes.
+    const bandsHz = compare.treatedBands.map(b => b.freq_hz);
+    const anyAbsorption = schedule.some(r => Array.isArray(r.absorption));
+    const alphaMatrixHead = anyAbsorption
+      ? `<tr><th>Tag</th>${bandsHz.map(hz => `<th class="pr-num">${escapeHtml(fmtBand(hz))}</th>`).join('')}</tr>`
+      : '';
+    const alphaMatrixRows = anyAbsorption
+      ? schedule.map(r => `
+          <tr>
+            <td class="pr-mono">${escapeHtml(r.tag)}</td>
+            ${bandsHz.map((_, idx) => {
+              const v = r.absorption?.[idx];
+              return `<td class="pr-num">${Number.isFinite(v) ? v.toFixed(2) : '—'}</td>`;
+            }).join('')}
+          </tr>`).join('')
+      : '';
+
+    // Aggregate strip — count, total area, total weight.
+    const totalCount = schedule.length;
+    const totalArea  = schedule.reduce((a, r) => a + (r.area_m2 || 0), 0);
+    const weightedRows = schedule.filter(r => r.weight_kg != null);
+    const totalWeight = weightedRows.reduce((a, r) => a + r.weight_kg, 0);
+    const aggregateLine = `${totalCount} panel${totalCount === 1 ? '' : 's'} · ${fmt(totalArea, 2)} m² total absorbing area · ${weightedRows.length > 0 ? `${fmt(totalWeight, 1)} kg total weight (${weightedRows.length}/${totalCount} panels with catalogued mass)` : 'weight not catalogued'}`;
+
+    // Trace strip — test standards + labs for the panels in the schedule.
+    // De-duplicated so a long schedule with the same product family
+    // doesn't repeat the same reference 20 times.
+    const traceSeen = new Set();
+    const traceItems = [];
+    for (const r of schedule) {
+      const key = `${r.test_standard ?? '—'}|${r.test_lab ?? '—'}|${r.test_report_id ?? '—'}`;
+      if (traceSeen.has(key)) continue;
+      traceSeen.add(key);
+      if (!r.test_standard && !r.test_lab && !r.test_report_id) continue;
+      const parts = [];
+      if (r.test_standard) parts.push(escapeHtml(r.test_standard));
+      if (r.test_lab) parts.push(escapeHtml(r.test_lab));
+      if (r.test_report_id) parts.push(`report ${escapeHtml(r.test_report_id)}`);
+      traceItems.push(parts.join(' · '));
+    }
+    const traceLine = traceItems.length > 0
+      ? `<p class="pr-note"><strong>Test traceability:</strong> ${traceItems.join('; ')}.</p>`
+      : '';
+
+    const ch04b = `
+      <div class="pr-page pr-page-treatment-plan">
+        <span class="pr-eyebrow">Drawing 03 · Treatment plan, top-down view</span>
+        <div class="pr-treatment-plan-grid">
+          <div class="pr-treatment-plan-stage">${planSvg}</div>
+          <div class="pr-treatment-plan-key">
+            <div class="pr-treatment-key-title">Legend</div>
+            <div class="pr-treatment-key-row"><span class="pr-treatment-key-swatch" style="background:#4F6E8F"></span>Absorber (porous / panel)</div>
+            <div class="pr-treatment-key-row"><span class="pr-treatment-key-swatch" style="background:#2F5560"></span>Bass control</div>
+            <div class="pr-treatment-key-row"><span class="pr-treatment-key-swatch" style="background:#B58741"></span>Diffuser</div>
+            <div class="pr-treatment-key-row"><span class="pr-treatment-key-swatch pr-treatment-key-ceiling" style="border-color:#4F6E8F"></span>Ceiling-mounted (dashed)</div>
+            <div class="pr-treatment-key-row"><span class="pr-treatment-key-swatch" style="background:#9EAA82"></span>Opening / system</div>
+          </div>
+        </div>
+        <p class="pr-caption">Drawing 03 — Treatment placement, top-down. Tags T1…Tn correspond to the rows in the schedule below. Ceiling-mounted panels are drawn with a dashed outline; wall-mounted panels are drawn at their plan-view footprint centred at the placement coordinate.</p>
+        <section class="pr-section">
+          <h3>Treatment placement schedule</h3>
+          <table class="pr-table pr-zebra pr-treatment-schedule">
+            <thead><tr>
+              <th>Tag</th><th>Product</th><th>Manufacturer</th>
+              <th>Mounting</th><th>Location</th>
+              <th class="pr-num">Size (m)</th>
+              <th class="pr-num">α(500)</th><th class="pr-num">α(1k)</th>
+              <th class="pr-num">NRC</th>
+              <th>Fire</th>
+              <th class="pr-num">Weight</th>
+            </tr></thead>
+            <tbody>${scheduleRows}</tbody>
+          </table>
+          <p class="pr-aggregate">${escapeHtml(aggregateLine)}</p>
+          ${traceLine}
+        </section>
+        ${anyAbsorption ? `
+          <section class="pr-section">
+            <h3>Per-band absorption coefficients α(f)</h3>
+            <table class="pr-table pr-zebra pr-alpha-matrix">
+              <thead>${alphaMatrixHead}</thead>
+              <tbody>${alphaMatrixRows}</tbody>
+            </table>
+            <p class="pr-note">Values per ISO 354 reverberation-room measurements as supplied by the manufacturer. Mounting condition shown in the schedule above governs the α curve (Type-A flush vs spaced); RoomLAB assumes Type-A flush unless the catalogue entry specifies otherwise. Where a panel's catalogue area exceeded the host wall's remaining area, the panel was clamped (badged in the schedule) and the absorption contribution scaled accordingly.</p>
+          </section>` : ''}
+      </div>`;
+
+    treatmentPages = ch04a + ch04b;
+  }
 
   // ------ Page 2: SCENE AT A GLANCE — coverage map + 12 KPI tiles ------
   // Per Sofia v2 (post-export-audit): the heatmap on the cover is the
@@ -979,8 +1304,8 @@ function renderPrintReport(model, { splGrid = null } = {}) {
     ${roomPage}
     ${sourcePage}
     ${listenerPage}
-    ${treatmentsPage}
     ${precisionPage}
+    ${treatmentPages}
     ${combinedPage}
     <footer class="pr-foot">
       RoomLAB · <span class="pr-mono">chongthekuli.github.io/RoomLab</span> · generated ${escapeHtml(model.project.generatedAt)} · schema v${model.project.schemaVersion}
@@ -1141,6 +1466,262 @@ function renderRT60Chart(rt60Bands, { volume_m3, schroederHz } = {}) {
     ${xLabels}
     ${xAxisTitle}
   </svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// renderCompareChart — paired-bar RT60-Eyring chart for Chapter 04.
+// Two bars per octave band: bare-room baseline (mid-grey) and treated
+// (#8C2A2A accent). Shared y-axis with the room's RT60 chart so a
+// reviewer flipping pages sees the same vertical scale. Per Sofia's
+// "visual continuity" call.
+//
+// Same SVG-in-millimetres approach as renderRT60Chart so the figure
+// is self-contained and prints crisply.
+// ---------------------------------------------------------------------------
+function renderCompareChart(compare) {
+  if (!compare || !Array.isArray(compare.treatedBands) || compare.treatedBands.length === 0) return '';
+  const N = compare.treatedBands.length;
+
+  // Pair values per band: prefer Eyring (correct when ᾱ > 0.2 — which
+  // is precisely the regime any meaningful treatment package pushes us
+  // into). Fall back to Sabine if Eyring is null/Infinity.
+  const pairs = [];
+  for (let i = 0; i < N; i++) {
+    const b = compare.bareBands[i];
+    const t = compare.treatedBands[i];
+    const bareV    = Number.isFinite(b?.eyring_s) ? b.eyring_s : (Number.isFinite(b?.sabine_s) ? b.sabine_s : null);
+    const treatedV = Number.isFinite(t?.eyring_s) ? t.eyring_s : (Number.isFinite(t?.sabine_s) ? t.sabine_s : null);
+    pairs.push({
+      freq_hz: t?.freq_hz ?? b?.freq_hz ?? null,
+      bare: bareV,
+      treated: treatedV,
+    });
+  }
+  const finite = pairs.flatMap(p => [p.bare, p.treated]).filter(v => Number.isFinite(v));
+  if (finite.length === 0) return '';
+
+  // ---- Plot geometry (mm) -------------------------------------------
+  const W = 180, H = 75;
+  const padL = 14, padR = 6, padT = 8, padB = 14;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const plotX = padL;
+  const plotY = padT;
+
+  // Y range: anchor at 1.5 s like renderRT60Chart so Chapter 02 and
+  // Chapter 04 share the same vertical scale visually.
+  const maxRaw = Math.max(...finite) * 1.15;
+  const yMax = Math.max(1.5, Math.ceil(maxRaw * 2) / 2);
+
+  const groupW = plotW / N;
+  const innerPad = 0.18 * groupW;
+  const barW = (groupW - innerPad * 2) / 2 - 0.6;          // 0.6 mm gutter between bars in a pair
+  const xOf = (i) => plotX + i * groupW;
+  const yOf = (v) => plotY + plotH - (v / yMax) * plotH;
+
+  // ---- Gridlines ----------------------------------------------------
+  const grid = [];
+  for (let v = 0; v <= yMax + 1e-6; v += 0.25) {
+    const y = yOf(v);
+    const isMajor = Math.abs((v * 2) % 1) < 1e-6;
+    const sw = isMajor ? 0.12 : 0.06;
+    grid.push(`<line x1="${plotX.toFixed(2)}" y1="${y.toFixed(2)}" x2="${(plotX + plotW).toFixed(2)}" y2="${y.toFixed(2)}" stroke="#C9C5BC" stroke-width="${sw}" />`);
+  }
+
+  // ---- Y-axis tick labels (every 0.5 s) -----------------------------
+  const yLabels = [];
+  for (let v = 0; v <= yMax + 1e-6; v += 0.5) {
+    const y = yOf(v);
+    yLabels.push(`<text x="${(plotX - 1.5).toFixed(2)}" y="${(y + 0.9).toFixed(2)}" text-anchor="end" font-size="2.4" fill="#6B6F75">${v.toFixed(1)}</text>`);
+  }
+  yLabels.push(`<text x="${(plotX - 10).toFixed(2)}" y="${(plotY + plotH / 2).toFixed(2)}" text-anchor="middle" font-size="2.4" font-weight="600" fill="#1A1F24" transform="rotate(-90 ${(plotX - 10).toFixed(2)} ${(plotY + plotH / 2).toFixed(2)})">RT60 (s)</text>`);
+
+  // ---- Bars ---------------------------------------------------------
+  const BARE_FILL    = '#A9A6A0';
+  const TREATED_FILL = '#8C2A2A';
+  const bars = [];
+  const valueLabels = [];
+  const xLabels = [];
+  for (let i = 0; i < N; i++) {
+    const groupX = xOf(i);
+    const cx = groupX + groupW / 2;
+    // Bare bar (left)
+    if (Number.isFinite(pairs[i].bare)) {
+      const v = Math.min(pairs[i].bare, yMax);
+      const y = yOf(v);
+      const x = cx - barW - 0.3;
+      bars.push(`<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barW.toFixed(2)}" height="${(plotY + plotH - y).toFixed(2)}" fill="${BARE_FILL}" />`);
+      valueLabels.push(`<text x="${(x + barW / 2).toFixed(2)}" y="${(y - 0.8).toFixed(2)}" text-anchor="middle" font-size="2.0" fill="#1A1F24">${pairs[i].bare.toFixed(2)}</text>`);
+    }
+    // Treated bar (right)
+    if (Number.isFinite(pairs[i].treated)) {
+      const v = Math.min(pairs[i].treated, yMax);
+      const y = yOf(v);
+      const x = cx + 0.3;
+      bars.push(`<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barW.toFixed(2)}" height="${(plotY + plotH - y).toFixed(2)}" fill="${TREATED_FILL}" />`);
+      valueLabels.push(`<text x="${(x + barW / 2).toFixed(2)}" y="${(y - 0.8).toFixed(2)}" text-anchor="middle" font-size="2.0" fill="#1A1F24">${pairs[i].treated.toFixed(2)}</text>`);
+    }
+    // x-axis tick label
+    const hz = pairs[i].freq_hz;
+    const lbl = hz == null ? '' : (hz >= 1000 ? `${hz / 1000}k` : `${hz}`);
+    xLabels.push(`<text x="${cx.toFixed(2)}" y="${(plotY + plotH + 4).toFixed(2)}" text-anchor="middle" font-size="2.4" fill="#6B6F75">${lbl}</text>`);
+  }
+  const xAxisTitle = `<text x="${(plotX + plotW / 2).toFixed(2)}" y="${(plotY + plotH + 9).toFixed(2)}" text-anchor="middle" font-size="2.4" font-weight="600" fill="#1A1F24">Octave-band centre frequency (Hz)</text>`;
+
+  // ---- Plot frame ----------------------------------------------------
+  const frame = `
+    <line x1="${plotX.toFixed(2)}" y1="${plotY.toFixed(2)}" x2="${plotX.toFixed(2)}" y2="${(plotY + plotH).toFixed(2)}" stroke="#1A1F24" stroke-width="0.16" />
+    <line x1="${plotX.toFixed(2)}" y1="${(plotY + plotH).toFixed(2)}" x2="${(plotX + plotW).toFixed(2)}" y2="${(plotY + plotH).toFixed(2)}" stroke="#1A1F24" stroke-width="0.16" />`;
+
+  // ---- Legend (top-right of plot) -----------------------------------
+  const lx = plotX + plotW - 35;
+  const ly = plotY + 3;
+  const legend = `
+    <g>
+      <rect x="${lx.toFixed(2)}" y="${(ly - 1.6).toFixed(2)}" width="3.5" height="2.0" fill="${BARE_FILL}" />
+      <text x="${(lx + 4.5).toFixed(2)}" y="${(ly + 0.1).toFixed(2)}" font-size="2.4" fill="#1A1F24">Bare room</text>
+      <rect x="${(lx + 15).toFixed(2)}" y="${(ly - 1.6).toFixed(2)}" width="3.5" height="2.0" fill="${TREATED_FILL}" />
+      <text x="${(lx + 19.5).toFixed(2)}" y="${(ly + 0.1).toFixed(2)}" font-size="2.4" fill="#1A1F24">With treatment</text>
+    </g>`;
+
+  return `<svg class="pr-compare-chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" width="180mm" height="75mm">
+    ${grid.join('')}
+    ${frame}
+    ${bars.join('')}
+    ${valueLabels.join('')}
+    ${yLabels.join('')}
+    ${xLabels.join('')}
+    ${xAxisTitle}
+    ${legend}
+  </svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// buildTreatmentPlanSVG — Drawing 03. Top-down floor plan with each
+// placed treatment rendered as a small filled rectangle, colour-coded
+// by category, with an index tag matching the schedule row.
+//
+// Mirrors print-heatmap.js coordinate frame (1.5 m margin, depth-flip
+// for the SVG Y axis) so the plan layout is interchangeable with
+// Drawing 01.
+//
+// Why a separate plan (not "overlay treatments on the SPL heatmap"):
+// (a) the SPL hero ships even with no treatments — overlaying would
+// force a special case there; (b) the schedule reader wants
+// uncluttered placement (no colour gradient distraction); (c) treatment
+// colour is by category, separate from the metric ramp.
+// ---------------------------------------------------------------------------
+function buildTreatmentPlanSVG(stateRef) {
+  const room = stateRef?.room;
+  if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
+  const treatments = stateRef.treatments || [];
+  if (treatments.length === 0) return '';
+
+  const MARGIN = 1.5;
+  const offsetX = MARGIN;
+  const offsetY = MARGIN;
+  const viewW = room.width_m + 2 * MARGIN;
+  const viewH = room.depth_m + 2 * MARGIN;
+  const depth_m = room.depth_m;
+
+  const project = (x, y) => ({ sx: x + offsetX, sy: (depth_m - y) + offsetY });
+
+  // ---- Room outline -------------------------------------------------
+  const stroke = '#222';
+  const sw = 0.06;
+  let outlineEl = '';
+  if (room.shape === 'rectangular') {
+    outlineEl = `<rect x="${offsetX.toFixed(3)}" y="${offsetY.toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="#F8F6F1" stroke="${stroke}" stroke-width="${sw}" />`;
+  } else if (room.shape === 'polygon') {
+    const cx = room.width_m / 2 + offsetX;
+    const cy = room.depth_m / 2 + offsetY;
+    const r = room.polygon_radius_m;
+    const N = room.polygon_sides;
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+      const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
+      pts.push(`${(cx + r * Math.cos(angle)).toFixed(3)},${(cy + r * Math.sin(angle)).toFixed(3)}`);
+    }
+    outlineEl = `<polygon points="${pts.join(' ')}" fill="#F8F6F1" stroke="${stroke}" stroke-width="${sw}" />`;
+  } else if (room.shape === 'round') {
+    const cx = room.width_m / 2 + offsetX;
+    const cy = room.depth_m / 2 + offsetY;
+    outlineEl = `<circle cx="${cx.toFixed(3)}" cy="${cy.toFixed(3)}" r="${room.round_radius_m.toFixed(3)}" fill="#F8F6F1" stroke="${stroke}" stroke-width="${sw}" />`;
+  } else if (room.shape === 'custom') {
+    const verts = room.custom_vertices || [];
+    if (verts.length >= 3) {
+      const pts = verts.map(v => {
+        const p = project(v.x, v.y);
+        return `${p.sx.toFixed(3)},${p.sy.toFixed(3)}`;
+      }).join(' ');
+      outlineEl = `<polygon points="${pts}" fill="#F8F6F1" stroke="${stroke}" stroke-width="${sw}" />`;
+    }
+  }
+
+  // ---- Treatment rectangles -----------------------------------------
+  // Category → fill colour (Sofia's palette).
+  const categoryColor = (cat) => {
+    if (!cat) return '#4F6E8F';
+    if (cat.startsWith('absorber')) return '#4F6E8F';
+    if (cat.startsWith('bass'))     return '#2F5560';
+    if (cat.startsWith('diffuser')) return '#B58741';
+    if (cat.startsWith('opening'))  return '#9EAA82';
+    return '#5B5048';
+  };
+  // For ceiling-mounted treatments: render a small dashed-outline
+  // rectangle (no fill darkening) so the reader sees that the panel is
+  // overhead, not on the floor footprint. Tag colour stays the same.
+  const treatmentEls = treatments.map((t, i) => {
+    const spec = t?._cachedSpec || findCatalogueEntry(t?.productId) || null;
+    const fill = categoryColor(spec?.category);
+    const isCeiling = t?.anchor?.surface === 'ceiling';
+    const px = t?.position?.x ?? (room.width_m / 2);
+    const py = t?.position?.y ?? (room.depth_m / 2);
+    const p = project(px, py);
+    const w = Math.max(0.18, (t?.dimensions?.width_m ?? 0.6));
+    const h = Math.max(0.18, (t?.dimensions?.height_m ?? 0.6));
+    // For plan view, the treatment is shown as its footprint-equivalent
+    // rectangle centred at the placement position. Wall-mounted panels
+    // are drawn flush to the wall edge in the schematic; ceiling tiles
+    // are drawn at their xy with a dashed outline.
+    const rx = p.sx - w / 2;
+    const ry = p.sy - h / 2;
+    const tag = t.id || `T${i + 1}`;
+    const rectEl = isCeiling
+      ? `<rect x="${rx.toFixed(3)}" y="${ry.toFixed(3)}" width="${w.toFixed(3)}" height="${h.toFixed(3)}" fill="${fill}" fill-opacity="0.35" stroke="${fill}" stroke-width="0.05" stroke-dasharray="0.18 0.12" />`
+      : `<rect x="${rx.toFixed(3)}" y="${ry.toFixed(3)}" width="${w.toFixed(3)}" height="${h.toFixed(3)}" fill="${fill}" fill-opacity="0.85" stroke="#1A1F24" stroke-width="0.04" />`;
+    const tagEl = `<text x="${p.sx.toFixed(3)}" y="${(p.sy + 0.16).toFixed(3)}" font-size="0.40" text-anchor="middle" fill="#fff" stroke="#1A1F24" stroke-width="0.05" paint-order="stroke">${escapeHtml(tag)}</text>`;
+    return rectEl + tagEl;
+  }).join('');
+
+  // ---- Scale bar (re-uses heatmap convention) -----------------------
+  const NICE = [0.5, 1, 2, 5, 10, 20];
+  const target = room.width_m / 5;
+  let barLen = NICE[0];
+  let bestD = Math.abs(barLen - target);
+  for (const v of NICE) { const d = Math.abs(v - target); if (d < bestD) { barLen = v; bestD = d; } }
+  const barX = offsetX;
+  const barY = viewH - MARGIN * 0.35;
+  const tickH = 0.15;
+  const scaleBar = `
+    <g class="pr-plan-scalebar">
+      <line x1="${barX.toFixed(3)}" y1="${barY.toFixed(3)}" x2="${(barX + barLen).toFixed(3)}" y2="${barY.toFixed(3)}" stroke="#000" stroke-width="0.07" />
+      <line x1="${barX.toFixed(3)}" y1="${(barY - tickH).toFixed(3)}" x2="${barX.toFixed(3)}" y2="${(barY + tickH).toFixed(3)}" stroke="#000" stroke-width="0.07" />
+      <line x1="${(barX + barLen).toFixed(3)}" y1="${(barY - tickH).toFixed(3)}" x2="${(barX + barLen).toFixed(3)}" y2="${(barY + tickH).toFixed(3)}" stroke="#000" stroke-width="0.07" />
+      <text x="${(barX + barLen / 2).toFixed(3)}" y="${(barY - 0.28).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">${barLen} m</text>
+    </g>`;
+
+  // ---- North arrow --------------------------------------------------
+  const naSize = 0.55;
+  const naX = viewW - 0.7;
+  const naY = MARGIN * 0.5;
+  const northArrow = `
+    <g class="pr-plan-northarrow">
+      <polygon points="${naX.toFixed(3)},${(naY - naSize).toFixed(3)} ${(naX + naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)} ${naX.toFixed(3)},${(naY + naSize * 0.05).toFixed(3)} ${(naX - naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)}" fill="#000" />
+      <text x="${naX.toFixed(3)}" y="${(naY + naSize * 0.75).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">N</text>
+    </g>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-treatment-plan-svg">${outlineEl}${treatmentEls}${scaleBar}${northArrow}</svg>`;
 }
 
 function renderPrecisionSection(p) {
