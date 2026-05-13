@@ -3636,9 +3636,10 @@ export function captureViewportImage(opts = {}) {
       // Pull the camera back along the view direction so the entire
       // room (walls, floor, contents) fits with breathing room — the
       // interactive preset uses 1.20 margin, but the printed cover
-      // wants no clipping on any edge. CAPTURE_PULL_BACK = 1.30 along
-      // the camera-to-target vector.
-      const CAPTURE_PULL_BACK = 1.30;
+      // wants no clipping on any edge. 1.10 keeps a 10 % safety while
+      // letting the room fill most of the captured PNG — anything
+      // larger leaves the room looking small in the printed cover.
+      const CAPTURE_PULL_BACK = 1.10;
       const dir = new THREE.Vector3().subVectors(camera.position, t.targetPos);
       camera.position.copy(t.targetPos).addScaledVector(dir, CAPTURE_PULL_BACK);
       camera.lookAt(t.targetPos);

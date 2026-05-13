@@ -290,7 +290,8 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-cover-hero-image {
     width: 100%;
-    height: 90mm;
+    height: auto;
+    max-height: 165mm;     /* leaves room for title block (~35mm) + detail (~45mm) + footer (~12mm) on A4 portrait */
     object-fit: contain;
     display: block;
   }
