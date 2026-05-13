@@ -3810,6 +3810,7 @@ export function captureViewportImage(opts = {}) {
   // dark slate → mixed over the white capture background = the black
   // blob symptom we kept misdiagnosing. Stash + null fog for capture.
   const prevFog = scene.fog;
+  const prevExposure = renderer ? renderer.toneMappingExposure : 1.0;
 
   // ---- Capture-only frustum expansion (real fix for "arena prints black") ----
   // Two compounding bugs were turning Pavilion / Dome interiors black in print:
@@ -3875,6 +3876,11 @@ export function captureViewportImage(opts = {}) {
     if (_floorGrid) _floorGrid.visible = false;
     if (audienceGroup) audienceGroup.visible = false;
     scene.fog = null;       // <-- THE FIX. Stops far-room saturation to fog colour.
+    // Mild exposure lift — fog was contributing implicit depth-darkening
+    // that now removed leaves the render slightly flat. 1.15× is just
+    // enough contrast to keep arena hero pieces "premium" without washing
+    // out the small rooms that already work.
+    if (renderer) renderer.toneMappingExposure = prevExposure * 1.15;
 
     // (Lighting boost removed — was washing out small rooms without
     // fixing the arena-black-floor root cause. Real fix is the
@@ -3959,6 +3965,7 @@ export function captureViewportImage(opts = {}) {
       if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
       if (audienceGroup && prevAudienceVisible !== null) audienceGroup.visible = prevAudienceVisible;
       scene.fog = prevFog;
+      if (renderer) renderer.toneMappingExposure = prevExposure;
       // Restore camera.far + shadow camera frustum if we touched them.
       if (camera && prevCamFar !== null) {
         camera.far = prevCamFar;
