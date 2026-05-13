@@ -209,11 +209,22 @@ export function mountRoomPanel({ materials }) {
       const blocked = !hasPrecision || isStale;
       printBtn.classList.toggle('btn-print-blocked', blocked);
       printBtn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+      // Two channels: native `title` for OS tooltip + a custom CSS tooltip
+      // driven by data-block-reason that appears IMMEDIATELY on hover when
+      // blocked (the native title takes ~1 s to appear, which feels slow
+      // when the user clicks Print and gets nothing). The CSS tooltip is
+      // styled in main.css `.btn-print-blocked:hover::after`.
+      let reason = '';
       if (!hasPrecision) {
-        printBtn.title = 'Run a Precision Render first — Print is disabled until then.';
+        reason = 'Run Precision Render first. Open the Precision panel (right rail · target icon) and click Render. Print enables when the render finishes.';
       } else if (isStale) {
-        printBtn.title = 'Scene has changed — re-render the precision engine before printing.';
+        reason = 'Scene has changed since the last render. Open the Precision panel (right rail · target icon) and click Render again to refresh. Print enables when the new render finishes.';
+      }
+      if (blocked) {
+        printBtn.setAttribute('data-block-reason', reason);
+        printBtn.title = reason;
       } else {
+        printBtn.removeAttribute('data-block-reason');
         printBtn.title = 'Print a multi-page proposal of the current scene.';
       }
     };
