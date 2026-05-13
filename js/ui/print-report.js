@@ -1356,7 +1356,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   const acceptanceSignatureGrid = `
     <div class="pr-accept-grid">
       <div class="pr-accept-kv">
-        <span class="pr-accept-k">Operator</span>
+        <span class="pr-accept-k">Author</span>
         <span class="pr-accept-v">${escapeHtml(operatorName)}</span>
       </div>
       <div class="pr-accept-kv">
@@ -1377,7 +1377,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </div>
     </div>
   `;
-  const acceptanceParagraph = `<span class="pr-accept-operator">${escapeHtml(operatorName)}</span> accessed RoomLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown. All predictions in this document — including reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance and are simulations executed by the browser-side engine described in the methodology section of this report. The standards referenced therein are implemented, not certified; RoomLAB is not a measurement instrument. Engineering responsibility for the application of these results rests with the named operator and their organisation. Where this report informs an emergency public-address, voice-alarm or other safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is required before commissioning.`;
+  const acceptanceParagraph = `<span class="pr-accept-operator">${escapeHtml(operatorName)}</span> accessed RoomLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown. All predictions in this document — including reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance and are simulations executed by the browser-side engine described in the methodology section of this report. The standards referenced therein are implemented, not certified; RoomLAB is not a measurement instrument. Engineering responsibility for the application of these results rests with the named author and their organisation. Where this report informs an emergency public-address, voice-alarm or other safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is required before commissioning.`;
 
   // Methodology + disclaimers are on TWO separate .pr-page blocks so
   // each is forced to the top of its own physical page. Earlier draft
@@ -1430,6 +1430,37 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
           <span class="pr-eyebrow">Reviewer's note —</span>
           Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.
         </div>
+        <!--
+          Manual sign-off — paper-level signature block. Sits below the
+          digital provenance grid (operator / IP / browser / accepted-at)
+          which stays as the SESSION-CAPTURED record. This block is for
+          a printed wet signature when the PDF is countersigned offline.
+          Using <table> for layout because print engines reliably honour
+          table cell widths + borders; flex `gap` is unsafe in print.
+          Three cells: Author / Company / Date. Each cell holds a sub-
+          label (small caps) above a thin baseline for the wet signature.
+        -->
+        <table class="pr-signoff-table" role="presentation">
+          <tr>
+            <td class="pr-signoff-cell">
+              <span class="pr-signoff-sub">Signature</span>
+              <span class="pr-signoff-line" aria-hidden="true"></span>
+              <span class="pr-signoff-label">Author</span>
+            </td>
+            <td class="pr-signoff-spacer" aria-hidden="true"></td>
+            <td class="pr-signoff-cell">
+              <span class="pr-signoff-sub">Signature / Stamp</span>
+              <span class="pr-signoff-line" aria-hidden="true"></span>
+              <span class="pr-signoff-label">Company</span>
+            </td>
+            <td class="pr-signoff-spacer" aria-hidden="true"></td>
+            <td class="pr-signoff-cell">
+              <span class="pr-signoff-sub">Date</span>
+              <span class="pr-signoff-line" aria-hidden="true"></span>
+              <span class="pr-signoff-label">Date</span>
+            </td>
+          </tr>
+        </table>
       </footer>
     </div>`;
 

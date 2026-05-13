@@ -1040,39 +1040,45 @@ body.is-pdf-export .vp-tabs {
     border: none;
     break-after: avoid;
   }
-  /* Methodology — 3-column grid; rows auto-size to the tallest cell. */
+  /* Methodology — 5-column grid; rows auto-size to the tallest cell.
+     Sofia v2 (post-page-9-spill fix): the previous 3-col layout at
+     ~6.5pt body pushed the disclaimer + references + signature cluster
+     onto a second sheet. Going to 5 columns lets the 17 entries occupy
+     roughly the upper third of the page with type still readable at
+     A4 print resolution. Column-rule replaces the per-entry left
+     border so 5 narrow columns don't read as a row of stripes. */
   #print-report .pr-credentials-method { flex: 0 0 auto; }
   #print-report .pr-method-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 2pt 7pt;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2pt 5pt;
     margin: 0;
   }
   #print-report .pr-method-entry {
     margin: 0;
-    padding: 0 0 0 4pt;
+    padding: 0 0 0 3pt;
     border-left: 0.3pt solid var(--rule);
     break-inside: avoid;
   }
   #print-report .pr-method-heading {
     font-weight: 600;
-    font-size: 6.6pt;
+    font-size: 5.8pt;
     color: var(--ink);
     margin: 0;
     line-height: 1.15;
   }
   #print-report .pr-method-cite {
-    font-size: 5.6pt;
+    font-size: 4.9pt;
     color: var(--muted);
     margin: 0;
-    line-height: 1.2;
+    line-height: 1.18;
     font-style: italic;
   }
   #print-report .pr-method-body {
-    font-size: 6.0pt;
+    font-size: 5.3pt;
     color: var(--ink);
-    margin: 0.5pt 0 0 0;
-    line-height: 1.25;
+    margin: 0.3pt 0 0 0;
+    line-height: 1.22;
   }
   /* Disclaimers — pinned to the BOTTOM of the page (usual legal-
      footer placement). margin-top: auto in the flex column pushes
@@ -1199,6 +1205,61 @@ body.is-pdf-export .vp-tabs {
     font-size: 6pt;
     color: var(--accent);
     font-weight: 700;
+  }
+  /* Manual sign-off block — paper-level wet-signature row. Sits below
+     the digital provenance grid + reviewer note as the last element on
+     the methodology page. Uses <table> for print reliability (Chrome,
+     Firefox and Safari all preserve table-cell widths + borders in
+     print; flex `gap` is unsafe). Three signature cells at ~5cm × 2.5cm
+     each with a hairline frame; sub-label small-caps above the wet-ink
+     baseline; cell label centred below. */
+  #print-report .pr-signoff-table {
+    width: 100%;
+    margin: 6pt 0 0 0;
+    border-collapse: collapse;
+    table-layout: fixed;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #print-report .pr-signoff-cell {
+    width: 50mm;
+    height: 25mm;
+    border: 0.4pt solid var(--ink);
+    padding: 3pt 4pt 4pt 4pt;
+    vertical-align: bottom;
+    text-align: center;
+    position: relative;
+  }
+  #print-report .pr-signoff-spacer {
+    width: 4mm;
+    border: none;
+    padding: 0;
+  }
+  #print-report .pr-signoff-sub {
+    display: block;
+    font-size: 5pt;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    margin-bottom: 1pt;
+  }
+  #print-report .pr-signoff-line {
+    display: block;
+    width: 100%;
+    height: 11mm;
+    border-bottom: 0.5pt solid var(--ink);
+    margin: 0 0 2pt 0;
+  }
+  #print-report .pr-signoff-label {
+    display: block;
+    font-size: 6pt;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+    text-align: left;
   }
 
   /* Reviewer's note — left accent bar, no banana background */

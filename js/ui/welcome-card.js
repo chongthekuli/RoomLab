@@ -282,12 +282,12 @@ function buildScrim() {
         </li>
         <li>
           <strong>Acceptance is recorded and travels with your work.</strong>
-          This acknowledgement is timestamped in UTC together with your operator label, public IP address, browser and platform, and is referenced on the methodology page of every PDF report generated in this session.
+          This acknowledgement is timestamped in UTC together with your author label, public IP address, browser and platform, and is referenced on the methodology page of every PDF report generated in this session.
         </li>
       </ul>
       <div class="terms-operator-row">
         <label class="terms-operator-label" for="terms-operator-name">
-          Operator name / workstation label
+          Author name / workstation label
           <span class="terms-operator-hint">required — appears on every PDF report</span>
         </label>
         <input
@@ -298,7 +298,7 @@ function buildScrim() {
           spellcheck="false"
           maxlength="80"
           placeholder="e.g. John Tan / Studio-PC-01"
-          aria-label="Operator name or workstation label" />
+          aria-label="Author name or workstation label" />
       </div>
       <button id="terms-accept-btn" class="terms-btn" type="button" disabled aria-label="I accept and continue">
         <span class="terms-btn-label">I accept and continue</span>
@@ -340,7 +340,7 @@ function runAcceptanceAnimation(card, scrim, record, reducedMotion, done) {
 function renderAckHtml(record, staggered) {
   const cls = staggered ? 'terms-ack-line terms-ack-stagger' : 'terms-ack-line';
   const rows = [
-    { label: 'Operator',  value: record.operatorName },
+    { label: 'Author',    value: record.operatorName },
     { label: 'Public IP', value: record.publicIp },
     { label: 'Browser',   value: record.browser },
     { label: 'Timezone',  value: record.timezone },
