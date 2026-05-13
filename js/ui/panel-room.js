@@ -1837,7 +1837,7 @@ async function handleDxfImport(file) {
 }
 
 // Listen for room:changed to re-render panel when draw mode finishes
-import { on } from './events.js';
+// (`on` is imported at the top of the file alongside `emit`).
 import { openPanel, getOpenPanel } from './rail-system.js';
 on('room:changed', () => {
   const root = document.getElementById('panel-room');
