@@ -1050,17 +1050,25 @@ body.is-pdf-export .vp-tabs {
      A4 print resolution. Column-rule replaces the per-entry left
      border so 5 narrow columns don't read as a row of stripes. */
   #print-report .pr-credentials-method { flex: 0 0 auto; }
+  /* CSS Multi-Column instead of Grid. Grid reserves empty cells in the
+     final partial row — with 17 entries × 5 cols that's 3 empty cells
+     in the last row = up to ⅗ of a row of wasted vertical space.
+     Multi-column flows entries top-to-bottom in each column and
+     balances heights, no gaps. break-inside on each entry keeps a
+     heading + cite + body block together inside one column. */
   #print-report .pr-method-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 1.5pt 5pt;              /* was 2pt 5pt — row gap trims with 4 rows = ~2pt */
+    column-count: 5;
+    column-gap: 5pt;
+    column-fill: balance;
     margin: 0;
   }
   #print-report .pr-method-entry {
-    margin: 0;
+    margin: 0 0 3pt 0;
     padding: 0 0 0 3pt;
     border-left: 0.3pt solid var(--rule);
     break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    page-break-inside: avoid;
   }
   #print-report .pr-method-heading {
     font-weight: 600;
