@@ -304,6 +304,14 @@ body.is-pdf-export .vp-tabs {
     display: block;
     margin: 0 auto;
   }
+  #print-report .pr-cover-hero-caption {
+    font-size: 7.5pt;
+    color: var(--muted);
+    text-align: center;
+    margin: 2mm 0 4mm;
+    line-height: 1.4;
+    font-style: italic;
+  }
   #print-report .pr-cover-hero-plan {
     width: 100%;
   }

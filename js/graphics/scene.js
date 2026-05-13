@@ -3938,6 +3938,30 @@ export function captureViewportImage(opts = {}) {
   // blob symptom we kept misdiagnosing. Stash + null fog for capture.
   const prevFog = scene.fog;
   const prevExposure = renderer ? renderer.toneMappingExposure : 1.0;
+  // Stash + dim ceiling meshes to 5 % opacity during capture so the
+  // hero render shows what's INSIDE the room (audience zones, sources,
+  // floor heatmap) instead of being blocked by the ceiling plane.
+  // Walks every mesh in roomGroup whose userData.surface_id matches
+  // 'ceiling' (works for box ceiling, dome cap, enclosure ceilings).
+  // Stashed by material so a single ceiling material shared across
+  // meshes doesn't get double-restored.
+  const _ceilingStash = [];
+  const _ceilingSeen = new Set();
+  try {
+    if (roomGroup) {
+      roomGroup.traverse((obj) => {
+        if (!obj.isMesh) return;
+        const sid = obj.userData?.surface_id;
+        if (!sid || !/ceiling/i.test(sid)) return;
+        const mat = obj.material;
+        if (!mat || _ceilingSeen.has(mat)) return;
+        _ceilingStash.push({ mat, opacity: mat.opacity, transparent: mat.transparent });
+        mat.transparent = true;
+        mat.opacity = 0.05;
+        _ceilingSeen.add(mat);
+      });
+    }
+  } catch (_) { /* leave ceilings alone if traversal fails */ }
 
   // ---- Capture-only frustum expansion (real fix for "arena prints black") ----
   // Two compounding bugs were turning Pavilion / Dome interiors black in print:
@@ -4093,6 +4117,10 @@ export function captureViewportImage(opts = {}) {
       if (audienceGroup && prevAudienceVisible !== null) audienceGroup.visible = prevAudienceVisible;
       scene.fog = prevFog;
       if (renderer) renderer.toneMappingExposure = prevExposure;
+      for (const s of _ceilingStash) {
+        s.mat.opacity = s.opacity;
+        s.mat.transparent = s.transparent;
+      }
       // Restore camera.far + shadow camera frustum if we touched them.
       if (camera && prevCamFar !== null) {
         camera.far = prevCamFar;

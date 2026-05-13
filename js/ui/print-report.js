@@ -785,6 +785,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         </div>
         ${insetHtml}
       </div>
+      ${coverImage ? `<div class="pr-cover-hero-caption">Ceiling rendered at 5 % opacity for visibility of room interior.</div>` : ''}
       <div class="pr-cover-room-detail">
         <table class="pr-table pr-kv pr-cover-measurements">
           ${measurementsRows}
