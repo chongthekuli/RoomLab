@@ -758,13 +758,51 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     : '';
 
   const roomNameDisplay = room.name && room.name.length > 0 ? room.name : 'Untitled room';
-  const summary = buildRoomSummary(room);
+  // Sofia v5 — measurements card overlays the top-left of the hero; the
+  // old below-hero summary is replaced by a proposal-tone description.
   const measurementsRows = `
     <tr><th>Shape</th><td>${escapeHtml(describeShape(room))}</td></tr>
     <tr><th>W × D × H</th><td>${fmt(room.width_m, 2)} × ${fmt(room.depth_m, 2)} × ${fmt(room.height_m, 2)} m</td></tr>
     <tr><th>Floor area</th><td>${fmt(room.baseArea_m2, 1)} m²</td></tr>
     <tr><th>Volume</th><td>${fmt(room.volume_m3, 0)} m³</td></tr>
     <tr><th>Surface area</th><td>${fmt(room.totalArea_m2, 0)} m²</td></tr>`;
+
+  // Proposal description copy — engineer-tone, no marketing fluff.
+  // References project + room without repeating them as labels (the
+  // title block already carries those). Dynamic where possible:
+  // sources / zones / listeners come from the model so the cover
+  // narrates what the report actually contains.
+  const nSources   = model.sources.length;
+  const nListeners = model.listeners.length;
+  const nZones     = model.zones.length;
+  const hasPrecision = !!model.precision;
+  const shapeLabel = describeShape(room);
+  const dims = `${fmt(room.width_m, 0)} × ${fmt(room.depth_m, 0)} × ${fmt(room.height_m, 0)} m`;
+  const sourcePhrase = nSources === 0
+    ? 'a proposed loudspeaker layout'
+    : `the proposed ${nSources}-source loudspeaker layout`;
+  const coveragePhrase = nZones > 0
+    ? `, with intelligibility reported across ${nZones} audience zone${nZones === 1 ? '' : 's'}`
+    : (nListeners > 0
+        ? `, with intelligibility sampled at ${nListeners} listener position${nListeners === 1 ? '' : 's'}`
+        : '');
+  const engineNote = hasPrecision
+    ? 'Results are computed with the precision ray-tracing engine.'
+    : 'Results are computed with the statistical-acoustics engine (Sabine / Eyring).';
+  const proposalParagraph = `This document is an acoustic simulation report for the ${dims} ${shapeLabel} room described above. It quantifies reverberation time (RT60) per ISO 3382-1, speech intelligibility (STI / STIPA) per IEC 60268-16, and sound-pressure-level coverage for ${sourcePhrase}${coveragePhrase}. A proposed surface-treatment scheme is presented alongside before-versus-after figures so the acoustic impact of each intervention is auditable. ${engineNote}`;
+
+  // Meta strip — five short lines, scannable, sits under the eyebrow
+  // in the lower band. Engineer-tone, no marketing fluff.
+  const proposalScope = [
+    ['Document',     'Acoustic simulation report'],
+    ['Deliverables', 'RT60 · STI / STIPA · SPL coverage · treatment scheme'],
+    ['Methods',      hasPrecision ? 'Precision ray tracing · statistical acoustics' : 'Statistical acoustics (Sabine / Eyring)'],
+    ['Standards',    'ISO 3382-1 · IEC 60268-16 · ISO 9613-1'],
+    ['Comparison',   'Untreated baseline vs. proposed treatment'],
+  ];
+  const scopeRows = proposalScope.map(([k, v]) =>
+    `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`
+  ).join('');
 
   const cover = `
     <div class="pr-page pr-page-cover">
@@ -783,15 +821,24 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         <div class="pr-cover-hero">
           ${heroBody}
         </div>
+        <aside class="pr-cover-spec-overlay" aria-label="Room specifications">
+          <div class="pr-cover-spec-overlay-title">Room specifications</div>
+          <table class="pr-cover-spec-overlay-table">
+            ${measurementsRows}
+          </table>
+        </aside>
         ${insetHtml}
       </div>
       ${coverImage ? `<div class="pr-cover-hero-caption">Ceiling rendered at 5 % opacity for visibility of room interior.</div>` : ''}
-      <div class="pr-cover-room-detail">
-        <table class="pr-table pr-kv pr-cover-measurements">
-          ${measurementsRows}
-        </table>
-        <p class="pr-cover-summary">${escapeHtml(summary)}</p>
-      </div>
+      <section class="pr-cover-proposal">
+        <div class="pr-cover-proposal-meta">
+          <span class="pr-eyebrow">Proposal scope</span>
+          <table class="pr-cover-proposal-scope">${scopeRows}</table>
+        </div>
+        <div class="pr-cover-proposal-body">
+          <p class="pr-cover-proposal-para">${escapeHtml(proposalParagraph)}</p>
+        </div>
+      </section>
       <div class="pr-cover-foot">
         <span>schema v${model.project.schemaVersion} · generated ${escapeHtml(model.project.generatedAt)}</span>
       </div>

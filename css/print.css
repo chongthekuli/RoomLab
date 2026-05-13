@@ -182,7 +182,9 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-table th,
   #print-report .pr-zebra tbody tr:nth-child(even) td,
   #print-report .pr-bandstrip-label,
-  #print-report .pr-tile {
+  #print-report .pr-tile,
+  #print-report .pr-cover-spec-overlay,
+  #print-report .pr-cover-proposal-body {
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
@@ -359,43 +361,134 @@ body.is-pdf-export .vp-tabs {
     z-index: 1;
   }
 
-  /* Room measurements + summary block — sits below the hero */
-  #print-report .pr-cover-room-detail {
-    display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-    gap: 8mm;
-    align-items: start;
+  /* Sofia v5 — Room-specifications overlay card.
+     Pinned to the top-left of .pr-cover-hero-wrap so it sits over the
+     hero image regardless of the hero's variable aspect (square-ish
+     classroom heroes vs. wide-and-short pavilion heroes both work).
+     Translucent white (92% opacity) keeps it readable against both
+     bright daytime skies and dark room interiors. Hairline ink rule;
+     no drop-shadow, no backdrop-blur — those date a proposal instantly.
+     Fixed width 62mm so the data column lands at the same x on every
+     room type, leaving the 2D plan inset (bottom-right, 50mm wide)
+     uncrowded. */
+  #print-report .pr-cover-spec-overlay {
+    position: absolute;
+    top: 4mm;
+    left: 4mm;
+    width: 62mm;
+    background: rgba(255, 255, 255, 0.92);
+    border: 0.5pt solid var(--ink);
+    padding: 3mm 4mm 3mm 4mm;
+    box-sizing: border-box;
+    z-index: 2;             /* above the hero image, below nothing */
+    pointer-events: none;
   }
+  #print-report .pr-cover-spec-overlay-title {
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin: 0 0 2.5mm 0;
+    padding-bottom: 1.5mm;
+    border-bottom: 0.5pt solid var(--rule);
+  }
+  #print-report .pr-cover-spec-overlay-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  #print-report .pr-cover-spec-overlay-table tr + tr th,
+  #print-report .pr-cover-spec-overlay-table tr + tr td {
+    border-top: 0.25pt solid var(--rule);
+  }
+  #print-report .pr-cover-spec-overlay-table th,
+  #print-report .pr-cover-spec-overlay-table td {
+    padding: 1.6mm 0;
+    text-align: left;
+    vertical-align: baseline;
+    font-size: 8.5pt;
+    line-height: 1.25;
+  }
+  #print-report .pr-cover-spec-overlay-table th {
+    width: 42%;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 7pt;
+  }
+  #print-report .pr-cover-spec-overlay-table td {
+    font-family: var(--font-mono);
+    color: var(--ink);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Backwards-compat: a couple of other pages still re-use .pr-cover-measurements
+     classes for styling. Keep a thin legacy rule so we don't regress them. */
   #print-report .pr-cover-measurements {
     width: 100%;
     border-collapse: collapse;
     font-size: 10pt;
   }
-  #print-report .pr-cover-measurements th,
-  #print-report .pr-cover-measurements td {
-    padding: 3pt 4pt;
-    border-bottom: 0.5pt solid var(--rule);
-    text-align: left;
-    vertical-align: top;
+
+  /* Proposal description — sits below the hero (where the old
+     room-detail block was). Two-column composition: left = small-caps
+     eyebrow + 5-row scope meta; right = the 50–90 word engineer-tone
+     paragraph. Reads as a real consultancy proposal opener, not a
+     data-sheet summary line. */
+  #print-report .pr-cover-proposal {
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.4fr);
+    gap: 10mm;
+    align-items: start;
+    padding-top: 2mm;
+    border-top: 0.5pt solid var(--rule);
   }
-  #print-report .pr-cover-measurements th {
+  #print-report .pr-cover-proposal-meta .pr-eyebrow {
+    margin-bottom: 3mm;
+  }
+  #print-report .pr-cover-proposal-scope {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  #print-report .pr-cover-proposal-scope th,
+  #print-report .pr-cover-proposal-scope td {
+    padding: 1.8mm 0;
+    text-align: left;
+    vertical-align: baseline;
+    border-bottom: 0.25pt dotted var(--rule);
+    font-size: 8.5pt;
+    line-height: 1.35;
+  }
+  #print-report .pr-cover-proposal-scope tr:last-child th,
+  #print-report .pr-cover-proposal-scope tr:last-child td {
+    border-bottom: none;
+  }
+  #print-report .pr-cover-proposal-scope th {
     width: 36%;
     font-weight: 600;
     color: var(--muted);
-    font-size: 9pt;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+    font-size: 7pt;
   }
-  #print-report .pr-cover-measurements td {
-    font-family: var(--font-mono);
-    font-size: 10pt;
+  #print-report .pr-cover-proposal-scope td {
     color: var(--ink);
   }
-  #print-report .pr-cover-summary {
-    font-size: 10pt;
-    line-height: 1.5;
+  #print-report .pr-cover-proposal-body {
+    /* Narrow optical leading column with a subtle accent rule so the
+       eye is led straight to the paragraph as the second read. */
+    border-left: 1pt solid var(--accent);
+    padding-left: 6mm;
+  }
+  #print-report .pr-cover-proposal-para {
+    font-size: 10.5pt;
+    line-height: 1.55;
     color: var(--ink);
     margin: 0;
+    max-width: 110mm;
+    text-wrap: pretty;
   }
 
   /* Cover footer is the meta strip */
