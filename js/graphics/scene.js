@@ -3577,8 +3577,13 @@ function _cameraPresetTransform(name) {
       const fovH = 2 * Math.atan(Math.tan(fovV / 2) * Math.max(camera.aspect || 1, 0.1));
       const distH = maxOX / Math.tan(fovH / 2);
       const distV = maxOY / Math.tan(fovV / 2);
-      // 1.05 margin = ~5% breathing room around the silhouette edges.
-      const dist = Math.max(distH, distV) * 1.05;
+      // 1.12 margin. Looks like 12 % overshoot but the binding corner
+      // is typically CLOSER to the camera than the target (perspective
+      // foreshortening means a 1.05 multiplier on dist only gives
+      // ~3 % visible buffer at that corner). 1.12 → ~10 % visible gap
+      // between room edge and frame edge, which reads as breathing
+      // room rather than a flush cut.
+      const dist = Math.max(distH, distV) * 1.12;
       return {
         targetPos,
         targetCam: targetPos.clone().add(dirToCam.multiplyScalar(dist)),
