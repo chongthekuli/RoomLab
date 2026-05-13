@@ -3773,7 +3773,7 @@ try {
 // (opacity ~0.55) vanish against the page; #fafafa preserves ink-friendly
 // brightness but gives transparent surfaces a faint grey to multiply
 // against, so the room silhouette never disappears entirely.
-const _printCaptureBackground = new THREE.Color(0xfafafa);
+const _printCaptureBackground = new THREE.Color(0xffffff);
 
 // Returns string|null synchronously. Use await Promise.resolve(...) at
 // the call site if a Promise contract is wanted.
@@ -3795,38 +3795,12 @@ export function captureViewportImage(opts = {}) {
   const prevBackground = scene.background;        // swap to white for print, restore after
   const prevGridVisible = _floorGrid ? _floorGrid.visible : null;
 
-  // --- Wall-opacity boost for capture only ----------------------------
-  // Live walls render at opacity ~0.55 so the user can see through them
-  // to heatmaps / sources inside. On a near-white print background the
-  // result is invisible (transparent walls × white = white). For the
-  // captured cover we want the room silhouette to READ, so we walk
-  // every wall mesh in roomGroup and push its material opacity up to
-  // 0.92. The 'open-air' material (transparent: true, opacity: 0) is
-  // skipped — its zero opacity is semantic (the wall is GONE), not a
-  // styling choice. Restored in finally.
-  // Build [{ material, prevOpacity, prevTransparent }] before any
-  // mutation so restore is exact even if a material is shared between
-  // meshes (rectangular walls reuse wallsMat; we only stash once).
-  const _opacityStash = [];
-  const _seenMats = new Set();
-  try {
-    if (roomGroup) {
-      roomGroup.traverse((obj) => {
-        if (!obj.isMesh) return;
-        const mat = obj.material;
-        if (!mat || _seenMats.has(mat)) return;
-        // Skip open-air boundary (opacity 0 by design) and already-opaque
-        // floors (opacity 0.95). Target the translucent wall + ceiling
-        // surfaces specifically (0.1 < opacity < 0.95, transparent=true).
-        if (mat.transparent && mat.opacity > 0.1 && mat.opacity < 0.95) {
-          _opacityStash.push({ mat, opacity: mat.opacity, transparent: mat.transparent });
-          mat.opacity = 0.92;
-          _seenMats.add(mat);
-        }
-      });
-    }
-  } catch (e) { /* leave walls untouched if traversal fails */ }
-
+  // Wall-opacity boost (Viktor v362) was reverted: it made dark walls
+  // print fully black AND light walls (gypsum, white plaster) blend
+  // into the white background. The original opacity (~0.55) keeps the
+  // transparent-wall aesthetic that works in the live viewport. Large
+  // rooms still render dim — that's a separate issue (light rig not
+  // scaled to room volume), tracked for a follow-up.
   let dataUrl = null;
   let rt = null;
   try {
@@ -3918,13 +3892,6 @@ export function captureViewportImage(opts = {}) {
       _focusTween = prevTween;
       scene.background = prevBackground;
       if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
-      // Restore wall opacities. Doing this AFTER background restore (so
-      // an exception above still leaves the live viewport visually
-      // unchanged on next frame).
-      for (const s of _opacityStash) {
-        s.mat.opacity = s.opacity;
-        s.mat.transparent = s.transparent;
-      }
       if (rt) rt.dispose();
       // No need to re-render — we never touched the live canvas's
       // back buffer (everything went to the off-screen render target).
