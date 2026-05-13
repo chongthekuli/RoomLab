@@ -3695,14 +3695,58 @@ function _cameraPresetTransform(name) {
       const minHalfFov = Math.min(fovV / 2, 2 * Math.atan(tanHalfH) / 2);
       let dist = sphereR / Math.sin(minHalfFov);
 
-      // Iterate. View basis stays constant (we only move along
-      // dirToCam, target fixed), so we can build it once.
+      // View basis stays constant (we only move along dirToCam, target
+      // fixed after centring), so we can build it once.
       const viewDir = dirToCam.clone().negate();    // camera → target
       const worldUp = new THREE.Vector3(0, 1, 0);
       const right = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();
       const up    = new THREE.Vector3().crossVectors(right, viewDir).normalize();
       // up = right × viewDir gives a right-handed view basis where +viewDir
       // is into the screen (camera looks along viewDir toward target).
+
+      // -------- Center the silhouette in the frustum --------
+      // For tall / wide / off-center rooms, perspective foreshortening
+      // makes the near corner project much larger than the far corner
+      // on the SAME world-x. Result: silhouette is shifted in screen
+      // space → one side of the PNG has more empty margin than the
+      // other (Pavilion 80×40×23.2: near corner NDC ≈ -0.92, far corner
+      // NDC ≈ +0.61, silhouette center ≈ -0.16 — 16 % off-centre).
+      //
+      // Project all silhouette corners onto the view-plane basis around
+      // a probe distance (sphere-fit), find the screen-space center of
+      // their projections, then shift targetPos so the silhouette
+      // re-centres in the frustum. Done ONCE before the iterative fit
+      // so subsequent passes converge symmetric.
+      {
+        const probePos = targetPos.clone().addScaledVector(dirToCam, dist);
+        let minVX = Infinity, maxVX = -Infinity;
+        let minVY = Infinity, maxVY = -Infinity;
+        const t = new THREE.Vector3();
+        for (const c of corners) {
+          t.copy(c).sub(probePos);
+          const vz = t.dot(viewDir);
+          if (vz <= 1e-3) continue;
+          // Use NDC-space projection so the centre we find reflects
+          // post-perspective screen position, not unprojected world.
+          const ndcX = t.dot(right) / (vz * tanHalfH);
+          const ndcY = t.dot(up)    / (vz * tanHalfV);
+          if (ndcX < minVX) minVX = ndcX;
+          if (ndcX > maxVX) maxVX = ndcX;
+          if (ndcY < minVY) minVY = ndcY;
+          if (ndcY > maxVY) maxVY = ndcY;
+        }
+        if (Number.isFinite(minVX) && Number.isFinite(minVY)) {
+          // Silhouette centre in NDC. We want this at (0, 0).
+          const centerNdcX = (minVX + maxVX) / 2;
+          const centerNdcY = (minVY + maxVY) / 2;
+          // Convert NDC offset to world-space shift along the view
+          // basis at the target's depth. depthAtTarget = dist (probe).
+          const shiftX = centerNdcX * dist * tanHalfH;
+          const shiftY = centerNdcY * dist * tanHalfV;
+          targetPos.addScaledVector(right, shiftX);
+          targetPos.addScaledVector(up, shiftY);
+        }
+      }
 
       const tmp = new THREE.Vector3();
       for (let iter = 0; iter < 6; iter++) {
