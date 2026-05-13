@@ -46,6 +46,7 @@ const TAG_CEILING = 2;
 const TAG_WALL = 3;
 const TAG_ZONE = 4;
 const TAG_SCOREBOARD = 5;
+const TAG_TREATMENT = 6;
 
 export const SURFACE_TAGS = {
   FLOOR: TAG_FLOOR,
@@ -53,7 +54,25 @@ export const SURFACE_TAGS = {
   WALL: TAG_WALL,
   ZONE: TAG_ZONE,
   SCOREBOARD: TAG_SCOREBOARD,
+  TREATMENT: TAG_TREATMENT,
 };
+
+// Treatment quads sit this many metres in FRONT of the host wall /
+// ceiling, along the host's inward normal, so the BVH always reports
+// the treatment hit before the wall behind it. 1 mm is six orders of
+// magnitude larger than the tracer's self-intersection EPS (1e-6 m in
+// tracer-core.js) so a ray reflecting off the treatment and
+// re-querying the BVH never accidentally hits the same treatment quad
+// (the post-reflection origin nudge is along the OUTGOING direction,
+// not toward the wall behind).
+//
+// Why 1 mm and not larger: any visible offset between the treatment
+// face and the wall it sits on would leak rays grazing parallel to
+// the wall through the gap, double-counting absorption on the back
+// wall and biasing late reverb downward. 1 mm × tan(grazing angle of
+// ~1°) ≈ 60 µm of leak width — negligible vs the 0.5 m receiver
+// sphere radius.
+const TREATMENT_OFFSET_M = 1e-3;
 
 // Subdivisions for curved geometry. Too low → faceting visible in early
 // reflections; too high → BVH overhead. 32 sides for a round room and
@@ -98,8 +117,176 @@ export function triangulateScene(scene, opts = {}) {
   triangulateScoreboard(scene, tris);
   triangulateStandaloneEnclosures(scene, tris);
   triangulateWallSegments(scene, tris);
+  triangulateTreatments(scene, tris);
 
   return finalizeBuffer(tris);
+}
+
+// --- Treatments (v3 — placed acoustic panels) -------------------------
+// Each entry on scene.treatments (built by scene-snapshot.js) becomes
+// a single rectangular quad in front of its host wall (or below the
+// ceiling), with its synthetic `treatment:<productId>` material
+// already resolved to materialIdx. The tracer treats the quad like
+// any other reflector: when a ray hits it, scene.materials[matIdx]
+// gives both the per-band absorption (energy attenuation) AND the
+// scattering coefficient (diffuse-vs-specular branch — see
+// tracer-core.js:427-455).
+//
+// Geometric model: the wall-anchored treatment's `position` is the
+// CENTRE of its back face (per scene.js's
+// _placeTreatmentGroupOnSurface convention — group local +Z extends
+// into the room, body centred at z=d/2). The quad we push for the
+// tracer is the FRONT face of the panel, shifted 1 mm into the room
+// from the wall plane so the BVH tie-break is deterministic.
+//
+// Scope (matches the v2 Sabine path — `treatmentHostSurfaceId` in
+// physics/room-shape.js):
+//   - rectangular rooms: wallIndex 0..3 → north/south/east/west.
+//   - custom-vertex rooms: wallIndex → edge between
+//     custom_vertices[i] and custom_vertices[i+1] (CCW polygon).
+//   - any room: anchor.surface === 'ceiling' → quad on the ceiling
+//     plane facing down.
+//
+// Out of scope (matches Sabine — silently skipped):
+//   - polygon / round rooms: Sabine bundles ALL panels onto the
+//     merged 'walls' slot with no positional resolver. Until a
+//     v4 resolver lands the precision tracer treats these as
+//     visual-only too. UI never lets a user place a treatment on
+//     these rooms anyway (the placement raycaster requires a wall
+//     mesh).
+//   - standalone enclosures: treatments anchored to enclosure walls
+//     are not in the current Sabine scope either. State carries no
+//     `enclosureId` field on the treatment.
+function triangulateTreatments(scene, tris) {
+  const list = scene.treatments;
+  if (!Array.isArray(list) || list.length === 0) return;
+  const room = scene.room;
+  const shape = room?.shape ?? 'rectangular';
+  // Only resolve anchors for shapes the Sabine path handles. Skipping
+  // mirrors v2's silent-drop behaviour for unsupported geometries.
+  if (shape !== 'rectangular' && shape !== 'custom') {
+    // Ceiling-anchored treatments work on any shape — fall through
+    // below; wall-anchored ones we'd silently drop here. Iterate
+    // anyway to pick up ceiling anchors on polygon/round rooms.
+  }
+  for (let ti = 0; ti < list.length; ti++) {
+    const t = list[ti];
+    if (!t || t.materialIdx < 0) continue;     // catalogue cache miss → skip
+    const w = Math.max(0, t.dimensions?.width_m  || 0);
+    const h = Math.max(0, t.dimensions?.height_m || 0);
+    if (w < 1e-3 || h < 1e-3) continue;
+
+    if (t.anchor?.surface === 'ceiling') {
+      pushCeilingTreatmentQuad(scene, tris, t, w, h, ti);
+      continue;
+    }
+    if (t.anchor?.surface !== 'wall') continue;
+    if (shape === 'rectangular') {
+      pushRectWallTreatmentQuad(scene, tris, t, w, h, ti);
+    } else if (shape === 'custom') {
+      pushCustomWallTreatmentQuad(scene, tris, t, w, h, ti);
+    }
+  }
+}
+
+function pushRectWallTreatmentQuad(scene, tris, t, w, h, ti) {
+  const room = scene.room;
+  const W = room.width_m, D = room.depth_m;
+  const idx = t.anchor.wallIndex | 0;
+  const cx = t.position.x, cy = t.position.y, cz = t.position.z;
+  // Local axes per rectangular wall:
+  //   - normal n points INTO the room
+  //   - in-plane tangent u runs along the wall's horizontal extent
+  //   - in-plane up v = (0, 0, 1) (world +z) for all walls
+  // Wall index → (n, u) per the convention in triangulateRectangularRoom:
+  //   0 north (y=D, n=(0,-1,0)),  u=(+1,0,0)
+  //   1 south (y=0, n=(0,+1,0)),  u=(-1,0,0)   (matches wall winding order)
+  //   2 east  (x=W, n=(-1,0,0)),  u=(0,+1,0)
+  //   3 west  (x=0, n=(+1,0,0)),  u=(0,-1,0)
+  let nx = 0, ny = 0, nz = 0;
+  let ux = 0, uy = 0;
+  switch (idx) {
+    case 0: nx = 0; ny = -1; ux = 1;  uy = 0;  break;
+    case 1: nx = 0; ny = 1;  ux = -1; uy = 0;  break;
+    case 2: nx = -1; ny = 0; ux = 0;  uy = 1;  break;
+    case 3: nx = 1;  ny = 0; ux = 0;  uy = -1; break;
+    default: return;   // unknown wall — drop silently (matches Sabine)
+  }
+  // Push the panel ε in front of the wall along n. The panel CENTRE is
+  // (cx, cy, cz); its back rests on the wall plane (per scene.js).
+  const ox = cx + nx * TREATMENT_OFFSET_M;
+  const oy = cy + ny * TREATMENT_OFFSET_M;
+  const oz = cz;
+  // Four corners (CCW seen from the room interior — opposite to the
+  // wall's interior winding because the panel face NORMAL is +n away
+  // from the wall, into the room).
+  const hw = w / 2, hh = h / 2;
+  const v00 = [ox - ux * hw, oy - uy * hw, oz - hh];   // bottom-left
+  const v10 = [ox + ux * hw, oy + uy * hw, oz - hh];   // bottom-right
+  const v11 = [ox + ux * hw, oy + uy * hw, oz + hh];   // top-right
+  const v01 = [ox - ux * hw, oy - uy * hw, oz + hh];   // top-left
+  pushQuad(tris, v00, v10, v11, v01, [nx, ny, nz],
+    t.materialIdx, TAG_TREATMENT, `treatment_${t.id ?? ti}`);
+}
+
+function pushCustomWallTreatmentQuad(scene, tris, t, w, h, ti) {
+  const verts = scene.room.custom_vertices;
+  if (!Array.isArray(verts) || verts.length < 3) return;
+  const idx = t.anchor.wallIndex | 0;
+  if (idx < 0 || idx >= verts.length) return;
+  const a = verts[idx];
+  const b = verts[(idx + 1) % verts.length];
+  // Centroid for inward-normal sign — same convention as
+  // triangulateCustomRoom (CCW polygons in state coords; inward
+  // normal points toward the polygon centroid).
+  let cxg = 0, cyg = 0;
+  for (const v of verts) { cxg += v.x; cyg += v.y; }
+  cxg /= verts.length; cyg /= verts.length;
+  const ex = b.x - a.x, ey = b.y - a.y;
+  const eLen = Math.hypot(ex, ey);
+  if (eLen < 1e-6) return;
+  const ux = ex / eLen, uy = ey / eLen;
+  // Inward normal: 90° rotation of edge tangent toward the centroid.
+  // For a CCW polygon, that's (-ey, ex) / |e|; verify by dot with
+  // (centroid - midpoint) and flip if the sign is negative (handles
+  // CW polygons gracefully).
+  let nx = -uy, ny = ux;
+  const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+  if ((cxg - midX) * nx + (cyg - midY) * ny < 0) { nx = -nx; ny = -ny; }
+  const cx = t.position.x, cy = t.position.y, cz = t.position.z;
+  const ox = cx + nx * TREATMENT_OFFSET_M;
+  const oy = cy + ny * TREATMENT_OFFSET_M;
+  const oz = cz;
+  const hw = w / 2, hh = h / 2;
+  const v00 = [ox - ux * hw, oy - uy * hw, oz - hh];
+  const v10 = [ox + ux * hw, oy + uy * hw, oz - hh];
+  const v11 = [ox + ux * hw, oy + uy * hw, oz + hh];
+  const v01 = [ox - ux * hw, oy - uy * hw, oz + hh];
+  pushQuad(tris, v00, v10, v11, v01, [nx, ny, 0],
+    t.materialIdx, TAG_TREATMENT, `treatment_${t.id ?? ti}`);
+}
+
+function pushCeilingTreatmentQuad(scene, tris, t, w, h, ti) {
+  // Ceiling panel sits flush with the ceiling plane; face normal
+  // points DOWN (-z) so rays from below hit it. position.z is the
+  // ceiling height (per scene.js's reanchorTreatmentsOnRoomChange).
+  const cx = t.position.x, cy = t.position.y;
+  const cz = t.position.z - TREATMENT_OFFSET_M;
+  // rotation_deg = roll around vertical (world Y in Three, world Z
+  // in state coords). Apply 2D rotation around (cx, cy).
+  const rad = (t.rotation_deg || 0) * Math.PI / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  const hw = w / 2, hh = h / 2;
+  // Local in-plane corners (before rotation): (-hw,-hh), (hw,-hh), etc.
+  const rot = (lx, ly) => [cx + lx * c - ly * s, cy + lx * s + ly * c, cz];
+  const v00 = rot(-hw, -hh);
+  const v10 = rot( hw, -hh);
+  const v11 = rot( hw,  hh);
+  const v01 = rot(-hw,  hh);
+  // Outward face normal = -z (panel faces down into the room).
+  // Winding for -z normal: v00, v01, v11, v10 (reversed vs +z).
+  pushQuad(tris, v00, v01, v11, v10, [0, 0, -1],
+    t.materialIdx, TAG_TREATMENT, `treatment_${t.id ?? ti}`);
 }
 
 // --- Standalone enclosures (broken-out sub-rooms) ---------------------

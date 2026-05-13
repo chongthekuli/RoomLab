@@ -139,6 +139,29 @@ export function getTreatmentAbsorption(productId, bandIdx) {
   return Number.isFinite(v) ? v : null;
 }
 
+// Per-band scattering accessor — sibling of getTreatmentAbsorption.
+// Used by the v3 precision tracer to fold ISO 17497-2 scattering
+// coefficients into the diffuse-vs-specular reflection decision when
+// a ray hits a placed treatment. Returns null on the same fallback
+// conditions as getTreatmentAbsorption (catalogue not loaded, product
+// not found, missing scattering_coefficient field). Caller treats
+// null as 0 → fully specular reflection, matching pre-v3 behaviour
+// for that surface (visible-only treatment, no scattering effect).
+//
+// Note: the precision engine ALSO caches scattering via the synthetic
+// `treatment:<productId>` material entry built in scene-snapshot.js,
+// so the hot ray-loop never calls this accessor directly. This
+// function exists for any future code path that needs scattering as
+// an attribute query on the live catalogue (e.g. a SurfaceLAB
+// inspector panel, a docs-export pass, or a test fixture builder).
+export function getTreatmentScattering(productId, bandIdx) {
+  if (!_cached) return null;
+  const entry = _cached.all.find(e => e.id === productId);
+  if (!entry || !Array.isArray(entry.scattering_coefficient)) return null;
+  const v = entry.scattering_coefficient[bandIdx];
+  return Number.isFinite(v) ? v : null;
+}
+
 // Synchronous catalogue accessor for code paths that need to enumerate
 // all loaded products WITHOUT awaiting `loadSurfaceCatalogue()` (e.g.
 // the physics engine when called from a test where the panel-treatments

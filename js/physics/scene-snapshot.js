@@ -19,6 +19,7 @@
 // favour of `PhysicsScene`-accepting signatures.
 
 import { expandSources } from '../app-state.js';
+import { getCachedCatalogue } from '../labs/surfacelab/catalog.js';
 
 export const PHYSICS_SCENE_VERSION = 1;
 
@@ -116,6 +117,13 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
   const BANDS = bands_hz.length;
 
   // --- Materials — resolve to flat indexed table. ---------------------
+  // Pass 1: copy the room/surface materials verbatim from the
+  // materials.json list. Pass 2 (further down, after zones) appends
+  // synthetic `treatment:<productId>` entries pulled from the
+  // SurfaceLAB catalogue so the precision tracer can hit a placed
+  // panel and resolve both its catalogue absorption AND its
+  // catalogue scattering coefficient without round-tripping through
+  // the catalogue cache from the hot loop.
   const materialsTable = materials.list.map((m, idx) => {
     const abs = m.absorption ?? [];
     const sca = m.scattering ?? [];
@@ -264,6 +272,82 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     });
   });
 
+  // --- Treatments — placed acoustic panels (v3 precision bridge). -----
+  // Each entry on `state.treatments` carries an anchor (wall index or
+  // ceiling), a world-space `position` (the panel CENTRE on the host
+  // plane), a `rotation_deg` (yaw on a wall, roll on the ceiling), and
+  // a `dimensions` block. The precision tracer needs:
+  //   1) the rectangle in world coords → built by triangulate-scene.js
+  //      from anchor + position + dimensions.
+  //   2) the per-band absorption + scattering coefficients of the
+  //      catalogue product → exposed via a synthetic material entry
+  //      keyed `treatment:<productId>` so the existing
+  //      tracer-core.js path (which reads scene.materials[idx]) works
+  //      with NO downstream change. Pre-cached productIds collapse to
+  //      a single material entry; duplicate productIds reuse it.
+  //
+  // Catalogue resolution: getCachedCatalogue() returns null when the
+  // SurfaceLAB load hasn't completed yet. In that case treatments
+  // contribute NO acoustic effect — matching the v2 Sabine path's
+  // "catalogue not loaded → treatment silently skipped" fallback.
+  // This keeps the engine deterministic even on cold-boot test paths.
+  const cat = getCachedCatalogue();
+  const treatmentMatIdxByProduct = new Map();
+  function registerTreatmentMaterial(productId) {
+    if (!cat || !productId) return -1;
+    const cached = treatmentMatIdxByProduct.get(productId);
+    if (cached !== undefined) return cached;
+    const entry = cat.all.find(e => e.id === productId);
+    if (!entry) {
+      treatmentMatIdxByProduct.set(productId, -1);
+      return -1;
+    }
+    const absArr = new Float32Array(BANDS);
+    const scaArr = new Float32Array(BANDS);
+    const absSrc = Array.isArray(entry.absorption) ? entry.absorption : [];
+    const scaSrc = Array.isArray(entry.scattering_coefficient) ? entry.scattering_coefficient : [];
+    for (let k = 0; k < BANDS; k++) {
+      absArr[k] = Number.isFinite(absSrc[k]) ? absSrc[k] : 0;
+      scaArr[k] = Number.isFinite(scaSrc[k]) ? scaSrc[k] : DEFAULT_SCATTERING;
+    }
+    const idx = materialsTable.length;
+    materialsTable.push(Object.freeze({
+      index: idx,
+      id: `treatment:${productId}`,
+      name: entry.name ?? productId,
+      absorption: absArr,
+      scattering: scaArr,
+    }));
+    treatmentMatIdxByProduct.set(productId, idx);
+    return idx;
+  }
+
+  const stateTreatments = Array.isArray(state.treatments) ? state.treatments : [];
+  const treatments = stateTreatments.map((t, ti) => {
+    const matIdx = registerTreatmentMaterial(t.productId);
+    const dim = t.dimensions ?? {};
+    return Object.freeze({
+      id: t.id ?? `T${ti + 1}`,
+      productId: t.productId ?? null,
+      anchor: Object.freeze({
+        surface: t.anchor?.surface ?? 'wall',
+        wallIndex: Number.isFinite(t.anchor?.wallIndex) ? t.anchor.wallIndex : 0,
+      }),
+      position: Object.freeze({
+        x: Number(t.position?.x) || 0,
+        y: Number(t.position?.y) || 0,
+        z: Number(t.position?.z) || 0,
+      }),
+      rotation_deg: Number(t.rotation_deg) || 0,
+      dimensions: Object.freeze({
+        width_m:  Number(dim.width_m)  || 0.6,
+        height_m: Number(dim.height_m) || 0.6,
+        depth_m:  Number(dim.depth_m)  || 0.05,
+      }),
+      materialIdx: matIdx,
+    });
+  });
+
   // --- Room — shallow-clone the fields physics cares about. -----------
   const srcRoom = state.room ?? {};
   const room = Object.freeze({
@@ -362,8 +446,13 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
       labels: Object.freeze(recLabels),
       ids: Object.freeze(recIds),
     }),
-    physics,
-    eq,
+    // v3 — placed treatments, materialIdx already resolved to a
+    // synthetic catalogue-backed entry on `materials` above. The
+    // precision tracer reads scene.materials[idx].scattering for the
+    // diffuse-scatter probability decision (tracer-core.js:427).
+    // Empty array (frozen) when no treatments are placed or when the
+    // SurfaceLAB catalogue hasn't loaded yet.
+    treatments: Object.freeze(treatments),
 
     // Phase B additions — triangle list + BVH — land with the
     // precision engine. Present here as null placeholders so worker
