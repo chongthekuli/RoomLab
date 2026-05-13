@@ -3701,6 +3701,11 @@ function buildSpeakerEnclosure(src, groupInt, outside) {
     new THREE.EdgesGeometry(bodyGeo, 15),
     new THREE.LineBasicMaterial({ color: edgeColor }),
   );
+  // Opt the wireframe OUT of raycasting. Three.js's default Line raycast
+  // threshold is 1 m — so without this, hovering up to a metre from the
+  // cabinet edge would trigger the speaker hover highlight. The solid
+  // body / grill / driver meshes still pick at pixel accuracy.
+  edges.raycast = () => {};
 
   // Baffle/grille panel flush with the front face, tinted by speaker group.
   const grillColor = outside ? 0xff5a3c : (groupInt ?? 0x4a515b);
