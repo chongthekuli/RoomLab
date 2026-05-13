@@ -14,7 +14,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { buildRackGroup } from './rack-render.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
-import { roomPlanVertices, domeGeometry, isInsideRoom3D, normalizeWallSlot } from '../physics/room-shape.js';
+import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, normalizeWallSlot } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { openPanel } from '../ui/rail-system.js';
@@ -3426,6 +3426,183 @@ function _tickCameraFocus(ts) {
   controls.target.lerpVectors(_focusTween.startPos, _focusTween.targetPos, e);
   camera.position.lerpVectors(_focusTween.startCam, _focusTween.targetCam, e);
   if (t >= 1) _focusTween = null;
+}
+
+// ----- AutoCAD-style preset views ----------------------------------------
+// Six buttons (Top / Front / Back / Left / Right / Iso) anchored to the
+// top-right of the 3D viewport. Each preset frames the entire room AABB
+// (any shape) using FOV-derived distance math: we project the AABB onto
+// the camera plane and pull back far enough that both axes fit, with a
+// 1.15× margin. Tween hooks the existing _focusTween system so the
+// transition is smooth (~500 ms) rather than an instant snap.
+//
+// AABB sourcing — roomEffectiveBounds() already unions the parent
+// footprint with every standaloneEnclosure polygon, so the framing
+// stays correct for detached zones and arbitrary polygons. Falls back
+// to width_m / depth_m for the degenerate / boot-time case where the
+// vertex list is empty (e.g. mid-draw custom polygon).
+//
+// Axis mapping (state → three.js): state.x → world.x, state.y → world.z,
+// elevation → world.y. Room sits with min corner at (0,0,0).
+function _roomWorldAABB() {
+  const room = state.room || {};
+  const h = room.height_m ?? 3;
+  let b = null;
+  try { b = roomEffectiveBounds(room); } catch (_) { b = null; }
+  let minX, maxX, minZ, maxZ;
+  if (b && Number.isFinite(b.minX) && Number.isFinite(b.maxX) && b.maxX > b.minX) {
+    minX = b.minX; maxX = b.maxX; minZ = b.minY; maxZ = b.maxY;
+  } else {
+    minX = 0; maxX = room.width_m ?? 10;
+    minZ = 0; maxZ = room.depth_m ?? 10;
+  }
+  const w = maxX - minX;
+  const d = maxZ - minZ;
+  const cx = (minX + maxX) / 2;
+  const cz = (minZ + maxZ) / 2;
+  const cy = h * 0.4;             // matches frameCameraToRoom target altitude
+  return { minX, maxX, minZ, maxZ, w, d, h, cx, cy, cz };
+}
+
+// Distance that frames an extentX × extentY rectangle filling the camera
+// frustum, given the current camera's vertical FOV and aspect ratio.
+// margin > 1 leaves breathing room around the edges.
+function _fitDistance(extentX, extentY, margin) {
+  if (!camera) return 10;
+  const fovV = THREE.MathUtils.degToRad(camera.fov || 38);
+  const aspect = Math.max(camera.aspect || 1, 0.1);
+  // distance so extentY fits vertically
+  const distY = (extentY / 2) / Math.tan(fovV / 2);
+  // distance so extentX fits horizontally (horizontal fov derived from V)
+  const fovH = 2 * Math.atan(Math.tan(fovV / 2) * aspect);
+  const distX = (extentX / 2) / Math.tan(fovH / 2);
+  return Math.max(distX, distY) * (margin || 1.15);
+}
+
+// Build (targetPos, targetCam) for a named preset. Returns null if the
+// preset name is unknown or the room AABB is degenerate.
+function _cameraPresetTransform(name) {
+  if (!camera) return null;
+  const aabb = _roomWorldAABB();
+  const { minX, maxX, minZ, maxZ, w, d, h, cx, cy, cz } = aabb;
+  // Small safety floor — frames don't collapse onto a zero-extent axis.
+  const safe = (v) => Math.max(v, 0.5);
+  switch (name) {
+    case 'top': {
+      // Looking straight down. extentX = w, extentY = d. Lift the camera
+      // high enough that w AND d fit, then put target at floor centre
+      // with a tiny +z offset so OrbitControls' polar axis doesn't sing
+      // gimbal lock when the camera is exactly above target.
+      const dist = _fitDistance(safe(w), safe(d), 1.20);
+      const camY = dist + h;       // above the room ceiling, by dist
+      // Camera looks toward +Z so that state +y (depth) maps to screen
+      // DOWN — matches the 2D plan orientation (front wall at top of
+      // screen, back wall at bottom). Achieved by offsetting the target
+      // very slightly in -z relative to camera xz so up-vector resolves.
+      return {
+        targetPos: new THREE.Vector3(cx, 0, cz + 0.001),
+        targetCam: new THREE.Vector3(cx, camY, cz),
+      };
+    }
+    case 'front': {
+      // Viewed from the FRONT wall (state.y = 0 → world.z = 0). Camera
+      // sits outside that wall looking toward +Z. extentX = w, extentY = h.
+      const dist = _fitDistance(safe(w), safe(h), 1.20);
+      return {
+        targetPos: new THREE.Vector3(cx, h * 0.5, cz),
+        targetCam: new THREE.Vector3(cx, h * 0.5, minZ - dist),
+      };
+    }
+    case 'back': {
+      // Viewed from the BACK wall (state.y = maxY) looking toward -Z.
+      const dist = _fitDistance(safe(w), safe(h), 1.20);
+      return {
+        targetPos: new THREE.Vector3(cx, h * 0.5, cz),
+        targetCam: new THREE.Vector3(cx, h * 0.5, maxZ + dist),
+      };
+    }
+    case 'left': {
+      // Viewed from the LEFT wall (state.x = 0) looking toward +X.
+      // extentX (screen-horizontal) = d (room depth), extentY = h.
+      const dist = _fitDistance(safe(d), safe(h), 1.20);
+      return {
+        targetPos: new THREE.Vector3(cx, h * 0.5, cz),
+        targetCam: new THREE.Vector3(minX - dist, h * 0.5, cz),
+      };
+    }
+    case 'right': {
+      // Viewed from the RIGHT wall (state.x = maxX) looking toward -X.
+      const dist = _fitDistance(safe(d), safe(h), 1.20);
+      return {
+        targetPos: new THREE.Vector3(cx, h * 0.5, cz),
+        targetCam: new THREE.Vector3(maxX + dist, h * 0.5, cz),
+      };
+    }
+    case 'iso':
+    default: {
+      // Mirror frameCameraToRoom — `cx + d3*0.9, h + d3*0.5, maxZ + d3*0.4`.
+      // The original uses `d + d3*0.4` for the depth component, which on
+      // the default rect (minZ=0) equals maxZ + d3*0.4. Using maxZ keeps
+      // the same framing for polygons whose AABB doesn't start at z=0.
+      // Kept as a tween target so the user gets a smooth transition
+      // from any preset back to the default 3/4 view.
+      const d3 = Math.max(w, h, d);
+      return {
+        targetPos: new THREE.Vector3(cx, h * 0.4, cz),
+        targetCam: new THREE.Vector3(cx + d3 * 0.9, h + d3 * 0.5, maxZ + d3 * 0.4),
+      };
+    }
+  }
+}
+
+// Build tag so a user can confirm the live module matches the fix in
+// case of stale-cache reports. Logged once at module load.
+try {
+  console.info('[scene] build 2026-05-13 v351 — applyCameraPreset');
+} catch (_) { /* server-side noop */ }
+
+// Public — kick off a smooth tween to one of the named presets.
+// 'top' | 'front' | 'back' | 'left' | 'right' | 'iso'
+export function applyCameraPreset(name) {
+  if (walkMode || !camera || !controls) return;
+  const t = _cameraPresetTransform(name);
+  if (!t) return;
+  _focusTween = {
+    targetPos: t.targetPos,
+    targetCam: t.targetCam,
+    startPos: controls.target.clone(),
+    startCam: camera.position.clone(),
+    t0: performance.now(),
+    durationMs: 500,
+  };
+}
+
+// Best-guess which preset the camera is currently sitting near. Returns
+// one of the 6 names, or null if the current view is "in between" any
+// preset (e.g. the user has manually orbited away). Used purely to
+// decorate the active button — never to drive behavior. Heuristic:
+// for each preset, compute the expected (camPos, target) and measure
+// the camera offset's angular distance from the preset's offset. If
+// the closest preset is within ~12° on the unit-direction, treat it
+// as "active"; otherwise return null.
+export function detectActiveCameraPreset() {
+  if (!camera || !controls || walkMode) return null;
+  const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+  if (offset.lengthSq() < 1e-6) return null;
+  const dir = offset.clone().normalize();
+  const names = ['top', 'front', 'back', 'left', 'right', 'iso'];
+  let best = null;
+  let bestDot = -2;
+  for (const name of names) {
+    const t = _cameraPresetTransform(name);
+    if (!t) continue;
+    const pdir = new THREE.Vector3().subVectors(t.targetCam, t.targetPos).normalize();
+    const dot = dir.dot(pdir);
+    if (dot > bestDot) { bestDot = dot; best = name; }
+  }
+  // ~12° threshold (cos 12° ≈ 0.978). Tight enough that we don't
+  // false-positive once the user starts dragging the orbit.
+  return bestDot > 0.978 ? best : null;
 }
 
 // Cabinet dimensions in meters by speaker type. Line-array elements are

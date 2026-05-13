@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=350" />
-  <link rel="stylesheet" href="css/theme.css?v=350" />
-  <link rel="stylesheet" href="css/print.css?v=350" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=351" />
+  <link rel="stylesheet" href="css/theme.css?v=351" />
+  <link rel="stylesheet" href="css/print.css?v=351" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -140,6 +140,20 @@
           <div class="vp-more-footer">
             <button id="btn-show-help" type="button">Keyboard shortcuts →</button>
           </div>
+        </div>
+        <!-- AutoCAD-style preset-view cluster (top-right of viewport).
+             6 named camera positions wired by labs/roomlab/main.js to
+             scene.js applyCameraPreset(). Hidden in 2D and Walk modes
+             via viewport:tab-changed listener (also in main.js).
+             3×2 grid mirrors AutoCAD ViewCube's footprint while staying
+             compact enough not to crowd the right rail. -->
+        <div class="vp-view-cube" id="vp-view-cube" role="group" aria-label="Camera preset views">
+          <button class="vp-view-btn" data-preset="top"   title="Top view — overhead, matches 2D plan orientation" type="button"><span class="vp-view-glyph">⊟</span><span class="vp-view-label">Top</span></button>
+          <button class="vp-view-btn" data-preset="front" title="Front view — looking from front wall toward back" type="button"><span class="vp-view-glyph">▣</span><span class="vp-view-label">Front</span></button>
+          <button class="vp-view-btn" data-preset="back"  title="Back view — looking from back wall toward front"  type="button"><span class="vp-view-glyph">▢</span><span class="vp-view-label">Back</span></button>
+          <button class="vp-view-btn" data-preset="left"  title="Left view — looking from left wall toward right"  type="button"><span class="vp-view-glyph">◧</span><span class="vp-view-label">Left</span></button>
+          <button class="vp-view-btn" data-preset="right" title="Right view — looking from right wall toward left" type="button"><span class="vp-view-glyph">◨</span><span class="vp-view-label">Right</span></button>
+          <button class="vp-view-btn" data-preset="iso"   title="Isometric — default 3/4 perspective"              type="button"><span class="vp-view-glyph">◈</span><span class="vp-view-label">Iso</span></button>
         </div>
         <div id="view-2d" class="viewport-view" hidden></div>
         <div id="view-3d" class="viewport-view">
@@ -330,6 +344,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=350"></script>
+  <script type="module" src="js/main.js?v=351"></script>
 </body>
 </html>

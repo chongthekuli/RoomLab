@@ -34,6 +34,7 @@ import {
   mount3DViewport, toggleHeatmaps, toggleAimLines, toggleIsobars, toggleProbe,
   toggleReverbField, toggleHeatmapMode, toggleRayViz, frameCameraToRoom,
   setRackCatalogues, setWalkthroughMode,
+  applyCameraPreset, detectActiveCameraPreset,
 } from '../../graphics/scene.js';
 import { installCollapsibles } from '../../ui/collapsibles.js';
 import { mountWalkTouchHUD } from '../../ui/walk-touch-hud.js';
@@ -60,6 +61,50 @@ function setupTabs() {
       document.dispatchEvent(new CustomEvent('viewport:tab-changed', { detail: { view: target } }));
     });
   });
+
+  // AutoCAD-style preset-view cluster. Visible only in 3D (orbit camera
+  // exists). 2D has its own pan/zoom controller and Walk has the
+  // first-person camera bound to the avatar — neither has a meaningful
+  // notion of "Top / Front / Iso", so the cluster hides outright in
+  // those modes. The viewport:tab-changed CustomEvent dispatched above
+  // is our single source of truth for which view is active.
+  const viewCube = document.getElementById('vp-view-cube');
+  const updateViewCubeActive = () => {
+    if (!viewCube || viewCube.hidden) return;
+    const active = detectActiveCameraPreset();
+    viewCube.querySelectorAll('.vp-view-btn').forEach(btn => {
+      btn.classList.toggle('is-active', btn.dataset.preset === active);
+    });
+  };
+  if (viewCube) {
+    viewCube.querySelectorAll('.vp-view-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const preset = btn.dataset.preset;
+        if (!preset) return;
+        applyCameraPreset(preset);
+        // Optimistically mark this preset active — the tween starts now
+        // and detectActiveCameraPreset() during the tween would return
+        // null until the offset settles within 12° of the target.
+        viewCube.querySelectorAll('.vp-view-btn').forEach(b => {
+          b.classList.toggle('is-active', b === btn);
+        });
+        // After the 500 ms tween finishes, re-detect — clears the
+        // optimistic highlight if the camera ended up "between"
+        // presets due to any state change mid-tween (room resized,
+        // shape swapped, etc.).
+        setTimeout(updateViewCubeActive, 560);
+      });
+    });
+    // Initial state: 3D is the default tab so the cube is visible. The
+    // tab-changed listener below keeps it in sync on every switch.
+    document.addEventListener('viewport:tab-changed', e => {
+      const v = e.detail?.view;
+      viewCube.hidden = (v !== '3d');
+      if (!viewCube.hidden) requestAnimationFrame(updateViewCubeActive);
+    });
+    // First paint — after mount, the iso preset is the default camera.
+    requestAnimationFrame(updateViewCubeActive);
+  }
 
   const heatBtn = document.getElementById('toggle-heatmaps');
   const heatmapDependents = () => ['toggle-isobars', 'toggle-reverb', 'toggle-stipa-mode']

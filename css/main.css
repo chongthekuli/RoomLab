@@ -617,6 +617,82 @@ html[data-rail-right="construction"]    #panel-construction {
   background: rgba(40, 50, 65, 0.78);
   border-color: rgba(255, 255, 255, 0.18);
 }
+/* AutoCAD-style preset-view cluster — top-right of the 3D viewport,
+   inside the scene area (not in the side rail). 3×2 grid: T/F/Bk on
+   top row, L/R/Iso on bottom row. Same glass-pill family as the
+   centre mode segment so the two clusters visually rhyme. Visibility
+   is gated by JS (main.js sets a `hidden` attribute) when the
+   viewport is in 2D or Walk mode — those views don't have an orbit
+   camera to retarget. The 16-px clearance from the right edge avoids
+   crowding the right rail's icons (which sit at right:0, 40 px wide). */
+.vp-view-cube {
+  position: absolute;
+  top: 56px;                    /* aligned with the mode segment */
+  right: 56px;                  /* rail icons are 40 px wide at right:0; +16 px gap */
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 32px;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(20, 22, 28, 0.45);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  z-index: 10;
+}
+@supports not ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  .vp-view-cube { background: rgba(20, 22, 28, 0.65); }
+}
+.vp-view-cube[hidden] { display: none; }
+.vp-view-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 2px 6px;
+  min-width: 44px;
+  border-radius: calc(var(--radius) - 1px);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.vp-view-btn:hover:not(.is-active) {
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.04);
+}
+.vp-view-btn.is-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-strong, #fff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(120, 160, 220, 0.45);
+}
+.vp-view-glyph {
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.85;
+}
+.vp-view-label {
+  font-size: 0.66rem;
+  line-height: 1;
+}
+/* On narrow viewports collapse to glyph-only so the cluster doesn't
+   eat horizontal space from the central column. */
+@media (max-width: 900px) {
+  .vp-view-cube { right: 48px; }
+  .vp-view-btn { min-width: 30px; padding: 2px 3px; }
+  .vp-view-label { display: none; }
+  .vp-view-glyph { font-size: 0.95rem; }
+}
+
 /* Fullscreen + more-menu BOTH live INSIDE the segmented control now
    (2D / 3D / Walk / ⛶ / ⋯). Both inherit .vp-tab dimensions; just
    size the glyph slightly larger so icons match the visual weight
