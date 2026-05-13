@@ -1444,21 +1444,25 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
           label (small caps) above a thin baseline for the wet signature.
         -->
         <table class="pr-signoff-table" role="presentation">
+          <tr class="pr-signoff-sub-row">
+            <th class="pr-signoff-sub">Signature</th>
+            <td class="pr-signoff-spacer" aria-hidden="true"></td>
+            <th class="pr-signoff-sub">Signature / Stamp</th>
+            <td class="pr-signoff-spacer" aria-hidden="true"></td>
+            <th class="pr-signoff-sub">Date</th>
+          </tr>
           <tr>
             <td class="pr-signoff-cell">
-              <span class="pr-signoff-sub">Signature</span>
               <span class="pr-signoff-line" aria-hidden="true"></span>
               <span class="pr-signoff-label">Author</span>
             </td>
             <td class="pr-signoff-spacer" aria-hidden="true"></td>
             <td class="pr-signoff-cell">
-              <span class="pr-signoff-sub">Signature / Stamp</span>
               <span class="pr-signoff-line" aria-hidden="true"></span>
               <span class="pr-signoff-label">Company</span>
             </td>
             <td class="pr-signoff-spacer" aria-hidden="true"></td>
             <td class="pr-signoff-cell">
-              <span class="pr-signoff-sub">Date</span>
               <span class="pr-signoff-line" aria-hidden="true"></span>
               <span class="pr-signoff-label">Date</span>
             </td>

@@ -1106,8 +1106,8 @@ body.is-pdf-export .vp-tabs {
      space. Full width wraps each paragraph fewer times overall. */
   #print-report .pr-disclaimer-grid {
     column-count: 1;
-    font-size: 6.2pt;            /* was 6.3pt — minor compression */
-    line-height: 1.22;           /* was 1.25 */
+    font-size: 6.5pt;            /* baseline for the disclaimer + reviewer prose tier */
+    line-height: 1.28;
   }
   #print-report .pr-disclaimer-grid p {
     margin: 0 0 1pt 0;           /* was 1.5pt */
@@ -1198,20 +1198,20 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-reviewer-compact {
     margin: 0;
-    padding: 1.5pt 6pt;
+    padding: 2pt 6pt;
     background: var(--paper-2);
     border-left: 1.2pt solid var(--accent);
-    /* Match the disclaimer body size so reviewer text reads as the
-       same prose tier as the other paragraph copy on this page —
-       was 6pt @ 1.25, now 6.2pt @ 1.25 to align with .pr-disclaimer-grid. */
-    font-size: 6.2pt;
-    line-height: 1.25;
+    /* Reviewer prose is the SAME size + line-height as the disclaimer
+       body — both at 6.5pt / 1.28 line-height — so they read as one
+       consistent prose tier on the methodology page. */
+    font-size: 6.5pt;
+    line-height: 1.28;
     break-inside: avoid;
   }
   #print-report .pr-reviewer-compact .pr-eyebrow {
     display: inline;
     margin: 0;
-    font-size: 6.2pt;            /* match the body size of this block */
+    font-size: 6.5pt;            /* match the body size of this block */
     color: var(--accent);
     font-weight: 700;
   }
@@ -1232,13 +1232,13 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-signoff-cell {
     width: 50mm;
-    height: 14mm;                  /* was 16mm — still ≥12mm minimum per constraint */
-    /* 10 % opacity ink — visible guide for the cell without a heavy
-       box weighing down the page. The signature line itself (pr-
-       signoff-line, below) keeps full opacity as the actual writing
-       target. */
+    height: 22mm;                  /* was 14mm — user asked for ~2 more 'enter lines' */
+    /* 10 % opacity ink — faint guide for the cell boundary so the
+       frame doesn't weigh the page down. The signature line itself
+       (pr-signoff-line, below) keeps full opacity as the actual
+       writing target. */
     border: 0.4pt solid rgba(26, 31, 36, 0.10);
-    padding: 1.5pt 4pt 1.5pt 4pt;
+    padding: 2pt 4pt 2pt 4pt;
     vertical-align: bottom;
     text-align: center;
     position: relative;
@@ -1248,20 +1248,26 @@ body.is-pdf-export .vp-tabs {
     border: none;
     padding: 0;
   }
+  /* Sub-labels (Signature / Signature-Stamp / Date) live in a SEPARATE
+     row ABOVE the cell now, rendered as <th> at 10% opacity. Reads as
+     a faint guide caption; doesn't compete with the writing target.
+     Note: NOT inside the cell anymore — that's the structural change. */
   #print-report .pr-signoff-sub {
-    display: block;
-    font-size: 5pt;
+    font-size: 5.5pt;
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: rgba(26, 31, 36, 0.40);   /* faint — same family as the cell border */
     text-align: left;
-    margin-bottom: 1pt;
+    padding: 0 0 1pt 1pt;
+    border: none;
+    vertical-align: bottom;
   }
+  #print-report .pr-signoff-sub-row { border: none; }
   #print-report .pr-signoff-line {
     display: block;
     width: 100%;
-    height: 6mm;                   /* was 7mm — cell trimmed 2mm so line trims 1mm */
+    height: 14mm;                  /* was 6mm — taller cell needs more writing room */
     border-bottom: 0.5pt solid var(--ink);
     margin: 0 0 1pt 0;
   }
