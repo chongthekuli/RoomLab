@@ -3612,9 +3612,40 @@ function _cameraPresetTransform(name) {
       // losing the 3/4 "lean" of a classic iso.
       const dirToCam  = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
 
-      // 8 corners of the visible Box3. World-space, fixed regardless
-      // of camera position.
-      const corners = [
+      // Silhouette point set. For a CIRCULAR / POLYGON room the Box3
+      // is the inscribed-cylinder's AABB — w × d × h with 4 corners
+      // sitting in EMPTY space outside the room footprint. Fitting to
+      // those corners pulls the camera back too far → ~20-25 % wasted
+      // margin on octagons, 16-gon chambers, 36-gon domes.
+      //
+      // Fix: project the ACTUAL room polygon footprint × {floor,
+      // ceiling}. roomPlanVertices(room) gives:
+      //   - rectangular → 4 plan corners
+      //   - polygon     → N plan vertices
+      //   - round       → 64 sampled ring points
+      //   - custom      → state.room.custom_vertices
+      //
+      // We still union with the visible-content Box3 (treatments /
+      // speakers / racks that poke past the shell), so meshes outside
+      // the room footprint never clip. Their Box3 corners get included
+      // alongside the room silhouette points.
+      const corners = [];
+      try {
+        const planVerts = roomPlanVertices(state.room);
+        const floorY = box.min.y;
+        const ceilY  = box.max.y;
+        for (const v of planVerts) {
+          corners.push(new THREE.Vector3(v.x, floorY, v.y));
+          corners.push(new THREE.Vector3(v.x, ceilY,  v.y));
+        }
+      } catch (_) { /* no-op — fall through to bbox corners */ }
+      // Always include the visible-content Box3 corners too. For a
+      // rectangular room these match the plan vertices exactly (no
+      // change to existing behaviour). For round / polygon rooms they
+      // capture meshes that extend past the room footprint (e.g. a
+      // line-array flown above the ceiling Box3 max-y, or a speaker
+      // pole outside the polygon).
+      corners.push(
         new THREE.Vector3(box.min.x, box.min.y, box.min.z),
         new THREE.Vector3(box.max.x, box.min.y, box.min.z),
         new THREE.Vector3(box.min.x, box.max.y, box.min.z),
@@ -3623,7 +3654,7 @@ function _cameraPresetTransform(name) {
         new THREE.Vector3(box.max.x, box.min.y, box.max.z),
         new THREE.Vector3(box.min.x, box.max.y, box.max.z),
         new THREE.Vector3(box.max.x, box.max.y, box.max.z),
-      ];
+      );
 
       const fovV = THREE.MathUtils.degToRad(camera.fov || 38);
       const aspect = Math.max(camera.aspect || 1, 0.1);
@@ -3703,6 +3734,16 @@ try {
   console.info('[scene] build 2026-05-13 v360 — iterativeIsoFit');
 } catch (_) { /* server-side noop */ }
 
+// One-time build stamp so the user can confirm a fresh module is live
+// in the browser (vs a cached older copy). Bumped each time the
+// capture/fit path changes shape.
+try {
+  if (typeof console !== 'undefined' && !window.__roomlab_scene_build_logged) {
+    console.info('[scene] build 2026-05-13 v362 — captureViewportImage shape-aware fit + wall-opacity boost');
+    window.__roomlab_scene_build_logged = true;
+  }
+} catch (_) { /* noop */ }
+
 // Capture the current 3D viewport as a PNG data URL, framed to a named
 // camera preset (default: 'iso'). Used by the print-report cover to
 // embed a hero-sized perspective render of the room.
@@ -3728,7 +3769,11 @@ try {
 // Print background — white during the off-screen capture, then restored.
 // Constructed once at module scope so we don't churn THREE.Color objects
 // across repeat prints.
-const _printCaptureBackground = new THREE.Color(0xffffff);
+// Near-white print background. Pure #ffffff makes transparent walls
+// (opacity ~0.55) vanish against the page; #fafafa preserves ink-friendly
+// brightness but gives transparent surfaces a faint grey to multiply
+// against, so the room silhouette never disappears entirely.
+const _printCaptureBackground = new THREE.Color(0xfafafa);
 
 // Returns string|null synchronously. Use await Promise.resolve(...) at
 // the call site if a Promise contract is wanted.
@@ -3749,6 +3794,38 @@ export function captureViewportImage(opts = {}) {
   const prevTween = _focusTween;
   const prevBackground = scene.background;        // swap to white for print, restore after
   const prevGridVisible = _floorGrid ? _floorGrid.visible : null;
+
+  // --- Wall-opacity boost for capture only ----------------------------
+  // Live walls render at opacity ~0.55 so the user can see through them
+  // to heatmaps / sources inside. On a near-white print background the
+  // result is invisible (transparent walls × white = white). For the
+  // captured cover we want the room silhouette to READ, so we walk
+  // every wall mesh in roomGroup and push its material opacity up to
+  // 0.92. The 'open-air' material (transparent: true, opacity: 0) is
+  // skipped — its zero opacity is semantic (the wall is GONE), not a
+  // styling choice. Restored in finally.
+  // Build [{ material, prevOpacity, prevTransparent }] before any
+  // mutation so restore is exact even if a material is shared between
+  // meshes (rectangular walls reuse wallsMat; we only stash once).
+  const _opacityStash = [];
+  const _seenMats = new Set();
+  try {
+    if (roomGroup) {
+      roomGroup.traverse((obj) => {
+        if (!obj.isMesh) return;
+        const mat = obj.material;
+        if (!mat || _seenMats.has(mat)) return;
+        // Skip open-air boundary (opacity 0 by design) and already-opaque
+        // floors (opacity 0.95). Target the translucent wall + ceiling
+        // surfaces specifically (0.1 < opacity < 0.95, transparent=true).
+        if (mat.transparent && mat.opacity > 0.1 && mat.opacity < 0.95) {
+          _opacityStash.push({ mat, opacity: mat.opacity, transparent: mat.transparent });
+          mat.opacity = 0.92;
+          _seenMats.add(mat);
+        }
+      });
+    }
+  } catch (e) { /* leave walls untouched if traversal fails */ }
 
   let dataUrl = null;
   let rt = null;
@@ -3841,6 +3918,13 @@ export function captureViewportImage(opts = {}) {
       _focusTween = prevTween;
       scene.background = prevBackground;
       if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
+      // Restore wall opacities. Doing this AFTER background restore (so
+      // an exception above still leaves the live viewport visually
+      // unchanged on next frame).
+      for (const s of _opacityStash) {
+        s.mat.opacity = s.opacity;
+        s.mat.transparent = s.transparent;
+      }
       if (rt) rt.dispose();
       // No need to re-render — we never touched the live canvas's
       // back buffer (everything went to the off-screen render target).
