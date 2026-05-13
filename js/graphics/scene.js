@@ -4482,6 +4482,97 @@ let _pendingPlacementSpec = null;
 const _placeRay = new THREE.Raycaster();
 const _placeNdc = { x: 0, y: 0 };
 
+// Cursor-tip hint shown while placement is armed. The left-rail panel's
+// "armed banner" is good but easy to miss when the user has already
+// moved their eyes to the 3D viewport. This is a floating label that
+// rides with the cursor inside the canvas — same affordance every CAD
+// tool uses for "what mode am I in." Cleared by hideTreatmentPlacementHint.
+let _placementHintEl = null;
+let _placementHintBound = false;
+
+function ensurePlacementHint() {
+  if (_placementHintEl && document.body.contains(_placementHintEl)) return _placementHintEl;
+  const el = document.createElement('div');
+  el.className = 'treatment-placement-hint';
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', 'polite');
+  el.style.cssText = [
+    'position:fixed', 'z-index:10000', 'pointer-events:none',
+    'padding:6px 10px', 'border-radius:4px',
+    'background:rgba(15,18,24,0.92)',
+    'border:1px solid rgba(74,163,255,0.55)',
+    'box-shadow:0 4px 16px rgba(0,0,0,0.45)',
+    'color:#e6edf3', 'font-family:Inter Tight, system-ui, sans-serif',
+    'font-size:12px', 'line-height:1.35', 'white-space:nowrap',
+    'opacity:0', 'transition:opacity 120ms ease-out',
+  ].join(';');
+  document.body.appendChild(el);
+  _placementHintEl = el;
+  return el;
+}
+
+function showTreatmentPlacementHint(productName) {
+  const el = ensurePlacementHint();
+  el.innerHTML =
+    `<strong style="color:#fff;font-weight:600;">${escapeHintText(productName)}</strong>` +
+    `<span style="color:#b9bfc8;"> — click a wall or the ceiling</span>` +
+    `<span style="color:#8a929c;"> · Esc to cancel</span>`;
+  // Initial position: hide off-screen until first pointermove inside canvas.
+  el.style.left = '-9999px';
+  el.style.top = '-9999px';
+  el.style.opacity = '0';
+  if (!_placementHintBound) {
+    if (renderer) renderer.domElement.addEventListener('pointermove', _onPlacementHintMove);
+    window.addEventListener('keydown', _onPlacementEscKey);
+    _placementHintBound = true;
+  }
+}
+
+function hideTreatmentPlacementHint() {
+  if (_placementHintEl) {
+    _placementHintEl.style.opacity = '0';
+    _placementHintEl.style.left = '-9999px';
+    _placementHintEl.style.top = '-9999px';
+  }
+  if (_placementHintBound) {
+    if (renderer) renderer.domElement.removeEventListener('pointermove', _onPlacementHintMove);
+    window.removeEventListener('keydown', _onPlacementEscKey);
+    _placementHintBound = false;
+  }
+}
+
+function _onPlacementHintMove(e) {
+  if (!_placementHintEl) return;
+  // Offset down-right of the cursor so the label doesn't cover what the
+  // user is about to click. Clamp to viewport so it stays on-screen
+  // when the cursor is near the right/bottom edge.
+  const offsetX = 16, offsetY = 18;
+  const w = _placementHintEl.offsetWidth || 220;
+  const h = _placementHintEl.offsetHeight || 32;
+  const vx = window.innerWidth, vy = window.innerHeight;
+  let x = e.clientX + offsetX;
+  let y = e.clientY + offsetY;
+  if (x + w > vx - 4) x = e.clientX - w - 8;     // flip to the left
+  if (y + h > vy - 4) y = e.clientY - h - 8;     // flip above
+  _placementHintEl.style.left = `${x}px`;
+  _placementHintEl.style.top = `${y}px`;
+  _placementHintEl.style.opacity = '1';
+}
+
+function _onPlacementEscKey(e) {
+  if (e.key !== 'Escape') return;
+  if (!_pendingPlacementProductId) return;
+  e.preventDefault();
+  cancelTreatmentPlacement();
+  try { emit('treatment:placement_cancelled'); } catch (_) {}
+}
+
+function escapeHintText(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 export async function armTreatmentPlacement(productId) {
   if (!productId) return;
   // Resolve the spec; we may need to load the catalogue first.
@@ -4499,6 +4590,7 @@ export async function armTreatmentPlacement(productId) {
   _pendingPlacementProductId = productId;
   _pendingPlacementSpec = spec;
   if (renderer) renderer.domElement.style.cursor = 'crosshair';
+  showTreatmentPlacementHint(spec.name || productId);
   // Show a hint via the scene's existing toast pattern (panel emits
   // treatment:placement_armed for any listener that cares).
   try { emit('treatment:placement_armed', { productId, spec }); } catch (_) {}
@@ -4508,6 +4600,7 @@ export function cancelTreatmentPlacement() {
   _pendingPlacementProductId = null;
   _pendingPlacementSpec = null;
   if (renderer) renderer.domElement.style.cursor = '';
+  hideTreatmentPlacementHint();
 }
 
 // Called from onSurfaceClick (below) when placement is armed. Returns
