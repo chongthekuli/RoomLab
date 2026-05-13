@@ -3799,13 +3799,17 @@ export function captureViewportImage(opts = {}) {
   const prevTween = _focusTween;
   const prevBackground = scene.background;        // swap to white for print, restore after
   const prevGridVisible = _floorGrid ? _floorGrid.visible : null;
-  // Hide audience FIGURES during capture. They render as dense vertical
-  // dark bodies that, viewed from iso angle in an arena, project as a
-  // solid black blob on the floor and dominate the cover. The colored
-  // zone overlays (zonesGroup) remain visible — the room still reads as
-  // a venue with audience areas, just without the thousands-of-figures
-  // visual noise. Module-scope audienceGroup is set in rebuildAudience().
+  // Hide audience FIGURES during capture (kept from previous commit —
+  // helps even at small scale for arenas with seating).
   const prevAudienceVisible = audienceGroup ? audienceGroup.visible : null;
+  // ROOT CAUSE for arena black-blob (Martina audit): scene.fog is a
+  // linear Fog(slate, 55, 110). Live OrbitControls clamps maxDistance
+  // to 80 so users never enter heavy-fog territory. The iso capture
+  // preset places the camera 85-150 m from a Pavilion 80×40×23 or a
+  // Dome 60×60×12, so the entire room sits past fog.far → saturated to
+  // dark slate → mixed over the white capture background = the black
+  // blob symptom we kept misdiagnosing. Stash + null fog for capture.
+  const prevFog = scene.fog;
 
   // ---- Capture-only frustum expansion (real fix for "arena prints black") ----
   // Two compounding bugs were turning Pavilion / Dome interiors black in print:
@@ -3870,6 +3874,7 @@ export function captureViewportImage(opts = {}) {
     // room is the subject — drop the surrounding noise.
     if (_floorGrid) _floorGrid.visible = false;
     if (audienceGroup) audienceGroup.visible = false;
+    scene.fog = null;       // <-- THE FIX. Stops far-room saturation to fog colour.
 
     // (Lighting boost removed — was washing out small rooms without
     // fixing the arena-black-floor root cause. Real fix is the
@@ -3953,6 +3958,7 @@ export function captureViewportImage(opts = {}) {
       scene.background = prevBackground;
       if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
       if (audienceGroup && prevAudienceVisible !== null) audienceGroup.visible = prevAudienceVisible;
+      scene.fog = prevFog;
       // Restore camera.far + shadow camera frustum if we touched them.
       if (camera && prevCamFar !== null) {
         camera.far = prevCamFar;
