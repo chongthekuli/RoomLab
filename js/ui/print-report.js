@@ -2000,19 +2000,11 @@ export async function triggerPrint() {
     }
   } catch (e) { /* localStorage blocked — skip hint silently */ }
 
-  // Soft fallback — most browsers render document.title in the
-  // top-centre print header when the user has "Headers and footers"
-  // enabled in their print dialog. We can't suppress that toggle
-  // programmatically, but blanking the title makes the centre cell
-  // print empty instead of "RoomLAB Suite". Restored on afterprint
-  // so the live page-title stays normal.
-  const _origTitle = document.title;
-  document.title = '';
-  const _onAfter = () => {
-    document.title = _origTitle;
-    window.removeEventListener('afterprint', _onAfter);
-  };
-  window.addEventListener('afterprint', _onAfter);
+  // (Title-blanking trick reverted: most browsers fall back to the
+  // page URL — "localhost:8000/#/room" or similar — when title is
+  // empty, which is worse than "RoomLAB Suite". To strip the centre
+  // header entirely, the user must uncheck "Headers and footers" in
+  // their print dialog — no programmatic alternative.)
 
   requestAnimationFrame(() => { window.print(); });
 }
