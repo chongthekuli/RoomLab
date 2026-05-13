@@ -3541,49 +3541,144 @@ function _cameraPresetTransform(name) {
     }
     case 'iso':
     default: {
-      // AABB-corner projection fit — tight, no clipping, no wasted
-      // canvas. Project all 8 room corners onto the camera's view
-      // basis (right, up), find max |x| and max |y| extents, then
-      // pick whichever distance fits first (height-limited or width-
-      // limited). Bounding-sphere fit (the previous attempt) wraps a
-      // sphere around the AABB, which is ~30-50 % larger than the room
-      // actually projects to on screen — the room ended up tiny in a
-      // big empty PNG. This fits the silhouette, not the sphere.
-      const targetPos = new THREE.Vector3(cx, h * 0.4, cz);
-      const dirToCam = new THREE.Vector3(0.9, 0.5, 0.4).normalize();
-      // View basis: viewDir = camera-toward-target = -dirToCam.
-      // right = worldUp × viewDir, up = viewDir × right.
-      const viewDir = dirToCam.clone().negate();
+      // Iterative perspective "frame selected" fit. Three prior
+      // attempts (fixed multiplier, bounding-sphere, AABB-corner
+      // tangent fit) all clipped. Root cause: each one solved for an
+      // ABSTRACT AABB at the TARGET depth — but the binding corner
+      // sits CLOSER to the camera than the target, so its on-screen
+      // extent is larger than tan(fov/2) × dist predicts. Perspective
+      // foreshortening makes a closer corner LOOK bigger than a far
+      // corner of equal world extent, so the closer corner is what
+      // clips first.
+      //
+      // Correct algorithm — the DCC standard:
+      //   1. Build a Box3 from every VISIBLE mesh group (walls + floor
+      //      + ceiling + speakers + listeners + treatments + zone
+      //      catwalks + aim lines + racks). NOT the abstract room
+      //      AABB — we want the SILHOUETTE the renderer will actually
+      //      draw, including speaker meshes and panels that poke past
+      //      the room shell.
+      //   2. Use the box center (not h*0.4 of the room) so the framing
+      //      is balanced around what's actually visible.
+      //   3. Start with the bounding-sphere fit as an initial distance
+      //      (overshoots → safe lower bound for iteration).
+      //   4. Iterate: project all 8 corners through the candidate view
+      //      matrix → NDC. Find max(|ndc.x|, |ndc.y|). Rescale distance
+      //      so that max == TARGET_NDC (0.90 → 5 % gap each side).
+      //   5. Converges in 3-4 passes because (a) the projection is
+      //      monotonic in distance along the fixed camera direction
+      //      and (b) the binding corner rarely changes between passes.
+
+      // Gather visible groups. Skip heatmapGroup / heatmapMesh (they
+      // extend past walls and are an overlay, not geometry) and the
+      // floor grid (already hidden during capture). _floorGrid stays
+      // visible during interactive use but its extent doesn't matter
+      // because we're framing the room subject.
+      const groups = [];
+      if (roomGroup        && roomGroup.visible)        groups.push(roomGroup);
+      if (sourcesGroup     && sourcesGroup.visible)     groups.push(sourcesGroup);
+      if (listenersGroup   && listenersGroup.visible)   groups.push(listenersGroup);
+      if (treatmentsGroup  && treatmentsGroup.visible)  groups.push(treatmentsGroup);
+      if (zonesGroup       && zonesGroup.visible)       groups.push(zonesGroup);
+      if (typeof racksGroup    !== 'undefined' && racksGroup    && racksGroup.visible)    groups.push(racksGroup);
+      if (typeof aimLinesGroup !== 'undefined' && aimLinesGroup && aimLinesGroup.visible) groups.push(aimLinesGroup);
+
+      const box = new THREE.Box3();
+      let havePoints = false;
+      for (const g of groups) {
+        // expandByObject traverses children and unions every mesh's
+        // world-space AABB. Returns the original box (mutating).
+        const before = box.isEmpty();
+        box.expandByObject(g);
+        if (before && !box.isEmpty()) havePoints = true;
+        else if (!box.isEmpty()) havePoints = true;
+      }
+
+      // Degenerate fallback — boot before the scene is populated, or
+      // every group hidden. Use the abstract room AABB.
+      if (!havePoints || box.isEmpty()) {
+        box.min.set(minX, 0, minZ);
+        box.max.set(maxX, h, maxZ);
+      }
+
+      // Centre of the visible content, NOT h*0.4 of the room. Looks
+      // more balanced when treatments / line arrays push the visible
+      // box upward.
+      const targetPos = box.getCenter(new THREE.Vector3());
+      const dirToCam  = new THREE.Vector3(0.9, 0.5, 0.4).normalize();
+
+      // 8 corners of the visible Box3. World-space, fixed regardless
+      // of camera position.
+      const corners = [
+        new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+        new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+        new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+        new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+        new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+        new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+        new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+        new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+      ];
+
+      const fovV = THREE.MathUtils.degToRad(camera.fov || 38);
+      const aspect = Math.max(camera.aspect || 1, 0.1);
+      const tanHalfV = Math.tan(fovV / 2);
+      const tanHalfH = tanHalfV * aspect;          // h-FOV derived from v-FOV + aspect
+      // 5 % visible gap each side ⇒ binding corner sits at 90 % of the
+      // frustum half-extent (in NDC units, 0.90 of 1.0).
+      const TARGET_NDC = 0.90;
+
+      // Initial guess — bounding-sphere fit. Always overshoots (sphere
+      // is larger than the projected silhouette) so iteration can only
+      // pull IN, never push past valid distances.
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const sphereR = Math.max(sphere.radius, 0.5);
+      const minHalfFov = Math.min(fovV / 2, 2 * Math.atan(tanHalfH) / 2);
+      let dist = sphereR / Math.sin(minHalfFov);
+
+      // Iterate. View basis stays constant (we only move along
+      // dirToCam, target fixed), so we can build it once.
+      const viewDir = dirToCam.clone().negate();    // camera → target
       const worldUp = new THREE.Vector3(0, 1, 0);
       const right = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();
-      const up    = new THREE.Vector3().crossVectors(viewDir, right).normalize();
-      // 8 AABB corners (state x ↔ world x, state y ↔ world z, room floor at world y=0).
-      let maxOX = 0, maxOY = 0;
+      const up    = new THREE.Vector3().crossVectors(right, viewDir).normalize();
+      // up = right × viewDir gives a right-handed view basis where +viewDir
+      // is into the screen (camera looks along viewDir toward target).
+
       const tmp = new THREE.Vector3();
-      for (let xi = 0; xi < 2; xi++) {
-        for (let yi = 0; yi < 2; yi++) {
-          for (let zi = 0; zi < 2; zi++) {
-            tmp.set(
-              xi === 0 ? minX : maxX,
-              yi === 0 ? 0    : h,
-              zi === 0 ? minZ : maxZ,
-            ).sub(targetPos);
-            maxOX = Math.max(maxOX, Math.abs(tmp.dot(right)));
-            maxOY = Math.max(maxOY, Math.abs(tmp.dot(up)));
-          }
+      for (let iter = 0; iter < 6; iter++) {
+        const camPos = targetPos.clone().addScaledVector(dirToCam, dist);
+        let maxFracH = 0, maxFracV = 0;
+        for (const c of corners) {
+          tmp.copy(c).sub(camPos);
+          // View-space: x = tmp·right, y = tmp·up, z = tmp·viewDir.
+          // z is positive when corner is in front of the camera.
+          const vx = tmp.dot(right);
+          const vy = tmp.dot(up);
+          const vz = tmp.dot(viewDir);
+          if (vz <= 1e-3) continue;                 // behind / on camera; skip
+          // NDC x = vx / (vz·tanHalfH), NDC y = vy / (vz·tanHalfV).
+          // We want max |NDC| across corners.
+          const fracH = Math.abs(vx) / (vz * tanHalfH);
+          const fracV = Math.abs(vy) / (vz * tanHalfV);
+          if (fracH > maxFracH) maxFracH = fracH;
+          if (fracV > maxFracV) maxFracV = fracV;
         }
+        const maxFrac = Math.max(maxFracH, maxFracV);
+        if (maxFrac <= 1e-4) break;                 // degenerate, leave dist
+        // Rescale: we want maxFrac == TARGET_NDC. Because the binding
+        // corner's vz changes with dist (it's not at target depth),
+        // a single multiplicative correction undershoots — but applying
+        // it repeatedly converges geometrically. 3-4 passes is enough
+        // in practice; 6 is the safety cap.
+        const scale = maxFrac / TARGET_NDC;
+        const newDist = dist * scale;
+        // If the correction is < 0.5 % we've converged. Bail to avoid
+        // FP wobble on the last decimals.
+        if (Math.abs(newDist - dist) / dist < 0.005) { dist = newDist; break; }
+        dist = newDist;
       }
-      const fovV = THREE.MathUtils.degToRad(camera.fov || 38);
-      const fovH = 2 * Math.atan(Math.tan(fovV / 2) * Math.max(camera.aspect || 1, 0.1));
-      const distH = maxOX / Math.tan(fovH / 2);
-      const distV = maxOY / Math.tan(fovV / 2);
-      // 1.12 margin. Looks like 12 % overshoot but the binding corner
-      // is typically CLOSER to the camera than the target (perspective
-      // foreshortening means a 1.05 multiplier on dist only gives
-      // ~3 % visible buffer at that corner). 1.12 → ~10 % visible gap
-      // between room edge and frame edge, which reads as breathing
-      // room rather than a flush cut.
-      const dist = Math.max(distH, distV) * 1.12;
+
       return {
         targetPos,
         targetCam: targetPos.clone().add(dirToCam.multiplyScalar(dist)),
@@ -3595,7 +3690,7 @@ function _cameraPresetTransform(name) {
 // Build tag so a user can confirm the live module matches the fix in
 // case of stale-cache reports. Logged once at module load.
 try {
-  console.info('[scene] build 2026-05-13 v352 — captureViewportImage');
+  console.info('[scene] build 2026-05-13 v360 — iterativeIsoFit');
 } catch (_) { /* server-side noop */ }
 
 // Capture the current 3D viewport as a PNG data URL, framed to a named
