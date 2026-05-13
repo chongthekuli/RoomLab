@@ -44,7 +44,10 @@ let racksGroup = null;
 let treatmentsGroup = null;
 let _floorGrid = null;       // GridHelper backdrop; hidden during print capture
 let _ambientLight = null;    // Module-scope refs so captureViewportImage can
-let _hemiLight = null;       // boost intensity during print, restore after.
+let _hemiLight = null;       // mildly lift exposure during print, restore after.
+let _keyLight = null;        // Shadow-casting directional. Capture expands its
+                             // shadow camera to envelop arena-scale rooms so
+                             // the floor / far wall don't render fully-shadowed.
 let _rackCatalogue = null;
 let _ampCatalog = null;
 let rayGroup = null;
@@ -537,20 +540,20 @@ function initScene() {
 
   // Key: main directional light from a high front-right angle, slightly warm.
   // Only this light casts shadows (perf-friendly on arena-scale scenes).
-  const key = new THREE.DirectionalLight(0xfff4e0, 1.15);
-  key.position.set(25, 40, 18);
-  key.castShadow = true;
-  key.shadow.mapSize.width = 2048;
-  key.shadow.mapSize.height = 2048;
-  key.shadow.camera.near = 5;
-  key.shadow.camera.far = 120;
-  key.shadow.camera.left   = -45;
-  key.shadow.camera.right  =  45;
-  key.shadow.camera.top    =  45;
-  key.shadow.camera.bottom = -45;
-  key.shadow.bias = -0.0005;
-  key.shadow.normalBias = 0.02;
-  scene.add(key);
+  _keyLight = new THREE.DirectionalLight(0xfff4e0, 1.15);
+  _keyLight.position.set(25, 40, 18);
+  _keyLight.castShadow = true;
+  _keyLight.shadow.mapSize.width = 2048;
+  _keyLight.shadow.mapSize.height = 2048;
+  _keyLight.shadow.camera.near = 5;
+  _keyLight.shadow.camera.far = 120;
+  _keyLight.shadow.camera.left   = -45;
+  _keyLight.shadow.camera.right  =  45;
+  _keyLight.shadow.camera.top    =  45;
+  _keyLight.shadow.camera.bottom = -45;
+  _keyLight.shadow.bias = -0.0005;
+  _keyLight.shadow.normalBias = 0.02;
+  scene.add(_keyLight);
 
   // Fill: cooler counter-light from opposite side, no shadows, lower intensity.
   const fill = new THREE.DirectionalLight(0xa8c0d8, 0.35);
@@ -3796,15 +3799,44 @@ export function captureViewportImage(opts = {}) {
   const prevTween = _focusTween;
   const prevBackground = scene.background;        // swap to white for print, restore after
   const prevGridVisible = _floorGrid ? _floorGrid.visible : null;
-  // Light + tone-mapping boost for print. Live scene is tuned to look
-  // good against a dark slate background with subtle lighting; against
-  // a white print background the same scene reads as black-on-white
-  // (especially for arena-scale rooms whose interior is far from the
-  // fixed-position light rig). Boost exposure + ambient + hemisphere
-  // for the capture only, restore in finally.
-  const prevExposure  = renderer ? renderer.toneMappingExposure : null;
-  const prevAmbientI  = _ambientLight ? _ambientLight.intensity : null;
-  const prevHemiI     = _hemiLight ? _hemiLight.intensity : null;
+
+  // ---- Capture-only frustum expansion (real fix for "arena prints black") ----
+  // Two compounding bugs were turning Pavilion / Dome interiors black in print:
+  //
+  // (a) camera.far = 300 m. The iso preset places the camera so far back that
+  //     the far edge of an 80×40×23 m room can sit past the perspective near/far
+  //     plane → far wall clips.
+  // (b) Shadow camera frustum is fixed at ±45 m × 120 m far. For arena-scale
+  //     rooms the floor + far wall sit OUTSIDE the shadow camera frustum, and
+  //     Three.js's PCFSoftShadowMap samples outside-map texels as fully shadowed
+  //     → floor renders pitch black despite normal lighting.
+  //
+  // Stash + expand both based on the room's AABB diagonal; restore in finally.
+  // Previous bandaid was boosting ambient/hemi intensity, which washed out small
+  // rooms without fixing the root issue.
+  let prevCamFar = null;
+  let prevKeyShadow = null;
+  try {
+    const aabb = _roomWorldAABB?.();
+    if (aabb && camera) {
+      const roomDiag = Math.hypot(aabb.w ?? 10, aabb.d ?? 10, aabb.h ?? 3);
+      prevCamFar = camera.far;
+      camera.far = Math.max(prevCamFar, roomDiag * 4);
+      camera.updateProjectionMatrix();
+      if (_keyLight && _keyLight.shadow) {
+        const sc = _keyLight.shadow.camera;
+        prevKeyShadow = {
+          L: sc.left, R: sc.right, T: sc.top, B: sc.bottom, F: sc.far,
+        };
+        const r = Math.max(aabb.w ?? 10, aabb.d ?? 10) * 0.75;
+        sc.left = -r; sc.right = r;
+        sc.top = r;   sc.bottom = -r;
+        sc.far = Math.max(prevKeyShadow.F, roomDiag * 2);
+        sc.updateProjectionMatrix();
+        _keyLight.shadow.needsUpdate = true;
+      }
+    }
+  } catch (e) { /* leave defaults if AABB read fails */ }
 
   // Wall-opacity boost (Viktor v362) was reverted: it made dark walls
   // print fully black AND light walls (gypsum, white plaster) blend
@@ -3826,13 +3858,9 @@ export function captureViewportImage(opts = {}) {
     // room is the subject — drop the surrounding noise.
     if (_floorGrid) _floorGrid.visible = false;
 
-    // --- Brighten the scene for print. Tone-mapping + ambient + hemi
-    // are all bumped so arena-scale rooms (Pavilion 80m, Dome 60m)
-    // don't render their interior as black-on-white. Conservative
-    // multipliers — the live look is preserved on restore.
-    if (renderer) renderer.toneMappingExposure = (prevExposure ?? 1.0) * 1.6;
-    if (_ambientLight) _ambientLight.intensity = (prevAmbientI ?? 0.22) * 4.0;
-    if (_hemiLight) _hemiLight.intensity = (prevHemiI ?? 0.4) * 2.5;
+    // (Lighting boost removed — was washing out small rooms without
+    // fixing the arena-black-floor root cause. Real fix is the
+    // camera.far + shadow-frustum expansion above.)
 
     // --- Snap camera to preset (synchronous, bypasses the tween) ----
     // Set camera.aspect to MATCH the capture aspect so the preset's
@@ -3911,11 +3939,21 @@ export function captureViewportImage(opts = {}) {
       _focusTween = prevTween;
       scene.background = prevBackground;
       if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
-      // Restore exposure + light intensities. Each guarded with prev !== null
-      // so a partial mount (light not yet built) doesn't write garbage.
-      if (renderer && prevExposure !== null) renderer.toneMappingExposure = prevExposure;
-      if (_ambientLight && prevAmbientI !== null) _ambientLight.intensity = prevAmbientI;
-      if (_hemiLight && prevHemiI !== null) _hemiLight.intensity = prevHemiI;
+      // Restore camera.far + shadow camera frustum if we touched them.
+      if (camera && prevCamFar !== null) {
+        camera.far = prevCamFar;
+        camera.updateProjectionMatrix();
+      }
+      if (_keyLight && _keyLight.shadow && prevKeyShadow) {
+        const sc = _keyLight.shadow.camera;
+        sc.left   = prevKeyShadow.L;
+        sc.right  = prevKeyShadow.R;
+        sc.top    = prevKeyShadow.T;
+        sc.bottom = prevKeyShadow.B;
+        sc.far    = prevKeyShadow.F;
+        sc.updateProjectionMatrix();
+        _keyLight.shadow.needsUpdate = true;
+      }
       if (rt) rt.dispose();
       // No need to re-render — we never touched the live canvas's
       // back buffer (everything went to the off-screen render target).
