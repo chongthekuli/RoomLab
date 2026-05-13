@@ -3828,7 +3828,12 @@ export function captureViewportImage(opts = {}) {
         prevKeyShadow = {
           L: sc.left, R: sc.right, T: sc.top, B: sc.bottom, F: sc.far,
         };
-        const r = Math.max(aabb.w ?? 10, aabb.d ?? 10) * 0.75;
+        // EXPAND-ONLY: never shrink below the live defaults. Small rooms
+        // (octagon, chamber) need the original ±45 m frustum at high
+        // texel density; shrinking to fit the small room makes the
+        // shadow rig hug too tight and the room reads washed out.
+        const need = Math.max(aabb.w ?? 10, aabb.d ?? 10) * 0.75;
+        const r = Math.max(prevKeyShadow.R, prevKeyShadow.T, need);
         sc.left = -r; sc.right = r;
         sc.top = r;   sc.bottom = -r;
         sc.far = Math.max(prevKeyShadow.F, roomDiag * 2);
