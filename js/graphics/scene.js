@@ -3541,24 +3541,47 @@ function _cameraPresetTransform(name) {
     }
     case 'iso':
     default: {
-      // Bounding-sphere fit — robust across aspect ratios and across
-      // tall / wide / long rooms. The room's enclosing sphere has
-      // radius R = ½·√(w² + h² + d²); camera distance R / tan(minFov/2)
-      // ensures the sphere fits the narrower of horizontal and vertical
-      // FOV. Margin 1.15 keeps room edges clear of the frustum walls.
-      // Previous version used fixed `d3 × constant` offsets which clipped
-      // on rooms whose diagonal exceeded max(w,h,d) — that's most rooms
-      // bigger than a cube.
+      // AABB-corner projection fit — tight, no clipping, no wasted
+      // canvas. Project all 8 room corners onto the camera's view
+      // basis (right, up), find max |x| and max |y| extents, then
+      // pick whichever distance fits first (height-limited or width-
+      // limited). Bounding-sphere fit (the previous attempt) wraps a
+      // sphere around the AABB, which is ~30-50 % larger than the room
+      // actually projects to on screen — the room ended up tiny in a
+      // big empty PNG. This fits the silhouette, not the sphere.
       const targetPos = new THREE.Vector3(cx, h * 0.4, cz);
-      const dir = new THREE.Vector3(0.9, 0.5, 0.4).normalize();   // 3/4 view direction
-      const radius = 0.5 * Math.sqrt(w * w + h * h + d * d);
+      const dirToCam = new THREE.Vector3(0.9, 0.5, 0.4).normalize();
+      // View basis: viewDir = camera-toward-target = -dirToCam.
+      // right = worldUp × viewDir, up = viewDir × right.
+      const viewDir = dirToCam.clone().negate();
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      const right = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();
+      const up    = new THREE.Vector3().crossVectors(viewDir, right).normalize();
+      // 8 AABB corners (state x ↔ world x, state y ↔ world z, room floor at world y=0).
+      let maxOX = 0, maxOY = 0;
+      const tmp = new THREE.Vector3();
+      for (let xi = 0; xi < 2; xi++) {
+        for (let yi = 0; yi < 2; yi++) {
+          for (let zi = 0; zi < 2; zi++) {
+            tmp.set(
+              xi === 0 ? minX : maxX,
+              yi === 0 ? 0    : h,
+              zi === 0 ? minZ : maxZ,
+            ).sub(targetPos);
+            maxOX = Math.max(maxOX, Math.abs(tmp.dot(right)));
+            maxOY = Math.max(maxOY, Math.abs(tmp.dot(up)));
+          }
+        }
+      }
       const fovV = THREE.MathUtils.degToRad(camera.fov || 38);
       const fovH = 2 * Math.atan(Math.tan(fovV / 2) * Math.max(camera.aspect || 1, 0.1));
-      const minFov = Math.min(fovV, fovH);
-      const dist = (radius / Math.tan(minFov / 2)) * 1.15;
+      const distH = maxOX / Math.tan(fovH / 2);
+      const distV = maxOY / Math.tan(fovV / 2);
+      // 1.05 margin = ~5% breathing room around the silhouette edges.
+      const dist = Math.max(distH, distV) * 1.05;
       return {
         targetPos,
-        targetCam: targetPos.clone().add(dir.multiplyScalar(dist)),
+        targetCam: targetPos.clone().add(dirToCam.multiplyScalar(dist)),
       };
     }
   }
@@ -3641,12 +3664,10 @@ export function captureViewportImage(opts = {}) {
     if (t) {
       camera.position.copy(t.targetCam);
       if (controls) controls.target.copy(t.targetPos);
-      // Tiny extra pull-back on top of the preset's built-in margin —
-      // the iso preset already uses bounding-sphere fit with a 1.15
-      // margin, so 1.05 here just hardens against borderline cases
-      // (oblong rooms, far-from-default FOV). Effective iso margin
-      // ≈ 1.21 — close-cropped without clipping.
-      const CAPTURE_PULL_BACK = 1.05;
+      // The iso preset now uses AABB-corner projection fit with a 1.05
+      // margin built in. No extra pull-back needed for capture — the
+      // preset already produces a tight, edge-aware framing.
+      const CAPTURE_PULL_BACK = 1.00;
       const dir = new THREE.Vector3().subVectors(camera.position, t.targetPos);
       camera.position.copy(t.targetPos).addScaledVector(dir, CAPTURE_PULL_BACK);
       camera.lookAt(t.targetPos);
