@@ -3605,7 +3605,12 @@ function _cameraPresetTransform(name) {
       // more balanced when treatments / line arrays push the visible
       // box upward.
       const targetPos = box.getCenter(new THREE.Vector3());
-      const dirToCam  = new THREE.Vector3(0.9, 0.5, 0.4).normalize();
+      // Iso direction — steeper pitch (~32°) for a more dramatic 3/4
+      // aerial view. Previously (0.9, 0.5, 0.4) gave ~27° pitch which
+      // read as flat in a square frame; (0.85, 0.6, 0.45) lifts the
+      // camera so the floor + room volume both project visibly without
+      // losing the 3/4 "lean" of a classic iso.
+      const dirToCam  = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
 
       // 8 corners of the visible Box3. World-space, fixed regardless
       // of camera position.
@@ -3626,7 +3631,12 @@ function _cameraPresetTransform(name) {
       const tanHalfH = tanHalfV * aspect;          // h-FOV derived from v-FOV + aspect
       // 5 % visible gap each side ⇒ binding corner sits at 90 % of the
       // frustum half-extent (in NDC units, 0.90 of 1.0).
-      const TARGET_NDC = 0.90;
+      // 0.96 = 4 % visible gap each side — tight enough that the room
+      // fills the captured square without obvious wasted margin, loose
+      // enough that mesh chrome / line strokes never kiss the edge.
+      // Previously 0.90 (10 % gap) left the room looking small in the
+      // printed cover.
+      const TARGET_NDC = 0.96;
 
       // Initial guess — bounding-sphere fit. Always overshoots (sphere
       // is larger than the projected silhouette) so iteration can only
