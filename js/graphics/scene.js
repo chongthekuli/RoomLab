@@ -43,6 +43,8 @@ let racksGroup = null;
 // v1 = visual-only; not part of any physics group.
 let treatmentsGroup = null;
 let _floorGrid = null;       // GridHelper backdrop; hidden during print capture
+let _ambientLight = null;    // Module-scope refs so captureViewportImage can
+let _hemiLight = null;       // boost intensity during print, restore after.
 let _rackCatalogue = null;
 let _ampCatalog = null;
 let rayGroup = null;
@@ -529,9 +531,9 @@ function initScene() {
   // --- Lighting rig — 3-light archviz setup -----------------------------
   // Hemisphere gives a subtle sky/ground tint that replaces flat ambient —
   // slightly warmer up top, cooler below, mimicking daylight bounce.
-  const hemi = new THREE.HemisphereLight(0xbfd0e8, 0x2a2620, 0.4);
-  hemi.position.set(0, 30, 0);
-  scene.add(hemi);
+  _hemiLight = new THREE.HemisphereLight(0xbfd0e8, 0x2a2620, 0.4);
+  _hemiLight.position.set(0, 30, 0);
+  scene.add(_hemiLight);
 
   // Key: main directional light from a high front-right angle, slightly warm.
   // Only this light casts shadows (perf-friendly on arena-scale scenes).
@@ -556,8 +558,8 @@ function initScene() {
   scene.add(fill);
 
   // Rim / ambient lift so dome + bowl back don't fall into pure black.
-  const ambient = new THREE.AmbientLight(0xffffff, 0.22);
-  scene.add(ambient);
+  _ambientLight = new THREE.AmbientLight(0xffffff, 0.22);
+  scene.add(_ambientLight);
 
   // Procedural image-based lighting via RoomEnvironment — bakes subtle
   // environment reflections onto every MeshStandardMaterial without
@@ -3794,6 +3796,15 @@ export function captureViewportImage(opts = {}) {
   const prevTween = _focusTween;
   const prevBackground = scene.background;        // swap to white for print, restore after
   const prevGridVisible = _floorGrid ? _floorGrid.visible : null;
+  // Light + tone-mapping boost for print. Live scene is tuned to look
+  // good against a dark slate background with subtle lighting; against
+  // a white print background the same scene reads as black-on-white
+  // (especially for arena-scale rooms whose interior is far from the
+  // fixed-position light rig). Boost exposure + ambient + hemisphere
+  // for the capture only, restore in finally.
+  const prevExposure  = renderer ? renderer.toneMappingExposure : null;
+  const prevAmbientI  = _ambientLight ? _ambientLight.intensity : null;
+  const prevHemiI     = _hemiLight ? _hemiLight.intensity : null;
 
   // Wall-opacity boost (Viktor v362) was reverted: it made dark walls
   // print fully black AND light walls (gypsum, white plaster) blend
@@ -3814,6 +3825,14 @@ export function captureViewportImage(opts = {}) {
     // extends past the room and looks like a cropped wood floor. The
     // room is the subject — drop the surrounding noise.
     if (_floorGrid) _floorGrid.visible = false;
+
+    // --- Brighten the scene for print. Tone-mapping + ambient + hemi
+    // are all bumped so arena-scale rooms (Pavilion 80m, Dome 60m)
+    // don't render their interior as black-on-white. Conservative
+    // multipliers — the live look is preserved on restore.
+    if (renderer) renderer.toneMappingExposure = (prevExposure ?? 1.0) * 1.6;
+    if (_ambientLight) _ambientLight.intensity = (prevAmbientI ?? 0.22) * 4.0;
+    if (_hemiLight) _hemiLight.intensity = (prevHemiI ?? 0.4) * 2.5;
 
     // --- Snap camera to preset (synchronous, bypasses the tween) ----
     // Set camera.aspect to MATCH the capture aspect so the preset's
@@ -3892,6 +3911,11 @@ export function captureViewportImage(opts = {}) {
       _focusTween = prevTween;
       scene.background = prevBackground;
       if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
+      // Restore exposure + light intensities. Each guarded with prev !== null
+      // so a partial mount (light not yet built) doesn't write garbage.
+      if (renderer && prevExposure !== null) renderer.toneMappingExposure = prevExposure;
+      if (_ambientLight && prevAmbientI !== null) _ambientLight.intensity = prevAmbientI;
+      if (_hemiLight && prevHemiI !== null) _hemiLight.intensity = prevHemiI;
       if (rt) rt.dispose();
       // No need to re-render — we never touched the live canvas's
       // back buffer (everything went to the off-screen render target).
