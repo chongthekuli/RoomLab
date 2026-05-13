@@ -55,7 +55,16 @@ export function mountPrecisionPanel({ materials }) {
         <button id="precision-rerender-btn" class="btn-link">Re-render</button>
       </div>
       <div id="precision-results" class="precision-results" hidden></div>
-      <canvas id="precision-echogram" class="precision-echogram" width="300" height="140" hidden></canvas>
+      <div id="precision-echogram-wrap" class="precision-echogram-wrap" hidden>
+        <div class="precision-echogram-head">
+          <span class="precision-echogram-title">Echogram — energy decay over time</span>
+          <span class="precision-echogram-sub">Broadband impulse response · click to enlarge</span>
+        </div>
+        <button id="precision-echogram-zoom" class="precision-echogram-zoom" type="button"
+                aria-label="Open larger echogram preview" title="Click to enlarge">
+          <canvas id="precision-echogram" class="precision-echogram" width="380" height="180"></canvas>
+        </button>
+      </div>
       <div id="precision-audition" class="precision-audition" hidden>
         <div class="audition-advisory">
           <span aria-hidden="true">🎧</span>
@@ -85,6 +94,8 @@ export function mountPrecisionPanel({ materials }) {
   root.querySelector('#precision-rerender-btn').addEventListener('click', runRender);
   root.querySelector('#precision-audition-btn').addEventListener('click', toggleAudition);
   root.querySelector('#precision-original-btn').addEventListener('click', toggleOriginal);
+  // Click anywhere on the echogram mini view → open the large modal.
+  root.querySelector('#precision-echogram-zoom')?.addEventListener('click', openEchogramModal);
 
   // HEAD-probe the audio sample at panel mount so the buttons can show
   // a clear disabled-state tooltip if the file isn't shipped yet.
@@ -327,13 +338,15 @@ function updateSchroederNote(result, metrics) {
   }
 }
 
-function drawEchogram(result, receiverIdx) {
-  const canvas = document.getElementById('precision-echogram');
-  if (!canvas) return;
-  canvas.hidden = false;
+// Render the echogram (broadband energy decay over time) to ANY canvas.
+// Plot area sits inside per-side margins so the axis tick labels and the
+// axis titles ("Level (dB)" / "Time (ms)") don't overlap the curve.
+// Used both for the in-panel mini view and the large modal preview.
+function _renderEchogramToCanvas(canvas, result, receiverIdx, scale = 1.0) {
   const ctx = canvas.getContext('2d');
-  // Match CSS dimensions if any future resize changes them.
   const W = canvas.width, H = canvas.height;
+
+  // Background
   ctx.fillStyle = '#0a0d12';
   ctx.fillRect(0, 0, W, H);
 
@@ -352,35 +365,69 @@ function drawEchogram(result, receiverIdx) {
   for (let t = 0; t < T; t++) if (bb[t] > peak) peak = bb[t];
   if (peak <= 0) {
     ctx.fillStyle = '#89929d';
-    ctx.font = '11px monospace';
-    ctx.fillText('No receiver hits — increase ray count', 10, H / 2);
+    ctx.font = `${Math.round(13 * scale)}px monospace`;
+    ctx.fillText('No receiver hits — increase ray count', 14 * scale, H / 2);
     return;
   }
 
-  // Draw grid.
+  // Margins: more room on left/bottom for axis labels and titles.
+  const ML = 38 * scale, MR = 12 * scale, MT = 12 * scale, MB = 32 * scale;
+  const plotW = W - ML - MR;
+  const plotH = H - MT - MB;
   const dbRange = 60;
+
+  // Plot area frame.
+  ctx.strokeStyle = 'rgba(140, 160, 200, 0.18)';
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(90, 122, 176, 0.15)';
-  ctx.fillStyle = '#5a616a';
-  ctx.font = '9px monospace';
-  ctx.textBaseline = 'bottom';
-  for (const db of [-10, -20, -30, -40, -50]) {
-    const y = H - (1 + db / dbRange) * H;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    ctx.fillText(`${db}`, 2, y - 1);
-  }
-  ctx.textBaseline = 'alphabetic';
-  for (const ms of [200, 500, 1000, 1500]) {
-    const bucket = ms / bucketDtMs;
-    if (bucket >= T) continue;
-    const x = (bucket / T) * W;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-    ctx.fillText(`${ms}ms`, x + 2, H - 2);
+  ctx.strokeRect(ML, MT, plotW, plotH);
+
+  // Y-axis (dB) gridlines + tick labels.
+  ctx.fillStyle = '#8a929c';
+  ctx.font = `${Math.round(10 * scale)}px monospace`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'right';
+  for (const db of [0, -10, -20, -30, -40, -50, -60]) {
+    const y = MT + (-db / dbRange) * plotH;
+    ctx.strokeStyle = db === 0
+      ? 'rgba(140, 160, 200, 0.35)'
+      : 'rgba(90, 122, 176, 0.18)';
+    ctx.beginPath(); ctx.moveTo(ML, y); ctx.lineTo(ML + plotW, y); ctx.stroke();
+    ctx.fillText(`${db}`, ML - 4, y);
   }
 
-  // Plot IR in dB, clipped to [-60, 0].
+  // X-axis (time) gridlines + tick labels.
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  const xTicks = [0, 100, 200, 500, 1000, 1500, 2000];
+  for (const ms of xTicks) {
+    const bucket = ms / bucketDtMs;
+    if (bucket > T) continue;
+    const x = ML + (bucket / T) * plotW;
+    if (ms !== 0) {
+      ctx.strokeStyle = 'rgba(90, 122, 176, 0.18)';
+      ctx.beginPath(); ctx.moveTo(x, MT); ctx.lineTo(x, MT + plotH); ctx.stroke();
+    }
+    ctx.fillText(`${ms}`, x, MT + plotH + 4);
+  }
+
+  // Axis titles.
+  ctx.fillStyle = '#cfd3d9';
+  ctx.font = `${Math.round(11 * scale)}px 'Inter Tight', system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('Time (ms)', ML + plotW / 2, H - 4);
+  // Y title — rotated.
+  ctx.save();
+  ctx.translate(8 * scale, MT + plotH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.fillText('Level (dB rel. peak)', 0, 0);
+  ctx.restore();
+
+  // Plot the IR in dB, clipped to [-dbRange, 0].
   ctx.strokeStyle = '#4aa3ff';
-  ctx.lineWidth = 1.2;
+  ctx.lineWidth = 1.3 * scale;
   ctx.beginPath();
   let started = false;
   for (let t = 0; t < T; t++) {
@@ -388,23 +435,82 @@ function drawEchogram(result, receiverIdx) {
     if (v <= 0) continue;
     const db = 10 * Math.log10(v / peak);
     if (db < -dbRange) continue;
-    const x = (t / T) * W;
-    const y = H - (1 + db / dbRange) * H;
+    const x = ML + (t / T) * plotW;
+    const y = MT + (-db / dbRange) * plotH;
     if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
   }
   ctx.stroke();
 
-  // Peak marker.
+  // Peak marker (top-right of plot area).
+  const peakMs = bb.indexOf(peak) * bucketDtMs;
   ctx.fillStyle = '#e9c46a';
-  ctx.font = '9px monospace';
+  ctx.font = `${Math.round(10 * scale)}px monospace`;
   ctx.textBaseline = 'top';
-  ctx.fillText(`peak 0 dB · ${((bb.indexOf(peak) * bucketDtMs)).toFixed(0)}ms`, W - 100, 2);
+  ctx.textAlign = 'right';
+  ctx.fillText(`peak 0 dB · ${peakMs.toFixed(0)} ms`, ML + plotW - 4, MT + 4);
+
+  // Reset text alignment for callers that draw afterwards.
+  ctx.textAlign = 'left';
+}
+
+let _lastEchogramResult = null;
+let _lastEchogramReceiverIdx = 0;
+
+function drawEchogram(result, receiverIdx) {
+  const canvas = document.getElementById('precision-echogram');
+  if (!canvas) return;
+  _lastEchogramResult = result;
+  _lastEchogramReceiverIdx = receiverIdx;
+  _renderEchogramToCanvas(canvas, result, receiverIdx, 1.0);
+}
+
+// Modal — opens a 900×500 high-resolution echogram preview centred over
+// the viewport. Backdrop click / Esc / × all close. The render uses the
+// SAME draw routine as the panel mini-view, just at 2.4× scale so the
+// curve detail is readable.
+function openEchogramModal() {
+  if (!_lastEchogramResult) return;
+  let scrim = document.getElementById('echogram-modal-scrim');
+  if (scrim) scrim.remove();    // never stack two
+  scrim = document.createElement('div');
+  scrim.id = 'echogram-modal-scrim';
+  scrim.className = 'echogram-modal-scrim';
+  scrim.setAttribute('role', 'dialog');
+  scrim.setAttribute('aria-modal', 'true');
+  scrim.setAttribute('aria-label', 'Echogram — large preview');
+  scrim.innerHTML = `
+    <div class="echogram-modal-card">
+      <div class="echogram-modal-head">
+        <div class="echogram-modal-title">
+          Echogram — energy decay over time
+          <span class="echogram-modal-sub">Broadband impulse response · receiver-relative dB</span>
+        </div>
+        <button class="echogram-modal-close" type="button" aria-label="Close">×</button>
+      </div>
+      <canvas class="echogram-modal-canvas" width="900" height="500"></canvas>
+      <div class="echogram-modal-foot">
+        Energy at each time bin is summed across the 7 octave bands and
+        normalised to the peak (0 dB). Slope of the late tail is what
+        EDT / T20 / T30 measure; early energy in the first 50 ms drives C50.
+      </div>
+    </div>
+  `;
+  document.body.appendChild(scrim);
+  const modalCanvas = scrim.querySelector('.echogram-modal-canvas');
+  _renderEchogramToCanvas(modalCanvas, _lastEchogramResult, _lastEchogramReceiverIdx, 1.6);
+
+  const close = () => scrim.remove();
+  scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+  scrim.querySelector('.echogram-modal-close').addEventListener('click', close);
+  document.addEventListener('keydown', function onKey(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+  });
 }
 
 function updateUI() {
   const progressEl = document.getElementById('precision-progress');
   const resultsEl = document.getElementById('precision-results');
-  const echogramEl = document.getElementById('precision-echogram');
+  const echogramEl = document.getElementById('precision-echogram-wrap');
   const auditionEl = document.getElementById('precision-audition');
   const staleEl = document.getElementById('precision-stale');
   const renderBtn = document.getElementById('precision-render-btn');
