@@ -3583,6 +3583,11 @@ try {
 //      to the 2D plan in this case.
 //   4. WebGL context loss / readback failure returns null.
 //
+// Print background — white during the off-screen capture, then restored.
+// Constructed once at module scope so we don't churn THREE.Color objects
+// across repeat prints.
+const _printCaptureBackground = new THREE.Color(0xffffff);
+
 // Returns string|null synchronously. Use await Promise.resolve(...) at
 // the call site if a Promise contract is wanted.
 export function captureViewportImage(opts = {}) {
@@ -3595,15 +3600,21 @@ export function captureViewportImage(opts = {}) {
   const height = Math.max(150, Math.floor(opts.height ?? 900));
   const presetName = opts.preset ?? 'iso';
 
-  // --- Stash live camera state we'll mutate --------------------------
+  // --- Stash live camera + scene state we'll mutate -------------------
   const prevAspect = camera.aspect;
   const prevCamPos = camera.position.clone();
   const prevTarget = controls ? controls.target.clone() : null;
   const prevTween = _focusTween;
+  const prevBackground = scene.background;        // swap to white for print, restore after
 
   let dataUrl = null;
   let rt = null;
   try {
+    // --- Print-friendly background — white instead of the dark slate
+    // the live viewport uses. Saves ink on the printed page and lets the
+    // 2D-plan inset overlap the hero without a noisy contrast jump.
+    scene.background = _printCaptureBackground;
+
     // --- Snap camera to preset (synchronous, bypasses the tween) ----
     // Set camera.aspect to MATCH the capture aspect so the preset's
     // fit-distance math (in _cameraPresetTransform → _fitDistance)
@@ -3673,6 +3684,7 @@ export function captureViewportImage(opts = {}) {
       camera.position.copy(prevCamPos);
       if (controls && prevTarget) controls.target.copy(prevTarget);
       _focusTween = prevTween;
+      scene.background = prevBackground;
       if (rt) rt.dispose();
       // No need to re-render — we never touched the live canvas's
       // back buffer (everything went to the off-screen render target).

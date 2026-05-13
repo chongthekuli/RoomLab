@@ -754,10 +754,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // 3D render to sit on top of. Without the 3D the plan IS the hero;
   // showing it twice would be redundant.
   const insetHtml = (coverImage && planSvg)
-    ? `<div class="pr-cover-hero-inset" title="2D plan view">
-         <div class="pr-cover-inset-label">Plan view</div>
-         ${planSvg}
-       </div>`
+    ? `<div class="pr-cover-hero-inset" title="2D plan view">${planSvg}</div>`
     : '';
 
   const roomNameDisplay = room.name && room.name.length > 0 ? room.name : 'Untitled room';

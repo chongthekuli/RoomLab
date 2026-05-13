@@ -305,22 +305,23 @@ body.is-pdf-export .vp-tabs {
     height: auto;
     display: block;
   }
-  /* 2D plan inset — Sofia v3: 50 × 35 mm pinned to the bottom-right
-     corner of the hero. Hairline border + drop shadow makes it read as
-     a callout. Print stylesheets ignore box-shadow on many engines, so
-     a 1pt double-border fallback also frames it. */
+  /* 2D plan inset — Sofia v4: frameless. Sits transparently over the
+     bottom-right of the hero so the room outline + symbols read as
+     a ghost overlay on the 3D render. No background, no border, no
+     drop-shadow, no caption — the inset IS the room and its symbols. */
   #print-report .pr-cover-hero-inset {
     position: absolute;
     right: 4mm;
     bottom: 4mm;
     width: 50mm;
     height: 35mm;
-    background: var(--paper);
-    border: 1pt solid var(--ink);
-    box-shadow: 0 1pt 3pt rgba(0, 0, 0, 0.18);
-    padding: 2pt;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
     box-sizing: border-box;
     overflow: hidden;
+    pointer-events: none;
   }
   #print-report .pr-cover-hero-inset svg,
   #print-report .pr-cover-hero-inset .pr-heatmap-svg {

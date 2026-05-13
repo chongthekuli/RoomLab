@@ -49,7 +49,7 @@ function buildRoomOutline(room, depth_m, offsetX, offsetY) {
   const stroke = '#222';
   const sw = 0.06; // 6 cm in plan, scales as a hairline at print DPI
   if (room.shape === 'rectangular') {
-    return `<rect x="${offsetX.toFixed(3)}" y="${offsetY.toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="#fafafa" stroke="${stroke}" stroke-width="${sw}" />`;
+    return `<rect x="${offsetX.toFixed(3)}" y="${offsetY.toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   }
   if (room.shape === 'polygon') {
     const cx = room.width_m / 2 + offsetX;
@@ -63,12 +63,12 @@ function buildRoomOutline(room, depth_m, offsetX, offsetY) {
       const py = cy + r * Math.sin(angle);
       pts.push(`${px.toFixed(3)},${py.toFixed(3)}`);
     }
-    return `<polygon points="${pts.join(' ')}" fill="#fafafa" stroke="${stroke}" stroke-width="${sw}" />`;
+    return `<polygon points="${pts.join(' ')}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   }
   if (room.shape === 'round') {
     const cx = room.width_m / 2 + offsetX;
     const cy = room.depth_m / 2 + offsetY;
-    return `<circle cx="${cx.toFixed(3)}" cy="${cy.toFixed(3)}" r="${room.round_radius_m.toFixed(3)}" fill="#fafafa" stroke="${stroke}" stroke-width="${sw}" />`;
+    return `<circle cx="${cx.toFixed(3)}" cy="${cy.toFixed(3)}" r="${room.round_radius_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   }
   if (room.shape === 'custom') {
     const verts = room.custom_vertices || [];
@@ -78,7 +78,7 @@ function buildRoomOutline(room, depth_m, offsetX, offsetY) {
       const sy = v.y + offsetY;
       return `${sx.toFixed(3)},${sy.toFixed(3)}`;
     }).join(' ');
-    return `<polygon points="${pts}" fill="#fafafa" stroke="${stroke}" stroke-width="${sw}" />`;
+    return `<polygon points="${pts}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   }
   return '';
 }
