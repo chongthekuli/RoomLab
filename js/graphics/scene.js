@@ -3558,8 +3558,130 @@ function _cameraPresetTransform(name) {
 // Build tag so a user can confirm the live module matches the fix in
 // case of stale-cache reports. Logged once at module load.
 try {
-  console.info('[scene] build 2026-05-13 v351 — applyCameraPreset');
+  console.info('[scene] build 2026-05-13 v352 — captureViewportImage');
 } catch (_) { /* server-side noop */ }
+
+// Capture the current 3D viewport as a PNG data URL, framed to a named
+// camera preset (default: 'iso'). Used by the print-report cover to
+// embed a hero-sized perspective render of the room.
+//
+// Implementation notes — Viktor's brief:
+//   1. Synchronously SNAP the camera to the preset (no tween) so we
+//      don't have to await any rAF chain. The user's existing camera
+//      state is stashed and restored in `finally`.
+//   2. Render to an off-screen WebGLRenderTarget instead of the canvas
+//      back buffer. This sidesteps two problems at once:
+//        a. Martina's flag: the renderer is constructed WITHOUT
+//           preserveDrawingBuffer (intentional — Martina's HIGH on
+//           the print-report.js intro). canvas.toDataURL() on the
+//           live canvas would intermittently come back blank.
+//        b. We can render at any size (1400×900) without first
+//           resizing the visible renderer / restoring it. Less risk
+//           of the viewport flashing during the capture.
+//   3. Walk mode returns null — capture only makes sense from the
+//      OrbitControls free camera. The print-report cover falls back
+//      to the 2D plan in this case.
+//   4. WebGL context loss / readback failure returns null.
+//
+// Returns string|null synchronously. Use await Promise.resolve(...) at
+// the call site if a Promise contract is wanted.
+export function captureViewportImage(opts = {}) {
+  if (!renderer || !scene || !camera) return null;
+  if (walkMode) {
+    console.warn('[scene] captureViewportImage skipped — walk mode active');
+    return null;
+  }
+  const width  = Math.max(200, Math.floor(opts.width  ?? 1400));
+  const height = Math.max(150, Math.floor(opts.height ?? 900));
+  const presetName = opts.preset ?? 'iso';
+
+  // --- Stash live camera state we'll mutate --------------------------
+  const prevAspect = camera.aspect;
+  const prevCamPos = camera.position.clone();
+  const prevTarget = controls ? controls.target.clone() : null;
+  const prevTween = _focusTween;
+
+  let dataUrl = null;
+  let rt = null;
+  try {
+    // --- Snap camera to preset (synchronous, bypasses the tween) ----
+    // Set camera.aspect to MATCH the capture aspect so the preset's
+    // fit-distance math (in _cameraPresetTransform → _fitDistance)
+    // frames the room for the PNG's aspect, not the screen's.
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    const t = _cameraPresetTransform(presetName);
+    if (t) {
+      camera.position.copy(t.targetCam);
+      if (controls) controls.target.copy(t.targetPos);
+      camera.lookAt(t.targetPos);
+    }
+    // Kill any in-flight tween so _tickCameraFocus on the next
+    // animate() frame doesn't drag the camera away from the preset
+    // before our restore runs.
+    _focusTween = null;
+
+    // --- Off-screen render target ------------------------------------
+    rt = new THREE.WebGLRenderTarget(width, height, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+      colorSpace: THREE.SRGBColorSpace,
+    });
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(prevRT);
+
+    // --- Read pixels back to a typed array ---------------------------
+    const pixels = new Uint8Array(width * height * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, width, height, pixels);
+
+    // --- Encode via a 2D canvas (no preserveDrawingBuffer needed) ---
+    // readRenderTargetPixels returns rows bottom-up (OpenGL convention).
+    // Flip vertically while copying into the 2D canvas so the PNG is
+    // top-down (HTML/print convention).
+    const enc = document.createElement('canvas');
+    enc.width = width;
+    enc.height = height;
+    const ctx = enc.getContext('2d');
+    const imgData = ctx.createImageData(width, height);
+    const dst = imgData.data;
+    const rowBytes = width * 4;
+    for (let y = 0; y < height; y++) {
+      const srcOff = (height - 1 - y) * rowBytes;
+      const dstOff = y * rowBytes;
+      dst.set(pixels.subarray(srcOff, srcOff + rowBytes), dstOff);
+    }
+    ctx.putImageData(imgData, 0, 0);
+    try {
+      dataUrl = enc.toDataURL('image/png');
+    } catch (err) {
+      console.warn('[scene] toDataURL failed:', err);
+      dataUrl = null;
+    }
+  } catch (err) {
+    console.warn('[scene] captureViewportImage failed:', err);
+    dataUrl = null;
+  } finally {
+    // --- Restore camera + dispose render target ----------------------
+    try {
+      camera.aspect = prevAspect;
+      camera.updateProjectionMatrix();
+      camera.position.copy(prevCamPos);
+      if (controls && prevTarget) controls.target.copy(prevTarget);
+      _focusTween = prevTween;
+      if (rt) rt.dispose();
+      // No need to re-render — we never touched the live canvas's
+      // back buffer (everything went to the off-screen render target).
+    } catch (err) {
+      console.warn('[scene] capture restore failed:', err);
+    }
+  }
+  return dataUrl;
+}
 
 // Public — kick off a smooth tween to one of the named presets.
 // 'top' | 'front' | 'back' | 'left' | 'right' | 'iso'

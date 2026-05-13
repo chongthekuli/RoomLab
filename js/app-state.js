@@ -375,6 +375,9 @@ export function expandSources(sources) {
 
 export const state = {
   room: {
+    // See DEFAULT_ROOM_STATE.name — free-text room label that flows
+    // through serialize/load and shows on the print-report cover.
+    name: '',
     shape: 'polygon',
     polygon_sides: 16,
     polygon_radius_m: 10,
@@ -608,6 +611,12 @@ function deepClone(x) { return JSON.parse(JSON.stringify(x)); }
 // data from a previous preset (custom_vertices, stadiumStructure,
 // multiLevelStructure, etc.) leaking through the next one.
 const DEFAULT_ROOM_STATE = {
+  // Free-text room label that survives serialize/load and is surfaced on
+  // the print-report cover next to the project name. Distinct from
+  // state.projectName — one project may hold several rooms (Lobby,
+  // Atrium 3F, Main hall). Empty string when never set; the cover
+  // falls back to "Untitled room" for display.
+  name: '',
   shape: 'rectangular',
   // Indoor (default) means there's a ceiling/roof and the room is an
   // enclosed volume — Sabine / Eyring apply. 'outdoor' means no roof:
@@ -664,6 +673,10 @@ export function applyPresetToState(key) {
   resetSceneState({ state, defaultRoomState: DEFAULT_ROOM_STATE, deepClone });
 
   // --- 2. Apply preset room fields ------------------------------------
+  // Seed room.name from the preset's display label so the print-report
+  // cover has a sensible room title without forcing the user to type one.
+  // (User can overwrite via the room panel.)
+  if (typeof p.label === 'string' && p.label.length > 0) state.room.name = p.label;
   if (p.shape !== undefined)              state.room.shape = p.shape;
   if (p.ceiling_type !== undefined)       state.room.ceiling_type = p.ceiling_type;
   if (p.width_m !== undefined)            state.room.width_m = p.width_m;
@@ -750,6 +763,10 @@ export function applyTemplateToState(key, dimsOverride) {
   // Same canonical reset path as applyPresetToState — see
   // js/state/scene-lifecycle.js. Single source of truth.
   resetSceneState({ state, defaultRoomState: DEFAULT_ROOM_STATE, deepClone });
+  // Seed room.name from the template label (e.g. "Hi-fi room", "Classroom")
+  // — same rationale as applyPresetToState. Template metadata lives on `t`,
+  // not on the generator output, because the label is a static descriptor.
+  if (typeof t.label === 'string' && t.label.length > 0) state.room.name = t.label;
   if (generated.shape !== undefined)               state.room.shape = generated.shape;
   if (generated.ceiling_type !== undefined)        state.room.ceiling_type = generated.ceiling_type;
   if (generated.width_m !== undefined)             state.room.width_m = generated.width_m;
@@ -848,6 +865,7 @@ export function deserializeProject(obj) {
     // Assign scalar fields one-by-one so an unexpected key in the file
     // can't pollute room state with a foreign property.
     const r = obj.room;
+    if (typeof r.name === 'string')              state.room.name = r.name;
     if (typeof r.shape === 'string')             state.room.shape = r.shape;
     if (typeof r.ceiling_type === 'string')      state.room.ceiling_type = r.ceiling_type;
     if (Number.isFinite(r.width_m))              state.room.width_m = r.width_m;

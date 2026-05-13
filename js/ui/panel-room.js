@@ -44,6 +44,11 @@ export function mountRoomPanel({ materials }) {
   const root = document.getElementById('panel-room');
   root.innerHTML = `
     <h2>Room</h2>
+    <div class="field-group room-name-row">
+      <label title="Free-text label for this room — shows on the print-report cover under the project name. Distinct from the project name (one project can hold several rooms).">Room name
+        <input type="text" id="room-name-input" placeholder="e.g. Lobby, Atrium 3F, Main hall" value="${escapeAttr(state.room.name ?? '')}" maxlength="80" />
+      </label>
+    </div>
     <div class="picker-row">
       <span class="picker-label" title="Signature pre-built scenes that load with their full geometry, audience, and PA system as authored.">Presets</span>
       <div class="picker-buttons" id="preset-row"></div>
@@ -165,13 +170,36 @@ export function mountRoomPanel({ materials }) {
     }
   });
 
-  document.getElementById('btn-print-report')?.addEventListener('click', () => {
+  document.getElementById('btn-print-report')?.addEventListener('click', async () => {
     try {
-      triggerPrint();
+      // triggerPrint is now async — it awaits the 3D viewport capture
+      // for the cover hero before invoking window.print(). Awaiting
+      // here means showStatus on the error path catches both sync and
+      // async failures.
+      await triggerPrint();
     } catch (err) {
       showStatus(`Print failed: ${err.message || err}`, 'err');
     }
   });
+
+  // Room name — text input at the top of the panel. 'input' fires per
+  // keystroke (cheap — only mutates a string field). We don't emit
+  // 'room:changed' because the renderer doesn't care about the label;
+  // the print-report reads it directly when the user prints. Trim on
+  // commit (blur) so trailing whitespace doesn't sneak into the cover.
+  const roomNameInput = root.querySelector('#room-name-input');
+  if (roomNameInput) {
+    roomNameInput.addEventListener('input', e => {
+      state.room.name = e.target.value;
+    });
+    roomNameInput.addEventListener('blur', e => {
+      const trimmed = e.target.value.trim();
+      if (trimmed !== e.target.value) {
+        e.target.value = trimmed;
+        state.room.name = trimmed;
+      }
+    });
+  }
 
   // After a custom-shape draw closes:
   //   1. Persist the custom room to localStorage so the user can come
@@ -184,6 +212,12 @@ export function mountRoomPanel({ materials }) {
   //      the user from looking at the floor plan they just drew.
   document.addEventListener('roomshape:closed', () => {
     try {
+      // Bake the captured room name into state.room BEFORE snapshotting,
+      // so the saved entry's geometry blob itself carries the label and
+      // the print-report cover renders it on first load.
+      if (typeof pendingRoomName === 'string' && pendingRoomName.trim()) {
+        state.room.name = pendingRoomName.trim();
+      }
       // Deep-clone so the saved entry is independent of further edits.
       const roomSnapshot = JSON.parse(JSON.stringify(state.room));
       const rackSnapshot = JSON.parse(JSON.stringify(state.rackSystem ?? { racks: [] }));
@@ -461,6 +495,10 @@ function syncBoundingBoxToShape() {
 
 function render() {
   const root = document.getElementById('panel-room');
+  // Room name — sync the input from state in case a preset / template /
+  // load just updated it. The input is uncontrolled between renders.
+  const nameIn = root.querySelector('#room-name-input');
+  if (nameIn) nameIn.value = state.room.name ?? '';
   root.querySelector('[data-f="shape"]').value = state.room.shape;
   root.querySelector('[data-f="ceiling_type"]').value = state.room.ceiling_type;
   root.querySelector('[data-f="enclosure"]').value = state.room.enclosure ?? 'indoor';
@@ -973,6 +1011,12 @@ function loadCustomRoomById(id) {
   applyBlankCustomRoom({ projectName: entry.projectName ?? null });
   // Overlay the saved geometry on top of the freshly-blanked room.
   Object.assign(state.room, JSON.parse(JSON.stringify(entry.room)));
+  // Backfill room.name from the saved-rooms library entry's roomName
+  // when the snapshot itself didn't carry one (saved before room.name
+  // existed as a state field). Keeps the print-report cover stable.
+  if (!state.room.name && typeof entry.roomName === 'string' && entry.roomName.trim()) {
+    state.room.name = entry.roomName.trim();
+  }
   // Restore the saved-room's rackSystem so racks placed via DeviceLAB
   // into this saved entry land in the live scene now. Empty default
   // when the entry pre-dates the rackSystem-on-saved-rooms feature.

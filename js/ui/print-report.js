@@ -32,8 +32,69 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend } from './print-heatmap.js';
+import { buildFloorPlanSVG } from './print-plan-svg.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
 import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
+
+// scene.js pulls in Three.js, which has no Node resolution path. We
+// import captureViewportImage LAZILY inside mountPrintReport so the
+// headless test harness (tests/print-*.test.mjs) can still build a
+// print model without dragging Three into the test graph.
+//
+// In the browser: mountPrintReport kicks the dynamic import on mount;
+// by the time the user clicks Print (or hits Ctrl-P) the module is
+// cached and _captureFn is ready to call synchronously. If the import
+// is still in flight when print fires, the cover falls back to the
+// 2D plan as the hero — same graceful-degradation path as walk mode.
+let _captureFn = null;
+async function _loadCaptureFn() {
+  if (_captureFn) return _captureFn;
+  try {
+    const mod = await import('../graphics/scene.js');
+    if (typeof mod.captureViewportImage === 'function') {
+      _captureFn = mod.captureViewportImage;
+      return _captureFn;
+    }
+  } catch (err) {
+    console.warn('[print-report] scene.js dynamic import failed:', err);
+  }
+  return null;
+}
+
+// Human-readable label for the room's plan shape. Pulled out of the
+// cover template so it can be unit-tested without spinning up a DOM.
+function describeShape(room) {
+  if (!room) return 'unknown';
+  switch (room.shape) {
+    case 'rectangular': return 'rectangular';
+    case 'round':       return 'round';
+    case 'polygon':     return `regular ${room.polygon_sides ?? 6}-sided polygon`;
+    case 'custom': {
+      const n = Array.isArray(room.custom_vertices) ? room.custom_vertices.length : 0;
+      return n > 0 ? `custom polygon (${n} vertices)` : 'custom polygon';
+    }
+    default: return room.shape || 'unknown';
+  }
+}
+
+// One-or-two sentence plain-English summary written for the print cover.
+// Reads from the print model's room block plus the model's mean-α-1k
+// figure so we don't double-compute. Pure function — testable.
+function buildRoomSummary(room) {
+  if (!room) return '';
+  const dims = `${fmt(room.width_m, 1)} × ${fmt(room.depth_m, 1)} × ${fmt(room.height_m, 1)} m`;
+  const shape = describeShape(room);
+  const vol = fmt(room.volume_m3, 0);
+  const meanA = (Number.isFinite(room.meanAbsorption_1k) && room.meanAbsorption_1k > 0)
+    ? room.meanAbsorption_1k
+    : null;
+  const finishCue = meanA == null
+    ? ''
+    : meanA < 0.10 ? ' Hard, reflective finishes throughout — long reverb expected.'
+    : meanA < 0.25 ? ' Mixed finishes — moderate reverberation.'
+    : ' Substantial soft / absorbent finishes — short reverb.';
+  return `This is a ${dims} ${shape} room (${vol} m³ total volume).${finishCue}`;
+}
 
 // ---------------------------------------------------------------------------
 // buildPrintModel — pure data function (testable without a headless browser).
@@ -84,7 +145,15 @@ export function buildPrintModel({ materials, nameHint } = {}) {
       schemaVersion: 1,
     },
     room: {
+      // Room name surfaces on the print-report cover as a sub-title under
+      // the project name. Falls back to "Untitled room" at render time so
+      // the cover always has SOMETHING in the room-name slot.
+      name: (typeof state.room.name === 'string' && state.room.name.trim().length > 0)
+        ? state.room.name.trim()
+        : '',
       shape: state.room.shape,
+      polygon_sides: state.room.polygon_sides ?? null,
+      custom_vertices: Array.isArray(state.room.custom_vertices) ? state.room.custom_vertices.slice() : null,
       width_m: state.room.width_m,
       depth_m: state.room.depth_m,
       height_m: state.room.height_m,
@@ -638,7 +707,7 @@ function escapeHtml(s) {
 // hero plan on the cover, displayed numbers, two-tone + one accent.
 // Tear-down is via afterprint, see mountPrintReport.
 // ---------------------------------------------------------------------------
-function renderPrintReport(model, { splGrid = null } = {}) {
+function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   let root = document.getElementById('print-report');
   if (root) root.remove();
   root = document.createElement('div');
@@ -650,32 +719,55 @@ function renderPrintReport(model, { splGrid = null } = {}) {
       ${body}
     </section>`;
 
-  // ------ Page 1: COVER — title block + COLOURED heatmap hero + 3 figs --
-  // Per Sofia v2 (post-export-audit): the coloured heatmap IS the hero.
-  // Earlier draft shipped a B&W floor plan on the cover AND on page 2,
-  // then the colour heatmap on page 6 — the user flagged the duplication
-  // ("don't need so many pages reminding this 2D view"). One plan view,
-  // the colour one, top of the report.
+  // ------ Page 1: COVER — room-centric ----------------------------------
+  // Sofia v3 (user-requested redesign, 2026-05-13): cover is about the
+  // ROOM, not scene-level metrics. Layout:
+  //   - title block: project name (h1) + room name (h2, falls back to
+  //     "Untitled room"). Date + engine on the right.
+  //   - hero: 3D iso perspective render of the room (PNG captured from
+  //     the live Three.js viewport). Falls back to the 2D floor plan
+  //     when no 3D capture is available (walk mode, scene unmounted).
+  //   - inset: small 2D floor plan overlapping the hero's bottom-right
+  //     corner. Hairline border + drop shadow so it reads as a callout.
+  //   - measurements panel: W×D×H, floor area, volume, surface area,
+  //     shape descriptor. Tabular, 5 rows.
+  //   - summary: one-sentence plain-English description of the room.
+  //   - footer: schema + generated stamp.
+  // The 3 KPI tiles (RT60, r_c, Volume) that used to live here moved
+  // to the Reverberation chapter on page 2 — they belong with the
+  // physics, not on the room-detail cover.
   const room = model.room;
-  const rt60_1k = model.rt60[3];
-  const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid) : '';
-  const heatLegend = (model.heatmap && splGrid) ? buildHeatmapLegend(splGrid) : '';
+  // 2D plan for the inset. buildFloorPlanSVG already exists for the
+  // standalone plan page; reusing it keeps the visual identical.
+  const planSvg = (() => {
+    try { return buildFloorPlanSVG(state, { compact: true }); }
+    catch (err) { console.warn('[print-report] plan SVG failed:', err); return ''; }
+  })();
+  // Hero — prefer the 3D render. Fallback chain: 3D PNG → 2D plan SVG
+  // (full-sized) → an empty-state notice. Cover ALWAYS has something.
+  const heroBody = coverImage
+    ? `<img class="pr-cover-hero-image" src="${coverImage}" alt="3D perspective view of the room" />`
+    : (planSvg
+        ? `<div class="pr-cover-hero-plan">${planSvg}</div>`
+        : '<p class="pr-empty-state" style="margin:0">3D preview unavailable — visit RoomLAB before printing.</p>');
+  // Inset — only show the 2D plan as an inset when we actually have a
+  // 3D render to sit on top of. Without the 3D the plan IS the hero;
+  // showing it twice would be redundant.
+  const insetHtml = (coverImage && planSvg)
+    ? `<div class="pr-cover-hero-inset" title="2D plan view">
+         <div class="pr-cover-inset-label">Plan view</div>
+         ${planSvg}
+       </div>`
+    : '';
 
-  const coverFigures = `
-    <div class="pr-hero-figures">
-      <div class="pr-hero-figure">
-        <div class="pr-hero-figure-label">RT60 @ 1 kHz · Eyring</div>
-        <div class="pr-hero-figure-value pr-accent">${rt60_1k ? fmt(rt60_1k.eyring_s, 2) : '—'}<span class="pr-hero-figure-unit"> s</span></div>
-      </div>
-      <div class="pr-hero-figure">
-        <div class="pr-hero-figure-label">Critical distance r_c</div>
-        <div class="pr-hero-figure-value">${model.derived.criticalDistance_m != null ? fmt(model.derived.criticalDistance_m, 2) : '—'}<span class="pr-hero-figure-unit"> m</span></div>
-      </div>
-      <div class="pr-hero-figure">
-        <div class="pr-hero-figure-label">Volume</div>
-        <div class="pr-hero-figure-value">${fmt(room.volume_m3, 0)}<span class="pr-hero-figure-unit"> m³</span></div>
-      </div>
-    </div>`;
+  const roomNameDisplay = room.name && room.name.length > 0 ? room.name : 'Untitled room';
+  const summary = buildRoomSummary(room);
+  const measurementsRows = `
+    <tr><th>Shape</th><td>${escapeHtml(describeShape(room))}</td></tr>
+    <tr><th>W × D × H</th><td>${fmt(room.width_m, 2)} × ${fmt(room.depth_m, 2)} × ${fmt(room.height_m, 2)} m</td></tr>
+    <tr><th>Floor area</th><td>${fmt(room.baseArea_m2, 1)} m²</td></tr>
+    <tr><th>Volume</th><td>${fmt(room.volume_m3, 0)} m³</td></tr>
+    <tr><th>Surface area</th><td>${fmt(room.totalArea_m2, 0)} m²</td></tr>`;
 
   const cover = `
     <div class="pr-page pr-page-cover">
@@ -683,22 +775,25 @@ function renderPrintReport(model, { splGrid = null } = {}) {
         <div>
           <span class="pr-eyebrow">RoomLAB · Acoustic simulation</span>
           <h1>${escapeHtml(model.project.name)}</h1>
+          <h2 class="pr-cover-room-name">${escapeHtml(roomNameDisplay)}</h2>
         </div>
         <div class="pr-cover-titleblock-right">
           ${escapeHtml(model.project.date)}<br>
           <span class="pr-mute">${model.precision ? 'precision engine' : 'draft engine'}</span>
         </div>
       </div>
-      <div class="pr-cover-hero">
-        ${heatSvg || '<p class="pr-empty-state" style="margin:0">Place at least one source to render a coverage map.</p>'}
+      <div class="pr-cover-hero-wrap">
+        <div class="pr-cover-hero">
+          ${heroBody}
+        </div>
+        ${insetHtml}
       </div>
-      ${coverFigures}
-      <p class="pr-lead">
-        This document is a RoomLAB scene-design report for the project above. It records the room geometry,
-        sources, listener and zone layout, and predicted reverberation, coverage, and speech intelligibility
-        against the venue's noise floor. Use the figures to validate equipment selection, placement, and
-        treatment before procurement or BOMBA submission.
-      </p>
+      <div class="pr-cover-room-detail">
+        <table class="pr-table pr-kv pr-cover-measurements">
+          ${measurementsRows}
+        </table>
+        <p class="pr-cover-summary">${escapeHtml(summary)}</p>
+      </div>
       <div class="pr-cover-foot">
         <span>schema v${model.project.schemaVersion} · generated ${escapeHtml(model.project.generatedAt)}</span>
       </div>
@@ -1074,6 +1169,15 @@ function renderPrintReport(model, { splGrid = null } = {}) {
   // headline composition; this page repeats it larger with the numeric
   // legend and the scene-summary tile grid below. Replaces the dead
   // standalone B&W floor-plan page from v1.
+  //
+  // Cover redesign (Sofia v3, 2026-05-13): the heatmap is no longer on
+  // the cover, but THIS page still needs it as the full-size coverage
+  // figure. The cover hero is now a 3D render of the room. heatSvg /
+  // heatLegend are rebuilt locally here so the heatmap-detail page
+  // (and the operating-range strip below) remain unchanged.
+  const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid) : '';
+  const heatLegend = (model.heatmap && splGrid) ? buildHeatmapLegend(splGrid) : '';
+  const rt60_1k = model.rt60[3];
   let heatmapPage = '';
   if (heatSvg) {
     const metricLabel = model.heatmap.metric === 'sti' ? 'STI (IEC 60268-16)' : 'SPL @ 1 kHz';
@@ -1832,7 +1936,7 @@ function showMobilePrintHint() {
   try { localStorage.setItem(MOBILE_HINT_KEY, '1'); } catch (e) { /* private mode */ }
 }
 
-export function triggerPrint() {
+export async function triggerPrint() {
   if (!_printMaterialsRef) {
     console.warn('[print-report] mountPrintReport() never called — materials reference missing');
     return;
@@ -1842,8 +1946,19 @@ export function triggerPrint() {
   const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments });
   const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
   const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
+  // 3D viewport snapshot for the cover hero. Lazily imports scene.js
+  // (which pulls Three.js) so the headless test harness can still
+  // build a print model without that dependency. Returns null when
+  // the scene hasn't mounted yet (user printed from a non-3D Lab),
+  // walk mode is active, or WebGL context is lost — renderPrintReport
+  // handles null by falling back to the 2D plan as the hero.
+  let coverImage = null;
+  try {
+    const captureFn = await _loadCaptureFn();
+    if (captureFn) coverImage = captureFn({ width: 1400, height: 900, preset: 'iso' });
+  } catch (err) { console.warn('[print-report] capture failed:', err); }
   const model = buildPrintModel({ materials: _printMaterialsRef });
-  renderPrintReport(model, { splGrid });
+  renderPrintReport(model, { splGrid, coverImage });
 
   // Show the mobile hint BEFORE invoking print so users have time
   // to read it. The hint is a blocking alert — print() runs after
@@ -1862,14 +1977,27 @@ export function triggerPrint() {
 export function mountPrintReport({ materials }) {
   _printMaterialsRef = materials;
 
+  // Warm-load the scene.js capture path so the synchronous beforeprint
+  // handler below can call it without waiting on a dynamic import. By
+  // the time the user opens the print dialog (seconds later at the
+  // earliest), the module is cached.
+  _loadCaptureFn();
+
   window.addEventListener('beforeprint', () => {
     if (!_printMaterialsRef) return;
     if (document.getElementById('print-report')) return;
     const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments });
     const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
     const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
+    // 3D viewport snapshot for the cover hero. _captureFn is populated
+    // by the warm-load above — if it's still null at this point the
+    // import is still in flight and we fall back to the 2D plan.
+    let coverImage = null;
+    try {
+      if (_captureFn) coverImage = _captureFn({ width: 1400, height: 900, preset: 'iso' });
+    } catch (err) { console.warn('[print-report] capture failed:', err); }
     const model = buildPrintModel({ materials: _printMaterialsRef });
-    renderPrintReport(model, { splGrid });
+    renderPrintReport(model, { splGrid, coverImage });
   });
 
   window.addEventListener('afterprint', () => {

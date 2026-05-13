@@ -241,10 +241,10 @@ body.is-pdf-export .vp-tabs {
     font-size: 8.5pt;
   }
 
-  /* ----------- COVER (page 1) ----------- */
+  /* ----------- COVER (page 1) — room-centric (Sofia v3) -------- */
   #print-report .pr-page-cover {
     display: grid;
-    grid-template-rows: auto auto auto auto auto;
+    grid-template-rows: auto auto auto auto;
     gap: 6mm;
   }
   #print-report .pr-cover-titleblock {
@@ -257,6 +257,17 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-cover-titleblock .pr-eyebrow {
     margin-bottom: 4pt;
   }
+  /* Room name — Sofia v3: sits directly under the project h1 so the
+     reader sees BOTH names at a glance. Lighter weight + smaller size
+     than h1 so the hierarchy reads project → room. */
+  #print-report .pr-cover-titleblock .pr-cover-room-name {
+    font-size: 16pt;
+    font-weight: 300;
+    color: var(--muted);
+    margin: 2pt 0 0 0;
+    letter-spacing: 0;
+    line-height: 1.2;
+  }
   #print-report .pr-cover-titleblock-right {
     text-align: right;
     color: var(--muted);
@@ -264,58 +275,109 @@ body.is-pdf-export .vp-tabs {
     line-height: 1.5;
   }
 
-  /* Hero band — coloured coverage map dominates the cover. */
+  /* Hero band — 3D perspective render dominates the cover. The
+     wrapper is positioned so the 2D plan inset can absolute-pin to
+     the bottom-right corner. */
+  #print-report .pr-cover-hero-wrap {
+    position: relative;
+    width: 100%;
+  }
   #print-report .pr-cover-hero {
     width: 100%;
     background: var(--paper-2);
-    padding: 6mm 4mm;
+    padding: 4mm;
     border-radius: 0;
+    box-sizing: border-box;
   }
-  #print-report .pr-cover-hero .pr-heatmap-svg,
-  #print-report .pr-cover-hero svg {
+  #print-report .pr-cover-hero-image {
     width: 100%;
-    max-height: 130mm;
+    height: 90mm;
+    object-fit: contain;
+    display: block;
+  }
+  #print-report .pr-cover-hero-plan {
+    width: 100%;
+  }
+  #print-report .pr-cover-hero-plan svg,
+  #print-report .pr-cover-hero-plan .pr-heatmap-svg {
+    width: 100%;
+    max-height: 90mm;
     height: auto;
     display: block;
   }
-
-  /* Three displayed numbers — Sofia's "the glance is the figures" */
-  #print-report .pr-hero-figures {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0;
-    border-top: 1pt solid var(--rule);
-    border-bottom: 1pt solid var(--rule);
-    padding: 6pt 0;
+  /* 2D plan inset — Sofia v3: 50 × 35 mm pinned to the bottom-right
+     corner of the hero. Hairline border + drop shadow makes it read as
+     a callout. Print stylesheets ignore box-shadow on many engines, so
+     a 1pt double-border fallback also frames it. */
+  #print-report .pr-cover-hero-inset {
+    position: absolute;
+    right: 4mm;
+    bottom: 4mm;
+    width: 50mm;
+    height: 35mm;
+    background: var(--paper);
+    border: 1pt solid var(--ink);
+    box-shadow: 0 1pt 3pt rgba(0, 0, 0, 0.18);
+    padding: 2pt;
+    box-sizing: border-box;
+    overflow: hidden;
   }
-  #print-report .pr-hero-figure {
-    padding: 0 8pt;
-    border-right: 0.5pt solid var(--rule);
+  #print-report .pr-cover-hero-inset svg,
+  #print-report .pr-cover-hero-inset .pr-heatmap-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
   }
-  #print-report .pr-hero-figure:last-child { border-right: none; }
-  #print-report .pr-hero-figure-label {
-    font-size: 7.5pt;
-    font-weight: 600;
-    letter-spacing: 0.08em;
+  #print-report .pr-cover-inset-label {
+    position: absolute;
+    top: 1pt;
+    left: 3pt;
+    font-size: 6pt;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--muted);
-    margin-bottom: 4pt;
+    background: var(--paper);
+    padding: 0 2pt;
+    z-index: 1;
   }
-  #print-report .pr-hero-figure-value {
-    font-size: 36pt;
-    font-weight: 300;
-    line-height: 1;
-    letter-spacing: -0.02em;
+
+  /* Room measurements + summary block — sits below the hero */
+  #print-report .pr-cover-room-detail {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    gap: 8mm;
+    align-items: start;
+  }
+  #print-report .pr-cover-measurements {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10pt;
+  }
+  #print-report .pr-cover-measurements th,
+  #print-report .pr-cover-measurements td {
+    padding: 3pt 4pt;
+    border-bottom: 0.5pt solid var(--rule);
+    text-align: left;
+    vertical-align: top;
+  }
+  #print-report .pr-cover-measurements th {
+    width: 36%;
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 9pt;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  #print-report .pr-cover-measurements td {
+    font-family: var(--font-mono);
+    font-size: 10pt;
     color: var(--ink);
   }
-  #print-report .pr-hero-figure-value.pr-accent {
-    color: var(--accent);
-  }
-  #print-report .pr-hero-figure-unit {
-    font-size: 16pt;
-    font-weight: 300;
-    color: var(--muted);
-    margin-left: 2pt;
+  #print-report .pr-cover-summary {
+    font-size: 10pt;
+    line-height: 1.5;
+    color: var(--ink);
+    margin: 0;
   }
 
   /* Cover footer is the meta strip */
