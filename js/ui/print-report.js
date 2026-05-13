@@ -1422,10 +1422,13 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </section>
 
       <footer class="pr-credentials-footer">
-        <div class="pr-references-inline">
-          <strong>Standards &amp; sources cited:</strong>
-          ${DISCLAIMER_REFERENCES.map(r => escapeHtml(r)).join(' · ')}
-        </div>
+        <!-- Sofia v3: bottom references-inline strip removed. The standard
+             cited for each metric is already on its own pr-method-cite line
+             inside the grid above; duplicating them as a flat band wasted
+             ~6mm of vertical and was pushing the signature cells onto a
+             second page. DISCLAIMER_REFERENCES is no longer rendered here
+             but the constant is preserved in case a future Appendix wants
+             it as a flat list. -->
         <div class="pr-reviewer-note pr-reviewer-compact">
           <span class="pr-eyebrow">Reviewer's note —</span>
           Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.

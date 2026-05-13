@@ -1009,23 +1009,23 @@ body.is-pdf-export .vp-tabs {
     height: 100%;
   }
   #print-report .pr-credentials-header {
-    margin-bottom: 3pt;
-    padding-bottom: 2pt;
-    border-bottom: 0.8pt solid var(--ink);
+    margin-bottom: 2pt;            /* was 3pt */
+    padding-bottom: 1.5pt;         /* was 2pt */
+    border-bottom: 0.6pt solid var(--ink);  /* was 0.8pt */
     flex: 0 0 auto;
   }
   #print-report .pr-credentials-header h2 {
-    font-size: 12pt;
+    font-size: 11pt;               /* was 12pt — header now reads as page-level not chapter */
     font-weight: 600;
-    margin: 0 0 1pt 0;
+    margin: 0 0 0.5pt 0;           /* was 1pt */
     line-height: 1.05;
   }
   #print-report .pr-credentials-intro {
-    font-size: 7pt;
-    line-height: 1.3;
+    font-size: 6.4pt;              /* was 7pt — intro is contextual not load-bearing */
+    line-height: 1.28;             /* was 1.3 */
     color: var(--ink);
     margin: 0;
-    max-width: 165mm;
+    max-width: 175mm;              /* was 165mm — fewer wrapped lines */
   }
   /* Section labels reduced to a tiny inline marker — page header is
      already the section signpost, full h3s waste vertical budget. */
@@ -1035,7 +1035,9 @@ body.is-pdf-export .vp-tabs {
     letter-spacing: 0.10em;
     text-transform: uppercase;
     color: var(--muted);
-    margin: 3pt 0 2pt 0;
+    margin: 2pt 0 1.5pt 0;         /* was 3pt 0 2pt — every section header
+                                       trims 1.5pt off the top/bottom; x3
+                                       sections in this page = ~4.5pt */
     padding: 0;
     border: none;
     break-after: avoid;
@@ -1051,7 +1053,7 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-method-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 2pt 5pt;
+    gap: 1.5pt 5pt;              /* was 2pt 5pt — row gap trims with 4 rows = ~2pt */
     margin: 0;
   }
   #print-report .pr-method-entry {
@@ -1088,18 +1090,22 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-credentials-disclaimer {
     margin-top: auto;            /* flex push to bottom */
     flex: 0 0 auto;
-    padding-top: 3pt;            /* was 4pt */
+    padding-top: 1.5pt;          /* was 2pt */
     border-top: 0.4pt solid var(--rule);
   }
+  /* Full-width disclaimer (was 2-col). At narrow column width the right
+     column kept ending early while the left ran long, wasting vertical
+     space. Full width wraps each paragraph fewer times overall. */
   #print-report .pr-disclaimer-grid {
-    column-count: 2;
-    column-gap: 7pt;
-    font-size: 6.3pt;            /* was 6.5pt */
-    line-height: 1.25;           /* was 1.3 */
+    column-count: 1;
+    font-size: 6.2pt;            /* was 6.3pt — minor compression */
+    line-height: 1.22;           /* was 1.25 */
   }
   #print-report .pr-disclaimer-grid p {
-    margin: 0 0 1.5pt 0;         /* was 2pt */
+    margin: 0 0 1pt 0;           /* was 1.5pt */
     break-inside: avoid;
+    text-align: justify;
+    hyphens: auto;
   }
   /* Acceptance addendum — the legal seal of the document. Sits
      directly under the disclaimers (which are themselves pinned to
@@ -1110,14 +1116,14 @@ body.is-pdf-export .vp-tabs {
      it immediately. */
   #print-report .pr-credentials-acceptance {
     flex: 0 0 auto;
-    margin-top: 2pt;             /* was 3pt */
-    padding: 2pt 0 0 0;          /* was 3pt */
+    margin-top: 1.5pt;           /* was 2pt */
+    padding: 1.5pt 0 0 0;        /* was 2pt */
     border-top: 0.4pt solid var(--rule);
     break-inside: avoid;
   }
   #print-report .pr-acceptance-body {
-    font-size: 6.3pt;            /* was 6.6pt */
-    line-height: 1.3;            /* was 1.35 */
+    font-size: 6.1pt;            /* was 6.3pt — paragraph trims one wrapped line */
+    line-height: 1.25;           /* was 1.3 */
     color: var(--ink);
     margin: 0;
     text-align: justify;
@@ -1132,10 +1138,10 @@ body.is-pdf-export .vp-tabs {
      reviewer's eye lands on the captured signature first. */
   #print-report .pr-accept-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2pt 8pt;
-    margin: 2pt 0 3pt 0;
-    padding: 2pt 4pt;
+    grid-template-columns: repeat(5, 1fr); /* was 3 — fits all 5 KVs on one row */
+    gap: 1.5pt 6pt;                /* was 2pt 8pt */
+    margin: 1.5pt 0 2pt 0;         /* was 2pt 0 3pt */
+    padding: 1.5pt 4pt;            /* was 2pt 4pt */
     background: var(--paper-2);
     border-radius: 1.5pt;
     break-inside: avoid;
@@ -1153,10 +1159,11 @@ body.is-pdf-export .vp-tabs {
     color: var(--muted);
   }
   #print-report .pr-accept-v {
-    font-size: 6.5pt;
+    font-size: 6.1pt;            /* was 6.5pt — 5-col layout needs narrower values */
     font-weight: 600;
     color: var(--ink);
     word-break: break-word;
+    line-height: 1.15;
   }
   #print-report .pr-accept-ts {
     font-size: 6.4pt;
@@ -1168,35 +1175,26 @@ body.is-pdf-export .vp-tabs {
     letter-spacing: 0.02em;
     white-space: nowrap;
   }
-  /* Footer: references strip + reviewer note — sits directly below
-     the disclaimer block (both pinned to page bottom together). */
+  /* Footer: reviewer note + signature block — sits directly below
+     the disclaimer + acceptance cluster (all pinned to page bottom
+     together). Sofia v3: the bottom references-inline strip was
+     REMOVED — every method entry already carries its citing standard
+     in pr-method-cite, so the footer band duplicated information and
+     wasted ~6mm of vertical that was pushing the signature row off
+     the page. Standards inventory lives ONLY in the per-entry cite
+     now; if a reviewer wants a flat list, they read the cite line of
+     each card in the grid. */
   #print-report .pr-credentials-footer {
     flex: 0 0 auto;
-    padding-top: 2pt;            /* was 3pt */
-  }
-  #print-report .pr-references-inline {
-    font-size: 5.6pt;            /* was 5.8pt */
-    color: var(--muted);
-    padding: 1.5pt 0;            /* was 2pt */
-    border-top: 0.4pt solid var(--rule);
-    border-bottom: 0.4pt solid var(--rule);
-    line-height: 1.35;           /* was 1.4 */
-    margin-bottom: 2pt;          /* was 3pt */
-  }
-  #print-report .pr-references-inline strong {
-    color: var(--ink);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    font-size: 5.4pt;
-    margin-right: 3pt;
+    padding-top: 1.5pt;          /* was 2pt */
   }
   #print-report .pr-reviewer-compact {
     margin: 0;
-    padding: 2pt 6pt;            /* was 3pt — tighter vertical */
+    padding: 1.5pt 6pt;          /* was 2pt 6pt */
     background: var(--paper-2);
     border-left: 1.2pt solid var(--accent);
-    font-size: 6.2pt;            /* was 6.4pt */
-    line-height: 1.3;            /* was 1.35 */
+    font-size: 6pt;              /* was 6.2pt */
+    line-height: 1.25;           /* was 1.3 */
     break-inside: avoid;
   }
   #print-report .pr-reviewer-compact .pr-eyebrow {
@@ -1215,7 +1213,7 @@ body.is-pdf-export .vp-tabs {
      baseline; cell label centred below. */
   #print-report .pr-signoff-table {
     width: 100%;
-    margin: 4pt 0 0 0;             /* was 6pt — pull closer to reviewer note */
+    margin: 2pt 0 0 0;             /* was 4pt — pull tight to reviewer note */
     border-collapse: collapse;
     table-layout: fixed;
     break-inside: avoid;
@@ -1223,9 +1221,9 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-signoff-cell {
     width: 50mm;
-    height: 16mm;                  /* was 25mm — still plenty for a wet sig */
+    height: 14mm;                  /* was 16mm — still ≥12mm minimum per constraint */
     border: 0.4pt solid var(--ink);
-    padding: 2pt 4pt 2pt 4pt;
+    padding: 1.5pt 4pt 1.5pt 4pt;  /* was 2pt */
     vertical-align: bottom;
     text-align: center;
     position: relative;
@@ -1248,7 +1246,7 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-signoff-line {
     display: block;
     width: 100%;
-    height: 7mm;                   /* was 11mm — still room for a signature */
+    height: 6mm;                   /* was 7mm — cell trimmed 2mm so line trims 1mm */
     border-bottom: 0.5pt solid var(--ink);
     margin: 0 0 1pt 0;
   }
