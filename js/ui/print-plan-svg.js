@@ -75,7 +75,7 @@ function buildRoomOutline(room, depth_m, offsetX, offsetY) {
     if (verts.length < 3) return '';
     const pts = verts.map(v => {
       const sx = v.x + offsetX;
-      const sy = (depth_m - v.y) + offsetY;
+      const sy = v.y + offsetY;
       return `${sx.toFixed(3)},${sy.toFixed(3)}`;
     }).join(' ');
     return `<polygon points="${pts}" fill="#fafafa" stroke="${stroke}" stroke-width="${sw}" />`;
@@ -83,21 +83,23 @@ function buildRoomOutline(room, depth_m, offsetX, offsetY) {
   return '';
 }
 
-// Convert state-frame (x_m, y_m) to SVG-frame (sx, sy) with y flipped
-// so north points up on the printed page.
+// State y=0 is FRONT (where the north arrow points); state +y grows
+// toward the BACK wall. SVG y also grows downward, so we map state y
+// directly to SVG y — no flip. Matches room-2d.js so the printed plan
+// and the in-app 2D plan show the same room in the same orientation.
 function projectXY(x_m, y_m, depth_m, offsetX, offsetY) {
   return {
     sx: x_m + offsetX,
-    sy: (depth_m - y_m) + offsetY,
+    sy: y_m + offsetY,
   };
 }
 
 // Aim-triangle builder: apex points in the source yaw direction.
-// SVG y is flipped vs state +y (see projectXY) — that's why apex Y uses
-// -cos(yaw). Mirrors the live 2D viewport convention.
+// yaw=0 aims along state +y (toward BACK), which in the SVG is +sy
+// (downward), so apex Y uses +cos(yaw).
 function aimTrianglePoints(cx, cy, r, yawDeg) {
   const yaw = (yawDeg || 0) * Math.PI / 180;
-  const dx = Math.sin(yaw), dy = -Math.cos(yaw);
+  const dx = Math.sin(yaw), dy = Math.cos(yaw);
   const px = -dy, py = dx;
   const ax = cx + dx * r;
   const ay = cy + dy * r;

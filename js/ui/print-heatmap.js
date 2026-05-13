@@ -46,17 +46,21 @@ function pickScaleBar(roomWidth_m) {
   return best;
 }
 
+// State y=0 is the FRONT wall (where the north arrow points); state y
+// grows toward the BACK wall. SVG y also grows downward, so we map
+// state y directly to SVG y — no flip. This matches the live 2D plan
+// in room-2d.js so the printed report and the in-app view show the
+// same room in the same orientation.
 function projectXY(x_m, y_m, depth_m, offsetX, offsetY) {
-  return { sx: x_m + offsetX, sy: (depth_m - y_m) + offsetY };
+  return { sx: x_m + offsetX, sy: y_m + offsetY };
 }
 
 // Build a triangle whose apex points in the source aim direction.
-// State +y is "forward" but projectXY flips Y for SVG, so apex Y uses
-// -cos(yaw) to match. Used by the cover plan + drawing pages for
-// source markers; mirrors the 2D viewport's aim-cone convention.
+// Source aim yaw=0 means firing along state +y (toward the BACK wall),
+// which in the SVG is +sy (downward), so apex Y uses +cos(yaw).
 function aimTrianglePoints(cx, cy, r, yawDeg) {
   const yaw = (yawDeg || 0) * Math.PI / 180;
-  const dx = Math.sin(yaw), dy = -Math.cos(yaw);   // unit aim in SVG coords
+  const dx = Math.sin(yaw), dy = Math.cos(yaw);    // unit aim in SVG coords
   const px = -dy, py = dx;                          // perpendicular (right-hand)
   const ax = cx + dx * r;                           // apex along aim
   const ay = cy + dy * r;
@@ -83,11 +87,12 @@ export function buildHeatmapDataURL(splGrid) {
   canvas.height = cellsY;
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(cellsX, cellsY);
-  // Image-Y points DOWN; state-Y points UP (north). The plan SVG flips
-  // the linework via projectXY; we mirror the heatmap raster the same
-  // way so cell (i, j) lines up with cell (i, cellsY-1-j) on screen.
+  // State y=0 is FRONT and lines up with the top of the SVG; state +y
+  // grows toward the BACK wall and toward the bottom of the SVG. Both
+  // raster and SVG share that direction now (was previously flipped),
+  // so grid row j renders at image row j directly.
   for (let j = 0; j < cellsY; j++) {
-    const srcRow = cellsY - 1 - j;
+    const srcRow = j;
     for (let i = 0; i < cellsX; i++) {
       const v = grid[srcRow][i];
       const idx = (j * cellsX + i) * 4;
@@ -178,12 +183,10 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
   const oy = splGrid.originY_m ?? 0;
   const planeW = (splGrid.cellW_m ?? 0) * splGrid.cellsX || room.width_m;
   const planeD = (splGrid.cellD_m ?? 0) * splGrid.cellsY || room.depth_m;
-  // image-Y is flipped (state Y goes north, SVG Y goes south); we
-  // already mirrored the raster row order in buildHeatmapDataURL, so
-  // we just place the image at the top-left corner of its bounds in
-  // SVG space.
+  // State y=oy (front of grid) maps to SVG y=oy+offsetY at the TOP of
+  // the image's vertical span — no flip, raster row order matches.
   const imgX = ox + offsetX;
-  const imgY = (depth_m - (oy + planeD)) + offsetY;
+  const imgY = oy + offsetY;
   const heatEl = `<image href="${dataURL}" x="${imgX.toFixed(3)}" y="${imgY.toFixed(3)}" width="${planeW.toFixed(3)}" height="${planeD.toFixed(3)}" preserveAspectRatio="none" image-rendering="optimizeQuality" />`;
 
   // Room outline — drawn over the heatmap so the architectural reads
@@ -215,7 +218,7 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
     if (verts.length >= 3) {
       const pts = verts.map(v => {
         const sx = v.x + offsetX;
-        const sy = (depth_m - v.y) + offsetY;
+        const sy = v.y + offsetY;
         return `${sx.toFixed(3)},${sy.toFixed(3)}`;
       }).join(' ');
       outlineEl = `<polygon points="${pts}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;

@@ -1624,7 +1624,9 @@ function buildTreatmentPlanSVG(stateRef) {
   const viewH = room.depth_m + 2 * MARGIN;
   const depth_m = room.depth_m;
 
-  const project = (x, y) => ({ sx: x + offsetX, sy: (depth_m - y) + offsetY });
+  // State y=0 is FRONT (top of plan); state +y grows toward BACK (bottom)
+  // — same orientation as room-2d.js and print-heatmap.js. No Y flip.
+  const project = (x, y) => ({ sx: x + offsetX, sy: y + offsetY });
 
   // ---- Room outline -------------------------------------------------
   const stroke = '#222';
