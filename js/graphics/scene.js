@@ -3788,9 +3788,55 @@ export function captureViewportImage(opts = {}) {
     console.warn('[scene] captureViewportImage skipped — walk mode active');
     return null;
   }
-  const width  = Math.max(200, Math.floor(opts.width  ?? 1400));
-  const height = Math.max(150, Math.floor(opts.height ?? 900));
+  let width  = Math.max(200, Math.floor(opts.width  ?? 1400));
+  let height = Math.max(150, Math.floor(opts.height ?? 900));
   const presetName = opts.preset ?? 'iso';
+
+  // ---- Adaptive capture aspect (so shallow rooms don't leave empty PNG margin) ----
+  // For iso preset, compute the room silhouette's natural aspect from
+  // projecting AABB extents onto the iso view basis. Then resize the
+  // capture to that aspect (keeping pixel area ~constant for quality)
+  // so the room fills the PNG. CSS displays the PNG at `width:165mm;
+  // height:auto` so the rendered hero is variable-height per room.
+  if (presetName === 'iso') {
+    try {
+      const aabb = _roomWorldAABB?.();
+      if (aabb && aabb.w > 0 && aabb.d > 0) {
+        const dirToCam = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
+        const viewDir = dirToCam.clone().negate();
+        const worldUp = new THREE.Vector3(0, 1, 0);
+        const rightV = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();
+        const upV    = new THREE.Vector3().crossVectors(viewDir, rightV).normalize();
+        const cx = aabb.cx, cz = aabb.cz, h = aabb.h;
+        let maxOX = 0, maxOY = 0;
+        const tmp = new THREE.Vector3();
+        for (let xi = 0; xi < 2; xi++) {
+          for (let yi = 0; yi < 2; yi++) {
+            for (let zi = 0; zi < 2; zi++) {
+              tmp.set(
+                xi === 0 ? aabb.minX : aabb.maxX,
+                yi === 0 ? 0 : h,
+                zi === 0 ? aabb.minZ : aabb.maxZ,
+              );
+              tmp.x -= cx; tmp.y -= h * 0.4; tmp.z -= cz;
+              maxOX = Math.max(maxOX, Math.abs(tmp.dot(rightV)));
+              maxOY = Math.max(maxOY, Math.abs(tmp.dot(upV)));
+            }
+          }
+        }
+        if (maxOX > 0 && maxOY > 0) {
+          const silhouetteAspect = maxOX / maxOY;       // wide-shallow rooms > 1; tall narrow < 1
+          // Clamp aspect to a sane range so a degenerate room doesn't
+          // produce a 1×10000 strip.
+          const aspect = Math.max(0.6, Math.min(2.2, silhouetteAspect));
+          // Keep pixel area close to original — sqrt distributes it.
+          const area = width * height;
+          width  = Math.round(Math.sqrt(area * aspect));
+          height = Math.round(Math.sqrt(area / aspect));
+        }
+      }
+    } catch (e) { /* fall back to opts dimensions */ }
+  }
 
   // --- Stash live camera + scene state we'll mutate -------------------
   const prevAspect = camera.aspect;
