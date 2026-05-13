@@ -3799,6 +3799,13 @@ export function captureViewportImage(opts = {}) {
   const prevTween = _focusTween;
   const prevBackground = scene.background;        // swap to white for print, restore after
   const prevGridVisible = _floorGrid ? _floorGrid.visible : null;
+  // Hide audience FIGURES during capture. They render as dense vertical
+  // dark bodies that, viewed from iso angle in an arena, project as a
+  // solid black blob on the floor and dominate the cover. The colored
+  // zone overlays (zonesGroup) remain visible — the room still reads as
+  // a venue with audience areas, just without the thousands-of-figures
+  // visual noise. Module-scope audienceGroup is set in rebuildAudience().
+  const prevAudienceVisible = audienceGroup ? audienceGroup.visible : null;
 
   // ---- Capture-only frustum expansion (real fix for "arena prints black") ----
   // Two compounding bugs were turning Pavilion / Dome interiors black in print:
@@ -3862,6 +3869,7 @@ export function captureViewportImage(opts = {}) {
     // extends past the room and looks like a cropped wood floor. The
     // room is the subject — drop the surrounding noise.
     if (_floorGrid) _floorGrid.visible = false;
+    if (audienceGroup) audienceGroup.visible = false;
 
     // (Lighting boost removed — was washing out small rooms without
     // fixing the arena-black-floor root cause. Real fix is the
@@ -3944,6 +3952,7 @@ export function captureViewportImage(opts = {}) {
       _focusTween = prevTween;
       scene.background = prevBackground;
       if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
+      if (audienceGroup && prevAudienceVisible !== null) audienceGroup.visible = prevAudienceVisible;
       // Restore camera.far + shadow camera frustum if we touched them.
       if (camera && prevCamFar !== null) {
         camera.far = prevCamFar;
