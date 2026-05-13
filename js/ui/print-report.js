@@ -659,6 +659,9 @@ const METHODOLOGY_ENTRIES = [
   ['Precision engine — STI (full)',
     'IEC 60268-16:2020 Annex A (full STI, 14 mod-freqs).',
     'm(f_m) = |∫h²·e^(−j2π fₘ t)dt| / ∫h²dt across 14 modulation frequencies × 7 bands; α/β weighting and ±15 dB clamp as STIPA.'],
+  ['Precision engine — treatment scattering (v3)',
+    'ISO 17497-2:2012 (scattering coefficient); Cox & D\'Antonio 2nd ed. §6.4 & §11.2.',
+    'Each ray bouncing off a placed treatment in the precision tracer is reflected diffusely (cosine-weighted hemisphere) with probability equal to the catalogued ISO 17497-2 scattering coefficient s(f) at that frequency band; the complementary probability (1 − s) produces a specular reflection. Absorbers behave the same way with s = 0 (pure specular). Methodology change vs pre-v3: STI, C50, C80 and EDT may shift in rooms with placed treatments. Typical magnitudes are scene-dependent: diffuser-rich rooms exhibit C50 drift in the range of a few tenths of a dB to ~1.5 dB (sign depends on the balance of catalogued α versus s in the chosen product); absorber-rich rooms show RT60 reductions of 5–20 % depending on coverage.'],
 ];
 
 // ---------------------------------------------------------------------------

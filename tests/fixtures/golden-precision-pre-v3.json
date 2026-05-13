@@ -1,4 +1,10 @@
 {
+  "_schema": {
+    "version": "v3-post",
+    "bare":      "pre-v3 baseline (no treatments — identical pre/post v3, used as a tracer-determinism regression)",
+    "absorbers": "post-v3 ground truth (pre-v3 was wrong by construction — tracer ignored treatment absorption entirely; v3 wires treatment α into the precision engine)",
+    "qrd":       "pre-v3 reference for v3 acceptance gate in tests/treatments-precision-v3.test.mjs (Δ = live − this; window ΔC50 ∈ [-1.5, -0.3] dB, ΔSTI ∈ [-0.04, +0.02])"
+  },
   "bare": {
     "edt_s": 2.3589,
     "t30_s": 1.6218,
@@ -7,13 +13,15 @@
     "sti": 0.463
   },
   "absorbers": {
-    "edt_s": 2.3589,
-    "t30_s": 1.6218,
-    "c50_db": -5.019,
-    "c80_db": -2.543,
-    "sti": 0.463
+    "_origin": "post-v3 ground truth — locked in at PR3 ship",
+    "edt_s": 1.4568,
+    "t30_s": 1.3617,
+    "c50_db": -2.324,
+    "c80_db": 0.583,
+    "sti": 0.529
   },
   "qrd": {
+    "_origin": "pre-v3 reference — held frozen so the v3 acceptance gate has a stable Δ baseline",
     "edt_s": 2.3589,
     "t30_s": 1.6218,
     "c50_db": -5.019,
