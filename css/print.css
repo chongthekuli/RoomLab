@@ -1088,17 +1088,17 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-credentials-disclaimer {
     margin-top: auto;            /* flex push to bottom */
     flex: 0 0 auto;
-    padding-top: 4pt;
+    padding-top: 3pt;            /* was 4pt */
     border-top: 0.4pt solid var(--rule);
   }
   #print-report .pr-disclaimer-grid {
     column-count: 2;
     column-gap: 7pt;
-    font-size: 6.5pt;
-    line-height: 1.3;
+    font-size: 6.3pt;            /* was 6.5pt */
+    line-height: 1.25;           /* was 1.3 */
   }
   #print-report .pr-disclaimer-grid p {
-    margin: 0 0 2pt 0;
+    margin: 0 0 1.5pt 0;         /* was 2pt */
     break-inside: avoid;
   }
   /* Acceptance addendum — the legal seal of the document. Sits
@@ -1110,14 +1110,14 @@ body.is-pdf-export .vp-tabs {
      it immediately. */
   #print-report .pr-credentials-acceptance {
     flex: 0 0 auto;
-    margin-top: 3pt;
-    padding: 3pt 0 0 0;
+    margin-top: 2pt;             /* was 3pt */
+    padding: 2pt 0 0 0;          /* was 3pt */
     border-top: 0.4pt solid var(--rule);
     break-inside: avoid;
   }
   #print-report .pr-acceptance-body {
-    font-size: 6.6pt;
-    line-height: 1.35;
+    font-size: 6.3pt;            /* was 6.6pt */
+    line-height: 1.3;            /* was 1.35 */
     color: var(--ink);
     margin: 0;
     text-align: justify;
@@ -1172,16 +1172,16 @@ body.is-pdf-export .vp-tabs {
      the disclaimer block (both pinned to page bottom together). */
   #print-report .pr-credentials-footer {
     flex: 0 0 auto;
-    padding-top: 3pt;
+    padding-top: 2pt;            /* was 3pt */
   }
   #print-report .pr-references-inline {
-    font-size: 5.8pt;
+    font-size: 5.6pt;            /* was 5.8pt */
     color: var(--muted);
-    padding: 2pt 0;
+    padding: 1.5pt 0;            /* was 2pt */
     border-top: 0.4pt solid var(--rule);
     border-bottom: 0.4pt solid var(--rule);
-    line-height: 1.4;
-    margin-bottom: 3pt;
+    line-height: 1.35;           /* was 1.4 */
+    margin-bottom: 2pt;          /* was 3pt */
   }
   #print-report .pr-references-inline strong {
     color: var(--ink);
@@ -1192,11 +1192,11 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-reviewer-compact {
     margin: 0;
-    padding: 3pt 6pt;
+    padding: 2pt 6pt;            /* was 3pt — tighter vertical */
     background: var(--paper-2);
     border-left: 1.2pt solid var(--accent);
-    font-size: 6.4pt;
-    line-height: 1.35;
+    font-size: 6.2pt;            /* was 6.4pt */
+    line-height: 1.3;            /* was 1.35 */
     break-inside: avoid;
   }
   #print-report .pr-reviewer-compact .pr-eyebrow {
@@ -1215,7 +1215,7 @@ body.is-pdf-export .vp-tabs {
      baseline; cell label centred below. */
   #print-report .pr-signoff-table {
     width: 100%;
-    margin: 6pt 0 0 0;
+    margin: 4pt 0 0 0;             /* was 6pt — pull closer to reviewer note */
     border-collapse: collapse;
     table-layout: fixed;
     break-inside: avoid;
@@ -1223,9 +1223,9 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-signoff-cell {
     width: 50mm;
-    height: 25mm;
+    height: 16mm;                  /* was 25mm — still plenty for a wet sig */
     border: 0.4pt solid var(--ink);
-    padding: 3pt 4pt 4pt 4pt;
+    padding: 2pt 4pt 2pt 4pt;
     vertical-align: bottom;
     text-align: center;
     position: relative;
@@ -1248,9 +1248,9 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-signoff-line {
     display: block;
     width: 100%;
-    height: 11mm;
+    height: 7mm;                   /* was 11mm — still room for a signature */
     border-bottom: 0.5pt solid var(--ink);
-    margin: 0 0 2pt 0;
+    margin: 0 0 1pt 0;
   }
   #print-report .pr-signoff-label {
     display: block;
