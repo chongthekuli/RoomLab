@@ -379,7 +379,7 @@ body.is-pdf-export .vp-tabs {
     right: 3mm;
     bottom: 3mm;
     width: 48mm;
-    opacity: 0.50;
+    opacity: 0.90;
     z-index: 2;
     pointer-events: none;
   }
