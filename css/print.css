@@ -1198,17 +1198,20 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-reviewer-compact {
     margin: 0;
-    padding: 1.5pt 6pt;          /* was 2pt 6pt */
+    padding: 1.5pt 6pt;
     background: var(--paper-2);
     border-left: 1.2pt solid var(--accent);
-    font-size: 6pt;              /* was 6.2pt */
-    line-height: 1.25;           /* was 1.3 */
+    /* Match the disclaimer body size so reviewer text reads as the
+       same prose tier as the other paragraph copy on this page —
+       was 6pt @ 1.25, now 6.2pt @ 1.25 to align with .pr-disclaimer-grid. */
+    font-size: 6.2pt;
+    line-height: 1.25;
     break-inside: avoid;
   }
   #print-report .pr-reviewer-compact .pr-eyebrow {
     display: inline;
     margin: 0;
-    font-size: 6pt;
+    font-size: 6.2pt;            /* match the body size of this block */
     color: var(--accent);
     font-weight: 700;
   }
@@ -1230,8 +1233,12 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-signoff-cell {
     width: 50mm;
     height: 14mm;                  /* was 16mm — still ≥12mm minimum per constraint */
-    border: 0.4pt solid var(--ink);
-    padding: 1.5pt 4pt 1.5pt 4pt;  /* was 2pt */
+    /* 10 % opacity ink — visible guide for the cell without a heavy
+       box weighing down the page. The signature line itself (pr-
+       signoff-line, below) keeps full opacity as the actual writing
+       target. */
+    border: 0.4pt solid rgba(26, 31, 36, 0.10);
+    padding: 1.5pt 4pt 1.5pt 4pt;
     vertical-align: bottom;
     text-align: center;
     position: relative;
