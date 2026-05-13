@@ -50,6 +50,24 @@ function projectXY(x_m, y_m, depth_m, offsetX, offsetY) {
   return { sx: x_m + offsetX, sy: (depth_m - y_m) + offsetY };
 }
 
+// Build a triangle whose apex points in the source aim direction.
+// State +y is "forward" but projectXY flips Y for SVG, so apex Y uses
+// -cos(yaw) to match. Used by the cover plan + drawing pages for
+// source markers; mirrors the 2D viewport's aim-cone convention.
+function aimTrianglePoints(cx, cy, r, yawDeg) {
+  const yaw = (yawDeg || 0) * Math.PI / 180;
+  const dx = Math.sin(yaw), dy = -Math.cos(yaw);   // unit aim in SVG coords
+  const px = -dy, py = dx;                          // perpendicular (right-hand)
+  const ax = cx + dx * r;                           // apex along aim
+  const ay = cy + dy * r;
+  const bcx = cx - dx * r * 0.4;                    // base center slightly back
+  const bcy = cy - dy * r * 0.4;
+  const bw = r * 0.75;
+  const blx = bcx + px * bw, bly = bcy + py * bw;
+  const brx = bcx - px * bw, bry = bcy - py * bw;
+  return `${ax.toFixed(3)},${ay.toFixed(3)} ${blx.toFixed(3)},${bly.toFixed(3)} ${brx.toFixed(3)},${bry.toFixed(3)}`;
+}
+
 // Render the splGrid into a canvas-2d ImageData and return the PNG
 // data URL. Cells outside the room (-Infinity in the grid) become
 // fully transparent so the room background shows through.
@@ -222,8 +240,10 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
       + `<text x="${c.sx.toFixed(3)}" y="${c.sy.toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#111" stroke="#fff" stroke-width="0.05" paint-order="stroke">${escapeText(z.label || z.id)}</text>`;
   }).join('');
 
-  // Sources — same indexed circles as the cover plan so a reader can
-  // cross-reference between the two pages.
+  // Sources — triangles pointing in the aim direction. Matches the
+  // live 2D viewport convention: sources radiate (directional symbol),
+  // listeners receive (circle). Previously these were swapped, which
+  // contradicted every other view in the app.
   const sourcePieces = [];
   let srcCounter = 0;
   for (const s of (state.sources || [])) {
@@ -236,31 +256,29 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
       const p = projectXY(px, py, depth_m, offsetX, offsetY);
       const color = el.groupId ? colorForGroup(el.groupId) : '#1f5faa';
       const label = s.kind === 'line-array' ? `${srcCounter}.${eIdx + 1}` : `${srcCounter}`;
-      sourcePieces.push(`<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="0.26" fill="${color}" stroke="#fff" stroke-width="0.07" />`);
-      sourcePieces.push(`<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="0.26" fill="none" stroke="#000" stroke-width="0.04" />`);
+      const tri = aimTrianglePoints(p.sx, p.sy, 0.32, el.aim?.yaw ?? 0);
+      sourcePieces.push(`<polygon points="${tri}" fill="${color}" stroke="#fff" stroke-width="0.08" />`);
+      sourcePieces.push(`<polygon points="${tri}" fill="none" stroke="#000" stroke-width="0.04" />`);
       if (!compact) {
-        sourcePieces.push(`<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#000" stroke="#fff" stroke-width="0.06" paint-order="stroke">${label}</text>`);
+        sourcePieces.push(`<text x="${(p.sx + 0.48).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#000" stroke="#fff" stroke-width="0.06" paint-order="stroke">${label}</text>`);
       }
     });
   }
   const sourcesEl = sourcePieces.join('');
 
-  // Listeners — triangles, white halo for legibility against any
+  // Listeners — circles. White halo for legibility against any
   // colour from the heatmap underneath.
   const listenersEl = (state.listeners || []).map(l => {
     const px = l.position?.x;
     const py = l.position?.y;
     if (px == null || py == null) return '';
     const p = projectXY(px, py, depth_m, offsetX, offsetY);
-    const r = 0.32;
-    const tri = `${p.sx.toFixed(3)},${(p.sy - r).toFixed(3)} `
-      + `${(p.sx + r * 0.866).toFixed(3)},${(p.sy + r * 0.5).toFixed(3)} `
-      + `${(p.sx - r * 0.866).toFixed(3)},${(p.sy + r * 0.5).toFixed(3)}`;
-    const triBase = `<polygon points="${tri}" fill="#0a8a4a" stroke="#fff" stroke-width="0.08" />`
-      + `<polygon points="${tri}" fill="none" stroke="#000" stroke-width="0.04" />`;
-    if (compact) return triBase;
-    return triBase
-      + `<text x="${(p.sx + 0.55).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28" stroke="#fff" stroke-width="0.06" paint-order="stroke">${escapeText(l.label || l.id)}</text>`;
+    const r = 0.26;
+    const base = `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="#0a8a4a" stroke="#fff" stroke-width="0.08" />`
+      + `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="none" stroke="#000" stroke-width="0.04" />`;
+    if (compact) return base;
+    return base
+      + `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28" stroke="#fff" stroke-width="0.06" paint-order="stroke">${escapeText(l.label || l.id)}</text>`;
   }).join('');
 
   // Scale bar + north arrow — both placed fully inside the SVG margin

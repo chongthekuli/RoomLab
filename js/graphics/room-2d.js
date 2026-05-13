@@ -856,6 +856,7 @@ function renderNormal(vp) {
         <g clip-path="url(#room-clip)">${splSvg}</g>
         ${roomOutline.walls}
         ${roomOutline.labels}
+        ${renderNorthArrowSVG(x0, y0, pxW)}
         ${zonesSvg}
         ${subSvg}
         ${encSvg}
@@ -1021,6 +1022,28 @@ function matIdOf(slot) {
   if (typeof slot === 'string') return slot;
   if (slot && typeof slot === 'object' && typeof slot.materialId === 'string') return slot.materialId;
   return 'gypsum-board';
+}
+
+// North arrow drawn above the top-right of the room rect, matching the
+// kite + 'N' label convention used by the printed report (see
+// print-heatmap.js northArrowEl) so the two views read identically.
+// In the live 2D plan the FRONT wall is at the top, which is also
+// where the arrow points — sources with yaw=180 in state coordinates
+// fire toward the front, so 'north = front' is the canonical map.
+function renderNorthArrowSVG(x0, y0, pxW) {
+  const size = 14;                          // half-height of the arrow
+  const cx = x0 + pxW - 10;                 // top-right, just inside the right edge
+  const cy = y0 - 18;                       // sits above the FRONT label band
+  const apexY = cy - size;
+  const midY = cy + size * 0.25;
+  const baseY = cy + size * 0.05;
+  const halfW = size * 0.45;
+  return `
+    <g class="vp-north-arrow" aria-hidden="true">
+      <polygon points="${cx},${apexY} ${cx + halfW},${midY} ${cx},${baseY} ${cx - halfW},${midY}" fill="#cfd3d9" stroke="#0a0c10" stroke-width="0.6" />
+      <text x="${cx}" y="${cy + size * 0.95}" text-anchor="middle" font-size="10" font-weight="600" fill="#cfd3d9" stroke="#0a0c10" stroke-width="0.4" paint-order="stroke">N</text>
+    </g>
+  `;
 }
 
 function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {

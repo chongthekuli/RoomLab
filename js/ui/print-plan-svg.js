@@ -92,6 +92,23 @@ function projectXY(x_m, y_m, depth_m, offsetX, offsetY) {
   };
 }
 
+// Aim-triangle builder: apex points in the source yaw direction.
+// SVG y is flipped vs state +y (see projectXY) — that's why apex Y uses
+// -cos(yaw). Mirrors the live 2D viewport convention.
+function aimTrianglePoints(cx, cy, r, yawDeg) {
+  const yaw = (yawDeg || 0) * Math.PI / 180;
+  const dx = Math.sin(yaw), dy = -Math.cos(yaw);
+  const px = -dy, py = dx;
+  const ax = cx + dx * r;
+  const ay = cy + dy * r;
+  const bcx = cx - dx * r * 0.4;
+  const bcy = cy - dy * r * 0.4;
+  const bw = r * 0.75;
+  const blx = bcx + px * bw, bly = bcy + py * bw;
+  const brx = bcx - px * bw, bry = bcy - py * bw;
+  return `${ax.toFixed(3)},${ay.toFixed(3)} ${blx.toFixed(3)},${bly.toFixed(3)} ${brx.toFixed(3)},${bry.toFixed(3)}`;
+}
+
 // Build the SVG floor plan as a string. Caller wraps in their own
 // container (the print page slot is sized via CSS).
 //
@@ -124,8 +141,9 @@ export function buildFloorPlanSVG(state, opts = {}) {
       + `<text x="${c.sx.toFixed(3)}" y="${c.sy.toFixed(3)}" font-size="0.45" text-anchor="middle" fill="#222">${escapeText(z.label || z.id)}</text>`;
   }).join('');
 
-  // Sources — filled circles, group-tinted, indexed labels. Line arrays
-  // expand to per-element circles so the user can see the column.
+  // Sources — triangles pointing in the aim direction (matches the
+  // live 2D viewport: sources radiate, listeners receive). Line arrays
+  // expand to per-element triangles so the user can see the column.
   const sourcePieces = [];
   let srcCounter = 0;
   for (const s of (state.sources || [])) {
@@ -138,25 +156,23 @@ export function buildFloorPlanSVG(state, opts = {}) {
       const p = projectXY(px, py, depth_m, offsetX, offsetY);
       const color = el.groupId ? colorForGroup(el.groupId) : '#1f5faa';
       const label = s.kind === 'line-array' ? `${srcCounter}.${eIdx + 1}` : `${srcCounter}`;
-      sourcePieces.push(`<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="0.28" fill="${color}" stroke="#000" stroke-width="0.04" />`);
-      sourcePieces.push(`<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#000">${label}</text>`);
+      const tri = aimTrianglePoints(p.sx, p.sy, 0.32, el.aim?.yaw ?? 0);
+      sourcePieces.push(`<polygon points="${tri}" fill="${color}" stroke="#000" stroke-width="0.04" />`);
+      sourcePieces.push(`<text x="${(p.sx + 0.48).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#000">${label}</text>`);
     });
   }
   const sourcesEl = sourcePieces.join('');
 
-  // Listeners — equilateral triangles pointing up. Distinct from
-  // source circles so the plan is readable in monochrome print too.
+  // Listeners — circles. Distinct from source triangles so the plan
+  // is readable in monochrome print too.
   const listenersEl = (state.listeners || []).map(l => {
     const px = l.position?.x;
     const py = l.position?.y;
     if (px == null || py == null) return '';
     const p = projectXY(px, py, depth_m, offsetX, offsetY);
-    const r = 0.32;
-    const tri = `${p.sx.toFixed(3)},${(p.sy - r).toFixed(3)} `
-      + `${(p.sx + r * 0.866).toFixed(3)},${(p.sy + r * 0.5).toFixed(3)} `
-      + `${(p.sx - r * 0.866).toFixed(3)},${(p.sy + r * 0.5).toFixed(3)}`;
-    return `<polygon points="${tri}" fill="#0a8a4a" stroke="#000" stroke-width="0.04" />`
-      + `<text x="${(p.sx + 0.55).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28">${escapeText(l.label || l.id)}</text>`;
+    const r = 0.26;
+    return `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="#0a8a4a" stroke="#000" stroke-width="0.04" />`
+      + `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28">${escapeText(l.label || l.id)}</text>`;
   }).join('');
 
   // Scale bar — chosen from a "nice" set so the labelled length is
