@@ -93,6 +93,15 @@ export async function mountTreatmentsPanel({ materials } = {}) {
   });
   on('treatment:changed', () => { _armedProductId = null; render(); });
   on('treatment:selected', render);
+  // 3D-click → panel jump. The scene.js click handler emits
+  // treatment:highlight AFTER treatment:selected. The render runs first,
+  // then the next animation frame scrolls + flashes the matching card.
+  on('treatment:highlight', ({ id } = {}) => {
+    if (!id) return;
+    _expandedTreatments.add(id);   // open the detail rows so user sees fields
+    render();
+    requestAnimationFrame(() => focusTreatmentCard(id));
+  });
   on('treatment:placement_armed', ({ productId } = {}) => {
     _armedProductId = productId || null;
     render();
@@ -228,6 +237,27 @@ function render() {
       emit('treatment:changed');
     });
   });
+}
+
+// Scroll the placed-card matching `id` into view and play the 1.4 s
+// pulse animation so the user can find it in a list of 20+ panels.
+// Mirrors focusSourceCard in panel-sources.js — same animation name
+// re-used so we don't need a second keyframe rule.
+function focusTreatmentCard(id) {
+  if (!id) return;
+  const panelRoot = document.getElementById('panel-treatments');
+  if (!panelRoot) return;
+  const card = panelRoot.querySelector(`.treatment-card[data-toggle-treatment="${id}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Strip any stale pulse so rapid repeats re-trigger the animation.
+  panelRoot.querySelectorAll('.treatment-card.treatment-card-flash').forEach(c => {
+    c.classList.remove('treatment-card-flash');
+  });
+  // Force reflow before re-adding so the browser restarts the animation.
+  void card.offsetHeight;
+  card.classList.add('treatment-card-flash');
+  setTimeout(() => card.classList.remove('treatment-card-flash'), 1400);
 }
 
 function renderPlacedList() {

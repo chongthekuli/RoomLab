@@ -4721,7 +4721,13 @@ function onTreatmentPointerDown(e) {
   renderer.domElement.addEventListener('pointermove', onTreatmentPointerMove);
   renderer.domElement.addEventListener('pointerup', onTreatmentPointerUp);
   renderer.domElement.addEventListener('pointercancel', onTreatmentPointerUp);
+  // Mirror the speaker-click pattern: open the Treatments panel and
+  // ask it to scroll + flash the matching card. treatment:selected
+  // re-renders the panel; treatment:highlight scrolls the new card
+  // into view AFTER the re-render flushes.
+  try { openPanel('left', 'treatments'); } catch (_) {}
   emit('treatment:selected', { id: tid });
+  emit('treatment:highlight', { id: tid });
 }
 
 function _raycastIntoSurfacePlane(e) {
