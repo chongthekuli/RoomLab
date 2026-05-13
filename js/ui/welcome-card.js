@@ -287,10 +287,12 @@ function buildScrim() {
       <p class="terms-whatsnew" aria-label="What's new in this release">
         <em>New in this build:</em> Treatments panel — drop acoustic absorbers,
         bass traps and diffusers from a 20-product catalogue onto your walls
-        and ceiling. Per-band absorption is folded into RT60 / STI live
-        (Sabine engine); each placed panel shows its &Delta;RT60 at 500&nbsp;Hz
-        on its card, and the printed BOM lists every product. Scattering /
-        diffusion behavior in the precision ray tracer is planned for v3.
+        and ceiling. Per-band absorption is folded into the draft Sabine
+        engine (RT60 / STI live); each placed panel shows its &Delta;RT60 at
+        500&nbsp;Hz on its card. <strong>v3:</strong> scattering and absorption
+        are now wired into the precision ray tracer per ISO 17497-2 — STI,
+        C50, C80 and EDT reflect placed treatments. The printed BOM lists
+        every product.
       </p>
       <div class="terms-operator-row">
         <label class="terms-operator-label" for="terms-operator-name">
