@@ -108,6 +108,8 @@ export function mountPrecisionPanel({ materials }) {
   on('source:model_changed', markStale);
   on('listener:changed', markStale);
   on('physics:eq_changed', markStale);
+  on('zone:changed', markStale);         // audience zones drive receiver positions for the trace
+  on('treatment:changed', markStale);    // v3: treatments are now in the BVH
   // Ambient noise only changes derived STI, not the impulse response —
   // so the raw histogram stays valid, but the displayed metrics need to
   // re-derive. Re-render without marking stale.

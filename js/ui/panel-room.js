@@ -1,5 +1,5 @@
 import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToState, applyTemplateToState, applyBlankCustomRoom } from '../app-state.js';
-import { emit } from './events.js';
+import { emit, on } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { importDxfFile } from '../physics/dxf-import.js';
 import { saveProjectToDownload, loadProjectFromFile } from '../io/project-file.js';
@@ -171,6 +171,21 @@ export function mountRoomPanel({ materials }) {
   });
 
   document.getElementById('btn-print-report')?.addEventListener('click', async () => {
+    // Gate: report generation requires a FRESH precision render. The
+    // precision tab caches state.results.precision when the user clicks
+    // Render; any scene edit (room / source / listener / zone /
+    // treatment / EQ) sets state.results.engines.precision.staleAt so
+    // the user must re-render before generating a report.
+    const hasPrecision = !!state.results?.precision;
+    const isStale = hasPrecision && !!state.results?.engines?.precision?.staleAt;
+    if (!hasPrecision) {
+      showStatus('Run a Precision Render first (right rail · precision icon) — Print is disabled until then.', 'err');
+      return;
+    }
+    if (isStale) {
+      showStatus('Scene has changed since the last precision render. Re-render before printing — open the Precision panel and click Render.', 'err');
+      return;
+    }
     try {
       // triggerPrint is now async — it awaits the 3D viewport capture
       // for the cover hero before invoking window.print(). Awaiting
@@ -181,6 +196,38 @@ export function mountRoomPanel({ materials }) {
       showStatus(`Print failed: ${err.message || err}`, 'err');
     }
   });
+
+  // Reflect the precision freshness in the button's appearance + title
+  // so the user sees Print is gated BEFORE clicking. Driven by every
+  // event that markStale subscribes to plus the precision:changed event
+  // that fires after a successful render or reset.
+  const printBtn = document.getElementById('btn-print-report');
+  if (printBtn) {
+    const syncPrintBtnState = () => {
+      const hasPrecision = !!state.results?.precision;
+      const isStale = hasPrecision && !!state.results?.engines?.precision?.staleAt;
+      const blocked = !hasPrecision || isStale;
+      printBtn.classList.toggle('btn-print-blocked', blocked);
+      printBtn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+      if (!hasPrecision) {
+        printBtn.title = 'Run a Precision Render first — Print is disabled until then.';
+      } else if (isStale) {
+        printBtn.title = 'Scene has changed — re-render the precision engine before printing.';
+      } else {
+        printBtn.title = 'Print a multi-page proposal of the current scene.';
+      }
+    };
+    syncPrintBtnState();
+    on('precision:changed', syncPrintBtnState);
+    on('room:changed', syncPrintBtnState);
+    on('source:changed', syncPrintBtnState);
+    on('source:model_changed', syncPrintBtnState);
+    on('listener:changed', syncPrintBtnState);
+    on('zone:changed', syncPrintBtnState);
+    on('treatment:changed', syncPrintBtnState);
+    on('physics:eq_changed', syncPrintBtnState);
+    on('scene:reset', syncPrintBtnState);
+  }
 
   // Room name — text input at the top of the panel. 'input' fires per
   // keystroke (cheap — only mutates a string field). We don't emit

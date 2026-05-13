@@ -131,6 +131,18 @@ html, body {
   color: var(--fg-strong, #fff);
   background: rgba(255, 255, 255, 0.04);
 }
+/* Print button gated state — no fresh precision render → muted look so
+   the user sees Print is blocked BEFORE clicking. Clicking still
+   surfaces a status message explaining what to do (panel-room.js). */
+#app-header .header-actions button.btn-print-blocked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+#app-header .header-actions button.btn-print-blocked:hover {
+  background: transparent;
+  border-color: var(--border-soft, rgba(255,255,255,0.06));
+  color: var(--fg-mid, #8a929c);
+}
 /* Reset button — same shape as the others but visually distinct so
    the destructive action signals itself. Compact, icon-only;
    confirmation dialog is the real safeguard. */
