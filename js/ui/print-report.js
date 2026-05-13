@@ -792,17 +792,8 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   const proposalParagraph = `This document is an acoustic simulation report for the ${dims} ${shapeLabel} room described above. It quantifies reverberation time (RT60) per ISO 3382-1, speech intelligibility (STI / STIPA) per IEC 60268-16, and sound-pressure-level coverage for ${sourcePhrase}${coveragePhrase}. A proposed surface-treatment scheme is presented alongside before-versus-after figures so the acoustic impact of each intervention is auditable. ${engineNote}`;
 
   // Meta strip — five short lines, scannable, sits under the eyebrow
-  // in the lower band. Engineer-tone, no marketing fluff.
-  const proposalScope = [
-    ['Document',     'Acoustic simulation report'],
-    ['Deliverables', 'RT60 · STI / STIPA · SPL coverage · treatment scheme'],
-    ['Methods',      hasPrecision ? 'Precision ray tracing · statistical acoustics' : 'Statistical acoustics (Sabine / Eyring)'],
-    ['Standards',    'ISO 3382-1 · IEC 60268-16 · ISO 9613-1'],
-    ['Comparison',   'Untreated baseline vs. proposed treatment'],
-  ];
-  const scopeRows = proposalScope.map(([k, v]) =>
-    `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`
-  ).join('');
+  // (Scope-table dropped per user v6 — the paragraph is the entire
+  // proposal opener now, justified prose, no point-form sidebar.)
 
   const cover = `
     <div class="pr-page pr-page-cover">
@@ -827,17 +818,10 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
             ${measurementsRows}
           </table>
         </aside>
-        ${insetHtml}
       </div>
       ${coverImage ? `<div class="pr-cover-hero-caption">Ceiling rendered at 5 % opacity for visibility of room interior.</div>` : ''}
       <section class="pr-cover-proposal">
-        <div class="pr-cover-proposal-meta">
-          <span class="pr-eyebrow">Proposal scope</span>
-          <table class="pr-cover-proposal-scope">${scopeRows}</table>
-        </div>
-        <div class="pr-cover-proposal-body">
-          <p class="pr-cover-proposal-para">${escapeHtml(proposalParagraph)}</p>
-        </div>
+        <p class="pr-cover-proposal-para">${escapeHtml(proposalParagraph)}</p>
       </section>
       <div class="pr-cover-foot">
         <span>schema v${model.project.schemaVersion} · generated ${escapeHtml(model.project.generatedAt)}</span>
