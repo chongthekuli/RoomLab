@@ -5267,3 +5267,74 @@ section h3 {
 #panel-treatments .treatments-armed ~ .treatments-catalogue .tp-place {
   opacity: 0.55;     /* dim other Place buttons while one is armed — still clickable to re-arm */
 }
+
+/* Per-card ΔRT60 ticker chip — PR-3, treatments physics integration.
+   Maya UX call: must be at-a-glance, signed, never compete with the
+   primary label for visual weight. Colour-coded by sign so a scan
+   of the placed-list reads as "how is my room responding". */
+#panel-treatments .treatment-delta-rt60 {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  border-radius: 9px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: var(--fg-mid, #b9bfc8);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+#panel-treatments .treatment-delta-rt60.negative {
+  /* Absorber doing its job — shortens RT60. */
+  background: rgba(70, 200, 130, 0.10);
+  border-color: rgba(70, 200, 130, 0.45);
+  color: #6fd8a4;
+}
+#panel-treatments .treatment-delta-rt60.positive {
+  /* Rare: panel α < wall material α (e.g. a glass diffuser on bare gypsum
+     at LF). User should see this — it's actually LENGTHENING RT60 a touch. */
+  background: rgba(255, 170, 60, 0.10);
+  border-color: rgba(255, 170, 60, 0.45);
+  color: #ffb874;
+}
+#panel-treatments .treatment-delta-rt60.zero,
+#panel-treatments .treatment-delta-rt60.unknown {
+  /* Tiny-effect or "catalogue still loading" — neutral. */
+  opacity: 0.7;
+}
+
+/* Clamped badge — panel area exceeded the wall budget, physics
+   reduced its effective area to fit. Visually similar warning weight
+   to the "outside" / "through wall" badges in the Results panel. */
+#panel-treatments .treatment-clamped-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  line-height: 1.4;
+  border-radius: 3px;
+  background: rgba(255, 165, 70, 0.14);
+  border: 1px solid rgba(255, 165, 70, 0.55);
+  color: #ffb874;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Precision tab banner — physics integration is RT60/STI only, not the
+   ray tracer (deferred to v3 per Hannes' scoping doc). Banner sits at
+   the top of #panel-precision so the user never thinks Precision T30
+   is reading the panel α catalogue. */
+#panel-precision .precision-v3-pending {
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 6px 9px;
+  margin: 0 0 10px;
+  background: rgba(255, 200, 80, 0.06);
+  border-left: 2px solid rgba(255, 200, 80, 0.55);
+  color: var(--fg-mid, #b9bfc8);
+}
+#panel-precision .precision-v3-pending strong { color: var(--fg, #e6edf3); }

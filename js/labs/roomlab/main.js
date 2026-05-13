@@ -362,7 +362,7 @@ export async function mountRoomLab() {
   // catalogue fetch. We don't block other panel mounts on it — the
   // panel renders a "Loading…" stub immediately and replaces it once
   // the catalogue resolves.
-  mountTreatmentsPanel().catch(err =>
+  mountTreatmentsPanel({ materials }).catch(err =>
     console.warn('[roomlab] treatments panel mount failed:', err));
   mountAmbientPanel();
   mountResultsPanel({ materials });

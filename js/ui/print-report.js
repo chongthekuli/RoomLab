@@ -43,7 +43,7 @@ import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
 // on state.results.precision.
 // ---------------------------------------------------------------------------
 export function buildPrintModel({ materials, nameHint } = {}) {
-  const rt60Bands = computeAllBands({ room: state.room, materials, zones: state.zones });
+  const rt60Bands = computeAllBands({ room: state.room, materials, zones: state.zones, treatments: state.treatments });
   const totalArea = rt60Bands[0]?.totalArea_m2 ?? 0;
   const volume = roomVolume(state.room);
   const flatSources = expandSources(state.sources ?? []);
@@ -1256,7 +1256,7 @@ export function triggerPrint() {
   }
   // Compute the grid ONCE here (so buildPrintModel's metadata and the
   // renderer's hero heatmap come from the same data) instead of twice.
-  const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones });
+  const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments });
   const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
   const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
   const model = buildPrintModel({ materials: _printMaterialsRef });
@@ -1282,7 +1282,7 @@ export function mountPrintReport({ materials }) {
   window.addEventListener('beforeprint', () => {
     if (!_printMaterialsRef) return;
     if (document.getElementById('print-report')) return;
-    const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones });
+    const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments });
     const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
     const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
     const model = buildPrintModel({ materials: _printMaterialsRef });

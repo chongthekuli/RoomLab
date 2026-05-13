@@ -112,6 +112,48 @@ export function findCatalogueEntry(id) {
   return _cached.all.find(e => e.id === id) || null;
 }
 
+// ---------------------------------------------------------------------------
+// Physics-side accessor — used by `roomEffectiveSurfaces` in
+// `js/physics/room-shape.js` to pull the absorption coefficient of a
+// placed treatment so it can be folded into the Sabine budget.
+//
+// Returns `null` when:
+//   * the catalogue hasn't been loaded yet (UI-first mounts always wait,
+//     but tests / physics-only callers might race — returning null lets
+//     the engine fall back to "treatment has no acoustic effect" without
+//     crashing, which is the correct visual-only-v1 behavior).
+//   * the productId isn't in the catalogue (deleted product, typo in a
+//     saved scene); same fallback as above.
+//   * the entry has no absorption array, or the bandIdx is out of range.
+//
+// Diffusers are treated AS-IS: their absorption coefficient (typically
+// 0.05–0.20 across the band) is added in the same way as a porous panel.
+// Per Hannes' edge-case ruling: no double-count subtraction is applied
+// for the "panel-covered" wall — the wall under the diffuser is already
+// carved away by the same overlap-math the absorber uses.
+export function getTreatmentAbsorption(productId, bandIdx) {
+  if (!_cached) return null;
+  const entry = _cached.all.find(e => e.id === productId);
+  if (!entry || !Array.isArray(entry.absorption)) return null;
+  const v = entry.absorption[bandIdx];
+  return Number.isFinite(v) ? v : null;
+}
+
+// Synchronous catalogue accessor for code paths that need to enumerate
+// all loaded products WITHOUT awaiting `loadSurfaceCatalogue()` (e.g.
+// the physics engine when called from a test where the panel-treatments
+// module already triggered the fetch). Returns null if the catalogue
+// hasn't resolved yet; the engine treats that as "treatments are
+// visually present but have no acoustic effect this frame", which
+// matches v1 behavior exactly.
+export function getCachedCatalogue() { return _cached; }
+
+// TEST-ONLY: install a pre-built catalogue so unit tests can exercise
+// `getTreatmentAbsorption` without going through fetch(). The real UI
+// path always uses `loadSurfaceCatalogue()`.
+export function _setCachedCatalogueForTests(cat) { _cached = cat; }
+export function _clearCachedCatalogueForTests() { _cached = null; }
+
 export function railSegmentFor(category) {
   if (!category || typeof category !== 'string') return 'surface';
   return category.split('.')[0];

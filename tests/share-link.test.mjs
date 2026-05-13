@@ -172,6 +172,7 @@ applyPresetToState('auditorium');
     'listeners', 'selectedListenerId', 'zones', 'selectedZoneId', 'physics',
     'rackSystem',  // PA equipment racks (Felix Brandt's RACK_BUILDER_DESIGN spec)
     'projectName', // user-set project label (Hospital Serdang, etc.)
+    'treatments', 'selectedTreatmentId',   // acoustic treatments (PR-2 physics integration, May 2026)
   ]);
   const present = Object.keys(parsed);
   const unexpected = present.filter(k => !allowedTopKeys.has(k));

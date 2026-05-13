@@ -33,6 +33,9 @@ export function mountPrecisionPanel({ materials }) {
   root.innerHTML = `
     <h2>Precision Render</h2>
     <div id="precision-body">
+      <div class="precision-v3-pending" role="note">
+        <strong>Treatment absorption not yet wired into precision engine.</strong> Showing base-room materials.
+      </div>
       <div class="precision-intro">
         Time-domain ray tracing. Computes EDT · T20/T30 · C80/C50 · D/R · STI plus the impulse-response echogram at the selected listener. Typical render 1–10 s on 8+ cores.
       </div>

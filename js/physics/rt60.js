@@ -1,5 +1,6 @@
 import { roomSurfaces, roomEffectiveSurfaces, roomVolume } from './room-shape.js';
 import { airSabins } from './air-absorption.js';
+import { getTreatmentAbsorption } from '../labs/surfacelab/catalog.js';
 
 const SABINE_CONSTANT = 0.161;
 
@@ -32,17 +33,29 @@ export function eyring({ volume_m3, totalArea_m2, surfaceMeanAbsorption, airAbsS
 // `airAbsorption` flag defaults to true. When a caller disables it here
 // it must also disable it in `computeRoomConstant` to keep the two
 // reverberant-field calculations consistent.
-export function computeRT60Band({ room, materials, bandIndex, zones = [], airAbsorption = true }) {
-  // Include zone absorption so stadium bowl carpet + court wood actually
-  // contribute. Without this the arena preset reports ~16 s RT60.
-  const surfaces = roomEffectiveSurfaces(room, zones);
+export function computeRT60Band({ room, materials, bandIndex, zones = [], treatments = [], airAbsorption = true }) {
+  // Include zone + treatment absorption so stadium bowl carpet + court
+  // wood + placed acoustic panels actually contribute. Without zones the
+  // arena preset reports ~16 s RT60; without treatments the user can
+  // place 50 absorbers and watch RT60 do nothing (v1 visual-only bug).
+  const surfaces = roomEffectiveSurfaces(room, zones, treatments);
   // Seated-audience absorption replaces the seating material for the fraction
   // of seats occupied (ISO 3382-1). α_eff = α_material·(1−occ) + α_audience·occ.
   const audienceAlpha = materials.byId['audience-seated']?.absorption[bandIndex] ?? 0;
   let totalArea_m2 = 0;
   let surfaceAbsorption_sabins = 0;
   for (const s of surfaces) {
-    const baseAlpha = materials.byId[s.materialId]?.absorption[bandIndex] ?? 0;
+    // Treatment surfaces carry a `treatment:<productId>` materialId
+    // that doesn't exist in materials.byId. The catalogue accessor
+    // returns null when SurfaceLAB hasn't loaded yet — we treat that
+    // as α=0 so a half-initialized engine never inflates RT60 by
+    // pretending a panel that has no α is fully reflective.
+    let baseAlpha;
+    if (s._isTreatment) {
+      baseAlpha = getTreatmentAbsorption(s.productId, bandIndex) ?? 0;
+    } else {
+      baseAlpha = materials.byId[s.materialId]?.absorption[bandIndex] ?? 0;
+    }
     const occ = Math.max(0, Math.min(1, (s.occupancy_percent ?? 0) / 100));
     const alpha = occ > 0 ? baseAlpha * (1 - occ) + audienceAlpha * occ : baseAlpha;
     totalArea_m2 += s.area_m2;
@@ -86,9 +99,9 @@ export function preferredRT60(band) {
   return band.sabine_s;
 }
 
-export function computeAllBands({ room, materials, zones = [], airAbsorption = true }) {
+export function computeAllBands({ room, materials, zones = [], treatments = [], airAbsorption = true }) {
   return materials.frequency_bands_hz.map((frequency_hz, i) => ({
     frequency_hz,
-    ...computeRT60Band({ room, materials, bandIndex: i, zones, airAbsorption }),
+    ...computeRT60Band({ room, materials, bandIndex: i, zones, treatments, airAbsorption }),
   }));
 }

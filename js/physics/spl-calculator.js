@@ -49,11 +49,11 @@ export function speedOfSound(T_C = DEFAULT_TEMPERATURE_C) {
 //
 // `airAbsorption` defaults to `true` and must only be set false by a
 // deliberate caller (physics-toggle UI) that also disabled 4mV in RT60.
-export function computeRoomConstant(room, materials, freq_hz, zones = [], { airAbsorption = true } = {}) {
+export function computeRoomConstant(room, materials, freq_hz, zones = [], { airAbsorption = true, treatments = [] } = {}) {
   if (!materials?.frequency_bands_hz) return 0;
   const bandIdx = materials.frequency_bands_hz.indexOf(freq_hz);
   if (bandIdx < 0) return 0;
-  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, airAbsorption });
+  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, treatments, airAbsorption });
   const S = rt.totalArea_m2;
   if (S <= 0) return 0;
   // rt.totalAbsorption_sabins already includes 4mV when airAbsorption is

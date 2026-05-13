@@ -444,40 +444,76 @@ function polygonArea2D(verts) {
   return Math.abs(a) / 2;
 }
 
-// Wrap roomSurfaces with zone-aware accounting. Every zone's 2D footprint
-// is subtracted from the base floor regardless of the zone's elevation —
-// because acoustically a sound wave traveling down only ever hits the
-// topmost surface in a given column, and an elevated zone (bowl tier,
-// concourse mezzanine) blocks the floor beneath it. The zone itself is
-// added as a new surface with its own material + occupancy.
+// Wrap roomSurfaces with zone-aware AND treatment-aware accounting.
 //
-// Previously only ground-level zones (|elev| < 0.1 m) carved the floor,
-// which double-counted stadium bowl footprints: the raked carpet zone was
-// added AND the full wood floor underneath stayed in the Sabine budget.
-// Dr. Chen flagged this in the C2 audit finding.
-export function roomEffectiveSurfaces(room, zones = []) {
+// Order of operations (Hannes/Dr. Chen v2 spec, May 2026):
+//   1. roomSurfaces() — bare shell, walls/floor/ceiling, openings split
+//      out of their parent wall, interior mall fixtures appended.
+//   2. Zones carve the floor first (each zone's 2D footprint is
+//      subtracted from `floor` and the zone surface is appended).
+//   3. Treatments carve their host wall SECOND (per panel: subtract
+//      its catalogue area from the host surface — capped at the
+//      surface's remaining area so the wall can't go negative — then
+//      append the treatment as its own surface entry with its α from
+//      the SurfaceLAB catalogue).
+//
+// Why zones FIRST then panels: a panel on the floor (rare but legal in
+// the ceiling-baffle case where surface='ceiling' carves the ceiling)
+// only collides with the ceiling material entry, not the zone overlay.
+// A panel on a wall never overlaps a zone footprint. Multi-panel-on-
+// same-wall is handled by greedy per-panel clamping in placement order
+// — the LAST placed panel is the one that gets `clamped:true` if the
+// wall's remaining area runs out.
+//
+// Openings rule: an opening (door/window) is emitted as its OWN
+// surface entry with a `_op_N` suffixed id. The wall slot only owns
+// the leftover area after openings are subtracted. Treatments
+// carve from the wall slot ONLY (id prefix match), never from
+// `wall_X_op_*` entries — pinning a panel over a door isn't a
+// physically meaningful operation in v2.
+//
+// Catalogue access: getTreatmentAbsorption() reads from the
+// SurfaceLAB cache. If the catalogue hasn't loaded yet (e.g. a
+// physics-only test path), the treatment contributes ZERO absorption
+// AND DOES NOT CARVE the host wall — matching v1 visual-only
+// behavior so a partially-initialized engine never lies about RT60.
+// The third argument is optional so all v1 callers (preset import,
+// scene snapshot diffing, etc.) keep working with no changes.
+export function roomEffectiveSurfaces(room, zones = [], treatments = []) {
   const base = roomSurfaces(room);
-  if (!zones || zones.length === 0) return base;
+  const hasZones = Array.isArray(zones) && zones.length > 0;
+  const hasTreatments = Array.isArray(treatments) && treatments.length > 0;
+  if (!hasZones && !hasTreatments) return base;
+
   const out = base.map(s => ({ ...s }));
-  let floorCarveOut = 0;
-  for (const z of zones) {
-    if (!z.vertices || z.vertices.length < 3 || !z.material_id) continue;
-    const area = polygonArea2D(z.vertices);
-    if (area <= 0) continue;
-    floorCarveOut += area;
-    out.push({
-      id: 'zone_' + z.id,
-      area_m2: area,
-      materialId: z.material_id,
-      occupancy_percent: z.occupancy_percent ?? 0,
-    });
+
+  // -- Zones (unchanged from v1) -------------------------------------------
+  if (hasZones) {
+    let floorCarveOut = 0;
+    for (const z of zones) {
+      if (!z.vertices || z.vertices.length < 3 || !z.material_id) continue;
+      const area = polygonArea2D(z.vertices);
+      if (area <= 0) continue;
+      floorCarveOut += area;
+      out.push({
+        id: 'zone_' + z.id,
+        area_m2: area,
+        materialId: z.material_id,
+        occupancy_percent: z.occupancy_percent ?? 0,
+      });
+    }
+    if (floorCarveOut > 0) {
+      const fi = out.findIndex(s => s.id === 'floor');
+      if (fi >= 0) out[fi].area_m2 = Math.max(0, out[fi].area_m2 - floorCarveOut);
+    }
   }
-  if (floorCarveOut > 0) {
-    const fi = out.findIndex(s => s.id === 'floor');
-    if (fi >= 0) out[fi].area_m2 = Math.max(0, out[fi].area_m2 - floorCarveOut);
+
+  // -- Treatments (new in v2) ----------------------------------------------
+  if (hasTreatments) {
+    applyTreatmentOverlap(out, treatments, room);
   }
-  // Center-hung scoreboard — 4 LED side faces + steel top/bottom.
-  // Acoustically significant as a hard reflector in the center of the room.
+
+  // Center-hung scoreboard — unchanged.
   const sb = room.stadiumStructure?.scoreboard;
   if (sb) {
     const sides = 4 * sb.width_m * sb.height_m;
@@ -489,6 +525,92 @@ export function roomEffectiveSurfaces(room, zones = []) {
     });
   }
   return out;
+}
+
+// Map a treatment's anchor to the host-surface id used by roomSurfaces().
+// Rectangular rooms use wall_north/south/east/west with wallIndex 0..3
+// (the conventions panel-treatments.js + scene.js already use). Custom
+// rooms use edge_0, edge_1, ... matching the polygon vertex order.
+// Ceiling treatments anchor to 'ceiling'. Returns null when the anchor
+// can't be resolved — the panel is silently dropped from the Sabine
+// budget rather than crashing the engine.
+function treatmentHostSurfaceId(treatment, room) {
+  const a = treatment?.anchor;
+  if (!a) return null;
+  if (a.surface === 'ceiling') return 'ceiling';
+  if (a.surface !== 'wall') return null;
+  const idx = a.wallIndex;
+  if (!Number.isFinite(idx) || idx < 0) return null;
+  const shape = getShape(room);
+  if (shape === 'rectangular') {
+    // Canonical wall ordering used by scene.js for 3D placement and
+    // by panel-treatments for projection. Matches the order
+    // roomSurfaces() emits walls in (N, S, E, W → 0,1,2,3).
+    return ['wall_north', 'wall_south', 'wall_east', 'wall_west'][idx] ?? null;
+  }
+  if (shape === 'custom') return `edge_${idx}`;
+  // Polygon / round rooms use the shared 'walls' slot — every panel
+  // carves the same merged perimeter surface. Acoustically equivalent
+  // to splitting the panels across virtual edges because the round
+  // room's α is uniform.
+  return 'walls';
+}
+
+// Apply treatment overlap math to a mutable surfaces[] in place.
+//   For each panel in placement order:
+//     1. Look up host surface entry by id.
+//     2. Compute the panel's catalogue area (width × height).
+//     3. Clamp panel area to the host's REMAINING area (per-wall
+//        clamping — sum of all panels on one wall never exceeds the
+//        wall's own area). The first panel that exceeds the host
+//        budget is logged once per session and tagged `clamped:true`
+//        for the UI.
+//     4. Subtract clamped area from host surface.
+//     5. Append a new surface entry { id: 'treatment_T1',
+//        area_m2: clampedArea, materialId: 'treatment:<productId>',
+//        productId, _isTreatment } so the absorption-lookup pass in
+//        rt60.js can recognise it and pull α from the SurfaceLAB
+//        catalogue instead of materials.byId.
+function applyTreatmentOverlap(surfaces, treatments, room) {
+  let clampWarned = false;
+  for (const t of treatments) {
+    if (!t || !t.productId) continue;
+    const hostId = treatmentHostSurfaceId(t, room);
+    if (!hostId) continue;
+    const hostIdx = surfaces.findIndex(s => s.id === hostId);
+    if (hostIdx < 0) continue;
+    const dim = t.dimensions || {};
+    const wantArea = (dim.width_m ?? 0) * (dim.height_m ?? 0);
+    if (wantArea <= 0) continue;
+    const remaining = surfaces[hostIdx].area_m2;
+    let panelArea = wantArea;
+    let clamped = false;
+    if (panelArea > remaining) {
+      panelArea = remaining;
+      clamped = true;
+      if (!clampWarned) {
+        clampWarned = true;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(
+            `[roomlab] Treatment ${t.id} (${t.productId}) catalogue area ${wantArea.toFixed(2)} m² ` +
+            `exceeded remaining area on ${hostId} (${remaining.toFixed(2)} m²). Clamped to ${panelArea.toFixed(2)} m². ` +
+            `Subsequent panels on the same wall this session will be clamped silently — check the UI badge.`
+          );
+        }
+      }
+      t._physicsClamped = true;   // surfaced in panel-treatments.js as a "Clamped" badge
+    } else {
+      t._physicsClamped = false;
+    }
+    surfaces[hostIdx].area_m2 = Math.max(0, remaining - panelArea);
+    surfaces.push({
+      id: `treatment_${t.id}`,
+      area_m2: panelArea,
+      materialId: `treatment:${t.productId}`,
+      productId: t.productId,
+      _isTreatment: true,
+    });
+  }
 }
 
 // Build a wall surface entry plus zero or more opening entries from a

@@ -802,11 +802,13 @@ export function serializeProject(src = state) {
     selectedListenerId: src.selectedListenerId ?? null,
     zones: deepClone(src.zones ?? []),
     selectedZoneId: src.selectedZoneId ?? null,
-    // Acoustic-treatment panels. Strip the session-only _cachedSpec so
-    // it doesn't bloat the save file (the catalogue entry is re-resolved
-    // from productId on load).
+    // Acoustic-treatment panels. Strip the session-only _cachedSpec
+    // (resolved catalogue entry) and _physicsClamped (computed-on-
+    // demand flag set by roomEffectiveSurfaces when a panel's catalogue
+    // area exceeds its host wall — reset every physics pass, so
+    // persisting it would freeze a stale value).
     treatments: (src.treatments ?? []).map(t => {
-      const { _cachedSpec, ...persistent } = t;
+      const { _cachedSpec, _physicsClamped, ...persistent } = t;
       return deepClone(persistent);
     }),
     selectedTreatmentId: src.selectedTreatmentId ?? null,
@@ -927,7 +929,12 @@ export function deserializeProject(obj) {
         && t.position && Number.isFinite(t.position.x)
         && Number.isFinite(t.position.y) && Number.isFinite(t.position.z))
       .map(t => {
-        const { _cachedSpec, ...persistent } = t;
+        // Strip session-only fields. _physicsClamped is recomputed by
+        // roomEffectiveSurfaces() on every physics pass — accepting it
+        // from a saved file would freeze a stale value until the next
+        // engine call, which could mis-badge a panel as "Clamped" when
+        // it now fits the resized wall.
+        const { _cachedSpec, _physicsClamped, ...persistent } = t;
         return deepClone(persistent);
       });
   } else {

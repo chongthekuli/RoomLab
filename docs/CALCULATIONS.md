@@ -123,19 +123,30 @@ V_air   = V_gross − V_stadium_solid
 
 Where `V_stadium_solid` is subtracted only for presets that carry a `stadiumStructure` descriptor (bowl concrete + upper-bowl rake + scoreboard cube occupy real volume). See [room-shape.js:74](../js/physics/room-shape.js). Arena preset: `V_stadium_solid ≈ 4,227 m³`, which is ~9 % of gross — exactly the correction Chen audit item H7 flagged.
 
-### 2.6 Surface enumeration with zones
+### 2.6 Surface enumeration with zones and treatments
 
-Every user-defined audience zone gets its 2D polygon footprint subtracted from the base floor (regardless of elevation — §2.6.1 below) and added to the surface list as its own patch with its own material:
+Every user-defined audience zone gets its 2D polygon footprint subtracted from the base floor (regardless of elevation — §2.6.1 below) and added to the surface list as its own patch with its own material. Every placed acoustic treatment then carves its catalogue area from its host surface and is appended as its own surface entry pulling α from the SurfaceLAB catalogue (§2.6.2):
 
 ```
-roomEffectiveSurfaces(room, zones):
+roomEffectiveSurfaces(room, zones, treatments):
     surfaces = [floor, ceiling, walls..., dome]      # from roomSurfaces(room)
+    # --- ZONES carve floor first ---
     for z in zones:
         a = shoelace(z.vertices)
         floor.area_m2 -= a           # always carve, regardless of z.elevation_m
         surfaces.push({ id: 'zone_'+z.id, area_m2: a,
                         materialId: z.material_id,
                         occupancy_percent: z.occupancy_percent ?? 0 })
+    # --- TREATMENTS carve their host wall/ceiling second ---
+    for t in treatments:                  # placement order
+        host = treatmentHostSurfaceId(t)  # 'wall_north' | 'edge_3' | 'ceiling' | 'walls'
+        remaining = surfaces[host].area_m2
+        want = t.dimensions.width_m × t.dimensions.height_m
+        A_p = min(want, remaining)        # per-surface clamp, never negative
+        if A_p < want: t._physicsClamped = true
+        surfaces[host].area_m2 -= A_p
+        surfaces.push({ id: 'treatment_'+t.id, area_m2: A_p,
+                        productId: t.productId, _isTreatment: true })
     # Center-hung scoreboard as one additional surface (LED + steel)
     if room.stadiumStructure.scoreboard:
         surfaces.push({ id: 'scoreboard',
@@ -143,11 +154,39 @@ roomEffectiveSurfaces(room, zones):
                         materialId: 'led-glass' })
 ```
 
-File: [room-shape.js:185](../js/physics/room-shape.js#L185).
+File: [room-shape.js](../js/physics/room-shape.js).
 
 #### 2.6.1 Why always carve the floor
 
 A sound wave travelling **down** from the ceiling only hits the topmost surface in a given column. If a bowl tier sits at elev = 3 m, the floor beneath it is in shadow acoustically — counting both would double-count absorption in that column. The previous version gated carve-out by `|elev| < 0.1 m` which worked for ground-level zones but silently triple-counted the arena's 900+ m² of bowl seating. Chen audit item C2. Fixed in commit `230e99a`.
+
+#### 2.6.2 Treatment overlap math (PR-2, May 2026)
+
+The total absorption per band with N placed treatments on M wall/ceiling surfaces is:
+
+```
+A_total(f) = Σ_i [ ( S_i − Σ_{j ∈ J(i)} A_pj ) · α_i(f) ]   # carved hosts
+           + Σ_j [ A_pj · α_pj(f) ]                          # panels themselves
+```
+
+where `J(i)` is the set of treatments anchored on surface `i`, `A_pj` is the catalogue area of treatment `j` after per-host clamping, and `α_pj` is its absorption coefficient from `data/treatment-products.json`.
+
+**Clamping rule (per surface, never global):**
+- `A_pj = min(catalogue_area_j, remaining_host_area)`
+- Multiple panels on same wall → LAST placed gets clamped, tagged `_physicsClamped: true`, UI shows "Clamped" badge.
+- Σ panels on one wall never exceeds `S_wall`. Verified by `tests/treatments-physics.test.mjs` invariant check.
+
+**Openings rule:** when a wall has door/window openings (§2.X), the opening areas are already subtracted from the wall material entry by `expandWallWithOpenings()`. Treatments carve from the **wall material entry only** (`wall_north`, never `wall_north_op_0`). Pinning a panel over a door isn't a physically meaningful operation in v2.
+
+**Zone-vs-panel precedence:** zones carve floor first, treatments carve wall/ceiling second. The two never conflict at the same surface entry — zones never touch walls, panels almost never touch the floor.
+
+**Diffuser handling:** add the catalogue α value as-is. Diffusers are not transparent — their absorption is real (a Schroeder diffuser has α≈0.10–0.20 across the band from the well structure and any backing absorber).
+
+**Catalogue not loaded (test path or unknown product):** treatment still carves its host wall, but contributes α = 0 to the band. RT60 cannot inflate from a missing α value — see test 8 in `treatments-physics.test.mjs`.
+
+**P6 limitation — corner traps:** a corner-mounted bass trap absorbs along TWO wall surfaces, not one. v2 carves only the surface the user clicked. Corner-trap α values in the catalogue assume free-field placement so they're already conservative, but for a true two-wall carve we'd need an `anchor.surfaces: ['wall_n', 'wall_e']` schema bump. Deferred to v3. Until then the math under-estimates RT60 drop by ~5–10 % for corner-trapped rooms.
+
+The integration is wired through the engine path: `computeRT60Band` → `computeAllBands` → `computeRoomConstant` → `precomputeSTIPAContext` → `computeSTIPA`. Each accepts an optional `treatments` parameter; passing `[]` or omitting the arg recovers v1 numbers exactly (verified by `tests/golden-rt60-treatments.test.mjs`). The **Precision** tab (ray-traced T30) does NOT yet read treatments — banner at the top of `panel-precision` calls this out. Wiring into the ray tracer is deferred to v3 because each panel needs a real BVH face with its scattering coefficient applied.
 
 ### 2.7 Inside-room tests
 

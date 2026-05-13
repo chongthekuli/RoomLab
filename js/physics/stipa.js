@@ -73,14 +73,14 @@ const NC_35_PER_BAND = [55, 50, 45, 40, 36, 34, 33];
 // band, per-source L_w and directivity def). Feed this once to
 // computeSTIPAAt for each listener position — ~10× faster than calling
 // computeSTIPA independently for every vertex of a heatmap surface.
-export function precomputeSTIPAContext({ sources, getSpeakerDef, room, materials, zones = [] }) {
+export function precomputeSTIPAContext({ sources, getSpeakerDef, room, materials, zones = [], treatments = [] }) {
   const rt60_per_band = STIPA_BANDS.map(fhz => {
     const bandIdx = materials?.frequency_bands_hz?.indexOf(fhz) ?? -1;
     if (bandIdx < 0) return 0.5;
-    return computeRT60Band({ room, materials, bandIndex: bandIdx, zones }).sabine_s;
+    return computeRT60Band({ room, materials, bandIndex: bandIdx, zones, treatments }).sabine_s;
   });
   const roomR_per_band = STIPA_BANDS.map(fhz =>
-    materials ? computeRoomConstant(room, materials, fhz, zones) : 0
+    materials ? computeRoomConstant(room, materials, fhz, zones, { treatments }) : 0
   );
   const sourceCtx = [];
   for (const src of sources) {
@@ -177,11 +177,11 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
 }
 
 export function computeSTIPA({
-  sources, getSpeakerDef, listenerPos, room, materials, zones = [],
+  sources, getSpeakerDef, listenerPos, room, materials, zones = [], treatments = [],
   ambientNoise_per_band = NC_35_PER_BAND,
   temperature_C = 20,
 }) {
-  const ctx = precomputeSTIPAContext({ sources, getSpeakerDef, room, materials, zones });
+  const ctx = precomputeSTIPAContext({ sources, getSpeakerDef, room, materials, zones, treatments });
   const rt60_per_band = ctx.rt60_per_band;
   const roomR_per_band = ctx.roomR_per_band;
   // Split direct and reverb power per band so MTF can apply the reverb-

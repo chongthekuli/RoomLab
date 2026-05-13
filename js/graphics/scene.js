@@ -1339,7 +1339,7 @@ function drawFrequencyResponse(canvas, sources, listenerPos) {
   // the 48 sample frequencies. Avoids walking the surface list 48 times.
   const Rbands = reverbOn
     ? [125, 250, 500, 1000, 2000, 4000, 8000].map(f => ({
-        f, R: computeRoomConstant(state.room, materialsRef, f, state.zones),
+        f, R: computeRoomConstant(state.room, materialsRef, f, state.zones, { treatments: state.treatments }),
       }))
     : null;
 
@@ -4773,6 +4773,7 @@ function rebuildZones() { shadowsNeedRefresh = true;
             sources: flatSources,
             getSpeakerDef: url => getCachedLoudspeaker(url),
             room: state.room, materials: materialsRef, zones: state.zones,
+            treatments: state.treatments,
           })
         : null;
       splInfo = computeZoneSPLGrid({
@@ -4984,7 +4985,7 @@ function currentPhysicsOpts(room) {
     airAbsorption: phys.airAbsorption !== false,
     coherent: !!phys.coherent,
     roomConstantR: phys.reverberantField && materialsRef
-      ? computeRoomConstant(room, materialsRef, freq, state.zones)
+      ? computeRoomConstant(room, materialsRef, freq, state.zones, { treatments: state.treatments })
       : 0,
     // Master EQ gain at the current heatmap frequency. eqGainAt returns 0
     // when the EQ is bypassed so SPL / heatmap physics is identical to
@@ -5012,7 +5013,7 @@ function sampleSurfaceColors(geo, anchors, sources, room, splOpts = {}) {
   // approxSoundPowerLevel calls per frame. ~15-20 % faster end-to-end.
   const useSTI = state.display.heatmapMode === 'stipa';
   const stipaCtx = useSTI
-    ? precomputeSTIPAContext({ sources, getSpeakerDef: getDef, room, materials: materialsRef, zones: state.zones })
+    ? precomputeSTIPAContext({ sources, getSpeakerDef: getDef, room, materials: materialsRef, zones: state.zones, treatments: state.treatments })
     : null;
   const splCtx = !useSTI
     ? precomputeSPLContext({
@@ -6232,6 +6233,7 @@ function rebuildHeatmap() {
     ? precomputeSTIPAContext({
         sources: flat, getSpeakerDef: url => getCachedLoudspeaker(url),
         room: state.room, materials: materialsRef, zones: state.zones,
+        treatments: state.treatments,
       })
     : null;
   const splResult = computeSPLGrid({

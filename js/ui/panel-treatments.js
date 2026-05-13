@@ -31,6 +31,7 @@
 import { state, duplicateTreatment } from '../app-state.js';
 import { emit, on } from './events.js';
 import { loadSurfaceCatalogue, findCatalogueEntry } from '../labs/surfacelab/catalog.js';
+import { computeRT60Band, preferredRT60 } from '../physics/rt60.js';
 // NOTE: We avoid a direct import of scene.js to keep panel-treatments.js
 // loadable from a non-DOM test environment (tests/treatments.test.mjs
 // imports this module without Three.js). Placement arming is signalled
@@ -51,8 +52,16 @@ let _activeTab = 'absorber';
 let _catalogueCache = null;   // resolved loadSurfaceCatalogue() result
 let _expandedTreatments = new Set();  // treatment ids whose detail card is expanded
 let _armedProductId = null;   // non-null while a + Place is awaiting a wall click in 3D
+let _materialsRef = null;     // materials DB ref — needed for per-card ΔRT60 ticker
 
-export async function mountTreatmentsPanel() {
+// 500 Hz is the band index in materials.frequency_bands_hz (= [125, 250,
+// 500, 1000, 2000, 4000, 8000]). The ticker reports the speech-intelligibility
+// reference band — Maya's UX call: one number, not seven. Per-card detail
+// can show the full curve in v3.
+const BAND_IDX_500HZ = 2;
+
+export async function mountTreatmentsPanel({ materials } = {}) {
+  _materialsRef = materials || null;
   const root = document.getElementById('panel-treatments');
   if (!root) return;
 
@@ -92,6 +101,12 @@ export async function mountTreatmentsPanel() {
     _armedProductId = null;
     render();
   });
+  // Per-card ΔRT60 ticker depends on room geometry + zones too — re-render
+  // when those change so the deltas track the live physics. Without this
+  // a user could resize the room and the ticker numbers go stale (since
+  // ΔRT60 scales with room volume and total surface area).
+  on('room:changed', render);
+  on('zone:changed', render);
 }
 
 function render() {
@@ -110,7 +125,7 @@ function render() {
   ` : '';
   body.innerHTML = `
     <div class="phase-placeholder treatments-disclaimer" role="note">
-      <strong>Visual placement only.</strong> RT60 / STI unchanged in v1.
+      Physics live in RT60 / STI. Precision tab still v1.
     </div>
     ${armedBanner}
     ${renderPlacedList()}
@@ -224,15 +239,85 @@ function renderPlacedList() {
       </div>
     `;
   }
+  // Precompute per-card ΔRT60 at 500 Hz so each card renders synchronously
+  // and a 12-panel list doesn't recompute the same baseline 12 times.
+  const deltas = computeMarginalDeltas500Hz(placed);
   return `
     <h3 class="treatments-h3">Placed (${placed.length})</h3>
     <div class="treatments-placed-list">
-      ${placed.map(t => renderPlacedCard(t)).join('')}
+      ${placed.map((t, i) => renderPlacedCard(t, deltas[i])).join('')}
     </div>
   `;
 }
 
-function renderPlacedCard(t) {
+// Compute the marginal ΔRT60 at 500 Hz for each placed treatment.
+// "Marginal" = current RT60 (all treatments) − RT60 if THIS treatment
+// were removed. Negative deltas mean the panel SHORTENS RT60 (the
+// expected sign for an absorber). Returns parallel array indexed by
+// the same order as `treatments`.
+//
+// Why marginal not "from baseline (no treatments)": with two panels of
+// identical absorption, the marginal ΔRT60 of each is slightly less
+// than half the "from baseline" delta — because the second panel's
+// effect is computed against the room with the first panel already
+// absorbing. The marginal view is the honest answer to "what happens
+// if I remove THIS panel" — Maya's spec.
+//
+// Performance note: O(N+1) RT60 computations per render (N panels =
+// N "remove-one" passes + 1 baseline-with-all). For typical N≤20 this
+// is ~30 ms on a quiet laptop — fine for the placement panel UI which
+// re-renders only on treatment add/remove/move/relabel.
+//
+// Returns null entries when materials aren't ready (the ticker
+// degrades to "—" rather than crashing the panel).
+function computeMarginalDeltas500Hz(treatments) {
+  if (!_materialsRef || !Array.isArray(treatments)) return treatments.map(() => null);
+  let withAll;
+  try {
+    withAll = computeRT60Band({
+      room: state.room, materials: _materialsRef,
+      bandIndex: BAND_IDX_500HZ, zones: state.zones, treatments,
+    });
+  } catch (e) {
+    console.warn('[panel-treatments] ΔRT60 baseline failed:', e);
+    return treatments.map(() => null);
+  }
+  const rt60All = preferredRT60(withAll);
+  if (!Number.isFinite(rt60All)) return treatments.map(() => null);
+  return treatments.map(t => {
+    const without = treatments.filter(x => x.id !== t.id);
+    try {
+      const w = computeRT60Band({
+        room: state.room, materials: _materialsRef,
+        bandIndex: BAND_IDX_500HZ, zones: state.zones, treatments: without,
+      });
+      const rt60Without = preferredRT60(w);
+      if (!Number.isFinite(rt60Without)) return null;
+      // Δ = with − without. Absorber → Δ negative. Diffuser with high α
+      // → still negative but smaller magnitude.
+      return rt60All - rt60Without;
+    } catch (_) {
+      return null;
+    }
+  });
+}
+
+// Format a ΔRT60 value (seconds) for the ticker chip on each card.
+// Returns "—" for null/NaN, and a signed string like "−0.12 s @ 500 Hz".
+// Sign uses a true minus glyph (U+2212) — same convention the Results
+// panel uses for negative numbers so the typography matches.
+function formatDeltaRT60(deltaS) {
+  if (deltaS == null || !Number.isFinite(deltaS)) return '—';
+  // Threshold: |Δ| < 0.005 s rounds to 0.00 s — we report "≈ 0" so the
+  // user doesn't think the panel is broken when a tiny panel on a huge
+  // arena produces a 1-ms drop. Maya's UX rule: never lie that the
+  // panel does nothing when it does, just acknowledge the magnitude.
+  if (Math.abs(deltaS) < 0.005) return '≈ 0 s @ 500 Hz';
+  const sign = deltaS < 0 ? '−' : '+';
+  return `${sign}${Math.abs(deltaS).toFixed(2)} s @ 500 Hz`;
+}
+
+function renderPlacedCard(t, deltaRT60 = null) {
   const spec = resolveSpec(t);
   const isSel = t.id === state.selectedTreatmentId;
   const expanded = _expandedTreatments.has(t.id);
@@ -242,6 +327,19 @@ function renderPlacedCard(t) {
   const productName = spec?.name ?? t.productId;
   const dim = t.dimensions || {};
   const areaM2 = (dim.width_m ?? 0) * (dim.height_m ?? 0);
+  // Per-card acoustic feedback — Maya copy: "the number the user wants
+  // is 'how much did this panel shorten the room'". 500 Hz is the
+  // single-band proxy for speech-intelligibility — same band the
+  // headline RT60 in the Results panel highlights.
+  const deltaLabel = formatDeltaRT60(deltaRT60);
+  const deltaCls = deltaRT60 == null || !Number.isFinite(deltaRT60)
+    ? 'unknown'
+    : (deltaRT60 < -0.005 ? 'negative' : (deltaRT60 > 0.005 ? 'positive' : 'zero'));
+  const tickerChip =
+    `<span class="treatment-delta-rt60 ${deltaCls}" title="Change in mid-band RT60 if this panel is removed (Sabine / Eyring auto-pick).">${escapeHtml(deltaLabel)}</span>`;
+  const clampedChip = t._physicsClamped
+    ? '<span class="treatment-clamped-badge" title="Panel catalogue area exceeded the wall — its effective area was clamped to the wall budget.">Clamped</span>'
+    : '';
 
   if (!expanded) {
     return `
@@ -249,6 +347,8 @@ function renderPlacedCard(t) {
            data-toggle-treatment="${t.id}">
         <span class="tc-label">${escapeHtml(t.label || productName)}</span>
         <span class="tc-meta">${surfaceLbl} · ${areaM2.toFixed(2)} m²</span>
+        ${tickerChip}
+        ${clampedChip}
         <button class="btn-select ${isSel ? 'active' : ''}"
                 data-treatment-select="${t.id}"
                 title="${isSel ? 'Selected' : 'Select'}">${isSel ? '●' : '○'}</button>
@@ -280,6 +380,10 @@ function renderPlacedCard(t) {
       <div class="source-row duo">
         <label>Size <span class="derived">${(dim.width_m ?? 0).toFixed(2)} × ${(dim.height_m ?? 0).toFixed(2)} m</span></label>
         <label>Manufacturer <span class="derived">${escapeHtml(spec?.manufacturer ?? '—')}</span></label>
+      </div>
+      <div class="source-row duo">
+        <label>ΔRT60 <span class="derived">${escapeHtml(deltaLabel)}</span></label>
+        <label>${t._physicsClamped ? `Status <span class="derived">Clamped (wall full)</span>` : `Status <span class="derived">OK</span>`}</label>
       </div>
       <div class="zone-actions">
         <button data-treatment-duplicate="${t.id}">Duplicate</button>
