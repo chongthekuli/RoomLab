@@ -1427,7 +1427,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <section class="pr-credentials-acceptance">
         <h3 class="pr-credentials-section-h">Acceptance of terms of use — session signature</h3>
         ${acceptanceSignatureGrid}
-        ${acceptanceParagraphs.map(p => `<p class="pr-acceptance-body">${p}</p>`).join('')}
+        <p class="pr-acceptance-body">${acceptanceParagraphs.join(' ')}</p>
       </section>
 
       <footer class="pr-credentials-footer">
