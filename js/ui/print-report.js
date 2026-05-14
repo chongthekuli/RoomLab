@@ -1429,7 +1429,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
              second page. DISCLAIMER_REFERENCES is no longer rendered here
              but the constant is preserved in case a future Appendix wants
              it as a flat list. -->
-        <div class="pr-reviewer-note pr-reviewer-compact">
+        <div class="pr-reviewer-compact">
           <span class="pr-eyebrow">Reviewer's note —</span>
           Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.
         </div>
