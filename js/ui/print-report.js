@@ -1932,8 +1932,10 @@ function renderPrecisionSection(p) {
 
   // Per Sofia: STI broadband as a displayed number, with a 3-cell tier
   // strip showing fail / marginal / pass. Use the receiver with the
-  // LOWEST STI as the headline figure — that's the worst-case zone, and
-  // the figure a BOMBA reviewer would care about.
+  // LOWEST STI as the headline figure — that's the LIMITING listener,
+  // the binding sign-off constraint a BOMBA reviewer cares about.
+  // (Renamed from 'worst-zone' for client-facing reading; the metric
+  // is unchanged.)
   const stiValues = p.receivers.map(r => r.sti).filter(v => Number.isFinite(v));
   const stiMin = stiValues.length > 0 ? Math.min(...stiValues) : null;
   let stiTier = null;
@@ -1952,7 +1954,7 @@ function renderPrecisionSection(p) {
   const stiHeadline = stiMin === null ? '' : `
     <div class="pr-precision-headline">
       <div>
-        <div class="pr-precision-sti-label">Worst-zone STI · IEC 60268-16</div>
+        <div class="pr-precision-sti-label">Limiting listener — STI · IEC 60268-16</div>
         <div class="pr-precision-sti">${fmt(stiMin, 2)}</div>
       </div>
       <div>
