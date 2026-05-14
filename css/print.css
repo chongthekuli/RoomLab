@@ -1151,7 +1151,12 @@ body.is-pdf-export .vp-tabs {
     margin: 0;
   }
   #print-report .pr-accept-operator {
-    font-weight: 700;
+    /* Was bold to highlight the author name. Now plain weight so the
+       acceptance paragraph reads as the same prose tier as the
+       disclaimer + reviewer blocks. The author's name is already
+       captured in the signature grid above; no need to call it out
+       twice in the same section. */
+    font-weight: inherit;
     color: var(--ink);
   }
   /* Signature grid — operator / IP / time / browser / timezone laid
@@ -1224,11 +1229,16 @@ body.is-pdf-export .vp-tabs {
     break-inside: avoid;
   }
   #print-report .pr-reviewer-compact .pr-eyebrow {
+    /* Was bold + accent-red ('REVIEWER'S NOTE —'). User wants the
+       reviewer prose to match the disclaimer style exactly — no
+       coloured / weighted emphasis. The leading label still reads
+       as a label because of the em-dash break that follows, just
+       not as a callout. */
     display: inline;
     margin: 0;
-    font-size: 6.5pt;            /* inherit-ish — match the body size */
-    color: var(--accent);
-    font-weight: 700;
+    font-size: 6.5pt;
+    color: var(--ink);
+    font-weight: inherit;
   }
   /* Manual sign-off block — paper-level wet-signature row. Sits below
      the digital provenance grid + reviewer note as the last element on
