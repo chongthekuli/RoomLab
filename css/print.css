@@ -1135,36 +1135,43 @@ body.is-pdf-export .vp-tabs {
   }
 
   /* ----- SESSION SIGNATURE ROW — 5 captured fields ----- */
+  /* Signature row: 5 KV pairs. Labels reuse the SAME .pg-section-label
+     tier as every other label on the page; values reuse the SAME .pg-prose
+     tier as every other paragraph. No bespoke typography here. The cream
+     background is gone — page is one consistent prose surface. */
   #print-report .pg-methodology .pg-signature-row {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 3pt 6pt;
+    gap: 3pt 9pt;
     margin: 0 0 6pt 0;
-    padding: 3pt 6pt;
-    background: var(--paper-2);
-    border-radius: 1.5pt;
+    padding: 0;
+    background: transparent;
     break-inside: avoid;
   }
   #print-report .pg-methodology .pg-signature-cell {
     display: flex;
     flex-direction: column;
-    line-height: 1.2;
+    gap: 1pt;
   }
+  /* Key = exact same class spec as .pg-section-label.
+     Value = exact same class spec as .pg-prose, just inline (no margin). */
   #print-report .pg-methodology .pg-signature-key {
     font-family: var(--font-sans);
-    font-size: 5.5pt;
+    font-size: 6.5pt;
     font-weight: 700;
+    line-height: 1.2;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--muted);
   }
   #print-report .pg-methodology .pg-signature-val {
     font-family: var(--font-sans);
-    font-size: 6.5pt;
-    font-weight: 600;
+    font-size: 7pt;
+    font-weight: 400;
+    line-height: 1.35;
+    letter-spacing: 0;
     color: var(--ink);
     word-break: break-word;
-    line-height: 1.2;
   }
 
   /* ----- WET-SIGNATURE BLOCK — 3 cells (Author / Company / Date) -----
@@ -1181,15 +1188,18 @@ body.is-pdf-export .vp-tabs {
   #print-report .pg-methodology .pg-signoff-sub-row {
     border: none;
   }
-  /* Sub-label sits ABOVE each cell at 10% opacity — faint guide
-     caption, doesn't compete with the writing target. */
+  /* Sub-label sits ABOVE each cell — same .pg-section-label spec
+     as every other label on the page, just rendered at 10 % opacity
+     so it reads as a faint guide caption without competing with the
+     writing target. */
   #print-report .pg-methodology .pg-signoff-sub {
     font-family: var(--font-sans);
-    font-size: 5.5pt;
+    font-size: 6.5pt;
     font-weight: 700;
+    line-height: 1.2;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: rgba(26, 31, 36, 0.10);
+    color: rgba(26, 31, 36, 0.30);
     text-align: left;
     padding: 0 0 1pt 1pt;
     border: none;
@@ -1219,9 +1229,10 @@ body.is-pdf-export .vp-tabs {
   #print-report .pg-methodology .pg-signoff-label {
     display: block;
     font-family: var(--font-sans);
-    font-size: 6pt;
+    font-size: 6.5pt;
     font-weight: 700;
-    letter-spacing: 0.10em;
+    line-height: 1.2;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--ink);
     text-align: left;
