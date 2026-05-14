@@ -1226,7 +1226,11 @@ body.is-pdf-export .vp-tabs {
      stays bold-accent inline to mark the section without changing
      the body's visual weight. */
   #print-report .pr-reviewer-compact {
-    margin: 0;
+    /* <p> now (was <div>) so global #print-report p { orphans/widows }
+       applies same as disclaimer + acceptance paragraphs. Match the
+       1pt bottom margin so the reviewer sits with the same paragraph
+       rhythm as the rest of the prose. */
+    margin: 0 0 1pt 0;
     padding: 0;
     background: transparent;
     border-left: none;

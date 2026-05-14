@@ -1438,10 +1438,9 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
              second page. DISCLAIMER_REFERENCES is no longer rendered here
              but the constant is preserved in case a future Appendix wants
              it as a flat list. -->
-        <div class="pr-reviewer-compact">
-          <span class="pr-eyebrow">Reviewer's note —</span>
-          Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.
-        </div>
+        <p class="pr-reviewer-compact">
+          <span class="pr-eyebrow">Reviewer's note —</span> Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.
+        </p>
         <!--
           Manual sign-off — paper-level signature block. Sits below the
           digital provenance grid (operator / IP / browser / accepted-at)
@@ -1490,9 +1489,10 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     ${precisionPage}
     ${treatmentPages}
     ${combinedPage}
-    <footer class="pr-foot">
-      RoomLAB · <span class="pr-mono">chongthekuli.github.io/RoomLab</span> · generated ${escapeHtml(model.project.generatedAt)} · schema v${model.project.schemaVersion}
-    </footer>
+    <!-- Footer band removed per user request (Edition 2026-05-14). The
+         CSS-rendered page numbers in the @page bottom-right margin box
+         (css/print.css ~line 52) still appear on every page. -->
+
   `;
   document.body.appendChild(root);
   return root;
