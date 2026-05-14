@@ -136,7 +136,7 @@ body.is-pdf-export .vp-tabs {
      previous page. Force a page break before each — page-break-after on
      the previous .pr-page already triggers, but page-break-before is
      belt-and-braces against future re-orderings of the page list. */
-  #print-report .pr-page-methodology,
+  #print-report .pg-methodology,
   #print-report .pr-page-disclaimer,
   #print-report .pr-page-heatmap,
   #print-report .pr-page-operating-range {
@@ -177,7 +177,6 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-strip-cell-stage,
   #print-report .pr-tierstrip-cell.pr-tierstrip-active,
   #print-report .pr-precision-headline,
-  #print-report .pr-reviewer-note,
   #print-report .pr-empty-state,
   #print-report .pr-table th,
   #print-report .pr-zebra tbody tr:nth-child(even) td,
@@ -995,357 +994,237 @@ body.is-pdf-export .vp-tabs {
     font-weight: 600;
   }
 
-  /* ----------- METHODOLOGY + DISCLAIMERS (single A4 page) ---------
-     Densest page in the report. Methodology takes the top ~⅔,
-     disclaimers + references + reviewer-note fill the bottom ⅓.
-     If you're editing typography here: every entry's column width
-     is ~55mm; longest body line is the STIPA formula at 110 chars.
-     Test by saving the PDF after any change. */
-  #print-report .pr-page-credentials {
-    font-size: 6.5pt;
-    line-height: 1.25;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-  }
-  #print-report .pr-credentials-header {
-    margin-bottom: 2pt;            /* was 3pt */
-    padding-bottom: 1.5pt;         /* was 2pt */
-    border-bottom: 0.6pt solid var(--ink);  /* was 0.8pt */
-    flex: 0 0 auto;
-  }
-  #print-report .pr-credentials-header h2 {
-    font-size: 11pt;               /* was 12pt — header now reads as page-level not chapter */
-    font-weight: 600;
-    margin: 0 0 0.5pt 0;           /* was 1pt */
-    line-height: 1.05;
-  }
-  #print-report .pr-credentials-intro {
-    font-size: 6.4pt;              /* was 7pt — intro is contextual not load-bearing */
-    line-height: 1.28;             /* was 1.3 */
+  /* ===========================================================
+     METHODOLOGY + DISCLAIMERS + SIGNATURE PAGE (last A4 page)
+     -----------------------------------------------------------
+     CLEAN-SLATE REWRITE Edition 2026-05-14 (9th iteration).
+     Five classes total. ONE coherent type system. Every paragraph
+     on this page is a <p class="pg-prose"> — identical element +
+     identical class = identical baseline by construction.
+
+     Type tiers (DO NOT add a fourth):
+       pg-prose          7 pt sans, weight 400, line-height 1.35
+       pg-section-label  6.5 pt, weight 700, uppercase, ls 0.12em
+       pg-method-cite    6 pt italic, weight 400, muted
+       (page title h2)   12 pt, weight 600
+
+     Spacing scale: every vertical margin is k·3pt (3 / 6 / 9 / 12).
+     If you're tempted to add a 1.5pt or 4pt or 5pt margin — STOP.
+     Round to the nearest 3pt. That's why this page is stable.
+     =========================================================== */
+
+  #print-report .pg-methodology {
+    /* Page layout — natural document flow, NO flex column. Earlier
+       flex+margin-top:auto pinning was the source of half the drift
+       between rounds (margins compounding into the flex gap budget).
+       Plain stacking lets the page grow top-down predictably. */
+    font-family: var(--font-sans);
     color: var(--ink);
-    margin: 0;
-    max-width: 175mm;              /* was 165mm — fewer wrapped lines */
   }
-  /* Section labels reduced to a tiny inline marker — page header is
-     already the section signpost, full h3s waste vertical budget. */
-  #print-report .pr-credentials-section-h {
-    font-size: 6pt;
+
+  /* ----- TYPE SYSTEM — single source of truth for all prose ----- */
+
+  /* The page title — only h2 on the page. */
+  #print-report .pg-methodology .pg-page-title {
+    font-family: var(--font-sans);
+    font-size: 12pt;
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: 0;
+    color: var(--ink);
+    margin: 0 0 6pt 0;
+    padding: 0 0 3pt 0;
+    border-bottom: 0.6pt solid var(--ink);
+  }
+
+  /* Section labels — h3 above each block. */
+  #print-report .pg-methodology .pg-section-label {
+    font-family: var(--font-sans);
+    font-size: 6.5pt;
     font-weight: 700;
-    letter-spacing: 0.10em;
+    line-height: 1.2;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--muted);
-    margin: 2pt 0 1.5pt 0;         /* was 3pt 0 2pt — every section header
-                                       trims 1.5pt off the top/bottom; x3
-                                       sections in this page = ~4.5pt */
+    margin: 9pt 0 3pt 0;
     padding: 0;
     border: none;
     break-after: avoid;
   }
-  /* Methodology — 5-column grid; rows auto-size to the tallest cell.
-     Sofia v2 (post-page-9-spill fix): the previous 3-col layout at
-     ~6.5pt body pushed the disclaimer + references + signature cluster
-     onto a second sheet. Going to 5 columns lets the 17 entries occupy
-     roughly the upper third of the page with type still readable at
-     A4 print resolution. Column-rule replaces the per-entry left
-     border so 5 narrow columns don't read as a row of stripes. */
-  #print-report .pr-credentials-method { flex: 0 0 auto; }
-  /* CSS Multi-Column instead of Grid. Grid reserves empty cells in the
-     final partial row — with 17 entries × 5 cols that's 3 empty cells
-     in the last row = up to ⅗ of a row of wasted vertical space.
-     Multi-column flows entries top-to-bottom in each column and
-     balances heights, no gaps. break-inside on each entry keeps a
-     heading + cite + body block together inside one column. */
-  #print-report .pr-method-grid {
-    column-count: 5;
-    column-gap: 5pt;
-    column-fill: balance;
-    margin: 0;
+  /* First section label gets less top margin — the intro paragraph
+     already supplies vertical breathing room above it. */
+  #print-report .pg-methodology .pg-intro + .pg-section-label {
+    margin-top: 6pt;
   }
-  #print-report .pr-method-entry {
+
+  /* THE prose tier — disclaimers, acceptance, reviewer, intro AND
+     methodology entry bodies all use this exact class. Properties
+     listed exhaustively so no inherited rule can shift one of them.
+     Override #print-report tabular-nums explicitly. */
+  #print-report .pg-methodology .pg-prose {
+    font-family: var(--font-sans);
+    font-size: 7pt;
+    line-height: 1.35;
+    font-weight: 400;
+    font-style: normal;
+    letter-spacing: 0;
+    word-spacing: normal;
+    text-align: left;          /* NOT justify — narrow columns flowed
+                                  with ugly river-gaps under justify */
+    text-indent: 0;
+    hyphens: auto;
+    color: var(--ink);
+    font-variant-numeric: normal;
+    font-feature-settings: normal;
+    font-kerning: auto;
     margin: 0 0 3pt 0;
+    padding: 0;
+    break-inside: avoid;
+  }
+  /* Page intro — same prose tier, just a slightly larger bottom margin
+     for visual separation from the first section label. */
+  #print-report .pg-methodology .pg-intro {
+    margin-bottom: 3pt;
+  }
+  /* Strong tag inside prose (reviewer note "Reviewer's note —" lead)
+     stays in prose colour, just bolded; no size or spacing change. */
+  #print-report .pg-methodology .pg-prose strong {
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  /* ----- METHODOLOGY GRID — 4 columns, balanced height ----- */
+  #print-report .pg-methodology .pg-method-grid {
+    column-count: 4;
+    column-gap: 9pt;
+    column-fill: balance;
+    margin: 0 0 3pt 0;
+  }
+  #print-report .pg-methodology .pg-method-entry {
+    margin: 0 0 6pt 0;
     padding: 0 0 0 3pt;
     border-left: 0.3pt solid var(--rule);
     break-inside: avoid;
     -webkit-column-break-inside: avoid;
     page-break-inside: avoid;
   }
-  #print-report .pr-method-heading {
-    font-weight: 600;
-    font-size: 5.8pt;
+  #print-report .pg-methodology .pg-method-heading {
+    font-family: var(--font-sans);
+    font-size: 7pt;
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: 0;
     color: var(--ink);
     margin: 0;
-    line-height: 1.15;
   }
-  #print-report .pr-method-cite {
-    font-size: 4.9pt;
+  #print-report .pg-methodology .pg-method-cite {
+    font-family: var(--font-sans);
+    font-size: 6pt;
+    font-weight: 400;
+    font-style: italic;
+    line-height: 1.3;
+    letter-spacing: 0;
     color: var(--muted);
     margin: 0;
-    line-height: 1.18;
-    font-style: italic;
   }
-  #print-report .pr-method-body {
-    font-size: 5.3pt;
-    color: var(--ink);
-    margin: 0.3pt 0 0 0;
-    line-height: 1.22;
+  /* Methodology body paragraph — already gets .pg-prose styling above.
+     Add a tiny top margin so it sits clear of the cite line, and
+     keep its bottom margin tight inside the entry block. */
+  #print-report .pg-methodology .pg-method-entry .pg-prose {
+    margin: 0;
   }
-  /* Disclaimers — pinned to the BOTTOM of the page (usual legal-
-     footer placement). margin-top: auto in the flex column pushes
-     this block + the footer below it to the page bottom; any
-     leftover vertical space is left blank BETWEEN methodology and
-     the disclaimer block. 2-column flow at 6.5pt. */
-  #print-report .pr-credentials-disclaimer {
-    margin-top: auto;            /* flex push to bottom */
-    flex: 0 0 auto;
-    padding-top: 1.5pt;          /* was 2pt */
-    border-top: 0.4pt solid var(--rule);
-  }
-  /* Full-width disclaimer (was 2-col). At narrow column width the right
-     column kept ending early while the left ran long, wasting vertical
-     space. Full width wraps each paragraph fewer times overall. */
-  /* ============================================================
-     SHARED PROSE TIER — disclaimer + acceptance + reviewer all
-     render with IDENTICAL text-affecting properties. EXHAUSTIVE
-     property list so no inherited rule can drift one of them.
-     ============================================================ */
-  #print-report .pr-disclaimer-grid p,
-  #print-report .pr-acceptance-body,
-  #print-report .pr-reviewer-compact {
-    font-family: var(--font-sans);
-    font-size: 6.5pt;
-    line-height: 1.28;
-    font-weight: 400;
-    font-style: normal;
-    letter-spacing: 0;
-    word-spacing: normal;
-    text-align: justify;
-    text-indent: 0;
-    hyphens: auto;
-    color: var(--ink);
-    font-variant-numeric: normal;        /* override #print-report tabular-nums */
-    font-feature-settings: normal;
-    font-kerning: auto;
-    margin: 0 0 1pt 0;                   /* uniform paragraph margin */
-    padding: 0;
-    break-inside: avoid;
-  }
-  /* Last paragraph in each block — reset bottom margin so the next
-     section doesn't double-space against this block. */
-  #print-report .pr-disclaimer-grid p:last-child,
-  #print-report .pr-acceptance-body:last-of-type,
-  #print-report .pr-reviewer-compact:last-child {
-    margin-bottom: 0;
-  }
-  #print-report .pr-disclaimer-grid {
-    column-count: 1;
-  }
-  /* (.pr-disclaimer-grid p margin / break-inside come from the shared
-     prose-tier rule above.) */
-  /* Acceptance addendum — the legal seal of the document. Sits
-     directly under the disclaimers (which are themselves pinned to
-     page bottom via margin-top: auto). Hairline above + below, body
-     slightly larger than the disclaimer body so this attestation
-     reads as the formal "this user agreed" block. UTC timestamp is
-     monospaced + faintly highlighted so a reviewer's eye lands on
-     it immediately. */
-  #print-report .pr-credentials-acceptance {
-    flex: 0 0 auto;
-    margin-top: 1.5pt;           /* was 2pt */
-    padding: 1.5pt 0 0 0;        /* was 2pt */
-    border-top: 0.4pt solid var(--rule);
-    break-inside: avoid;
-  }
-  /* (.pr-acceptance-body type, margin, break-inside, and last-of-type
-     reset all come from the shared prose-tier rule above.) */
-  #print-report .pr-accept-operator {
-    /* Was bold to highlight the author name. Now plain weight so the
-       acceptance paragraph reads as the same prose tier as the
-       disclaimer + reviewer blocks. The author's name is already
-       captured in the signature grid above; no need to call it out
-       twice in the same section. */
-    font-weight: inherit;
-    color: var(--ink);
-  }
-  /* Signature grid — operator / IP / time / browser / timezone laid
-     out as 3 columns of label+value pairs. Sits above the prose so a
-     reviewer's eye lands on the captured signature first. */
-  #print-report .pr-accept-grid {
+
+  /* ----- SESSION SIGNATURE ROW — 5 captured fields ----- */
+  #print-report .pg-methodology .pg-signature-row {
     display: grid;
-    grid-template-columns: repeat(5, 1fr); /* was 3 — fits all 5 KVs on one row */
-    gap: 1.5pt 6pt;                /* was 2pt 8pt */
-    margin: 1.5pt 0 2pt 0;         /* was 2pt 0 3pt */
-    padding: 1.5pt 4pt;            /* was 2pt 4pt */
+    grid-template-columns: repeat(5, 1fr);
+    gap: 3pt 6pt;
+    margin: 0 0 6pt 0;
+    padding: 3pt 6pt;
     background: var(--paper-2);
     border-radius: 1.5pt;
     break-inside: avoid;
   }
-  #print-report .pr-accept-kv {
+  #print-report .pg-methodology .pg-signature-cell {
     display: flex;
     flex-direction: column;
-    line-height: 1.15;
+    line-height: 1.2;
   }
-  #print-report .pr-accept-k {
-    font-size: 5pt;
+  #print-report .pg-methodology .pg-signature-key {
+    font-family: var(--font-sans);
+    font-size: 5.5pt;
     font-weight: 700;
-    letter-spacing: 0.10em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--muted);
   }
-  #print-report .pr-accept-v {
-    font-size: 6.1pt;            /* was 6.5pt — 5-col layout needs narrower values */
+  #print-report .pg-methodology .pg-signature-val {
+    font-family: var(--font-sans);
+    font-size: 6.5pt;
     font-weight: 600;
     color: var(--ink);
     word-break: break-word;
-    line-height: 1.15;
+    line-height: 1.2;
   }
-  #print-report .pr-accept-ts {
-    font-size: 6.4pt;
-    padding: 0.2pt 2pt;
-    background: var(--paper-2);
-    border-radius: 1pt;
-    color: var(--ink);
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-  }
-  /* Footer: reviewer note + signature block — sits directly below
-     the disclaimer + acceptance cluster (all pinned to page bottom
-     together). Sofia v3: the bottom references-inline strip was
-     REMOVED — every method entry already carries its citing standard
-     in pr-method-cite, so the footer band duplicated information and
-     wasted ~6mm of vertical that was pushing the signature row off
-     the page. Standards inventory lives ONLY in the per-entry cite
-     now; if a reviewer wants a flat list, they read the cite line of
-     each card in the grid. */
-  #print-report .pr-credentials-footer {
-    flex: 0 0 auto;
-    padding-top: 1.5pt;          /* was 2pt */
-  }
-  /* Reviewer compact — typography comes from the shared prose-tier
-     rule above. Only the chrome (background / border) and break
-     behaviour are unique here. Removed cream background + accent
-     border because the visual differentiation made the prose READ
-     as a different tier even at matched font-size. The eyebrow
-     stays bold-accent inline to mark the section without changing
-     the body's visual weight. */
-  #print-report .pr-reviewer-compact {
-    /* Type, margin, padding, break-inside come from the shared prose-
-       tier rule above. Only the chrome overrides are here: no cream
-       background, no accent-bar border. */
-    background: transparent;
-    border-left: none;
-  }
-  #print-report .pr-reviewer-compact .pr-eyebrow {
-    /* Full reset of every .pr-eyebrow property so this leading
-       label flows as plain prose identical to the disclaimer body.
-       The global .pr-eyebrow rule (line ~218) sets uppercase +
-       letter-spacing + bold + accent colour; all four are killed
-       here. The em-dash in the HTML ('Reviewer's note —') is what
-       semantically separates the label from the rest. */
-    display: inline;
-    margin: 0;
-    padding: 0;
-    font-family: inherit;
-    font-size: inherit;
-    line-height: inherit;
-    font-weight: inherit;
-    font-style: inherit;
-    color: inherit;
-    letter-spacing: normal;
-    text-transform: none;
-  }
-  /* Manual sign-off block — paper-level wet-signature row. Sits below
-     the digital provenance grid + reviewer note as the last element on
-     the methodology page. Uses <table> for print reliability (Chrome,
-     Firefox and Safari all preserve table-cell widths + borders in
-     print; flex `gap` is unsafe). Three signature cells at ~5cm × 2.5cm
-     each with a hairline frame; sub-label small-caps above the wet-ink
-     baseline; cell label centred below. */
-  #print-report .pr-signoff-table {
+
+  /* ----- WET-SIGNATURE BLOCK — 3 cells (Author / Company / Date) -----
+     Table layout for print-engine reliability (Chrome / Firefox / Safari
+     all honour table-cell widths + borders consistently in print). */
+  #print-report .pg-methodology .pg-signoff {
     width: 100%;
-    margin: 2pt 0 0 0;             /* was 4pt — pull tight to reviewer note */
+    margin: 9pt 0 0 0;
     border-collapse: collapse;
     table-layout: fixed;
     break-inside: avoid;
     page-break-inside: avoid;
   }
-  #print-report .pr-signoff-cell {
-    width: 50mm;
-    height: 22mm;                  /* was 14mm — user asked for ~2 more 'enter lines' */
-    /* 10 % opacity ink — faint guide for the cell boundary so the
-       frame doesn't weigh the page down. The signature line itself
-       (pr-signoff-line, below) keeps full opacity as the actual
-       writing target. */
-    border: 0.4pt solid rgba(26, 31, 36, 0.10);
-    padding: 2pt 4pt 2pt 4pt;
-    vertical-align: bottom;
-    text-align: center;
-    position: relative;
-  }
-  #print-report .pr-signoff-spacer {
-    width: 4mm;
+  #print-report .pg-methodology .pg-signoff-sub-row {
     border: none;
-    padding: 0;
   }
-  /* Sub-labels (Signature / Signature-Stamp / Date) live in a SEPARATE
-     row ABOVE the cell now, rendered as <th> at 10% opacity. Reads as
-     a faint guide caption; doesn't compete with the writing target.
-     Note: NOT inside the cell anymore — that's the structural change. */
-  #print-report .pr-signoff-sub {
+  /* Sub-label sits ABOVE each cell at 10% opacity — faint guide
+     caption, doesn't compete with the writing target. */
+  #print-report .pg-methodology .pg-signoff-sub {
+    font-family: var(--font-sans);
     font-size: 5.5pt;
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: rgba(26, 31, 36, 0.40);   /* faint — same family as the cell border */
+    color: rgba(26, 31, 36, 0.10);
     text-align: left;
     padding: 0 0 1pt 1pt;
     border: none;
     vertical-align: bottom;
   }
-  #print-report .pr-signoff-sub-row { border: none; }
-  #print-report .pr-signoff-line {
+  #print-report .pg-methodology .pg-signoff-cell {
+    width: 50mm;
+    height: 22mm;
+    border: 0.4pt solid rgba(26, 31, 36, 0.10);
+    padding: 3pt 6pt;
+    vertical-align: bottom;
+    text-align: center;
+    position: relative;
+  }
+  #print-report .pg-methodology .pg-signoff-spacer {
+    width: 4mm;
+    border: none;
+    padding: 0;
+  }
+  #print-report .pg-methodology .pg-signoff-line {
     display: block;
     width: 100%;
-    height: 14mm;                  /* was 6mm — taller cell needs more writing room */
+    height: 14mm;
     border-bottom: 0.5pt solid var(--ink);
     margin: 0 0 1pt 0;
   }
-  #print-report .pr-signoff-label {
+  #print-report .pg-methodology .pg-signoff-label {
     display: block;
+    font-family: var(--font-sans);
     font-size: 6pt;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.10em;
     text-transform: uppercase;
     color: var(--ink);
     text-align: left;
-  }
-
-  /* Reviewer's note — left accent bar, no banana background */
-  #print-report .pr-reviewer-note {
-    margin: 8pt 0;
-    padding: 6pt 0 6pt 10pt;
-    background: var(--paper);
-    border-left: 2pt solid var(--accent);
-    font-size: 9pt;
-    line-height: 1.5;
-    break-inside: avoid;
-  }
-  #print-report .pr-reviewer-note .pr-eyebrow {
-    margin-bottom: 3pt;
-  }
-
-  /* References — 2-column block, paper-2 background */
-  #print-report .pr-references {
-    column-count: 2;
-    column-gap: 12pt;
-    font-size: 8pt;
-    line-height: 1.6;
-    color: var(--ink);
-  }
-  #print-report .pr-references div {
-    break-inside: avoid;
-    margin-bottom: 1pt;
   }
 
   /* Empty state — paper-2 panel, muted accent bar */

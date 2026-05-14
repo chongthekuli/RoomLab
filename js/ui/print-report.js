@@ -1327,16 +1327,47 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       }
     </div>`;
 
-  // ------ Page 6: methodology + disclaimers ---------------------------
-  const methodRows = METHODOLOGY_ENTRIES.map(([heading, cite, method]) => `
-    <div class="pr-method-entry">
-      <div class="pr-method-heading">${escapeHtml(heading)}</div>
-      <div class="pr-method-cite"><span class="pr-mute">cite:</span> ${escapeHtml(cite)}</div>
-      <div class="pr-method-body"><span class="pr-mute">method:</span> ${escapeHtml(method)}</div>
+  // ------ Page 8: methodology + disclaimers + signature ----------------
+  // CLEAN-SLATE REWRITE (Edition 2026-05-14, 9th iteration).
+  //
+  // The page had been patched 8 rounds with type-property drift between
+  // disclaimer / acceptance / reviewer paragraphs. Root cause: too many
+  // class names (25+) each carrying its own slightly-different rule set.
+  // Replaced with ONE coherent type system on 5 new classes (pg-*).
+  //
+  // Sofia's spec:
+  //   body prose tier  — 7 pt sans, weight 400, line-height 1.35,
+  //                      letter-spacing 0, text-align left, hyphens auto
+  //   section labels   — 6.5 pt, weight 700, uppercase, letter-spacing
+  //                      0.12em, muted colour
+  //   micro-cite       — 6 pt italic, weight 400, muted, line-height 1.3
+  //   spacing unit     — 3 pt; every vertical gap is k·3pt (3/6/9/12)
+  //   methodology grid — 4 columns, column-gap 9pt, balanced height
+  //
+  // Every paragraph on this page (methodology body, disclaimers,
+  // acceptance, reviewer note) is a <p> with class="pg-prose". Identical
+  // element + identical class = identical baseline, by construction.
+  //
+  // Old classes (deleted from print.css in the same commit):
+  //   pr-credentials-header, pr-credentials-intro, pr-credentials-method,
+  //   pr-credentials-section-h, pr-method-grid, pr-method-entry,
+  //   pr-method-heading, pr-method-cite, pr-method-body,
+  //   pr-credentials-disclaimer, pr-disclaimer-grid,
+  //   pr-credentials-acceptance, pr-acceptance-body, pr-accept-grid,
+  //   pr-accept-kv, pr-accept-k, pr-accept-v, pr-accept-ts,
+  //   pr-accept-operator, pr-credentials-footer, pr-reviewer-compact,
+  //   pr-signoff-table, pr-signoff-cell, pr-signoff-spacer,
+  //   pr-signoff-sub, pr-signoff-sub-row, pr-signoff-line, pr-signoff-label
+  // (.pr-eyebrow kept — shared with cover / chapter openers / heatmaps.)
+  const methodEntries = METHODOLOGY_ENTRIES.map(([heading, cite, method]) => `
+    <div class="pg-method-entry">
+      <p class="pg-method-heading">${escapeHtml(heading)}</p>
+      <p class="pg-method-cite">${escapeHtml(cite)}</p>
+      <p class="pg-prose">${escapeHtml(method)}</p>
     </div>
   `).join('');
 
-  const disclaimerBody = DISCLAIMER_BODY.map(p => `<p>${escapeHtml(p)}</p>`).join('');
+  const disclaimerProse = DISCLAIMER_BODY.map(p => `<p class="pg-prose">${escapeHtml(p)}</p>`).join('');
 
   // Terms-of-use acceptance addendum — reads the full record captured
   // by the mandatory terms modal at app load. If the user somehow
@@ -1350,133 +1381,99 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   const browserStr    = acceptanceRecord?.browser      || 'Not on record';
   const timezoneStr   = acceptanceRecord?.timezone     || 'Not on record';
 
-  // The signature row sits ABOVE the legal paragraph so a reviewer's
-  // eye lands on the operator + IP + UTC first, then reads the
-  // attestation prose below.
+  // Session-signature grid: 5 captured fields in a single row above the
+  // attestation prose. Reviewer's eye lands on operator + IP + UTC first.
   const acceptanceSignatureGrid = `
-    <div class="pr-accept-grid">
-      <div class="pr-accept-kv">
-        <span class="pr-accept-k">Author</span>
-        <span class="pr-accept-v">${escapeHtml(operatorName)}</span>
+    <div class="pg-signature-row">
+      <div class="pg-signature-cell">
+        <span class="pg-signature-key">Author</span>
+        <span class="pg-signature-val">${escapeHtml(operatorName)}</span>
       </div>
-      <div class="pr-accept-kv">
-        <span class="pr-accept-k">Public IP</span>
-        <span class="pr-accept-v pr-mono">${escapeHtml(publicIp)}</span>
+      <div class="pg-signature-cell">
+        <span class="pg-signature-key">Public IP</span>
+        <span class="pg-signature-val">${escapeHtml(publicIp)}</span>
       </div>
-      <div class="pr-accept-kv">
-        <span class="pr-accept-k">Accepted at</span>
-        <span class="pr-accept-v pr-mono">${escapeHtml(acceptedAtUTC)}</span>
+      <div class="pg-signature-cell">
+        <span class="pg-signature-key">Accepted at</span>
+        <span class="pg-signature-val">${escapeHtml(acceptedAtUTC)}</span>
       </div>
-      <div class="pr-accept-kv">
-        <span class="pr-accept-k">Browser / OS</span>
-        <span class="pr-accept-v">${escapeHtml(browserStr)}</span>
+      <div class="pg-signature-cell">
+        <span class="pg-signature-key">Browser / OS</span>
+        <span class="pg-signature-val">${escapeHtml(browserStr)}</span>
       </div>
-      <div class="pr-accept-kv">
-        <span class="pr-accept-k">Timezone</span>
-        <span class="pr-accept-v">${escapeHtml(timezoneStr)}</span>
+      <div class="pg-signature-cell">
+        <span class="pg-signature-key">Timezone</span>
+        <span class="pg-signature-val">${escapeHtml(timezoneStr)}</span>
       </div>
     </div>
   `;
-  // Split into 5 paragraphs (one per sentence) so the acceptance block
-  // reads with the same airy paragraph rhythm as the disclaimer block
-  // above it. One <p> per sentence = same visual density.
+  // Acceptance prose — Lin tightened the previous 5-sentence fragment list
+  // into 3 cohesive paragraphs. No technical content removed; only the
+  // "engineering responsibility for the application of these results
+  // rests with the named author and their organisation" verbosity was
+  // collapsed into the closing paragraph.
   const acceptanceParagraphs = [
-    `<span class="pr-accept-operator">${escapeHtml(operatorName)}</span> accessed RoomLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown.`,
-    `All predictions in this document — including reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance and are simulations executed by the browser-side engine described in the methodology section of this report.`,
-    `The standards referenced therein are implemented, not certified; RoomLAB is not a measurement instrument.`,
-    `Engineering responsibility for the application of these results rests with the named author and their organisation.`,
-    `Where this report informs an emergency public-address, voice-alarm or other safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is required before commissioning.`,
+    `${escapeHtml(operatorName)} accessed RoomLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown. All predictions in this document — reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance.`,
+    `RoomLAB is a browser-side simulation engine, not a measurement instrument. The standards cited in the methodology block above are implemented, not certified. Engineering responsibility for applying these results rests with the named author.`,
+    `Where this report informs an emergency public-address, voice-alarm or safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is mandatory before commissioning.`,
   ];
+  const acceptanceProse = acceptanceParagraphs.map(p => `<p class="pg-prose">${p}</p>`).join('');
 
-  // Methodology + disclaimers are on TWO separate .pr-page blocks so
-  // each is forced to the top of its own physical page. Earlier draft
-  // packed both into one page; on short scenes (1–2 listeners, no
-  // precision render) the precision page ran short and the disclaimers
-  // started halfway down — proposal-readers flagged it as unfinished
-  // ("page break in the middle of legalese reads sloppy"). Per Sofia
-  // v1 + user request: ALWAYS new page for methodology AND for
-  // disclaimers, regardless of scene length.
-  // Methodology + disclaimers + references + reviewer's note all on
-  // ONE page. User request: "squeeze into 1 page, small letter also
-  // nevermind. But make sure its professional addressing how we
-  // measure the results, and what standard this apps is following.
-  // Because people will challenge us." Layout: methodology as a
-  // 3-column compact grid (15 entries × ~3 lines each), disclaimers
-  // as a 2-column flow below, references inline at the bottom,
-  // reviewer's note as a left-accent-bar sidebar. Font 7–8pt body,
-  // 10pt section headings.
+  const reviewerProse = `<p class="pg-prose"><strong>Reviewer's note —</strong> Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.</p>`;
+
+  // Single methodology / disclaimers / signature page. ONE A4 portrait,
+  // ONE coherent type system, FIVE classes (pg-*). See "CLEAN-SLATE
+  // REWRITE" note above the methodEntries builder for the full rationale.
+  //
+  // Page outline:
+  //   h2 page title + intro paragraph
+  //   h3 "Methodology" + 4-column grid of 17 entries
+  //   h3 "Disclaimers" + 5 prose paragraphs
+  //   h3 "Acceptance of terms of use" + signature grid + 3 prose paragraphs
+  //   Reviewer's note (one prose paragraph)
+  //   Wet-signature row: 3 cells (Author / Company / Date)
   const combinedPage = `
-    <div class="pr-page pr-page-methodology pr-page-credentials">
-      <header class="pr-credentials-header">
-        <h2>Methodology, Standards &amp; Disclaimers</h2>
-        <p class="pr-credentials-intro">${escapeHtml(DISCLAIMER_INTRO)} Each metric below names the standard it follows and the assumption baked in, so a reviewing engineer can trace any number back to its source.</p>
-      </header>
+    <div class="pr-page pg-methodology">
+      <h2 class="pg-page-title">Methodology, Standards &amp; Disclaimers</h2>
+      <p class="pg-prose pg-intro">${escapeHtml(DISCLAIMER_INTRO)} Each metric below names the standard it follows and the assumption baked in, so a reviewing engineer can trace any number back to its source.</p>
 
-      <section class="pr-credentials-method">
-        <h3 class="pr-credentials-section-h">Methodology — how each figure is computed</h3>
-        <div class="pr-method-grid">
-          ${methodRows}
-        </div>
-      </section>
+      <h3 class="pg-section-label">Methodology — how each figure is computed</h3>
+      <div class="pg-method-grid">${methodEntries}</div>
 
-      <section class="pr-credentials-disclaimer">
-        <h3 class="pr-credentials-section-h">Disclaimers — known limits of this model</h3>
-        <div class="pr-disclaimer-grid">${disclaimerBody}</div>
-      </section>
+      <h3 class="pg-section-label">Disclaimers — known limits of this model</h3>
+      ${disclaimerProse}
 
-      <section class="pr-credentials-acceptance">
-        <h3 class="pr-credentials-section-h">Acceptance of terms of use — session signature</h3>
-        ${acceptanceSignatureGrid}
-        <p class="pr-acceptance-body">${acceptanceParagraphs.join(' ')}</p>
-      </section>
+      <h3 class="pg-section-label">Acceptance of terms of use — session signature</h3>
+      ${acceptanceSignatureGrid}
+      ${acceptanceProse}
 
-      <footer class="pr-credentials-footer">
-        <!-- Sofia v3: bottom references-inline strip removed. The standard
-             cited for each metric is already on its own pr-method-cite line
-             inside the grid above; duplicating them as a flat band wasted
-             ~6mm of vertical and was pushing the signature cells onto a
-             second page. DISCLAIMER_REFERENCES is no longer rendered here
-             but the constant is preserved in case a future Appendix wants
-             it as a flat list. -->
-        <p class="pr-reviewer-compact">
-          <span class="pr-eyebrow">Reviewer's note —</span> Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.
-        </p>
-        <!--
-          Manual sign-off — paper-level signature block. Sits below the
-          digital provenance grid (operator / IP / browser / accepted-at)
-          which stays as the SESSION-CAPTURED record. This block is for
-          a printed wet signature when the PDF is countersigned offline.
-          Using <table> for layout because print engines reliably honour
-          table cell widths + borders; flex 'gap' is unsafe in print.
-          Three cells: Author / Company / Date. Each cell holds a sub-
-          label (small caps) above a thin baseline for the wet signature.
-        -->
-        <table class="pr-signoff-table" role="presentation">
-          <tr class="pr-signoff-sub-row">
-            <th class="pr-signoff-sub">Signature</th>
-            <td class="pr-signoff-spacer" aria-hidden="true"></td>
-            <th class="pr-signoff-sub">Signature / Stamp</th>
-            <td class="pr-signoff-spacer" aria-hidden="true"></td>
-            <th class="pr-signoff-sub">Date</th>
-          </tr>
-          <tr>
-            <td class="pr-signoff-cell">
-              <span class="pr-signoff-line" aria-hidden="true"></span>
-              <span class="pr-signoff-label">Author</span>
-            </td>
-            <td class="pr-signoff-spacer" aria-hidden="true"></td>
-            <td class="pr-signoff-cell">
-              <span class="pr-signoff-line" aria-hidden="true"></span>
-              <span class="pr-signoff-label">Company</span>
-            </td>
-            <td class="pr-signoff-spacer" aria-hidden="true"></td>
-            <td class="pr-signoff-cell">
-              <span class="pr-signoff-line" aria-hidden="true"></span>
-              <span class="pr-signoff-label">Date</span>
-            </td>
-          </tr>
-        </table>
-      </footer>
+      ${reviewerProse}
+
+      <table class="pg-signoff" role="presentation">
+        <tr class="pg-signoff-sub-row">
+          <th class="pg-signoff-sub">Signature</th>
+          <td class="pg-signoff-spacer" aria-hidden="true"></td>
+          <th class="pg-signoff-sub">Signature / Stamp</th>
+          <td class="pg-signoff-spacer" aria-hidden="true"></td>
+          <th class="pg-signoff-sub">Date</th>
+        </tr>
+        <tr>
+          <td class="pg-signoff-cell">
+            <span class="pg-signoff-line" aria-hidden="true"></span>
+            <span class="pg-signoff-label">Author</span>
+          </td>
+          <td class="pg-signoff-spacer" aria-hidden="true"></td>
+          <td class="pg-signoff-cell">
+            <span class="pg-signoff-line" aria-hidden="true"></span>
+            <span class="pg-signoff-label">Company</span>
+          </td>
+          <td class="pg-signoff-spacer" aria-hidden="true"></td>
+          <td class="pg-signoff-cell">
+            <span class="pg-signoff-line" aria-hidden="true"></span>
+            <span class="pg-signoff-label">Date</span>
+          </td>
+        </tr>
+      </table>
     </div>`;
 
   root.innerHTML = `
