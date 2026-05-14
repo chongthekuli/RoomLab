@@ -1925,6 +1925,12 @@ html.is-walkmode .spl-legend-3d {
   opacity: 0.85;
   flex: 0 0 auto;
 }
+/* Minor (unlabeled) graduation — shorter line, lower contrast, no
+   label. Renders as ruler-style sub-ticks between the labeled ones. */
+.spl-legend-3d .legend-tick.minor .legend-tick-line {
+  width: 3px;
+  opacity: 0.40;
+}
 .spl-legend-3d .legend-tick-label {
   margin-left: 4px;
   padding: 1px 4px;
@@ -4088,6 +4094,13 @@ section h3 {
   height: 1px;
   background: var(--muted);
   flex: 0 0 4px;
+}
+/* Minor (unlabeled) graduation — shorter line, lower contrast, no
+   label slot needed. Renders as ruler-style sub-ticks. */
+.vp-legend.spl-legend-v .spl-legend-tick.minor .spl-legend-tick-line {
+  width: 2px;
+  flex: 0 0 2px;
+  opacity: 0.45;
 }
 .vp-legend.spl-legend-v .spl-legend-tick-label {
   font-size: 0.66rem;

@@ -6,7 +6,7 @@ import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
 import { roomPlanVertices, isInsideRoom3D } from '../physics/room-shape.js';
-import { computeTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
+import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
 
 let materialsRef;
 
@@ -2067,6 +2067,13 @@ function renderLegend(splResult) {
     const maxVal = splResult.maxSPL_db;
     const freqHz = state.physics?.freq_hz ?? 1000;
     const ticks = computeTicks(minVal, maxVal, 'spl');
+    const minorTicks = computeMinorTicks(minVal, maxVal, 'spl', ticks);
+    const minorRows = minorTicks.map(t => {
+      const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
+      return `<div class="spl-legend-tick minor" style="top:${pct}%">
+        <span class="spl-legend-tick-line"></span>
+      </div>`;
+    }).join('');
     const tickRows = ticks.map(t => {
       const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
       return `<div class="spl-legend-tick" style="top:${pct}%">
@@ -2078,7 +2085,7 @@ function renderLegend(splResult) {
       <span class="legend-header">${legendHeader('spl', freqHz)}</span>
       <div class="spl-legend-stage">
         <div class="legend-bar"></div>
-        <div class="spl-legend-ticks">${tickRows}</div>
+        <div class="spl-legend-ticks">${minorRows}${tickRows}</div>
       </div>
       <span class="legend-footnote">re 20 µPa</span>
     </div>`;

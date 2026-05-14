@@ -22,7 +22,7 @@ import { loadCharacterRig } from './character-loader.js';
 import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode } from '../audio/audition.js';
 import { showWalkTouchHUD, hideWalkTouchHUD } from '../ui/walk-touch-hud.js';
 import { splColorRGB, stiColorRGB } from './colour-ramps.js';
-import { computeTicks, formatTickLabel } from './legend-ticks.js';
+import { computeTicks, computeMinorTicks, formatTickLabel } from './legend-ticks.js';
 import {
   makeTreatmentEntry, projectOntoNearestWall, projectOntoWall,
   wallYawDeg, rescueOrphanedTreatments,
@@ -7224,26 +7224,38 @@ function updateSPLLegend() {
   const minL = legend.querySelector('.legend-min');
   if (ticksEl) ticksEl.replaceChildren();
 
-  // Helper: append one tick at `pctFromBottom` % up the bar.
+  // Helper: append one tick at `pctFromBottom` % up the bar. When
+  // `label` is null, the tick renders as a minor (unlabeled) graduation
+  // — short faded line, no number — driven by .legend-tick.minor in CSS.
   const addTick = (pctFromBottom, label) => {
     if (!ticksEl) return;
     const t = document.createElement('div');
-    t.className = 'legend-tick';
+    t.className = label == null ? 'legend-tick minor' : 'legend-tick';
     t.style.bottom = pctFromBottom.toFixed(2) + '%';
     const line = document.createElement('span');
     line.className = 'legend-tick-line';
-    const lbl = document.createElement('span');
-    lbl.className = 'legend-tick-label';
-    lbl.textContent = label;
     t.appendChild(line);
-    t.appendChild(lbl);
+    if (label != null) {
+      const lbl = document.createElement('span');
+      lbl.className = 'legend-tick-label';
+      lbl.textContent = label;
+      t.appendChild(lbl);
+    }
     ticksEl.appendChild(t);
   };
 
   // Tick layout shared with the 2D legend and print-report heatmap legend
-  // — see js/graphics/legend-ticks.js. Cap of 7 ticks lives there.
+  // — see js/graphics/legend-ticks.js. Cap of 7 majors lives there. Minor
+  // graduations (unlabeled) are added underneath so the gradient bar
+  // reads like a ruler.
   const tickMode = mode === 'stipa' ? 'sti' : 'spl';
   const ticks = computeTicks(minVal, maxVal, tickMode);
+  const minorTicks = computeMinorTicks(minVal, maxVal, tickMode, ticks);
+  // Render minors first so majors layer on top (z-order via DOM order).
+  for (const t of minorTicks) {
+    const pct = Math.max(0, Math.min(100, t.position01 * 100));
+    addTick(pct, null);
+  }
   if (mode === 'stipa') {
     if (title) title.textContent = 'STI';
     // Gradient matches stiColorRGB: red (bad) → orange (poor) → yellow

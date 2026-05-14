@@ -45,6 +45,39 @@ export function computeTicks(min, max, mode) {
   return out;
 }
 
+// Minor (unlabeled) ticks at finer intervals between the major ticks.
+// Renders as short faded lines on the legend bar — "ruler graduations"
+// per user request 2026-05-14. Step rules mirror the major-tick logic
+// so the density scales with range:
+//   SPL  span ≤ 30 dB  → minor step 1 dB  (e.g. 83–97 → 14 minors)
+//   SPL  span ≤ 60 dB  → minor step 2 dB
+//   SPL  span > 60 dB  → minor step 5 dB
+//   STI                → minor step 0.05
+// Positions that coincide with a major-tick value are excluded so the
+// gradient doesn't render two lines on top of each other.
+export function computeMinorTicks(min, max, mode, majorTicks = []) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return [];
+  const span = max - min;
+  let step;
+  if (mode === 'sti') {
+    step = 0.05;
+  } else {
+    step = span <= 30 ? 1 : (span <= 60 ? 2 : 5);
+  }
+  const majorKeys = new Set(
+    majorTicks.map(t => Math.round(t.value * 1000) / 1000),
+  );
+  const first = Math.ceil(min / step) * step;
+  const last  = Math.floor(max / step) * step;
+  const out = [];
+  for (let v = first; v <= last + 1e-9; v += step) {
+    const key = Math.round(v * 1000) / 1000;
+    if (majorKeys.has(key)) continue;
+    out.push({ value: v, position01: (v - min) / span });
+  }
+  return out;
+}
+
 // Format a tick value for display. SPL → integer + dB suffix; STI → 2
 // decimals (unitless). Maya's call: pros scan tick lists; they don't
 // connect a header unit to 6 numbers below. Repeating the unit on
