@@ -1003,10 +1003,10 @@ body.is-pdf-export .vp-tabs {
      identical class = identical baseline by construction.
 
      Type tiers (DO NOT add a fourth):
-       pg-prose          7 pt sans, weight 400, line-height 1.35
-       pg-section-label  6.5 pt, weight 700, uppercase, ls 0.12em
-       pg-method-cite    6 pt italic, weight 400, muted
-       (page title h2)   12 pt, weight 600
+       pg-prose          6.5 pt sans, weight 400, line-height 1.35
+       pg-section-label  6 pt, weight 700, uppercase, ls 0.12em
+       pg-method-cite    5.5 pt italic, weight 400, muted
+       (page title h2)   11.5 pt, weight 600
 
      Spacing scale: every vertical margin is k·3pt (3 / 6 / 9 / 12).
      If you're tempted to add a 1.5pt or 4pt or 5pt margin — STOP.
@@ -1027,7 +1027,7 @@ body.is-pdf-export .vp-tabs {
   /* The page title — only h2 on the page. */
   #print-report .pg-methodology .pg-page-title {
     font-family: var(--font-sans);
-    font-size: 12pt;
+    font-size: 11.5pt;
     font-weight: 600;
     line-height: 1.15;
     letter-spacing: 0;
@@ -1040,7 +1040,7 @@ body.is-pdf-export .vp-tabs {
   /* Section labels — h3 above each block. */
   #print-report .pg-methodology .pg-section-label {
     font-family: var(--font-sans);
-    font-size: 6.5pt;
+    font-size: 6pt;
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: 0.12em;
@@ -1063,7 +1063,7 @@ body.is-pdf-export .vp-tabs {
      Override #print-report tabular-nums explicitly. */
   #print-report .pg-methodology .pg-prose {
     font-family: var(--font-sans);
-    font-size: 7pt;
+    font-size: 6.5pt;
     line-height: 1.35;
     font-weight: 400;
     font-style: normal;
@@ -1110,7 +1110,7 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pg-methodology .pg-method-heading {
     font-family: var(--font-sans);
-    font-size: 7pt;
+    font-size: 6.5pt;
     font-weight: 700;
     line-height: 1.25;
     letter-spacing: 0;
@@ -1119,7 +1119,7 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pg-methodology .pg-method-cite {
     font-family: var(--font-sans);
-    font-size: 6pt;
+    font-size: 5.5pt;
     font-weight: 400;
     font-style: italic;
     line-height: 1.3;
@@ -1157,7 +1157,7 @@ body.is-pdf-export .vp-tabs {
      Value = exact same class spec as .pg-prose, just inline (no margin). */
   #print-report .pg-methodology .pg-signature-key {
     font-family: var(--font-sans);
-    font-size: 6.5pt;
+    font-size: 6pt;
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: 0.12em;
@@ -1166,7 +1166,7 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pg-methodology .pg-signature-val {
     font-family: var(--font-sans);
-    font-size: 7pt;
+    font-size: 6.5pt;
     font-weight: 400;
     line-height: 1.35;
     letter-spacing: 0;
@@ -1194,7 +1194,7 @@ body.is-pdf-export .vp-tabs {
      writing target. */
   #print-report .pg-methodology .pg-signoff-sub {
     font-family: var(--font-sans);
-    font-size: 6.5pt;
+    font-size: 6pt;
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: 0.12em;
@@ -1229,7 +1229,7 @@ body.is-pdf-export .vp-tabs {
   #print-report .pg-methodology .pg-signoff-label {
     display: block;
     font-family: var(--font-sans);
-    font-size: 6.5pt;
+    font-size: 6pt;
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: 0.12em;

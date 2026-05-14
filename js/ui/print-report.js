@@ -1419,7 +1419,11 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   ];
   const acceptanceProse = acceptanceParagraphs.map(p => `<p class="pg-prose">${p}</p>`).join('');
 
-  const reviewerProse = `<p class="pg-prose"><strong>Reviewer's note —</strong> Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.</p>`;
+  // Reviewer note rendered as PLAIN <p class="pg-prose"> with no inline
+  // emphasis — every paragraph on this page is now structurally identical
+  // (one <p>, one class, no nested tags). The em-dash after "Reviewer's
+  // note" semantically separates the label from the body.
+  const reviewerProse = `<p class="pg-prose">Reviewer's note — Before issuing this report, confirm: (1) the project name on page 1 matches the tendered scheme; (2) the ambient noise floor reflects the venue's measured or specified condition, not a placeholder; (3) listener positions correspond to the seating, standing, or circulation intent of the design. Amend the scene and re-export if any item drifts.</p>`;
 
   // Single methodology / disclaimers / signature page. ONE A4 portrait,
   // ONE coherent type system, FIVE classes (pg-*). See "CLEAN-SLATE
