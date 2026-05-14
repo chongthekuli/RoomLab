@@ -4128,12 +4128,41 @@ section h3 {
   cursor: pointer;
   letter-spacing: 0.03em;
 }
+/* Precision render button — red glass treatment. Uses a translucent
+   red fill + subtle inner highlight so it reads as a 'heavy action'
+   button (precision render is a 1-10 s blocking compute). Hover
+   deepens the red and lifts the highlight. */
 .btn-render {
-  background: #3a5a8a;
-  color: #fff;
-  border-color: #5a7ab0;
+  background:
+    linear-gradient(180deg, rgba(255, 90, 90, 0.18) 0%, rgba(170, 30, 30, 0.42) 100%),
+    rgba(140, 30, 30, 0.55);
+  color: #fff5f5;
+  border-color: rgba(255, 110, 110, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 1px 2px rgba(140, 30, 30, 0.25);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
-.btn-render:hover { background: #4a6a9a; }
+.btn-render:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 120, 120, 0.28) 0%, rgba(200, 40, 40, 0.55) 100%),
+    rgba(170, 35, 35, 0.65);
+  border-color: rgba(255, 140, 140, 0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 2px 4px rgba(170, 35, 35, 0.32);
+}
+.btn-render:active {
+  background:
+    linear-gradient(180deg, rgba(180, 35, 35, 0.55) 0%, rgba(140, 25, 25, 0.62) 100%),
+    rgba(120, 25, 25, 0.7);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.32),
+    0 0 0 rgba(0, 0, 0, 0);
+}
 .btn-cancel {
   background: transparent;
   color: #ff8080;
