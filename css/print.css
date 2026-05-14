@@ -1146,10 +1146,14 @@ body.is-pdf-export .vp-tabs {
     break-inside: avoid;
   }
   #print-report .pr-acceptance-body {
-    /* Type properties come from the shared PROSE TIER rule above; only
-     unique behaviour here is margin reset. */
-    margin: 0;
+    /* Type properties come from the shared PROSE TIER rule above. The
+       acceptance is split into multiple <p>s (one per sentence) so it
+       reads with the same airy rhythm as the disclaimer block — match
+       the 1pt bottom margin used there. */
+    margin: 0 0 1pt 0;
+    break-inside: avoid;
   }
+  #print-report .pr-acceptance-body:last-child { margin-bottom: 0; }
   #print-report .pr-accept-operator {
     /* Was bold to highlight the author name. Now plain weight so the
        acceptance paragraph reads as the same prose tier as the

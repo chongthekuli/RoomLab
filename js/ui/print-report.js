@@ -1377,7 +1377,16 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </div>
     </div>
   `;
-  const acceptanceParagraph = `<span class="pr-accept-operator">${escapeHtml(operatorName)}</span> accessed RoomLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown. All predictions in this document — including reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance and are simulations executed by the browser-side engine described in the methodology section of this report. The standards referenced therein are implemented, not certified; RoomLAB is not a measurement instrument. Engineering responsibility for the application of these results rests with the named author and their organisation. Where this report informs an emergency public-address, voice-alarm or other safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is required before commissioning.`;
+  // Split into 5 paragraphs (one per sentence) so the acceptance block
+  // reads with the same airy paragraph rhythm as the disclaimer block
+  // above it. One <p> per sentence = same visual density.
+  const acceptanceParagraphs = [
+    `<span class="pr-accept-operator">${escapeHtml(operatorName)}</span> accessed RoomLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown.`,
+    `All predictions in this document — including reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance and are simulations executed by the browser-side engine described in the methodology section of this report.`,
+    `The standards referenced therein are implemented, not certified; RoomLAB is not a measurement instrument.`,
+    `Engineering responsibility for the application of these results rests with the named author and their organisation.`,
+    `Where this report informs an emergency public-address, voice-alarm or other safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is required before commissioning.`,
+  ];
 
   // Methodology + disclaimers are on TWO separate .pr-page blocks so
   // each is forced to the top of its own physical page. Earlier draft
@@ -1418,7 +1427,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <section class="pr-credentials-acceptance">
         <h3 class="pr-credentials-section-h">Acceptance of terms of use — session signature</h3>
         ${acceptanceSignatureGrid}
-        <p class="pr-acceptance-body">${acceptanceParagraph}</p>
+        ${acceptanceParagraphs.map(p => `<p class="pr-acceptance-body">${p}</p>`).join('')}
       </section>
 
       <footer class="pr-credentials-footer">
