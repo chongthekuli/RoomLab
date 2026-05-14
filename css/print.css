@@ -1229,16 +1229,23 @@ body.is-pdf-export .vp-tabs {
     break-inside: avoid;
   }
   #print-report .pr-reviewer-compact .pr-eyebrow {
-    /* Was bold + accent-red ('REVIEWER'S NOTE —'). User wants the
-       reviewer prose to match the disclaimer style exactly — no
-       coloured / weighted emphasis. The leading label still reads
-       as a label because of the em-dash break that follows, just
-       not as a callout. */
+    /* Full reset of every .pr-eyebrow property so this leading
+       label flows as plain prose identical to the disclaimer body.
+       The global .pr-eyebrow rule (line ~218) sets uppercase +
+       letter-spacing + bold + accent colour; all four are killed
+       here. The em-dash in the HTML ('Reviewer's note —') is what
+       semantically separates the label from the rest. */
     display: inline;
     margin: 0;
-    font-size: 6.5pt;
-    color: var(--ink);
+    padding: 0;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
     font-weight: inherit;
+    font-style: inherit;
+    color: inherit;
+    letter-spacing: normal;
+    text-transform: none;
   }
   /* Manual sign-off block — paper-level wet-signature row. Sits below
      the digital provenance grid + reviewer note as the last element on
