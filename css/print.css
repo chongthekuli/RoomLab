@@ -1104,16 +1104,32 @@ body.is-pdf-export .vp-tabs {
   /* Full-width disclaimer (was 2-col). At narrow column width the right
      column kept ending early while the left ran long, wasting vertical
      space. Full width wraps each paragraph fewer times overall. */
-  #print-report .pr-disclaimer-grid {
-    column-count: 1;
-    font-size: 6.5pt;            /* baseline for the disclaimer + reviewer prose tier */
+  /* ============================================================
+     SHARED PROSE TIER — disclaimer + acceptance + reviewer note all
+     render with IDENTICAL type properties so the three paragraphs
+     read as one consistent prose voice on this page. User flagged
+     three times that they didn't match because of font / weight /
+     letter-spacing / decoration drift. Locking everything here:
+     ============================================================ */
+  #print-report .pr-disclaimer-grid p,
+  #print-report .pr-acceptance-body,
+  #print-report .pr-reviewer-compact {
+    font-family: var(--font-sans);
+    font-size: 6.5pt;
     line-height: 1.28;
-  }
-  #print-report .pr-disclaimer-grid p {
-    margin: 0 0 1pt 0;           /* was 1.5pt */
-    break-inside: avoid;
+    font-weight: 400;
+    font-style: normal;
+    letter-spacing: 0;
     text-align: justify;
     hyphens: auto;
+    color: var(--ink);
+  }
+  #print-report .pr-disclaimer-grid {
+    column-count: 1;
+  }
+  #print-report .pr-disclaimer-grid p {
+    margin: 0 0 1pt 0;
+    break-inside: avoid;
   }
   /* Acceptance addendum — the legal seal of the document. Sits
      directly under the disclaimers (which are themselves pinned to
@@ -1130,16 +1146,9 @@ body.is-pdf-export .vp-tabs {
     break-inside: avoid;
   }
   #print-report .pr-acceptance-body {
-    /* SAME prose tier as .pr-disclaimer-grid p and .pr-reviewer-compact.
-       User asked for all three to read at one size. 6.5pt / 1.28 is the
-       baseline; changing any one of these breaks the visual match —
-       update all three together. */
-    font-size: 6.5pt;
-    line-height: 1.28;
-    color: var(--ink);
+    /* Type properties come from the shared PROSE TIER rule above; only
+     unique behaviour here is margin reset. */
     margin: 0;
-    text-align: justify;
-    hyphens: auto;
   }
   #print-report .pr-accept-operator {
     font-weight: 700;
@@ -1200,22 +1209,24 @@ body.is-pdf-export .vp-tabs {
     flex: 0 0 auto;
     padding-top: 1.5pt;          /* was 2pt */
   }
+  /* Reviewer compact — typography comes from the shared prose-tier
+     rule above. Only the chrome (background / border) and break
+     behaviour are unique here. Removed cream background + accent
+     border because the visual differentiation made the prose READ
+     as a different tier even at matched font-size. The eyebrow
+     stays bold-accent inline to mark the section without changing
+     the body's visual weight. */
   #print-report .pr-reviewer-compact {
     margin: 0;
-    padding: 2pt 6pt;
-    background: var(--paper-2);
-    border-left: 1.2pt solid var(--accent);
-    /* Reviewer prose is the SAME size + line-height as the disclaimer
-       body — both at 6.5pt / 1.28 line-height — so they read as one
-       consistent prose tier on the methodology page. */
-    font-size: 6.5pt;
-    line-height: 1.28;
+    padding: 0;
+    background: transparent;
+    border-left: none;
     break-inside: avoid;
   }
   #print-report .pr-reviewer-compact .pr-eyebrow {
     display: inline;
     margin: 0;
-    font-size: 6.5pt;            /* match the body size of this block */
+    font-size: 6.5pt;            /* inherit-ish — match the body size */
     color: var(--accent);
     font-weight: 700;
   }
