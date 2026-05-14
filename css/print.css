@@ -587,10 +587,13 @@ body.is-pdf-export .vp-tabs {
     background: var(--ink);
   }
   /* Minor (unlabeled) graduation — shorter line, fainter ink; renders
-     as ruler-style sub-ticks between the labelled majors. */
+     as ruler-style sub-ticks between the labelled majors. Bumped to
+     2.5pt / 0.65 opacity from the original 2pt / 0.45 — at print scale
+     the originals fell below the PDF's perceptible threshold and read
+     as if no minor ticks existed at all. */
   #print-report .pr-heatmap-legend-tick.minor .pr-heatmap-legend-tick-line {
-    width: 2pt;
-    opacity: 0.45;
+    width: 2.5pt;
+    opacity: 0.65;
   }
   #print-report .pr-heatmap-legend-tick-label {
     font-size: 7.5pt;
@@ -724,10 +727,12 @@ body.is-pdf-export .vp-tabs {
     background: var(--ink);
   }
   /* Minor (unlabeled) graduation — shorter line, fainter ink; renders
-     as ruler-style sub-ticks between the labelled majors. */
+     as ruler-style sub-ticks between the labelled majors. Bumped to
+     2pt / 0.65 from the original 1.5pt / 0.45 for the same reason as
+     the heatmap legend — at print scale the originals were invisible. */
   #print-report .pr-strip-legend-tick.minor .pr-strip-legend-tick-line {
-    height: 1.5pt;
-    opacity: 0.45;
+    height: 2pt;
+    opacity: 0.65;
   }
   #print-report .pr-strip-legend-tick-label {
     font-size: 7pt;
