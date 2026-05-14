@@ -1130,8 +1130,12 @@ body.is-pdf-export .vp-tabs {
     break-inside: avoid;
   }
   #print-report .pr-acceptance-body {
-    font-size: 6.1pt;            /* was 6.3pt — paragraph trims one wrapped line */
-    line-height: 1.25;           /* was 1.3 */
+    /* SAME prose tier as .pr-disclaimer-grid p and .pr-reviewer-compact.
+       User asked for all three to read at one size. 6.5pt / 1.28 is the
+       baseline; changing any one of these breaks the visual match —
+       update all three together. */
+    font-size: 6.5pt;
+    line-height: 1.28;
     color: var(--ink);
     margin: 0;
     text-align: justify;
