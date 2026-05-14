@@ -1105,11 +1105,9 @@ body.is-pdf-export .vp-tabs {
      column kept ending early while the left ran long, wasting vertical
      space. Full width wraps each paragraph fewer times overall. */
   /* ============================================================
-     SHARED PROSE TIER — disclaimer + acceptance + reviewer note all
-     render with IDENTICAL type properties so the three paragraphs
-     read as one consistent prose voice on this page. User flagged
-     three times that they didn't match because of font / weight /
-     letter-spacing / decoration drift. Locking everything here:
+     SHARED PROSE TIER — disclaimer + acceptance + reviewer all
+     render with IDENTICAL text-affecting properties. EXHAUSTIVE
+     property list so no inherited rule can drift one of them.
      ============================================================ */
   #print-report .pr-disclaimer-grid p,
   #print-report .pr-acceptance-body,
@@ -1120,17 +1118,30 @@ body.is-pdf-export .vp-tabs {
     font-weight: 400;
     font-style: normal;
     letter-spacing: 0;
+    word-spacing: normal;
     text-align: justify;
+    text-indent: 0;
     hyphens: auto;
     color: var(--ink);
+    font-variant-numeric: normal;        /* override #print-report tabular-nums */
+    font-feature-settings: normal;
+    font-kerning: auto;
+    margin: 0 0 1pt 0;                   /* uniform paragraph margin */
+    padding: 0;
+    break-inside: avoid;
+  }
+  /* Last paragraph in each block — reset bottom margin so the next
+     section doesn't double-space against this block. */
+  #print-report .pr-disclaimer-grid p:last-child,
+  #print-report .pr-acceptance-body:last-of-type,
+  #print-report .pr-reviewer-compact:last-child {
+    margin-bottom: 0;
   }
   #print-report .pr-disclaimer-grid {
     column-count: 1;
   }
-  #print-report .pr-disclaimer-grid p {
-    margin: 0 0 1pt 0;
-    break-inside: avoid;
-  }
+  /* (.pr-disclaimer-grid p margin / break-inside come from the shared
+     prose-tier rule above.) */
   /* Acceptance addendum — the legal seal of the document. Sits
      directly under the disclaimers (which are themselves pinned to
      page bottom via margin-top: auto). Hairline above + below, body
@@ -1145,15 +1156,8 @@ body.is-pdf-export .vp-tabs {
     border-top: 0.4pt solid var(--rule);
     break-inside: avoid;
   }
-  #print-report .pr-acceptance-body {
-    /* Type properties come from the shared PROSE TIER rule above. The
-       acceptance is split into multiple <p>s (one per sentence) so it
-       reads with the same airy rhythm as the disclaimer block — match
-       the 1pt bottom margin used there. */
-    margin: 0 0 1pt 0;
-    break-inside: avoid;
-  }
-  #print-report .pr-acceptance-body:last-child { margin-bottom: 0; }
+  /* (.pr-acceptance-body type, margin, break-inside, and last-of-type
+     reset all come from the shared prose-tier rule above.) */
   #print-report .pr-accept-operator {
     /* Was bold to highlight the author name. Now plain weight so the
        acceptance paragraph reads as the same prose tier as the
@@ -1226,15 +1230,11 @@ body.is-pdf-export .vp-tabs {
      stays bold-accent inline to mark the section without changing
      the body's visual weight. */
   #print-report .pr-reviewer-compact {
-    /* <p> now (was <div>) so global #print-report p { orphans/widows }
-       applies same as disclaimer + acceptance paragraphs. Match the
-       1pt bottom margin so the reviewer sits with the same paragraph
-       rhythm as the rest of the prose. */
-    margin: 0 0 1pt 0;
-    padding: 0;
+    /* Type, margin, padding, break-inside come from the shared prose-
+       tier rule above. Only the chrome overrides are here: no cream
+       background, no accent-bar border. */
     background: transparent;
     border-left: none;
-    break-inside: avoid;
   }
   #print-report .pr-reviewer-compact .pr-eyebrow {
     /* Full reset of every .pr-eyebrow property so this leading
