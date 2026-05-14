@@ -10,6 +10,65 @@ import { computeTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
 
 let materialsRef;
 
+// ---- Mouse-wheel zoom state ----
+// Applied as a CSS transform on the SVG element AFTER each render.
+// CSS transform vs reworking the SVG viewBox: transform is purely
+// visual, so click-math (clientToWorld) keeps working because
+// getBoundingClientRect already returns the transformed bounds —
+// no coordinate-mapping changes needed inside any handler.
+let _view2dZoom = 1;
+let _view2dPanX = 0;
+let _view2dPanY = 0;
+const VIEW2D_ZOOM_MIN = 0.5;
+const VIEW2D_ZOOM_MAX = 8;
+const VIEW2D_ZOOM_STEP = 1.15;       // per wheel-tick zoom multiplier
+
+function applyView2dTransform() {
+  const svg = document.querySelector('#view-2d svg');
+  if (!svg) return;
+  svg.style.transformOrigin = '0 0';
+  svg.style.transform =
+    `translate(${_view2dPanX}px, ${_view2dPanY}px) scale(${_view2dZoom})`;
+  svg.style.willChange = (_view2dZoom !== 1 || _view2dPanX !== 0 || _view2dPanY !== 0)
+    ? 'transform' : 'auto';
+}
+
+function resetView2dZoom() {
+  _view2dZoom = 1;
+  _view2dPanX = 0;
+  _view2dPanY = 0;
+  applyView2dTransform();
+}
+
+function onView2dWheel(e) {
+  // Only handle scrolls inside the 2D viewport.
+  if (!e.currentTarget.contains(e.target)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const svg = e.currentTarget.querySelector('svg');
+  if (!svg) return;
+  const rect = svg.getBoundingClientRect();
+  // Cursor position relative to the (pre-transform) SVG origin in
+  // screen px. We use it as the focal point so the world coord under
+  // the cursor stays under the cursor after the zoom change.
+  const fx = e.clientX - rect.left;
+  const fy = e.clientY - rect.top;
+  const factor = e.deltaY < 0 ? VIEW2D_ZOOM_STEP : 1 / VIEW2D_ZOOM_STEP;
+  const newZoom = Math.max(VIEW2D_ZOOM_MIN, Math.min(VIEW2D_ZOOM_MAX, _view2dZoom * factor));
+  if (newZoom === _view2dZoom) return;        // hit a clamp
+  // Focal-point zoom math: newPan = cursor - (cursor - oldPan) × (newZoom/oldZoom)
+  // The cursor's world coord (mapped via screen→pre-transform→viewBox)
+  // is preserved at the cursor's screen position after the scale change.
+  // Note: fx / fy here are in screen-px relative to the RENDERED rect,
+  // which already includes _view2dZoom, so we divide by zoom to get
+  // pre-transform px before re-applying the new zoom.
+  const ratio = newZoom / _view2dZoom;
+  _view2dPanX = fx - (fx - _view2dPanX) * ratio;
+  _view2dPanY = fy - (fy - _view2dPanY) * ratio;
+  _view2dZoom = newZoom;
+  applyView2dTransform();
+}
+
 const COLOR_BANDS = [
   { max: 0.10, color: '#d93a3a', label: 'Hard (α < 0.1)' },
   { max: 0.25, color: '#e6a53a', label: 'Reflective' },
@@ -517,13 +576,34 @@ export function mount2DViewport({ materials }) {
   on('treatment:selected', render);
   on('scene:reset', render);
   window.addEventListener('resize', render);
+  // Reset zoom whenever the scene is fully replaced so the new room
+  // shows at default scale.
+  on('scene:reset', resetView2dZoom);
+
+  // Mouse-wheel zoom on the 2D viewport container. Attached ONCE on
+  // mount; renders rewrite the inner SVG but leave the container alone.
+  const vp = document.getElementById('view-2d');
+  if (vp) {
+    vp.addEventListener('wheel', onView2dWheel, { passive: false });
+    // Double-click on empty background → reset zoom. Handler bails if
+    // the click hit an interactive element (room outline, speaker,
+    // listener, treatment) so it doesn't fight existing dblclick.
+    vp.addEventListener('dblclick', (e) => {
+      const target = e.target;
+      if (target.closest('[data-source-idx], [data-listener-id], [data-treatment-id], [data-zone-id], [data-vertex-idx]')) return;
+      if (_view2dZoom === 1 && _view2dPanX === 0 && _view2dPanY === 0) return;
+      e.preventDefault();
+      resetView2dZoom();
+    });
+  }
 }
 
 function render() {
   const vp = document.getElementById('view-2d');
-  if (drawActive && drawConfig.mode === 'room-shape') { renderCustomDraw(vp); return; }
-  if (drawActive && drawConfig.mode === 'zone') { renderZoneDraw(vp); return; }
+  if (drawActive && drawConfig.mode === 'room-shape') { renderCustomDraw(vp); applyView2dTransform(); return; }
+  if (drawActive && drawConfig.mode === 'zone') { renderZoneDraw(vp); applyView2dTransform(); return; }
   renderNormal(vp);
+  applyView2dTransform();
 }
 
 // Compute the state copy for the guide-text band based on draw state.
