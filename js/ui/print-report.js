@@ -1959,7 +1959,7 @@ function renderPrecisionSection(p) {
       </div>
       <div>
         ${tierStrip}
-        <p class="pr-note" style="margin-top:4pt">${stiTier === 2 ? 'Above the MS IEC 60849 / BOMBA emergency-PA threshold (0.50). Verify with in-situ commissioning.' : stiTier === 1 ? 'Marginal — between the BS 5839-8 floor (0.45) and the MS IEC 60849 / BOMBA threshold (0.50). Treatment recommended.' : 'Below the BS 5839-8 floor (0.45). Treatment required before submission.'}</p>
+        <p class="pr-note" style="margin-top:4pt">${stiTier === 2 ? 'Above the IEC 60849 emergency-PA threshold (0.50). Verify with in-situ commissioning.' : stiTier === 1 ? 'Marginal — between the BS 5839-8 floor (0.45) and the IEC 60849 threshold (0.50). Treatment recommended.' : 'Below the BS 5839-8 floor (0.45). Treatment required before submission.'}</p>
       </div>
     </div>`;
 
