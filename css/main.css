@@ -358,6 +358,35 @@ html.is-fullscreen #app-root {
   border-color: var(--accent);
 }
 
+/* Precision-render rail icon — red frozen-glass treatment so it
+   visually pairs with the red glass Render button inside the panel
+   it opens. Same backdrop-filter blur as the other rail icons so
+   it still reads as a member of the rail family, just tinted red. */
+.rail-icon[data-panel="precision"] {
+  background:
+    linear-gradient(180deg, rgba(255, 90, 90, 0.16) 0%, rgba(170, 30, 30, 0.34) 100%),
+    rgba(140, 30, 30, 0.30);
+  border-color: rgba(255, 110, 110, 0.32);
+  color: rgba(255, 200, 200, 0.85);
+}
+@supports not ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  .rail-icon[data-panel="precision"] { background: rgba(140, 30, 30, 0.55); }
+}
+.rail-icon[data-panel="precision"]:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 120, 120, 0.26) 0%, rgba(200, 40, 40, 0.50) 100%),
+    rgba(170, 35, 35, 0.45);
+  border-color: rgba(255, 140, 140, 0.55);
+  color: #fff5f5;
+}
+.rail-icon[data-panel="precision"].is-active {
+  background:
+    linear-gradient(180deg, rgba(255, 130, 130, 0.32) 0%, rgba(210, 45, 45, 0.62) 100%),
+    rgba(180, 40, 40, 0.55);
+  border-color: rgba(255, 150, 150, 0.85);
+  color: #fff;
+}
+
 /* Hover label — small floating tooltip slides 8 px from the rail. */
 .rail-icon::after {
   content: attr(aria-label);
