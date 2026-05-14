@@ -643,7 +643,7 @@ const METHODOLOGY_ENTRIES = [
     'NC-35 default per-band SPL; user-overridable. Drives N in the STIPA denominator and noise correction in full STI.'],
   ['Critical distance r_c',
     'Beranek 2nd ed. eq. 6-7.',
-    'r_c = 0.057·√(Q·V/T₆₀) at 1 kHz with assumed Q = 2 (DI ≈ 3 dB, omnidirectional baseline). Beyond r_c the reverberant field dominates the direct.'],
+    'Distance from the source at which direct and reverberant sound are equal in level. Listeners within r_c hear the speaker; beyond r_c they hear the room. r_c = 0.057·√(Q·V/T₆₀) at 1 kHz, Q = 2 (DI ≈ 3 dB, moderately directional). Grows with lower RT60 and higher directivity.'],
   ['Schroeder cutoff frequency',
     'Schroeder 1962; Kuttruff 6th ed. §3.4.',
     'f_s = 2000·√(T₆₀/V). Below f_s the room is modal; statistical-acoustics figures lose physical meaning.'],
