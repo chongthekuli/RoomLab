@@ -11,14 +11,22 @@ import { computeTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
 let materialsRef;
 
 // ---- Mouse-wheel zoom state ----
-// Applied as a CSS transform on the SVG element AFTER each render.
-// CSS transform vs reworking the SVG viewBox: transform is purely
-// visual, so click-math (clientToWorld) keeps working because
-// getBoundingClientRect already returns the transformed bounds —
-// no coordinate-mapping changes needed inside any handler.
+// We zoom by mutating the SVG's viewBox (NOT CSS transform). Reason:
+// CSS transform scales the rasterized SVG output → vector content
+// blurs on zoom-in. Mutating the viewBox makes the browser re-render
+// at the new resolution → strokes / text / heatmap rects stay sharp.
+// clientToWorldXY uses getScreenCTM, which automatically follows the
+// viewBox, so click math keeps working with no further changes.
+//
+// The viewBox base for normal mode is "0 0 800 500" (see renderNormal).
+// We track a virtual zoom + pan and reconstruct the viewBox each call:
+//   vbW = 800 / zoom; vbH = 500 / zoom
+//   vbX = panX_view ; vbY = panY_view   (in viewBox-coord px)
+const VIEW2D_BASE_VB_W = 800;
+const VIEW2D_BASE_VB_H = 500;
 let _view2dZoom = 1;
-let _view2dPanX = 0;
-let _view2dPanY = 0;
+let _view2dVbX  = 0;       // viewBox-coord pan (NOT screen px)
+let _view2dVbY  = 0;
 const VIEW2D_ZOOM_MIN = 0.5;
 const VIEW2D_ZOOM_MAX = 8;
 const VIEW2D_ZOOM_STEP = 1.15;       // per wheel-tick zoom multiplier
@@ -26,45 +34,54 @@ const VIEW2D_ZOOM_STEP = 1.15;       // per wheel-tick zoom multiplier
 function applyView2dTransform() {
   const svg = document.querySelector('#view-2d svg');
   if (!svg) return;
-  svg.style.transformOrigin = '0 0';
-  svg.style.transform =
-    `translate(${_view2dPanX}px, ${_view2dPanY}px) scale(${_view2dZoom})`;
-  svg.style.willChange = (_view2dZoom !== 1 || _view2dPanX !== 0 || _view2dPanY !== 0)
-    ? 'transform' : 'auto';
+  const vbW = VIEW2D_BASE_VB_W / _view2dZoom;
+  const vbH = VIEW2D_BASE_VB_H / _view2dZoom;
+  svg.setAttribute('viewBox', `${_view2dVbX} ${_view2dVbY} ${vbW} ${vbH}`);
+  svg.style.transform = '';            // ensure no leftover CSS transform
 }
 
 function resetView2dZoom() {
   _view2dZoom = 1;
-  _view2dPanX = 0;
-  _view2dPanY = 0;
+  _view2dVbX = 0;
+  _view2dVbY = 0;
   applyView2dTransform();
 }
 
 function onView2dWheel(e) {
-  // Only handle scrolls inside the 2D viewport.
   if (!e.currentTarget.contains(e.target)) return;
   e.preventDefault();
   e.stopPropagation();
   const svg = e.currentTarget.querySelector('svg');
   if (!svg) return;
-  const rect = svg.getBoundingClientRect();
-  // Cursor position relative to the (pre-transform) SVG origin in
-  // screen px. We use it as the focal point so the world coord under
-  // the cursor stays under the cursor after the zoom change.
-  const fx = e.clientX - rect.left;
-  const fy = e.clientY - rect.top;
+  // Cursor → viewBox coord (the world point we want to keep under the
+  // cursor across the zoom change). getScreenCTM().inverse() handles
+  // the current viewBox → screen mapping for us.
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return;
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX;
+  pt.y = e.clientY;
+  const before = pt.matrixTransform(ctm.inverse());
+
   const factor = e.deltaY < 0 ? VIEW2D_ZOOM_STEP : 1 / VIEW2D_ZOOM_STEP;
   const newZoom = Math.max(VIEW2D_ZOOM_MIN, Math.min(VIEW2D_ZOOM_MAX, _view2dZoom * factor));
   if (newZoom === _view2dZoom) return;        // hit a clamp
-  // Focal-point zoom math: newPan = cursor - (cursor - oldPan) × (newZoom/oldZoom)
-  // The cursor's world coord (mapped via screen→pre-transform→viewBox)
-  // is preserved at the cursor's screen position after the scale change.
-  // Note: fx / fy here are in screen-px relative to the RENDERED rect,
-  // which already includes _view2dZoom, so we divide by zoom to get
-  // pre-transform px before re-applying the new zoom.
-  const ratio = newZoom / _view2dZoom;
-  _view2dPanX = fx - (fx - _view2dPanX) * ratio;
-  _view2dPanY = fy - (fy - _view2dPanY) * ratio;
+
+  // New viewBox dimensions.
+  const newVbW = VIEW2D_BASE_VB_W / newZoom;
+  const newVbH = VIEW2D_BASE_VB_H / newZoom;
+  // After the zoom, the cursor's screen position should map to the
+  // same viewBox coord `before`. Cursor's position relative to the
+  // viewBox origin in CURRENT mapping is `before.x - _view2dVbX`. To
+  // keep that fraction constant of the new viewBox, the new origin is:
+  //   newVbX = before.x - (cursor_fraction_of_new_vb) × newVbW
+  // where cursor_fraction was (before.x - oldVbX) / oldVbW.
+  const oldVbW = VIEW2D_BASE_VB_W / _view2dZoom;
+  const oldVbH = VIEW2D_BASE_VB_H / _view2dZoom;
+  const fx = (before.x - _view2dVbX) / oldVbW;   // 0..1
+  const fy = (before.y - _view2dVbY) / oldVbH;
+  _view2dVbX = before.x - fx * newVbW;
+  _view2dVbY = before.y - fy * newVbH;
   _view2dZoom = newZoom;
   applyView2dTransform();
 }
@@ -946,9 +963,12 @@ function renderNormal(vp) {
         ${speakerSvg}
         ${vertexSvg}
         ${renderOriginCrosshair(x0, y0, '#5a6677')}
-        <text x="${x0 + pxW/2}" y="${500 - 18}" text-anchor="middle" class="vp-lbl vp-lbl-dim">${shapeMeta}  |  floor: ${nameOf(surfaces.floor)}  |  walls: ${wallsMeta}  |  ceiling: ${ceilMeta}</text>
         ${splResult ? '' : `<text x="${x0 + pxW/2}" y="${y0 + pxD/2}" text-anchor="middle" class="vp-lbl vp-lbl-empty">no sources placed</text><text x="${x0 + pxW/2}" y="${y0 + pxD/2 + 18}" text-anchor="middle" class="vp-lbl vp-lbl-empty-hint">add a speaker to compute SPL</text>`}
       </svg>
+      <!-- Meta text moved OUT of the SVG so wheel-zoom (which adjusts
+           the SVG viewBox) doesn't scale it. Lives below the SVG as
+           plain HTML; same .vp-lbl-dim styling. -->
+      <div class="vp-meta-strip">${shapeMeta}  |  floor: ${nameOf(surfaces.floor)}  |  walls: ${wallsMeta}  |  ceiling: ${ceilMeta}</div>
       ${renderLegend(splResult)}
     </div>
   `;
