@@ -19,7 +19,7 @@
 // page is layout-compatible with the cover plan.
 
 import { colorForMetric, splColorRGB } from '../graphics/colour-ramps.js';
-import { computeTicks, formatTickLabel, legendHeader } from '../graphics/legend-ticks.js';
+import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from '../graphics/legend-ticks.js';
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
 
 // 1.5m margin gives the North arrow + scale bar enough room to live
@@ -321,12 +321,20 @@ export function buildHeatmapLegend(splGrid) {
   const min = splGrid.minSPL_db;
   const max = splGrid.maxSPL_db;
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return '';
-  const ticks = computeTicks(min, max, metric === 'sti' ? 'sti' : 'spl');
+  const tickMode = metric === 'sti' ? 'sti' : 'spl';
+  const ticks = computeTicks(min, max, tickMode);
+  const minorTicks = computeMinorTicks(min, max, tickMode, ticks);
+  const minorRows = minorTicks.map(t => {
+    const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
+    return `<div class="pr-heatmap-legend-tick minor" style="top:${pct}%">
+      <span class="pr-heatmap-legend-tick-line"></span>
+    </div>`;
+  }).join('');
   const tickRows = ticks.map(t => {
     const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
     return `<div class="pr-heatmap-legend-tick" style="top:${pct}%">
       <span class="pr-heatmap-legend-tick-line"></span>
-      <span class="pr-heatmap-legend-tick-label">${formatTickLabel(t.value, metric === 'sti' ? 'sti' : 'spl')}</span>
+      <span class="pr-heatmap-legend-tick-label">${formatTickLabel(t.value, tickMode)}</span>
     </div>`;
   }).join('');
   const gradient = metric === 'sti'
@@ -334,10 +342,10 @@ export function buildHeatmapLegend(splGrid) {
     : 'linear-gradient(to top, #1428b4 0%, #008ce6 25%, #1edc50 50%, #ffd700 75%, #f01e1e 100%)';
   return `
     <div class="pr-heatmap-legend">
-      <div class="pr-heatmap-legend-header">${legendHeader(metric === 'sti' ? 'sti' : 'spl')}</div>
+      <div class="pr-heatmap-legend-header">${legendHeader(tickMode)}</div>
       <div class="pr-heatmap-legend-stage">
         <div class="pr-heatmap-legend-bar" style="background:${gradient}"></div>
-        <div class="pr-heatmap-legend-ticks">${tickRows}</div>
+        <div class="pr-heatmap-legend-ticks">${minorRows}${tickRows}</div>
       </div>
     </div>`;
 }
@@ -363,6 +371,21 @@ export function buildHeatmapStripLegend({ minDb, maxDb, stepDb = 5, header = 'SP
     const pct = ((v - minDb) / span) * 100;
     ticks.push({ value: v, pct });
   }
+  // Minor (unlabeled) sub-ticks — half the major step. With the typical
+  // 5 dB major step that places one minor in the middle of each major
+  // interval; coincident minors at major positions are filtered out.
+  const minorStep = stepDb / 2;
+  const majorVals = new Set(ticks.map(t => Math.round(t.value * 100) / 100));
+  const minorTicks = [];
+  if (minorStep > 0) {
+    const mFirst = Math.ceil(minDb / minorStep) * minorStep;
+    const mLast = Math.floor(maxDb / minorStep) * minorStep;
+    for (let v = mFirst; v <= mLast + 1e-6; v += minorStep) {
+      const key = Math.round(v * 100) / 100;
+      if (majorVals.has(key)) continue;
+      minorTicks.push({ value: v, pct: ((v - minDb) / span) * 100 });
+    }
+  }
   // The cell ramp (splColorRGB) is fixed-domain 60–110 dB. To make the
   // legend bar's colour-at-position MATCH the cell colour for the same
   // dB value, sample splColorRGB across [minDb, maxDb] and emit those
@@ -378,6 +401,10 @@ export function buildHeatmapStripLegend({ minDb, maxDb, stepDb = 5, header = 'SP
     stops.push(`rgb(${r},${g},${b}) ${(t * 100).toFixed(2)}%`);
   }
   const gradient = `linear-gradient(to right, ${stops.join(', ')})`;
+  const minorEls = minorTicks.map(t => `
+    <div class="pr-strip-legend-tick minor" style="left:${t.pct.toFixed(2)}%">
+      <span class="pr-strip-legend-tick-line"></span>
+    </div>`).join('');
   const tickEls = ticks.map(t => `
     <div class="pr-strip-legend-tick" style="left:${t.pct.toFixed(2)}%">
       <span class="pr-strip-legend-tick-line"></span>
@@ -388,7 +415,7 @@ export function buildHeatmapStripLegend({ minDb, maxDb, stepDb = 5, header = 'SP
       <div class="pr-strip-legend-header">${escapeText(header)}</div>
       <div class="pr-strip-legend-stage">
         <div class="pr-strip-legend-bar" style="background:${gradient}"></div>
-        <div class="pr-strip-legend-ticks">${tickEls}</div>
+        <div class="pr-strip-legend-ticks">${minorEls}${tickEls}</div>
       </div>
     </div>`;
 }

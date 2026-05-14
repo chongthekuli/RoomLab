@@ -586,6 +586,12 @@ body.is-pdf-export .vp-tabs {
     height: 0.4pt;
     background: var(--ink);
   }
+  /* Minor (unlabeled) graduation — shorter line, fainter ink; renders
+     as ruler-style sub-ticks between the labelled majors. */
+  #print-report .pr-heatmap-legend-tick.minor .pr-heatmap-legend-tick-line {
+    width: 2pt;
+    opacity: 0.45;
+  }
   #print-report .pr-heatmap-legend-tick-label {
     font-size: 7.5pt;
     color: var(--ink);
@@ -716,6 +722,12 @@ body.is-pdf-export .vp-tabs {
     width: 0.4pt;
     height: 3pt;
     background: var(--ink);
+  }
+  /* Minor (unlabeled) graduation — shorter line, fainter ink; renders
+     as ruler-style sub-ticks between the labelled majors. */
+  #print-report .pr-strip-legend-tick.minor .pr-strip-legend-tick-line {
+    height: 1.5pt;
+    opacity: 0.45;
   }
   #print-report .pr-strip-legend-tick-label {
     font-size: 7pt;
