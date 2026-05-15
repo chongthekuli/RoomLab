@@ -297,6 +297,40 @@ export function recordRayPaths({
         oz += dz * hit.t;
         const mat = scene.materials?.[hit.materialIdx];
         const alphaMid = mat?.absorption?.[3] ?? 0.1;
+
+        // Open-air surfaces (α ≥ 0.95, e.g. door / window cutouts in
+        // surauStructure.entrances) represent OPENINGS, not real walls.
+        // Rays should TRANSMIT through them, not reflect off them — the
+        // ray continues forward (no direction change), records a vertex
+        // at the boundary, and then either escapes the BVH on the next
+        // iteration (handled by the no-hit branch above) or hits a
+        // listener / further surface beyond. Without this, every door
+        // cutout reflects rays back into the room — the user-reported
+        // "ray bounces off door instead of passing through" bug.
+        const isOpening = alphaMid >= 0.95;
+
+        if (isOpening) {
+          // Record vertex AT the boundary; nudge past the hit so the
+          // next intersectRay starts on the outside side of the opening.
+          candXYZ[candVerts * 3 + 0] = ox;
+          candXYZ[candVerts * 3 + 1] = oy;
+          candXYZ[candVerts * 3 + 2] = oz;
+          const fadePass = Math.max(0.15, 0.15 + 0.85 * (Math.log10(energy + 0.01) + 2) / 2);
+          candRGB[candVerts * 3 + 0] = r0 * fadePass;
+          candRGB[candVerts * 3 + 1] = g0 * fadePass;
+          candRGB[candVerts * 3 + 2] = b0 * fadePass;
+          candVerts++;
+          // Step past the opening plane so the next iteration's
+          // raycast doesn't re-hit the same triangle.
+          ox += dx * EPS;
+          oy += dy * EPS;
+          oz += dz * EPS;
+          // Don't drop energy; an opening passes the ray through with
+          // negligible loss (atmospheric absorption at 1 m << 1 dB).
+          continue;
+        }
+
+        // Solid surface — apply absorption and reflect.
         energy *= Math.max(0.05, 1 - alphaMid);
 
         // Record vertex with energy-faded colour.
