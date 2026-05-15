@@ -6755,7 +6755,10 @@ function rebuildMultiLevelStructure(room) {
 // these never enter the BVH, but the flag documents intent and future-
 // proofs against a triangulator change):
 //   (7)  raised clerestory tower with ribbon windows above the hip roof
-//   (8)  slender corner minaret with crescent finial
+//        — OR (Malay vernacular) atap tumpang multi-tier roof (stacked
+//        pyramids with open clerestory gaps between tier eaves; see
+//        s.atapTumpang). atapTumpang takes precedence when both are set.
+//   (8)  slender corner minaret with mustaka / dome / crescent / stepped finial
 //   (9)  arcade / serambi with pointed Moorish arches around the building
 //   (10) jali screens (perforated geometric panels) on the front facade
 //   (11) raised concrete podium extending past the building footprint
@@ -6835,11 +6838,41 @@ function rebuildMultiLevelStructure(room) {
 //       window_height_m: number,   // ribbon-window strip height
 //       apexRise_m:      number,   // own small pyramid rise (default 1.0)
 //     },
+//     atapTumpang: {               // Malay vernacular multi-tier hip roof
+//                                  // (stacked pyramids with open clerestory
+//                                  // gaps between tier eaves). When set,
+//                                  // takes precedence over `clerestory`.
+//                                  // The first-tier hip roof is still drawn
+//                                  // by the s.hipRoof block below; this
+//                                  // adds tiers ABOVE that first plateau.
+//       tiers:                number,    // 1 (just main hip), 2 (hip + small),
+//                                        // 3 (hip + middle + small)
+//       gap_m:                number,    // open clerestory gap height between
+//                                        // each tier's eave and the tier above
+//                                        // (default 0.5 — admits daylight)
+//       tier_plateau_size_m:  number[],  // plateau side length at top of each
+//                                        // tier. Index 0 = top of tier-1
+//                                        // (== main hip plateau, drives the
+//                                        // hipRoof frustum); index 1 = top of
+//                                        // tier-2; index 2 = top of tier-3.
+//                                        // 0 = pure pyramid apex (no plateau).
+//                                        // Length should match `tiers`.
+//       tier_rise_m:          number[],  // height each tier's roof rises above
+//                                        // its own eave. Index 0 == hipRoof's
+//                                        // apexRise_m (kept for symmetry; the
+//                                        // hipRoof block reads its own
+//                                        // apexRise_m, this entry is ignored
+//                                        // but documented for clarity).
+//                                        // Indices 1+ drive the upper tiers.
+//     },
 //     minaret: {                   // slender corner tower
 //       corner:       'NW'|'NE'|'SW'|'SE',  // building corner (relative to room)
 //       base_size_m:  number,      // square cross-section side (≤ 1.4 reads slender)
 //       height_m:     number,      // total tower height from ground
-//       cap_style:    'crescent'|'dome'|'stepped',  // apex treatment
+//       cap_style:    'crescent'|'dome'|'stepped'|'mustaka',  // apex treatment
+//                                  // 'mustaka' = stacked-bulb Malay finial
+//                                  // (canonical; replaces the Ottoman-revival
+//                                  // crescent for Malay vernacular surau)
 //     },
 //     arcade: {                    // covered porch wrapping the building
 //       sides:                ('south'|'east'|'west'|'north')[],  // walls to wrap
@@ -7136,12 +7169,22 @@ function rebuildSurauStructure(room) {
       { x: 0, y: D },     // NW
     ];
 
-    // Decide plateau vs single apex. Plateau dims derived from clerestory
-    // footprint; if no clerestory or width_m unset, fall back to pure
-    // pyramid behaviour by collapsing the plateau to zero size.
-    const plateauW = (s.clerestory && Number.isFinite(s.clerestory.width_m))
-      ? s.clerestory.width_m : 0;
-    const plateauD = plateauW;   // surau clerestory is always square
+    // Decide plateau vs single apex. Plateau dims derived from EITHER
+    // atapTumpang.tier_plateau_size_m[0] (Malay vernacular tiered roof —
+    // takes precedence) OR clerestory.width_m (legacy box clerestory).
+    // If neither is present or both are zero, fall back to pure pyramid
+    // behaviour by collapsing the plateau to zero size.
+    const tumpangPlateau = (
+      s.atapTumpang
+      && Array.isArray(s.atapTumpang.tier_plateau_size_m)
+      && Number.isFinite(s.atapTumpang.tier_plateau_size_m[0])
+    ) ? s.atapTumpang.tier_plateau_size_m[0] : NaN;
+    const clerestoryPlateau = (s.clerestory && Number.isFinite(s.clerestory.width_m))
+      ? s.clerestory.width_m : NaN;
+    const plateauW = Number.isFinite(tumpangPlateau)
+      ? tumpangPlateau
+      : (Number.isFinite(clerestoryPlateau) ? clerestoryPlateau : 0);
+    const plateauD = plateauW;   // surau roof plateau is always square
     const usePlateau = plateauW > 0.05 && plateauD > 0.05
       && plateauW < W - 0.5 && plateauD < D - 0.5;
 
@@ -7513,9 +7556,13 @@ function rebuildSurauStructure(room) {
   // A smaller square box centred on the room, sitting on top of the main
   // hip-roof apex (z = H + hipRise). Walls have horizontal ribbon windows
   // around all 4 sides; the box is capped by its own small pyramid roof.
-  // This is the architectural focal point of the silhouette — without it
-  // the building reads as "hut with a hat", with it as "Malaysian surau".
-  if (s.clerestory) {
+  //
+  // NOTE — atap-tumpang takes precedence: when s.atapTumpang is defined the
+  // box-clerestory is suppressed entirely (the open gaps between the
+  // atap-tumpang tier eaves are the canonical Malay clerestory; a glassed
+  // box on top would double-stack and read as a Persian/Mughal revival
+  // rather than the vernacular form).
+  if (s.clerestory && !s.atapTumpang) {
     const cl = s.clerestory;
     const cl_w = Number.isFinite(cl.width_m) ? cl.width_m : 10;
     const cl_h = Number.isFinite(cl.height_m) ? cl.height_m : 3.5;
@@ -7590,9 +7637,191 @@ function rebuildSurauStructure(room) {
     roomGroup.add(cap);
   }
 
+  // ------------- 7b. Atap tumpang — Malay vernacular multi-tier roof -----
+  // Stack additional pyramidal tiers above the main hip-roof plateau, each
+  // separated from the tier below by an OPEN gap (`gap_m`) that admits
+  // daylight and ventilation. This open gap IS the canonical Malay
+  // clerestory — no glass strip required.
+  //
+  // Construction (per tier i ≥ 1):
+  //   * eave at z = (top of tier i−1 plateau) + gap_m
+  //   * footprint at eave = previous tier's plateau dims (atapTumpang
+  //     tiers always shrink upward — never flare out)
+  //   * plateau at the top of tier i has side = tier_plateau_size_m[i]
+  //     (0 collapses to a single apex point — typical for the topmost tier)
+  //   * roof rises tier_rise_m[i] above its eave
+  //   * thin perimeter posts span the open gap at the four corners of the
+  //     tier-i eave; without these the upper tier appears to float, which
+  //     reads as a render glitch from low angles
+  //
+  // Tier 0 is the existing main hip roof drawn by the s.hipRoof block
+  // above; this loop starts at i = 1 and only renders the upper tiers.
+  if (s.atapTumpang && s.hipRoof) {
+    const at = s.atapTumpang;
+    const tiers = Math.max(1, Math.min(4, Math.floor(at.tiers ?? 1)));
+    const gap = Number.isFinite(at.gap_m) ? at.gap_m : 0.5;
+    const plateauSizes = Array.isArray(at.tier_plateau_size_m) ? at.tier_plateau_size_m : [];
+    const tierRises = Array.isArray(at.tier_rise_m) ? at.tier_rise_m : [];
+
+    const apexX = Number.isFinite(s.hipRoof.apex_x_m) ? s.hipRoof.apex_x_m : W / 2;
+    const apexY = Number.isFinite(s.hipRoof.apex_y_m) ? s.hipRoof.apex_y_m : D / 2;
+    const tier0Rise = Number.isFinite(s.hipRoof.apexRise_m) ? s.hipRoof.apexRise_m : 1.5;
+
+    // Track running state across tiers. eaveZ_i = z-elevation of tier i's
+    // EAVE line (the lower edge of its sloped roof). Plateau_i is the
+    // square side-length at the TOP of tier i.
+    let prevPlateau = Number.isFinite(plateauSizes[0]) ? plateauSizes[0] : 0;
+    let prevTopZ = H + tier0Rise;   // top of tier-0 plateau
+
+    for (let i = 1; i < tiers; i++) {
+      if (!(prevPlateau > 0.05)) break;   // no surface to stack on
+
+      const eaveSize = prevPlateau;
+      const eaveZ = prevTopZ + gap;
+      const plateauSize = Number.isFinite(plateauSizes[i]) ? plateauSizes[i] : 0;
+      const tierRise = Number.isFinite(tierRises[i]) ? tierRises[i] : 1.0;
+      const topZ = eaveZ + tierRise;
+
+      const halfE = eaveSize / 2;
+      const eaveCorners = [
+        { x: apexX - halfE, y: apexY - halfE },  // SW
+        { x: apexX + halfE, y: apexY - halfE },  // SE
+        { x: apexX + halfE, y: apexY + halfE },  // NE
+        { x: apexX - halfE, y: apexY + halfE },  // NW
+      ];
+
+      // Thin corner posts spanning the open gap. Four posts, one per eave
+      // corner of THIS tier, descending into the tier-below's plateau.
+      // Cross-section 0.10 × 0.10 m so they read as carved timber struts
+      // without occluding the daylight gap. Painted with trimMat (dark
+      // teak) for visual continuity with the minbar / minaret belt.
+      const postSize = 0.10;
+      const postH = Math.max(0.001, gap);
+      if (postH > 0.05) {
+        for (const c of eaveCorners) {
+          // Pull the post slightly INWARD from the eave corner so it sits
+          // on the tier-below's plateau surface, not past its edge.
+          const px = c.x + (c.x < apexX ? +postSize : -postSize);
+          const py = c.y + (c.y < apexY ? +postSize : -postSize);
+          const postGeo = new THREE.BoxGeometry(postSize, postH, postSize);
+          const post = new THREE.Mesh(postGeo, trimMat);
+          post.position.set(px, prevTopZ + postH / 2, py);
+          post.userData.tag = `surau_atap_tumpang_post_${i}`;
+          post.userData.no_acoustic = true;
+          post.userData.no_walk_collide = true;
+          roomGroup.add(post);
+        }
+      }
+
+      // Tier roof: truncated frustum if plateauSize > 0, else single-apex
+      // pyramid. Same trapezoid construction as the main hip roof, just
+      // smaller. Use shingleMat to match tier 0.
+      const usePlateau = plateauSize > 0.05 && plateauSize < eaveSize - 0.1;
+      if (usePlateau) {
+        const halfP = plateauSize / 2;
+        const plateau = [
+          { x: apexX - halfP, y: apexY - halfP },
+          { x: apexX + halfP, y: apexY - halfP },
+          { x: apexX + halfP, y: apexY + halfP },
+          { x: apexX - halfP, y: apexY + halfP },
+        ];
+        for (let k = 0; k < 4; k++) {
+          const eA = eaveCorners[k];
+          const eB = eaveCorners[(k + 1) % 4];
+          const pA = plateau[k];
+          const pB = plateau[(k + 1) % 4];
+          const verts = new Float32Array([
+            eA.x, eaveZ, eA.y,
+            eB.x, eaveZ, eB.y,
+            pB.x, topZ,  pB.y,
+            eA.x, eaveZ, eA.y,
+            pB.x, topZ,  pB.y,
+            pA.x, topZ,  pA.y,
+          ]);
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+          const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
+          geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+          geo.computeVertexNormals();
+          const face = new THREE.Mesh(geo, shingleMat);
+          face.userData.tag = `surau_atap_tumpang_face_${i}_${['S','E','N','W'][k]}`;
+          face.userData.no_acoustic = true;
+          face.userData.no_walk_collide = true;
+          roomGroup.add(face);
+        }
+        // Plateau cap so the tier reads as a sealed roof when viewed from
+        // a low angle (otherwise daylight would leak through the next gap
+        // and visually merge two tiers into one).
+        const plateauGeo = new THREE.PlaneGeometry(plateauSize, plateauSize);
+        const plateauMesh = new THREE.Mesh(plateauGeo, hipMat);
+        plateauMesh.rotation.x = -Math.PI / 2;
+        plateauMesh.position.set(apexX, topZ, apexY);
+        plateauMesh.userData.tag = `surau_atap_tumpang_plateau_${i}`;
+        plateauMesh.userData.no_acoustic = true;
+        plateauMesh.userData.no_walk_collide = true;
+        roomGroup.add(plateauMesh);
+
+        // Hip ridges — eave corner → matching plateau corner. Visual
+        // detail; cheap (4 line segments per tier).
+        const ridgeMat = new THREE.LineBasicMaterial({ color: 0x4a3826 });
+        for (let k = 0; k < 4; k++) {
+          const pts = [
+            new THREE.Vector3(eaveCorners[k].x, eaveZ, eaveCorners[k].y),
+            new THREE.Vector3(plateau[k].x, topZ, plateau[k].y),
+          ];
+          const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ridgeMat);
+          line.userData.tag = `surau_atap_tumpang_ridge_${i}`;
+          line.userData.no_acoustic = true;
+          line.userData.no_walk_collide = true;
+          roomGroup.add(line);
+        }
+      } else {
+        // Single-apex pyramid — typical for the topmost tier.
+        for (let k = 0; k < 4; k++) {
+          const a = eaveCorners[k];
+          const b = eaveCorners[(k + 1) % 4];
+          const verts = new Float32Array([
+            a.x, eaveZ, a.y,
+            b.x, eaveZ, b.y,
+            apexX, topZ, apexY,
+          ]);
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+          const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+          geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+          geo.computeVertexNormals();
+          const face = new THREE.Mesh(geo, shingleMat);
+          face.userData.tag = `surau_atap_tumpang_face_${i}_${['S','E','N','W'][k]}`;
+          face.userData.no_acoustic = true;
+          face.userData.no_walk_collide = true;
+          roomGroup.add(face);
+        }
+        const ridgeMat = new THREE.LineBasicMaterial({ color: 0x4a3826 });
+        for (const c of eaveCorners) {
+          const pts = [
+            new THREE.Vector3(c.x, eaveZ, c.y),
+            new THREE.Vector3(apexX, topZ, apexY),
+          ];
+          const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ridgeMat);
+          line.userData.tag = `surau_atap_tumpang_ridge_${i}`;
+          line.userData.no_acoustic = true;
+          line.userData.no_walk_collide = true;
+          roomGroup.add(line);
+        }
+      }
+
+      prevPlateau = usePlateau ? plateauSize : 0;
+      prevTopZ = topZ;
+    }
+  }
+
   // ------------- 8. Minaret — slender corner tower -----------------------
   // Square shaft + small cap. Cap style is one of:
-  //   'crescent' — small dome + thin crescent finial (canonical)
+  //   'mustaka'  — small dome + stacked-bulb gold finial (Malay vernacular,
+  //                replaces the Ottoman-revival crescent for canonical surau)
+  //   'crescent' — small dome + thin crescent finial (Ottoman-revival;
+  //                visible on post-1980s Malaysian mosques but not original
+  //                Malay vocabulary — kept for presets that explicitly want it)
   //   'dome'     — small dome only
   //   'stepped'  — three boxes of decreasing size
   if (s.minaret) {
@@ -7600,7 +7829,7 @@ function rebuildSurauStructure(room) {
     const corner = mn.corner || 'NW';
     const baseSize = Number.isFinite(mn.base_size_m) ? mn.base_size_m : 1.2;
     const totalH = Number.isFinite(mn.height_m) ? mn.height_m : 8.5;
-    const capStyle = mn.cap_style || 'crescent';
+    const capStyle = mn.cap_style || 'mustaka';
 
     // Place the minaret OUTSIDE the building, set back from its corner by
     // a comfortable clearance. The clearance keeps the shaft from clashing
@@ -7656,7 +7885,7 @@ function rebuildSurauStructure(room) {
     lantern.userData.no_walk_collide = true;
     roomGroup.add(lantern);
 
-    if (capStyle === 'dome' || capStyle === 'crescent') {
+    if (capStyle === 'dome' || capStyle === 'crescent' || capStyle === 'mustaka') {
       // Half-sphere dome on top of the lantern. Radius = lantern size / 2
       // so the dome sits flush on the lantern's top face.
       const domeR = lanternSize / 2;
@@ -7668,12 +7897,17 @@ function rebuildSurauStructure(room) {
       dome.userData.no_walk_collide = true;
       roomGroup.add(dome);
 
-      if (capStyle === 'crescent') {
-        // Spike + crescent. Thin gold pole rising from the dome apex,
-        // topped with an open-ring TorusGeometry partially rotated to
-        // suggest a crescent moon. The pole length absorbs the remaining
+      if (capStyle === 'crescent' || capStyle === 'mustaka') {
+        // Thin gold pole rising from the dome apex — common to both the
+        // crescent and the mustaka. The pole length absorbs the remaining
         // cap budget so the total minaret height matches mn.height_m.
-        const poleH = Math.max(0.4, capRoom - lanternH - domeR);
+        // For mustaka the pole is shorter (the bulb stack itself is ~0.8 m
+        // tall and substitutes for most of the crescent's 0.6 m envelope
+        // plus its 0.4 m of pole), so we cap the pole at half the crescent's
+        // value to keep the bulb stack from floating impossibly high.
+        const poleH = capStyle === 'mustaka'
+          ? Math.max(0.15, (capRoom - lanternH - domeR) * 0.35)
+          : Math.max(0.4, capRoom - lanternH - domeR);
         const poleGeo = new THREE.CylinderGeometry(0.025, 0.025, poleH, 8);
         const pole = new THREE.Mesh(poleGeo, goldMat);
         pole.position.set(co.x, capBaseZ + lanternH + domeR + poleH / 2, co.y);
@@ -7682,90 +7916,187 @@ function rebuildSurauStructure(room) {
         pole.userData.no_walk_collide = true;
         roomGroup.add(pole);
 
-        // Crescent: an OPEN arc, not a closed ring. Built as a Shape from
-        // two circular arcs — outer arc minus inner arc, the two meeting at
-        // the crescent tips. Extruded shallowly along its normal so it has
-        // visible thickness in 3D.
-        //
-        // Construction (in shape-local 2D, before extrude):
-        //   * outer arc: radius R, sweep 0..π (a half-circle "U" opening up)
-        //   * inner arc: radius r, centre offset upward by (R - r), sweep
-        //     π..0 (reversed). Subtracting it carves the inner concavity,
-        //     leaving a thin moon-sliver shape.
-        // The extruded shape lives in the XY plane locally; rotate the mesh
-        // so the U opens UP in WORLD (toward +y). Because it's a U from
-        // every front view, no yaw-toward-centre rotation is needed.
-        // Real Islamic crescent geometry: NOT a uniform-thickness arc, but
-        // the visible bright sliver of a moon — the area inside one circle
-        // BUT outside a slightly smaller, slightly offset second circle.
-        // This naturally produces a crescent that is THICK in the middle
-        // and TAPERS to sharp points at both horns (the two intersection
-        // points of the circles).
-        //
-        // Construction (in shape-local 2D, before extrude):
-        //   * outer circle: centre (0, 0), radius R = 0.30
-        //   * inner circle: centre (+offset, 0), radius r = 0.27
-        //   * intersection at (xi, ±yi) where:
-        //       xi = (R² - r² + offset²) / (2 · offset)
-        //       yi = √(R² - xi²)
-        //   * boundary CCW: outer arc from upper horn (xi, +yi) through
-        //     LEFT side (-R, 0) down to lower horn (xi, -yi);
-        //     then inner arc CW from lower horn through LEFT side
-        //     (offset - r, 0) back up to upper horn.
-        //
-        // Result: body curves on the LEFT (negative-X), opening on the
-        // RIGHT (positive-X), horns sharp at top and bottom — the
-        // canonical horizontal "C" Islamic crescent shape.
-        const outerR = 0.30;             // ~60 cm tall overall
-        const innerR = 0.27;             // close to outerR — only 0.03 m smaller
-        const offset = 0.10;             // significant offset → sharp horns
-        const crescentDepth = 0.04;      // extrude thickness along the spike axis
-
-        const xi = (outerR * outerR - innerR * innerR + offset * offset) / (2 * offset);
-        const yi = Math.sqrt(Math.max(0, outerR * outerR - xi * xi));
-        const outerAngle = Math.atan2(yi, xi);                  // upper horn on outer circle
-        const innerAngle = Math.atan2(yi, xi - offset);         // upper horn on inner circle (in inner-local coords)
-
-        const crescentShape = new THREE.Shape();
-        // Outer arc CCW from upper horn (xi, +yi) through LEFT side
-        // (-outerR, 0) down to lower horn (xi, -yi).
-        crescentShape.absarc(0, 0, outerR, outerAngle, 2 * Math.PI - outerAngle, false);
-        // Inner arc CW from lower horn (xi, -yi) through LEFT side
-        // (offset - innerR, 0) back up to upper horn (xi, +yi). The
-        // CW traversal puts this arc on the RIGHT-INNER side of the
-        // boundary, which from the crescent body's perspective is the
-        // CONCAVE indented inner edge — what creates the "moon" look.
-        crescentShape.absarc(offset, 0, innerR, -innerAngle, innerAngle, true);
-
-        const crescentGeo = new THREE.ExtrudeGeometry(crescentShape, {
-          depth: crescentDepth,
-          bevelEnabled: false,
-          curveSegments: 32,
-        });
-        // Centre depth so the spike runs through the middle of the crescent,
-        // not its back face.
-        crescentGeo.translate(0, 0, -crescentDepth / 2);
-        // Tilt the crescent 20° CCW around the extrude axis so the opening
-        // faces 20° above horizontal (= 70° from vertical) — a slight
-        // upward angle, per user request 2026-05-15. The previous pure-
-        // horizontal orientation read as flat / inert; the slight upward
-        // tilt reads as a moon climbing in the sky.
-        crescentGeo.rotateZ(20 * Math.PI / 180);
-        crescentGeo.computeVertexNormals();
-
-        const crescent = new THREE.Mesh(crescentGeo, goldMat);
         const finialZ = capBaseZ + lanternH + domeR + poleH;
-        // Geometric origin (0,0) is at the centre of the OUTER circle.
-        // The crescent's vertical extent is ±yi (yi ≈ 0.27 here). To
-        // place the bottom horn just above the pole tip, position the
-        // origin at finialZ + yi + crescentClear so y = -yi (bottom
-        // horn) sits at finialZ + crescentClear.
-        const crescentClear = 0.02;
-        crescent.position.set(co.x, finialZ + yi + crescentClear, co.y);
-        crescent.userData.tag = 'surau_minaret_crescent';
-        crescent.userData.no_acoustic = true;
-        crescent.userData.no_walk_collide = true;
-        roomGroup.add(crescent);
+
+        if (capStyle === 'crescent') {
+          // Crescent: an OPEN arc, not a closed ring. Built as a Shape
+          // from two circular arcs — outer arc minus inner arc, the two
+          // meeting at the crescent tips. Extruded shallowly along its
+          // normal so it has visible thickness in 3D.
+          //
+          // Real Islamic crescent geometry: NOT a uniform-thickness arc,
+          // but the visible bright sliver of a moon — the area inside one
+          // circle BUT outside a slightly smaller, slightly offset second
+          // circle. This naturally produces a crescent that is THICK in
+          // the middle and TAPERS to sharp points at both horns (the two
+          // intersection points of the circles).
+          //
+          // Construction (in shape-local 2D, before extrude):
+          //   * outer circle: centre (0, 0), radius R = 0.30
+          //   * inner circle: centre (+offset, 0), radius r = 0.27
+          //   * intersection at (xi, ±yi) where:
+          //       xi = (R² - r² + offset²) / (2 · offset)
+          //       yi = √(R² - xi²)
+          //   * boundary CCW: outer arc from upper horn (xi, +yi) through
+          //     LEFT side (-R, 0) down to lower horn (xi, -yi);
+          //     then inner arc CW from lower horn through LEFT side
+          //     (offset - r, 0) back up to upper horn.
+          //
+          // Result: body curves on the LEFT (negative-X), opening on the
+          // RIGHT (positive-X), horns sharp at top and bottom — the
+          // canonical horizontal "C" Islamic crescent shape.
+          //
+          // Cultural note: kept for Malaysian post-1980s mosques that
+          // explicitly adopt the Ottoman/Middle-East-revival vocabulary;
+          // canonical Malay vernacular surau use cap_style: 'mustaka'.
+          const outerR = 0.30;             // ~60 cm tall overall
+          const innerR = 0.27;             // close to outerR — only 0.03 m smaller
+          const offset = 0.10;             // significant offset → sharp horns
+          const crescentDepth = 0.04;      // extrude thickness along the spike axis
+
+          const xi = (outerR * outerR - innerR * innerR + offset * offset) / (2 * offset);
+          const yi = Math.sqrt(Math.max(0, outerR * outerR - xi * xi));
+          const outerAngle = Math.atan2(yi, xi);                  // upper horn on outer circle
+          const innerAngle = Math.atan2(yi, xi - offset);         // upper horn on inner circle (in inner-local coords)
+
+          const crescentShape = new THREE.Shape();
+          crescentShape.absarc(0, 0, outerR, outerAngle, 2 * Math.PI - outerAngle, false);
+          crescentShape.absarc(offset, 0, innerR, -innerAngle, innerAngle, true);
+
+          const crescentGeo = new THREE.ExtrudeGeometry(crescentShape, {
+            depth: crescentDepth,
+            bevelEnabled: false,
+            curveSegments: 32,
+          });
+          crescentGeo.translate(0, 0, -crescentDepth / 2);
+          // Tilt the crescent 20° CCW around the extrude axis so the
+          // opening faces 20° above horizontal (= 70° from vertical) —
+          // a slight upward angle, per user request 2026-05-15.
+          crescentGeo.rotateZ(20 * Math.PI / 180);
+          crescentGeo.computeVertexNormals();
+
+          const crescent = new THREE.Mesh(crescentGeo, goldMat);
+          // Place the bottom horn just above the pole tip.
+          const crescentClear = 0.02;
+          crescent.position.set(co.x, finialZ + yi + crescentClear, co.y);
+          crescent.userData.tag = 'surau_minaret_crescent';
+          crescent.userData.no_acoustic = true;
+          crescent.userData.no_walk_collide = true;
+          roomGroup.add(crescent);
+        } else {
+          // -------- Mustaka: stacked-bulb gold finial (Malay vernacular) --
+          // A vertical stack of gold bulbs of decreasing size, separated
+          // by thin metal banding rings, terminating in a small tapered
+          // cone tip. Echoes the closed-lotus-bud / small-stupa silhouette
+          // that Malay woodcarvers traditionally turned and gilt-painted
+          // on top of the surau roof apex.
+          //
+          // Stack profile (bottom → top, target heights / widths):
+          //   1. Flattened ellipsoid base ......... 0.25 m wide, 0.12 m tall
+          //   2. Banding ring (torus) ............. 0.13 m outer R, 0.012 m tube
+          //   3. Main bulb ........................ 0.35 m wide, 0.30 m tall
+          //   4. Banding ring (torus) ............. 0.10 m outer R, 0.012 m tube
+          //   5. Upper bulb ....................... 0.22 m wide, 0.22 m tall
+          //   6. Tapered tip cone ................. 0.10 m base, 0.18 m tall
+          //
+          // Total nominal height ≈ 0.82 m. The dz cursor below is the
+          // vertical gap between the previous element's TOP and the next
+          // element's CENTRE (or BASE for the cone tip). Shared goldMat
+          // matches the pole.
+          //
+          // SphereGeometry uses radius=0.5 with .scale() so we can shape
+          // each bulb's WIDTH and HEIGHT independently (oblate or prolate)
+          // without paying for a custom LatheGeometry per bulb — three
+          // total sphere primitives is cheap on the GPU.
+
+          // Element 1 — flattened ellipsoid base (oblate)
+          {
+            const r = 0.5;
+            const w = 0.25, h = 0.12;
+            const geo = new THREE.SphereGeometry(r, 20, 14);
+            geo.scale(w / (2 * r), h / (2 * r), w / (2 * r));
+            const mesh = new THREE.Mesh(geo, goldMat);
+            mesh.position.set(co.x, finialZ + h / 2, co.y);
+            mesh.userData.tag = 'surau_minaret_mustaka';
+            mesh.userData.no_acoustic = true;
+            mesh.userData.no_walk_collide = true;
+            roomGroup.add(mesh);
+          }
+          let zCursor = finialZ + 0.12;   // top of element 1
+
+          // Element 2 — banding ring 1 (collar between base ellipsoid and main bulb)
+          {
+            const ringR = 0.075;        // ring centre-line radius (ring spans ~0.15 m wide)
+            const tube = 0.012;
+            const geo = new THREE.TorusGeometry(ringR, tube, 8, 24);
+            geo.rotateX(Math.PI / 2);   // lay flat — torus axis along world Y
+            const mesh = new THREE.Mesh(geo, goldMat);
+            mesh.position.set(co.x, zCursor + tube, co.y);
+            mesh.userData.tag = 'surau_minaret_mustaka_ring';
+            mesh.userData.no_acoustic = true;
+            mesh.userData.no_walk_collide = true;
+            roomGroup.add(mesh);
+          }
+          zCursor += 0.024;             // ring tube diameter
+
+          // Element 3 — main bulb (largest sphere in the stack)
+          {
+            const r = 0.5;
+            const w = 0.35, h = 0.30;
+            const geo = new THREE.SphereGeometry(r, 20, 16);
+            geo.scale(w / (2 * r), h / (2 * r), w / (2 * r));
+            const mesh = new THREE.Mesh(geo, goldMat);
+            mesh.position.set(co.x, zCursor + h / 2, co.y);
+            mesh.userData.tag = 'surau_minaret_mustaka';
+            mesh.userData.no_acoustic = true;
+            mesh.userData.no_walk_collide = true;
+            roomGroup.add(mesh);
+          }
+          zCursor += 0.30;
+
+          // Element 4 — banding ring 2 (collar between main bulb and upper bulb)
+          {
+            const ringR = 0.055;
+            const tube = 0.012;
+            const geo = new THREE.TorusGeometry(ringR, tube, 8, 24);
+            geo.rotateX(Math.PI / 2);
+            const mesh = new THREE.Mesh(geo, goldMat);
+            mesh.position.set(co.x, zCursor + tube, co.y);
+            mesh.userData.tag = 'surau_minaret_mustaka_ring';
+            mesh.userData.no_acoustic = true;
+            mesh.userData.no_walk_collide = true;
+            roomGroup.add(mesh);
+          }
+          zCursor += 0.024;
+
+          // Element 5 — upper bulb (smaller, near-spherical)
+          {
+            const r = 0.5;
+            const w = 0.22, h = 0.22;
+            const geo = new THREE.SphereGeometry(r, 20, 16);
+            geo.scale(w / (2 * r), h / (2 * r), w / (2 * r));
+            const mesh = new THREE.Mesh(geo, goldMat);
+            mesh.position.set(co.x, zCursor + h / 2, co.y);
+            mesh.userData.tag = 'surau_minaret_mustaka';
+            mesh.userData.no_acoustic = true;
+            mesh.userData.no_walk_collide = true;
+            roomGroup.add(mesh);
+          }
+          zCursor += 0.22;
+
+          // Element 6 — tapered tip cone (point upward)
+          {
+            const baseR = 0.05;
+            const coneH = 0.18;
+            const geo = new THREE.CylinderGeometry(0, baseR, coneH, 16);
+            const mesh = new THREE.Mesh(geo, goldMat);
+            mesh.position.set(co.x, zCursor + coneH / 2, co.y);
+            mesh.userData.tag = 'surau_minaret_mustaka_tip';
+            mesh.userData.no_acoustic = true;
+            mesh.userData.no_walk_collide = true;
+            roomGroup.add(mesh);
+          }
+        }
       }
     } else {
       // 'stepped' — three boxes of decreasing size, classic stupa-like cap.

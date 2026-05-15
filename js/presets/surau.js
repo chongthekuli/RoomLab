@@ -78,10 +78,36 @@ export default {
     // Hip roof — replaces the flat ceiling with a 4-sided pyramid rising
     // 1.5 m above the eaves. Matches the FALL 25° pitched roof in the
     // tender drawing (4.5 m at eaves → 6.0 m at apex). Apex defaults to
-    // room centre.
+    // room centre. When atapTumpang is also defined (below), this block
+    // becomes TIER 1 of a multi-tiered Malay roof — its plateau dims
+    // are taken from atapTumpang.tier_plateau_size_m[0].
     hipRoof: {
       apexRise_m: 1.5,
     },
+    // Atap tumpang — three-tier pyramidal Malay vernacular roof. Per
+    // audit 2026-05-15: replaces the previous 'clerestory tower' (a
+    // square box of ribbon windows above the main roof, which is
+    // Persian/Mughal/Ottoman vocabulary). Atap tumpang is the
+    // canonical Malaysian form — multi-tiered hipped roofs where the
+    // open gap between tier eaves admits clerestory daylight, no glass
+    // box needed. Three tiers historically symbolise Iman / Ibadat /
+    // Ihsan (faith / worship / spiritual excellence).
+    //
+    // Geometry: tier 1 = main hip roof (driven by hipRoof above, plateau
+    // 10 × 10 m). Tier 2 sits above with a 0.5 m open gap (the clerestory
+    // proper) supported by 4 thin corner posts, rising to a 5 × 5 m
+    // plateau. Tier 3 sits above another 0.5 m gap, rising to a single
+    // apex point. Total apex height ≈ 4.5 + 1.5 + 0.5 + 1.5 + 0.5 + 1.0
+    // ≈ 9.5 m (was 10.5 m for the boxed clerestory).
+    atapTumpang: {
+      tiers: 3,
+      gap_m: 0.5,
+      tier_plateau_size_m: [10, 5, 0],
+      tier_rise_m: [1.5, 1.5, 1.0],
+    },
+    // NOTE: clerestory field removed — replaced by atapTumpang above.
+    // Renderer auto-suppresses the legacy clerestory box when atapTumpang
+    // is present, so leaving the field out is the cleanest preset state.
     // Saf lines — prayer-row alignment markers on the carpet. 13 rows ×
     // 1.2 m spacing covers ~15.6 m of usable congregation depth, leaving
     // ~1.5 m clear at the back near the main entrance.
@@ -113,31 +139,27 @@ export default {
     ],
 
     // ---- EXTERIOR ELEMENTS (visual only — no acoustic effect) ----
-    // The six elements below turn the box-with-hat into a recognisable
-    // Malaysian surau: clerestory tower for daylight + visual hierarchy,
-    // slender minaret at the NW corner, pointed-arch arcade wrapping
-    // the south + east + west sides, perforated jali screens on the
-    // south facade, raised podium foundation, projecting south portico
-    // framing the main entrance. All marked no_acoustic in scene.js so
-    // the precision tracer ignores them.
+    // The five elements below turn the box-with-hat into a recognisable
+    // Malaysian surau: slender minaret at the NW corner, pointed-arch
+    // arcade wrapping the south + east + west sides, perforated jali
+    // screens on the south facade (currently disabled), raised podium
+    // foundation, projecting south portico framing the main entrance.
+    // The atap tumpang multi-tier roof above provides the daylight
+    // clerestory. All marked no_acoustic in scene.js so the precision
+    // tracer ignores them.
 
-    // Clerestory tower — square box of ribbon windows above the main
-    // hip roof, capped by its own smaller pyramid. ~55% of the main
-    // building footprint so it reads as the architectural focal point.
-    clerestory: {
-      width_m: 10,
-      height_m: 3.5,
-      sill_m: 0.5,
-      window_height_m: 2.0,
-      apexRise_m: 1.0,
-    },
-    // Minaret — slender square tower with crescent finial at the NW
-    // corner of the building footprint. ~8.5 m tall.
+    // Minaret — slender square tower with mustaka finial at the NW
+    // corner of the building footprint. ~8.5 m tall. Per audit
+    // 2026-05-15: cap_style switched from 'crescent' (Turkish/Ottoman
+    // emblem) to 'mustaka' (the canonical Malaysian vernacular finial,
+    // a stylised lotus-derived bulb stack). Renders as a stacked
+    // sequence of gold spherical bulbs and metal ring collars topped
+    // by a tapered cone tip — no foreign religious symbolism.
     minaret: {
       corner: 'NW',
       base_size_m: 1.2,
       height_m: 8.5,
-      cap_style: 'crescent',
+      cap_style: 'mustaka',
     },
     // Arcade / serambi — covered porch wrapping the front (south) plus
     // the two side walls (east + west). The qibla wall (north) is never
