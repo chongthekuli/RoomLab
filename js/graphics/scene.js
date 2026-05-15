@@ -8465,12 +8465,17 @@ function rebuildSurauStructure(room) {
     podium.position.set(W / 2, -podH / 2, D / 2);   // top face at z = 0 (floor plane)
     podium.userData.tag = 'surau_podium';
     podium.userData.no_acoustic = true;
-    podium.userData.no_walk_collide = true;   // avatar is at floor level (z=0)
+    // WALKABLE — avatar must be able to stand on the podium when it
+    // exits the prayer hall through any door (no other floor surface
+    // exists outside the room walls). Inside the room the room's own
+    // floor mesh is coplanar at z=0 so this doesn't double-up.
+    // Was no_walk_collide = true; user reported the avatar falls off
+    // the map when passing through a door (2026-05-16). Removed.
     roomGroup.add(podium);
 
-    // Stair lip on the south side — single step out from the podium edge,
-    // directly in front of the main entrance. Pure visual; the avatar
-    // teleports between presets so doesn't actually walk up to the door.
+    // Stair lip on the south side — single step from ground level up
+    // to the podium top, directly in front of the main entrance. Also
+    // walkable so the avatar can ascend / descend at the porch.
     const stepW = 4.0;
     const stepDepth = 0.4;
     const stepH = podH * 0.5;
@@ -8479,7 +8484,6 @@ function rebuildSurauStructure(room) {
     step.position.set(W / 2, -stepH / 2, -ext - stepDepth / 2);
     step.userData.tag = 'surau_podium_step';
     step.userData.no_acoustic = true;
-    step.userData.no_walk_collide = true;
     roomGroup.add(step);
   }
 

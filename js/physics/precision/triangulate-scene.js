@@ -464,15 +464,24 @@ function triangulateRectangularRoom(scene, tris) {
   // triangulateStandaloneEnclosures + triangulateWallSegments which
   // already handled openings correctly.
   //
-  // Wall vertex order: each entry's bottom edge is v1 → v2 (that ordering
-  // sets the wall-local +x direction the helpers use). The four wall
-  // descriptors below match the original solid-quad ordering exactly so
-  // closed-opening positions stay consistent with any user-authored
-  // door / window openings.
+  // Wall vertex order matters here: each entry's bottom edge is v1 → v2
+  // (that ordering sets the wall-local +x direction wallQuadsAfterOpenings
+  // uses). Scene.js's PlaneGeometry-based renderer applies a π / ±π/2
+  // Y-rotation to each wall, which mirrors the local-x direction for
+  // wall_north and wall_west. surauStructureWallOpenings() emits x_m for
+  // THAT convention. The triangulator must mirror v1/v2 on the same two
+  // walls so the helper's x_m falls at the matching world position.
+  // Mismatch was the bug: openings were cut at WRONG x positions on
+  // wall_north (scene's south doors landed mirrored across the wall),
+  // so rays still saw solid concrete at the visible door positions.
   const wallSpecs = [
-    { key: 'wall_north', v1: { x: 0, y: d }, v2: { x: w, y: d }, n: [0, -1, 0] },
-    { key: 'wall_south', v1: { x: w, y: 0 }, v2: { x: 0, y: 0 }, n: [0,  1, 0] },
+    // wall_north (scene) = preset 'south' = main entrance side. MIRROR.
+    { key: 'wall_north', v1: { x: w, y: d }, v2: { x: 0, y: d }, n: [0, -1, 0] },
+    // wall_south (scene) = preset 'north' = qibla side. NATURAL.
+    { key: 'wall_south', v1: { x: 0, y: 0 }, v2: { x: w, y: 0 }, n: [0,  1, 0] },
+    // wall_east. NATURAL (helper x_m maps to world +z = state +y).
     { key: 'wall_east',  v1: { x: w, y: 0 }, v2: { x: w, y: d }, n: [-1, 0, 0] },
+    // wall_west. MIRROR (helper x_m maps to world -z = state -y).
     { key: 'wall_west',  v1: { x: 0, y: d }, v2: { x: 0, y: 0 }, n: [ 1, 0, 0] },
   ];
   for (const spec of wallSpecs) {
