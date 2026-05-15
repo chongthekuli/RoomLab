@@ -7712,10 +7712,16 @@ function rebuildSurauStructure(room) {
           curveSegments: 24,
         });
         // The shape as built has horns at y=0 and convex back at y=+outerR
-        // (a frown / ∩). Flip vertically so horns point UP and the convex
-        // back is at the bottom — the canonical Islamic crescent
-        // orientation (U-shape, tips skyward).
+        // (a frown / ∩). Flip vertically so horns point UP and convex
+        // back is down (U-shape) — intermediate step.
         crescentGeo.scale(1, -1, 1);
+        // Then rotate 90° CW around the extrude axis so the U becomes a
+        // horizontal C with the opening facing east (+X direction toward
+        // the room centre). User asked for horizontal, not skyward —
+        // this matches the Malaysian/Islamic convention where the
+        // crescent on a minaret typically lies on its side facing the
+        // qibla or sunrise direction, not pointing at the sky.
+        crescentGeo.rotateZ(-Math.PI / 2);
         // Centre depth so the spike runs through the middle of the crescent,
         // not its back face.
         crescentGeo.translate(0, 0, -crescentDepth / 2);
@@ -7726,14 +7732,11 @@ function rebuildSurauStructure(room) {
 
         const crescent = new THREE.Mesh(crescentGeo, goldMat);
         const finialZ = capBaseZ + lanternH + domeR + poleH;
-        // Shape lies in local XY (X across, Y up). World wants Y-up, so
-        // local-Y → world-Y is already correct. Extrude axis is local-Z;
-        // shape reads as a U from any direction perpendicular to local-Z,
-        // so default orientation works for any minaret corner.
-        //
-        // Place the crescent so its lowest point (convex back, local y=-outerR
-        // after the Y-flip above) sits ~2 cm above the pole tip — looks
-        // resting on the spike, not impaling it.
+        // After the CW rotation: convex back is at local x=-outerR, horns
+        // span x=0, and the crescent extends ±outerR in local-Y. Vertical
+        // centre of the crescent body sits at the position-set Y coord;
+        // bottom horn tip is outerR below that, so finialZ + outerR +
+        // crescentClear places the bottom horn just above the pole tip.
         const crescentClear = 0.02;
         crescent.position.set(co.x, finialZ + outerR + crescentClear, co.y);
         crescent.userData.tag = 'surau_minaret_crescent';
