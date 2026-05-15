@@ -61,7 +61,7 @@ export default {
     mihrab: {
       center_x_m: W / 2,
       width_m: 1.8,
-      depth_m: 0.6,
+      depth_m: 1.2,    // deep enough for the imam to stand inside (was 0.6 — symbolic only)
       height_m: 3.0,
       sill_m: 0.0,
       materialId: 'gypsum-board',
@@ -197,16 +197,36 @@ export default {
     wall_west: 'concrete-painted',
   },
   zones: [
+    // Men's saf (front 70% of usable depth) — closer to the imam at qibla.
+    // JAKIM/JKR convention: men in front, women behind, with a partition or
+    // carpet-stripe demarcation between them. Per audit 2026-05-15 — was
+    // a single combined congregation zone, now split for regulatory
+    // correctness (gender segregation is mandatory in Malaysian surau).
     {
-      id: 'Z_congregation',
-      label: 'Congregation (carpeted prayer mat)',
+      id: 'Z_congregation_men',
+      label: 'Men’s saf (front 70 %)',
       vertices: rectVerts(
-        ZONE_INSET, ZONE_INSET,
-        W - ZONE_INSET, D - IMAM_STRIP,
+        ZONE_INSET,            ZONE_INSET + (D - IMAM_STRIP - 2 * ZONE_INSET) * 0.30,
+        W - ZONE_INSET,        D - IMAM_STRIP,
       ),
       elevation_m: 0,
       material_id: 'audience-seated',
-      occupancy_percent: 5,  // default sparse — bumps to 40 mid-week, ~100 at Jumaah
+      occupancy_percent: 5,  // default sparse; bumps to 40 mid-week, ~100 at Jumaah
+    },
+    // Women's saf (rear 30 %) — separated from the men's saf by a carpet
+    // stripe / curtain partition (visual demarcation rendered in scene.js
+    // is a TODO follow-up; the zone boundary at y = ~5.14 m is the
+    // canonical position).
+    {
+      id: 'Z_congregation_women',
+      label: 'Women’s saf (rear 30 %)',
+      vertices: rectVerts(
+        ZONE_INSET,            ZONE_INSET,
+        W - ZONE_INSET,        ZONE_INSET + (D - IMAM_STRIP - 2 * ZONE_INSET) * 0.30,
+      ),
+      elevation_m: 0,
+      material_id: 'audience-seated',
+      occupancy_percent: 5,
     },
     {
       id: 'Z_imam',
@@ -299,6 +319,27 @@ export default {
       aim: { yaw: 0, pitch: -90, roll: 0 },
       power_watts: 20,
       groupId: 'D',
+    },
+    // IMAM MIC SOURCE — represents the imam's amplified voice projecting
+    // forward from the mihrab toward the congregation. Without this, the
+    // STIPA / D-R metrics only measure the reinforcement system (groups
+    // A-D), not the actual prayer-leader experience the worshippers hear.
+    // Per audit 2026-05-15 (Malaysian Islamic architecture review).
+    //
+    // Position: at the mihrab niche centre, 1.5 m above the floor (imam
+    // mouth height when standing). Aim: south (yaw = -90 = -Y direction)
+    // toward the congregation; level pitch so direct field carries to
+    // the back rows. Power: 1 W — represents the human voice fed through
+    // a lapel mic + low-power amplification (the imam isn't shouting at
+    // 20 W, but the mic-fed reinforcement adds maybe 10-15 dB to the
+    // direct field). Group I (for Imam) is its own routing zone so it
+    // can be soloed/muted independently of the congregational PA.
+    {
+      modelUrl: SPK_MODEL,
+      position: { x: W / 2, y: D - 0.3, z: 1.5 },
+      aim: { yaw: -90, pitch: 0, roll: 0 },
+      power_watts: 1,
+      groupId: 'I',
     },
   ],
   listeners: [
