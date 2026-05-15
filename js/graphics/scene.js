@@ -7738,6 +7738,12 @@ function rebuildSurauStructure(room) {
         // Centre depth so the spike runs through the middle of the crescent,
         // not its back face.
         crescentGeo.translate(0, 0, -crescentDepth / 2);
+        // Tilt the crescent 20° CCW around the extrude axis so the opening
+        // faces 20° above horizontal (= 70° from vertical) — a slight
+        // upward angle, per user request 2026-05-15. The previous pure-
+        // horizontal orientation read as flat / inert; the slight upward
+        // tilt reads as a moon climbing in the sky.
+        crescentGeo.rotateZ(20 * Math.PI / 180);
         crescentGeo.computeVertexNormals();
 
         const crescent = new THREE.Mesh(crescentGeo, goldMat);
