@@ -41,6 +41,8 @@
 // Every triangle's vertices are ordered so its outward-facing normal
 // points INTO the room interior (the side sound waves reflect from).
 
+import { applySurauOpeningsToSlot } from '../room-shape.js';
+
 const TAG_FLOOR = 1;
 const TAG_CEILING = 2;
 const TAG_WALL = 3;
@@ -446,10 +448,6 @@ function triangulateRectangularRoom(scene, tris) {
   const S = room.surfaces || {};
   const floorMat   = materialIdxFor(scene, S.floor);
   const ceilingMat = materialIdxFor(scene, S.ceiling);
-  const wallN = materialIdxFor(scene, S.wall_north ?? S.walls);
-  const wallS = materialIdxFor(scene, S.wall_south ?? S.walls);
-  const wallE = materialIdxFor(scene, S.wall_east  ?? S.walls);
-  const wallW = materialIdxFor(scene, S.wall_west  ?? S.walls);
 
   pushQuad(tris,
     [0, 0, 0], [w, 0, 0], [w, d, 0], [0, d, 0],
@@ -457,18 +455,48 @@ function triangulateRectangularRoom(scene, tris) {
   pushQuad(tris,
     [0, 0, h], [0, d, h], [w, d, h], [w, 0, h],
     [0, 0, -1], ceilingMat, TAG_CEILING, 'ceiling');
-  pushQuad(tris,
-    [0, d, 0], [w, d, 0], [w, d, h], [0, d, h],
-    [0, -1, 0], wallN, TAG_WALL, 'wall_north');
-  pushQuad(tris,
-    [w, 0, 0], [0, 0, 0], [0, 0, h], [w, 0, h],
-    [0, 1, 0], wallS, TAG_WALL, 'wall_south');
-  pushQuad(tris,
-    [w, 0, 0], [w, d, 0], [w, d, h], [w, 0, h],
-    [-1, 0, 0], wallE, TAG_WALL, 'wall_east');
-  pushQuad(tris,
-    [0, d, 0], [0, 0, 0], [0, 0, h], [0, d, h],
-    [1, 0, 0], wallW, TAG_WALL, 'wall_west');
+
+  // Walls now cut around any openings the room slot declares (user-
+  // authored doors / windows + surauStructure entrances). Without this,
+  // the BVH had solid concrete wall quads at the door positions even
+  // though the visual mesh had real holes — rays bounced off invisible
+  // walls. Bug reported by user 2026-05-16. Implementation parallels
+  // triangulateStandaloneEnclosures + triangulateWallSegments which
+  // already handled openings correctly.
+  //
+  // Wall vertex order: each entry's bottom edge is v1 → v2 (that ordering
+  // sets the wall-local +x direction the helpers use). The four wall
+  // descriptors below match the original solid-quad ordering exactly so
+  // closed-opening positions stay consistent with any user-authored
+  // door / window openings.
+  const wallSpecs = [
+    { key: 'wall_north', v1: { x: 0, y: d }, v2: { x: w, y: d }, n: [0, -1, 0] },
+    { key: 'wall_south', v1: { x: w, y: 0 }, v2: { x: 0, y: 0 }, n: [0,  1, 0] },
+    { key: 'wall_east',  v1: { x: w, y: 0 }, v2: { x: w, y: d }, n: [-1, 0, 0] },
+    { key: 'wall_west',  v1: { x: 0, y: d }, v2: { x: 0, y: 0 }, n: [ 1, 0, 0] },
+  ];
+  for (const spec of wallSpecs) {
+    const rawSlot = S[spec.key] ?? S.walls;
+    const slot = applySurauOpeningsToSlot(rawSlot, room, spec.key);
+    const matId = (typeof slot === 'string')
+      ? slot
+      : (slot?.materialId ?? S.walls ?? 'gypsum-board');
+    const matIdx = materialIdxFor(scene, matId);
+    const openings = (slot && typeof slot === 'object') ? slot.openings : null;
+    const quads = wallQuadsAfterOpenings(spec.v1, spec.v2, 0, h, openings);
+    for (let qi = 0; qi < quads.length; qi++) {
+      const q = quads[qi];
+      pushQuad(tris,
+        [q.a.x, q.a.y, q.z0], [q.b.x, q.b.y, q.z0],
+        [q.b.x, q.b.y, q.z1], [q.a.x, q.a.y, q.z1],
+        spec.n, matIdx, TAG_WALL, `${spec.key}_p${qi}`);
+    }
+    // Closed openings (state !== 'open') get their own quad with the
+    // door / window material. Surau openings are all state==='open' so
+    // this is for any user-authored closed openings.
+    pushClosedOpeningQuads(tris, scene, spec.v1, spec.v2, 0, h, openings, spec.n,
+      `${spec.key}_op`);
+  }
 }
 
 // --- Polygon / round room shell ---------------------------------------
