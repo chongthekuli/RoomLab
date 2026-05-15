@@ -248,6 +248,10 @@ export const SPEAKER_GROUPS = [
   { id: 'D', label: 'Group D', color: '#f59e0b' },
   { id: 'E', label: 'Group E', color: '#a855f7' },
   { id: 'F', label: 'Group F', color: '#ec4899' },
+  // Reserved special-purpose groups. 'I' = Imam mic source (used by
+  // the surau preset for the prayer-leader voice at the mihrab).
+  // Future special groups can claim other letters here.
+  { id: 'I', label: 'Imam mic', color: '#fbbf24' },
 ];
 export function groupById(id) { return SPEAKER_GROUPS.find(g => g.id === id) || null; }
 export function colorForGroup(id) { return groupById(id)?.color ?? '#ffffff'; }

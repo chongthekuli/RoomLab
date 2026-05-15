@@ -162,7 +162,10 @@ function renderListenerSection() {
     groupTotals[src.groupId] = (groupTotals[src.groupId] || 0) + Math.pow(10, p.spl_db / 10);
   }
   const groupRows = Object.entries(groupTotals).map(([gid, press]) => {
-    const grp = groupById(gid);
+    // Fallback when a preset uses a groupId not registered in
+    // SPEAKER_GROUPS (otherwise grp.color reads null.color and crashes
+    // the panel mount). Renders as the raw id with a neutral grey badge.
+    const grp = groupById(gid) ?? { id: gid, label: `Group ${gid}`, color: '#6b7280' };
     const spl = 10 * Math.log10(press);
     return `<tr class="group-row"><td><span class="group-badge" style="background:${grp.color}">${grp.id}</span> ${grp.label}</td><td colspan="2"><strong>${spl.toFixed(1)} dB</strong></td></tr>`;
   }).join('');
