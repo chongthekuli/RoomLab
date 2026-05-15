@@ -8629,9 +8629,17 @@ function rebuildHeatmap() {
   }
 
   if (state.sources.length === 0) return;
-  // When zones exist, they carry per-elevation heatmaps. Skip the room-level plane
-  // to avoid a giant translucent disc covering the stacked zone visualization.
-  if (state.zones && state.zones.length > 0) return;
+  // When zones exist, they carry per-elevation heatmaps. Skip the room-level
+  // plane to avoid a giant translucent disc covering the stacked zone
+  // visualization (arena's tiered bowls, pavilion's stacked levels, etc.).
+  // EXCEPTION — surau presets with a podium need the room-level heatmap so
+  // the SPL coverage extends past the prayer-hall walls onto the arcade /
+  // podium area. The surau's two zones (congregation + imam strip) are
+  // both at floor elevation 0; the room heatmap renders at ear-height
+  // (1.2 m) and does not z-fight with them.
+  const hasSurauPodium = Number.isFinite(state.room?.surauStructure?.podium?.extension_m)
+    && state.room.surauStructure.podium.extension_m > 0;
+  if (state.zones && state.zones.length > 0 && !hasSurauPodium) return;
 
   const flat = expandSources(state.sources);
   if (flat.length === 0) return;
