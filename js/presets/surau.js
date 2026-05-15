@@ -148,18 +148,22 @@ export default {
     // clerestory. All marked no_acoustic in scene.js so the precision
     // tracer ignores them.
 
-    // Minaret — slender square tower with mustaka finial at the NW
-    // corner of the building footprint. ~8.5 m tall. Per audit
-    // 2026-05-15: cap_style switched from 'crescent' (Turkish/Ottoman
-    // emblem) to 'mustaka' (the canonical Malaysian vernacular finial,
-    // a stylised lotus-derived bulb stack). Renders as a stacked
-    // sequence of gold spherical bulbs and metal ring collars topped
-    // by a tapered cone tip — no foreign religious symbolism.
+    // Minaret — slender square tower with crescent finial at the NW
+    // corner of the building footprint. ~8.5 m tall.
+    //
+    // Note on cap_style: the Malaysian Islamic architecture audit 2026-05-15
+    // recommended 'mustaka' (lotus-derived bulb stack) as more vernacular
+    // than 'crescent' (Turkish/Ottoman emblem). User preference 2026-05-15
+    // reverted to 'crescent' — many post-1980s Malaysian mosques DO carry
+    // the crescent (Surau Al-Firdaus, Masjid Al-Wataniah Pasir Panjang,
+    // etc.) so it's not unheard-of. To switch back to mustaka, change
+    // cap_style to 'mustaka' below — both paths are implemented in
+    // rebuildSurauStructure().
     minaret: {
       corner: 'NW',
       base_size_m: 1.2,
       height_m: 8.5,
-      cap_style: 'mustaka',
+      cap_style: 'crescent',
     },
     // Arcade / serambi — covered porch wrapping the front (south) plus
     // the two side walls (east + west). The qibla wall (north) is never
