@@ -236,12 +236,20 @@ export function recordRayPaths({
           //    rays are invisible because random directions rarely
           //    intersect a 0.45-m listener sphere.
           //
-          // Bounce 0 only — once a ray has bounced off something and
-          // then escapes, it's not source-radiation anymore and we
-          // don't want to spam visible rays from every wall reflection.
+          // Fires at ANY bounce now (was bounce 0 only) — indoor speakers
+          // typically hit floor / wall / ceiling first, THEN have a
+          // reflection that escapes through a door cutout into the
+          // arcade. Without handling escape at bounce > 0, those
+          // through-door rays were silently discarded (the user-reported
+          // "indoor rays don't pass through doors" bug).
+          //
+          // Spray-mode (no listener hit) is restricted to bounce 0 to
+          // avoid flooding the viz with millions of post-reflection
+          // escape rays going in random directions; at bounce > 0, only
+          // listener-hit escapes commit.
           const OPEN_AIR_RANGE_M = 30;
-          const OPEN_AIR_DEFAULT_M = 6;   // visible length when no listener is hit
-          if (bounce === 0 && useListenerBias && R > 0 && !hitListener) {
+          const OPEN_AIR_DEFAULT_M = 6;
+          if (useListenerBias && R > 0 && !hitListener) {
             let bestT = Infinity;
             for (let recIdx = 0; recIdx < R; recIdx++) {
               const tRec = raySphereEntry(
@@ -254,22 +262,27 @@ export function recordRayPaths({
               );
               if (tRec >= 0 && tRec < bestT) bestT = tRec;
             }
-            const segLen = Number.isFinite(bestT) ? bestT : OPEN_AIR_DEFAULT_M;
-            // Commit decision: hit a listener → real coverage ray;
-            // otherwise → open-air visualization ray (lower fade so
-            // the distinction is visible).
-            const fadeOpenAir = Number.isFinite(bestT) ? 0.7 : 0.35;
-            hitListener = true;  // commit either way (open-air visualization)
-            const tx = ox + dx * segLen;
-            const ty = oy + dy * segLen;
-            const tz = oz + dz * segLen;
-            candXYZ[candVerts * 3 + 0] = tx;
-            candXYZ[candVerts * 3 + 1] = ty;
-            candXYZ[candVerts * 3 + 2] = tz;
-            candRGB[candVerts * 3 + 0] = r0 * fadeOpenAir;
-            candRGB[candVerts * 3 + 1] = g0 * fadeOpenAir;
-            candRGB[candVerts * 3 + 2] = b0 * fadeOpenAir;
-            candVerts++;
+            const hitRecOpenAir = Number.isFinite(bestT);
+            // Commit rule:
+            //   bounce 0 + listener hit: real direct coverage (bright)
+            //   bounce 0 + no listener:  spray viz (dim, default range)
+            //   bounce >0 + listener hit: through-door / reflected coverage
+            //   bounce >0 + no listener: discard (avoid spam)
+            if (hitRecOpenAir || bounce === 0) {
+              const segLen = hitRecOpenAir ? bestT : OPEN_AIR_DEFAULT_M;
+              const fadeOpenAir = hitRecOpenAir ? 0.7 : 0.35;
+              hitListener = true;
+              const tx = ox + dx * segLen;
+              const ty = oy + dy * segLen;
+              const tz = oz + dz * segLen;
+              candXYZ[candVerts * 3 + 0] = tx;
+              candXYZ[candVerts * 3 + 1] = ty;
+              candXYZ[candVerts * 3 + 2] = tz;
+              candRGB[candVerts * 3 + 0] = r0 * fadeOpenAir;
+              candRGB[candVerts * 3 + 1] = g0 * fadeOpenAir;
+              candRGB[candVerts * 3 + 2] = b0 * fadeOpenAir;
+              candVerts++;
+            }
           }
           break;
         }
