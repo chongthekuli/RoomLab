@@ -206,7 +206,7 @@ export default {
       ),
       elevation_m: 0,
       material_id: 'audience-seated',
-      occupancy_percent: 40,  // mid-week prayer; rises to ~100 % at Jumaah
+      occupancy_percent: 5,  // default sparse — bumps to 40 mid-week, ~100 at Jumaah
     },
     {
       id: 'Z_imam',
