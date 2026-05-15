@@ -219,7 +219,47 @@ export function recordRayPaths({
 
       for (let bounce = 0; bounce < maxBounces; bounce++) {
         const hit = intersectRay(bvh, ox, oy, oz, dx, dy, dz);
-        if (!hit) break;
+        if (!hit) {
+          // Ray escapes the surface BVH (e.g. an arcade / outdoor
+          // speaker firing into open space where surauStructure
+          // elements are deliberately tagged no_acoustic and excluded
+          // from the BVH). Before discarding, check if the unbounded
+          // ray would cross any listener sphere within OPEN_AIR_RANGE_M.
+          // If yes, record a terminal vertex at the listener so the
+          // visualised ray is visible going from source to receiver
+          // — otherwise the entire arcade-coverage ray field is
+          // invisible (the user-reported bug).
+          const OPEN_AIR_RANGE_M = 30;
+          if (useListenerBias && !hitListener && R > 0) {
+            let bestT = Infinity;
+            for (let recIdx = 0; recIdx < R; recIdx++) {
+              const tRec = raySphereEntry(
+                ox, oy, oz, dx, dy, dz,
+                recPositions[recIdx * 3 + 0],
+                recPositions[recIdx * 3 + 1],
+                recPositions[recIdx * 3 + 2],
+                recRadii[recIdx],
+                OPEN_AIR_RANGE_M,
+              );
+              if (tRec >= 0 && tRec < bestT) bestT = tRec;
+            }
+            if (bestT < Infinity) {
+              hitListener = true;
+              const tx = ox + dx * bestT;
+              const ty = oy + dy * bestT;
+              const tz = oz + dz * bestT;
+              const fadeOpenAir = Math.max(0.15, 0.15 + 0.85 * (Math.log10(energy + 0.01) + 2) / 2);
+              candXYZ[candVerts * 3 + 0] = tx;
+              candXYZ[candVerts * 3 + 1] = ty;
+              candXYZ[candVerts * 3 + 2] = tz;
+              candRGB[candVerts * 3 + 0] = r0 * fadeOpenAir;
+              candRGB[candVerts * 3 + 1] = g0 * fadeOpenAir;
+              candRGB[candVerts * 3 + 2] = b0 * fadeOpenAir;
+              candVerts++;
+            }
+          }
+          break;
+        }
 
         // Listener-bias check: did this segment [origin → hit] cross
         // any receiver sphere? Only test until we find one — we just
