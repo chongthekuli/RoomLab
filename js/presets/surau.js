@@ -58,14 +58,19 @@ export default {
     // Mihrab — concave semicircular niche on the qibla wall (state +y).
     // 1.8 m × 0.6 m × 3.0 m, centred E–W. Marble would be ideal; gypsum-
     // board is the closest catalogued material until a stone is added.
-    mihrab: {
-      center_x_m: W / 2,
-      width_m: 1.8,
-      depth_m: 1.2,    // deep enough for the imam to stand inside (was 0.6 — symbolic only)
-      height_m: 3.0,
-      sill_m: 0.0,
-      materialId: 'gypsum-board',
-    },
+    // Mihrab — DISABLED 2026-05-15 because the current renderer draws
+    // it as a SOLID half-cylinder protrusion bulging INTO the prayer
+    // hall, which reads as a pillar in the middle of the room rather
+    // than a concave niche cut into the qibla wall. A correct mihrab
+    // requires CSG-style geometry subtraction (cut a recess in the
+    // wall mesh, line the inside of the cut with material) which is
+    // a future renderer task. Until then, the qibla direction is still
+    // unambiguous from the saf lines + minbar position + the room's
+    // single mihrab-side facing convention.
+    //
+    // To re-enable when the renderer is fixed:
+    //   mihrab: { center_x_m: W / 2, width_m: 1.8, depth_m: 1.2,
+    //             height_m: 3.0, sill_m: 0.0, materialId: 'gypsum-board' },
     // Minbar — stepped pulpit, west of the mihrab, abutting the qibla wall.
     // 3 steps × 0.5 m rise + 1.0 × 0.6 m platform = ~1.8 m total.
     minbar: {
