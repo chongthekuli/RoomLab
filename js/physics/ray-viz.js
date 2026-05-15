@@ -223,14 +223,25 @@ export function recordRayPaths({
           // Ray escapes the surface BVH (e.g. an arcade / outdoor
           // speaker firing into open space where surauStructure
           // elements are deliberately tagged no_acoustic and excluded
-          // from the BVH). Before discarding, check if the unbounded
-          // ray would cross any listener sphere within OPEN_AIR_RANGE_M.
-          // If yes, record a terminal vertex at the listener so the
-          // visualised ray is visible going from source to receiver
-          // — otherwise the entire arcade-coverage ray field is
-          // invisible (the user-reported bug).
+          // from the BVH). Two things to do before discarding:
+          //
+          // 1) If a listener sphere is along the unbounded ray within
+          //    OPEN_AIR_RANGE_M, record a terminal vertex AT the
+          //    listener — gives the listener-bias commit decision a
+          //    yes-vote and produces a clean source-to-listener line.
+          //
+          // 2) If no listener is hit, STILL extend the ray to a
+          //    visible default range and commit it as an open-air
+          //    coverage ray — without this, ~99 % of arcade-speaker
+          //    rays are invisible because random directions rarely
+          //    intersect a 0.45-m listener sphere.
+          //
+          // Bounce 0 only — once a ray has bounced off something and
+          // then escapes, it's not source-radiation anymore and we
+          // don't want to spam visible rays from every wall reflection.
           const OPEN_AIR_RANGE_M = 30;
-          if (useListenerBias && !hitListener && R > 0) {
+          const OPEN_AIR_DEFAULT_M = 6;   // visible length when no listener is hit
+          if (bounce === 0 && useListenerBias && R > 0 && !hitListener) {
             let bestT = Infinity;
             for (let recIdx = 0; recIdx < R; recIdx++) {
               const tRec = raySphereEntry(
@@ -243,20 +254,22 @@ export function recordRayPaths({
               );
               if (tRec >= 0 && tRec < bestT) bestT = tRec;
             }
-            if (bestT < Infinity) {
-              hitListener = true;
-              const tx = ox + dx * bestT;
-              const ty = oy + dy * bestT;
-              const tz = oz + dz * bestT;
-              const fadeOpenAir = Math.max(0.15, 0.15 + 0.85 * (Math.log10(energy + 0.01) + 2) / 2);
-              candXYZ[candVerts * 3 + 0] = tx;
-              candXYZ[candVerts * 3 + 1] = ty;
-              candXYZ[candVerts * 3 + 2] = tz;
-              candRGB[candVerts * 3 + 0] = r0 * fadeOpenAir;
-              candRGB[candVerts * 3 + 1] = g0 * fadeOpenAir;
-              candRGB[candVerts * 3 + 2] = b0 * fadeOpenAir;
-              candVerts++;
-            }
+            const segLen = Number.isFinite(bestT) ? bestT : OPEN_AIR_DEFAULT_M;
+            // Commit decision: hit a listener → real coverage ray;
+            // otherwise → open-air visualization ray (lower fade so
+            // the distinction is visible).
+            const fadeOpenAir = Number.isFinite(bestT) ? 0.7 : 0.35;
+            hitListener = true;  // commit either way (open-air visualization)
+            const tx = ox + dx * segLen;
+            const ty = oy + dy * segLen;
+            const tz = oz + dz * segLen;
+            candXYZ[candVerts * 3 + 0] = tx;
+            candXYZ[candVerts * 3 + 1] = ty;
+            candXYZ[candVerts * 3 + 2] = tz;
+            candRGB[candVerts * 3 + 0] = r0 * fadeOpenAir;
+            candRGB[candVerts * 3 + 1] = g0 * fadeOpenAir;
+            candRGB[candVerts * 3 + 2] = b0 * fadeOpenAir;
+            candVerts++;
           }
           break;
         }
