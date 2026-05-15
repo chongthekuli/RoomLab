@@ -34,7 +34,8 @@ import { rectVerts } from './shared.js';
 const W = 18.0;          // E–W
 const D = 17.7;          // N–S
 const H = 4.5;           // ceiling
-const SPK_HEIGHT = 3.0;  // column-speaker mount height on side walls
+const SPK_CEILING_Z = 4.30;  // ceiling-mount speaker height (just under ceiling)
+const SPK_ARCADE_Z  = 4.20;  // arcade ceiling-mount speaker height (under arcade flat roof at 4.4)
 const SPK_MODEL = 'data/loudspeakers/amperes-cs520.json';
 
 // Audience zone — prayer mat covering most of the floor with a small
@@ -150,12 +151,12 @@ export default {
       arch_peak_height_m: 4.0,   // peak of the pointed arch
       roof_height_m: 4.4,        // flat roof above arcade
     },
-    // Jali screens — perforated geometric panels on the front (south)
-    // facade. Diamond-grid pattern via CanvasTexture + alphaTest;
-    // rendered as a single PlaneGeometry per side (thousands of true
-    // perforations would be wasteful at simulation distance).
+    // Jali screens — disabled on south side per user 2026-05-15 (the
+    // perforated grille was visually showing through the open door
+    // cutouts and made the doors look barred). Empty sides[] keeps
+    // the schema field present so the renderer no-ops cleanly.
     jaliScreens: {
-      sides: ['south'],
+      sides: [],
       sill_m: 1.0,
       height_m: 2.4,
       cell_size_m: 0.25,
@@ -220,44 +221,102 @@ export default {
     },
   ],
   sources: [
-    // Column speakers mounted at 3 m on the side walls, aimed horizontally
-    // across the hall (-10° pitch tilts toward the kneeling congregation
-    // at ear height ~1.1 m). Two on each long wall, spaced 1/3 and 2/3 of
-    // the depth so coverage doesn't bunch at the front or rear.
+    // PRAYER HALL ceiling speakers — 2×2 grid at z = 4.30 m (just below
+    // the 4.5 m ceiling), all aimed straight down (pitch = -90). Per
+    // user 2026-05-15: column-on-side-wall layout replaced with this
+    // ceiling-mount layout, all speakers facing downward to match the
+    // typical Malaysian surau ceiling-speaker convention.
+    // Group A = front pair (closer to qibla / mihrab).
+    // Group B = rear pair (closer to main entrance).
     {
       modelUrl: SPK_MODEL,
-      position: { x: 0.30, y: D * 0.33, z: SPK_HEIGHT },
-      aim: { yaw: 0, pitch: -10, roll: 0 },
+      position: { x: W * 0.25, y: D * 0.66, z: SPK_CEILING_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
       power_watts: 20,
       groupId: 'A',
     },
     {
       modelUrl: SPK_MODEL,
-      position: { x: 0.30, y: D * 0.66, z: SPK_HEIGHT },
-      aim: { yaw: 0, pitch: -10, roll: 0 },
+      position: { x: W * 0.75, y: D * 0.66, z: SPK_CEILING_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
       power_watts: 20,
       groupId: 'A',
     },
     {
       modelUrl: SPK_MODEL,
-      position: { x: W - 0.30, y: D * 0.33, z: SPK_HEIGHT },
-      aim: { yaw: 180, pitch: -10, roll: 0 },
+      position: { x: W * 0.25, y: D * 0.33, z: SPK_CEILING_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
       power_watts: 20,
       groupId: 'B',
     },
     {
       modelUrl: SPK_MODEL,
-      position: { x: W - 0.30, y: D * 0.66, z: SPK_HEIGHT },
-      aim: { yaw: 180, pitch: -10, roll: 0 },
+      position: { x: W * 0.75, y: D * 0.33, z: SPK_CEILING_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
       power_watts: 20,
       groupId: 'B',
+    },
+
+    // ARCADE / SERAMBI speakers — outdoor PA coverage under the
+    // arcade flat roof (~4.4 m). All aimed straight down. Positioned
+    // OUTSIDE the prayer-hall room boundary (x or y past the wall),
+    // representing speakers mounted on the arcade soffit. Acoustic
+    // engine treats them as direct-field sources to listeners L6–L8
+    // standing in the corridor — proper arcade-coupling physics is
+    // a future engine feature; this is a first-order approximation.
+    // Group C = south arcade (front), Group D = east + west sides.
+    {
+      modelUrl: SPK_MODEL,
+      position: { x: 4.5, y: -1.5, z: SPK_ARCADE_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
+      power_watts: 20,
+      groupId: 'C',
+    },
+    {
+      modelUrl: SPK_MODEL,
+      position: { x: 9.0, y: -1.5, z: SPK_ARCADE_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
+      power_watts: 20,
+      groupId: 'C',
+    },
+    {
+      modelUrl: SPK_MODEL,
+      position: { x: 13.5, y: -1.5, z: SPK_ARCADE_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
+      power_watts: 20,
+      groupId: 'C',
+    },
+    {
+      modelUrl: SPK_MODEL,
+      position: { x: -1.5, y: D / 2, z: SPK_ARCADE_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
+      power_watts: 20,
+      groupId: 'D',
+    },
+    {
+      modelUrl: SPK_MODEL,
+      position: { x: W + 1.5, y: D / 2, z: SPK_ARCADE_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
+      power_watts: 20,
+      groupId: 'D',
     },
   ],
   listeners: [
+    // Inside the prayer hall — 5 representative congregation positions.
     { id: 'L1', label: 'Front row (behind imam)',  position: { x: W / 2,        y: D - IMAM_STRIP - 1.0 }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
     { id: 'L2', label: 'Mid-hall centre',          position: { x: W / 2,        y: D * 0.55             }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
     { id: 'L3', label: 'Mid-hall east flank',      position: { x: W * 0.78,     y: D * 0.55             }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
     { id: 'L4', label: 'Mid-hall west flank',      position: { x: W * 0.22,     y: D * 0.55             }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
     { id: 'L5', label: 'Back row (near entrance)', position: { x: W / 2,        y: 2.0                  }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
+    // Outside in the arcade — 3 corridor positions for overflow worshippers
+    // during Friday/Eid prayers when the hall fills past capacity.
+    // Positioned outside the prayer-hall room boundary; SPL is computed
+    // from the arcade speakers' direct field. RT60/STIPA at these
+    // positions reflect the arcade-only direct-field coverage, not the
+    // prayer hall's reverberant field (no inside-to-outside coupling
+    // physics yet).
+    { id: 'L6', label: 'South arcade centre',      position: { x: W / 2,        y: -1.5                 }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
+    { id: 'L7', label: 'East arcade',              position: { x: W + 1.5,      y: D / 2                }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
+    { id: 'L8', label: 'West arcade',              position: { x: -1.5,         y: D / 2                }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
   ],
 };
