@@ -7688,57 +7688,67 @@ function rebuildSurauStructure(room) {
         // The extruded shape lives in the XY plane locally; rotate the mesh
         // so the U opens UP in WORLD (toward +y). Because it's a U from
         // every front view, no yaw-toward-centre rotation is needed.
-        // Geometry constraint: innerOffsetY + innerR < outerR, otherwise
-        // the inner arc pokes through the outer arc and the resulting shape
-        // self-intersects (a hole would appear at the top of the crescent).
-        // With outerR=0.18 and innerR=0.155, max innerOffsetY = 0.025 — we
-        // pick 0.020 to leave a small visible "belly" of metal at the top
-        // and slightly thicker horns at the tips.
-        const outerR = 0.18;             // ~36 cm wide
-        const innerR = 0.155;            // controls crescent body thickness
-        const innerOffsetY = 0.020;      // < (outerR - innerR) = 0.025, no self-intersect
+        // Real Islamic crescent geometry: NOT a uniform-thickness arc, but
+        // the visible bright sliver of a moon — the area inside one circle
+        // BUT outside a slightly smaller, slightly offset second circle.
+        // This naturally produces a crescent that is THICK in the middle
+        // and TAPERS to sharp points at both horns (the two intersection
+        // points of the circles).
+        //
+        // Construction (in shape-local 2D, before extrude):
+        //   * outer circle: centre (0, 0), radius R = 0.30
+        //   * inner circle: centre (+offset, 0), radius r = 0.27
+        //   * intersection at (xi, ±yi) where:
+        //       xi = (R² - r² + offset²) / (2 · offset)
+        //       yi = √(R² - xi²)
+        //   * boundary CCW: outer arc from upper horn (xi, +yi) through
+        //     LEFT side (-R, 0) down to lower horn (xi, -yi);
+        //     then inner arc CW from lower horn through LEFT side
+        //     (offset - r, 0) back up to upper horn.
+        //
+        // Result: body curves on the LEFT (negative-X), opening on the
+        // RIGHT (positive-X), horns sharp at top and bottom — the
+        // canonical horizontal "C" Islamic crescent shape.
+        const outerR = 0.30;             // ~60 cm tall overall
+        const innerR = 0.27;             // close to outerR — only 0.03 m smaller
+        const offset = 0.10;             // significant offset → sharp horns
         const crescentDepth = 0.04;      // extrude thickness along the spike axis
 
+        const xi = (outerR * outerR - innerR * innerR + offset * offset) / (2 * offset);
+        const yi = Math.sqrt(Math.max(0, outerR * outerR - xi * xi));
+        const outerAngle = Math.atan2(yi, xi);                  // upper horn on outer circle
+        const innerAngle = Math.atan2(yi, xi - offset);         // upper horn on inner circle (in inner-local coords)
+
         const crescentShape = new THREE.Shape();
-        // Outer arc: start at (-outerR, 0), sweep CCW through (0, outerR) to (outerR, 0).
-        crescentShape.absarc(0, 0, outerR, Math.PI, 0, true);
-        // Inner arc: start at (innerR, innerOffsetY), sweep CW back to (-innerR, innerOffsetY).
-        // Path automatically lineTo's to the inner-arc start before drawing it.
-        crescentShape.absarc(0, innerOffsetY, innerR, 0, Math.PI, false);
+        // Outer arc CCW from upper horn (xi, +yi) through LEFT side
+        // (-outerR, 0) down to lower horn (xi, -yi).
+        crescentShape.absarc(0, 0, outerR, outerAngle, 2 * Math.PI - outerAngle, false);
+        // Inner arc CW from lower horn (xi, -yi) through LEFT side
+        // (offset - innerR, 0) back up to upper horn (xi, +yi). The
+        // CW traversal puts this arc on the RIGHT-INNER side of the
+        // boundary, which from the crescent body's perspective is the
+        // CONCAVE indented inner edge — what creates the "moon" look.
+        crescentShape.absarc(offset, 0, innerR, -innerAngle, innerAngle, true);
 
         const crescentGeo = new THREE.ExtrudeGeometry(crescentShape, {
           depth: crescentDepth,
           bevelEnabled: false,
-          curveSegments: 24,
+          curveSegments: 32,
         });
-        // The shape as built has horns at y=0 and convex back at y=+outerR
-        // (a frown / ∩). Flip vertically so horns point UP and convex
-        // back is down (U-shape) — intermediate step.
-        crescentGeo.scale(1, -1, 1);
-        // Then rotate 90° CW around the extrude axis so the U becomes a
-        // horizontal C with the opening facing east (+X direction toward
-        // the room centre). User asked for horizontal, not skyward —
-        // this matches the Malaysian/Islamic convention where the
-        // crescent on a minaret typically lies on its side facing the
-        // qibla or sunrise direction, not pointing at the sky.
-        crescentGeo.rotateZ(-Math.PI / 2);
         // Centre depth so the spike runs through the middle of the crescent,
         // not its back face.
         crescentGeo.translate(0, 0, -crescentDepth / 2);
-        // After the Y-flip ExtrudeGeometry's per-face winding is reversed —
-        // recompute normals so lighting reads correctly on the gold metal
-        // material instead of looking matte/dark.
         crescentGeo.computeVertexNormals();
 
         const crescent = new THREE.Mesh(crescentGeo, goldMat);
         const finialZ = capBaseZ + lanternH + domeR + poleH;
-        // After the CW rotation: convex back is at local x=-outerR, horns
-        // span x=0, and the crescent extends ±outerR in local-Y. Vertical
-        // centre of the crescent body sits at the position-set Y coord;
-        // bottom horn tip is outerR below that, so finialZ + outerR +
-        // crescentClear places the bottom horn just above the pole tip.
+        // Geometric origin (0,0) is at the centre of the OUTER circle.
+        // The crescent's vertical extent is ±yi (yi ≈ 0.27 here). To
+        // place the bottom horn just above the pole tip, position the
+        // origin at finialZ + yi + crescentClear so y = -yi (bottom
+        // horn) sits at finialZ + crescentClear.
         const crescentClear = 0.02;
-        crescent.position.set(co.x, finialZ + outerR + crescentClear, co.y);
+        crescent.position.set(co.x, finialZ + yi + crescentClear, co.y);
         crescent.userData.tag = 'surau_minaret_crescent';
         crescent.userData.no_acoustic = true;
         crescent.userData.no_walk_collide = true;
