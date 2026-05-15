@@ -101,7 +101,7 @@ export default {
       height_m: 2.4,
       doorCenters_x_m: [5.0, 9.0, 13.0],
       doorWidth_m: 1.0,
-      materialId: 'plaster-smooth',
+      materialId: 'concrete-painted',
     },
     // Three entrance openings — east + west match the porches in the PDF;
     // south central is the MAIN ENTRANCE (already cut by the southPartition
@@ -161,10 +161,13 @@ export default {
       cell_size_m: 0.25,
       opacity: 0.7,
     },
-    // Raised podium — concrete base extending 1.5 m past the building
-    // footprint on every side. Reads as a 0.4 m step up to the entrances.
+    // Raised podium — concrete base extending 3.5 m past the building
+    // footprint on every side. Sized to fully contain the 3.0 m deep
+    // arcade columns (south + east + west sides) plus a 0.5 m visual
+    // margin so the columns clearly stand ON the podium, not at its
+    // edge. Reads as a 0.4 m step up to the entrances.
     podium: {
-      extension_m: 1.5,
+      extension_m: 3.5,
       height_m: 0.4,
     },
     // Front portico — projecting entrance pavilion at the south wall
@@ -179,16 +182,18 @@ export default {
   },
   surfaces: {
     // Carpet over concrete is the prayer-time floor across modern
-    // Malaysian surau. Plastered painted blockwork walls. Plasterboard
-    // suspended ceiling (more common than exposed roof in this build
-    // class). All assumed to be the listed catalogue materials.
+    // Malaysian surau. Painted concrete blockwork walls (per user
+    // 2026-05-15 — was plaster-smooth, but painted concrete is the
+    // honest as-built material in this construction class).
+    // Plasterboard suspended ceiling (more common than exposed roof
+    // in this build class). All from the catalogued materials list.
     floor: 'carpet-heavy-underlay',
     ceiling: 'gypsum-board',
-    walls: 'plaster-smooth',
-    wall_north: 'plaster-smooth',  // qibla / mihrab wall
-    wall_south: 'plaster-smooth',  // main entrance wall
-    wall_east: 'plaster-smooth',
-    wall_west: 'plaster-smooth',
+    walls: 'concrete-painted',
+    wall_north: 'concrete-painted',  // qibla / mihrab wall
+    wall_south: 'concrete-painted',  // main entrance wall
+    wall_east: 'concrete-painted',
+    wall_west: 'concrete-painted',
   },
   zones: [
     {
