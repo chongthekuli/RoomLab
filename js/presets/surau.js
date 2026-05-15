@@ -110,6 +110,72 @@ export default {
       { wall: 'east', center_y_m: D / 2, width_m: 1.2, height_m: 2.4 },
       { wall: 'west', center_y_m: D / 2, width_m: 1.2, height_m: 2.4 },
     ],
+
+    // ---- EXTERIOR ELEMENTS (visual only — no acoustic effect) ----
+    // The six elements below turn the box-with-hat into a recognisable
+    // Malaysian surau: clerestory tower for daylight + visual hierarchy,
+    // slender minaret at the NW corner, pointed-arch arcade wrapping
+    // the south + east + west sides, perforated jali screens on the
+    // south facade, raised podium foundation, projecting south portico
+    // framing the main entrance. All marked no_acoustic in scene.js so
+    // the precision tracer ignores them.
+
+    // Clerestory tower — square box of ribbon windows above the main
+    // hip roof, capped by its own smaller pyramid. ~55% of the main
+    // building footprint so it reads as the architectural focal point.
+    clerestory: {
+      width_m: 10,
+      height_m: 3.5,
+      sill_m: 0.5,
+      window_height_m: 2.0,
+      apexRise_m: 1.0,
+    },
+    // Minaret — slender square tower with crescent finial at the NW
+    // corner of the building footprint. ~8.5 m tall.
+    minaret: {
+      corner: 'NW',
+      base_size_m: 1.2,
+      height_m: 8.5,
+      cap_style: 'crescent',
+    },
+    // Arcade / serambi — covered porch wrapping the front (south) plus
+    // the two side walls (east + west). The qibla wall (north) is never
+    // wrapped. Pointed Moorish arches between solid bay walls.
+    arcade: {
+      sides: ['south', 'east', 'west'],
+      depth_m: 3.0,
+      column_spacing_m: 2.8,
+      column_thickness_m: 0.30,
+      arch_height_m: 3.2,        // springline (where the pointed curve starts)
+      arch_peak_height_m: 4.0,   // peak of the pointed arch
+      roof_height_m: 4.4,        // flat roof above arcade
+    },
+    // Jali screens — perforated geometric panels on the front (south)
+    // facade. Diamond-grid pattern via CanvasTexture + alphaTest;
+    // rendered as a single PlaneGeometry per side (thousands of true
+    // perforations would be wasteful at simulation distance).
+    jaliScreens: {
+      sides: ['south'],
+      sill_m: 1.0,
+      height_m: 2.4,
+      cell_size_m: 0.25,
+      opacity: 0.7,
+    },
+    // Raised podium — concrete base extending 1.5 m past the building
+    // footprint on every side. Reads as a 0.4 m step up to the entrances.
+    podium: {
+      extension_m: 1.5,
+      height_m: 0.4,
+    },
+    // Front portico — projecting entrance pavilion at the south wall
+    // centre, framing the main entrance arch. Own small pyramid roof.
+    portico: {
+      side: 'south',
+      width_m: 3.0,
+      depth_m: 3.0,
+      height_m: 4.5,
+      apexRise_m: 1.0,
+    },
   },
   surfaces: {
     // Carpet over concrete is the prayer-time floor across modern

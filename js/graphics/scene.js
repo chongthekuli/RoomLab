@@ -6730,13 +6730,37 @@ function rebuildMultiLevelStructure(room) {
 // -------------------------------------------------------------------------
 // Mosque prayer-hall architecture from `room.surauStructure`.
 //
-// Renders six visual elements that turn a plain rectangular shoebox into a
-// recognizable surau: (1) a concave mihrab niche on the qibla wall, (2) a
-// stepped minbar pulpit beside the mihrab, (3) a 4-sided pyramidal hip roof
-// replacing the flat ceiling, (4) parallel saf prayer-row markers on the
-// floor, (5) a thin south-wall partition band suggesting side rooms behind
-// the entrance wall, (6) inset frames around the three entrance openings
-// on the east, west, and south walls.
+// Renders TWO groups of elements that turn a plain rectangular shoebox into
+// a recognizable Malaysian surau.
+//
+// INTERIOR (acoustically meaningful — userData.acoustic_material set):
+//   (1) concave mihrab niche on the qibla wall
+//   (2) stepped minbar pulpit beside the mihrab
+//   (3) 4-sided pyramidal hip roof replacing the flat ceiling
+//   (4) parallel saf prayer-row markers on the floor
+//   (5) thin south-wall partition band suggesting side rooms behind the
+//       entrance wall
+//   (6) inset frames around the three entrance openings on the east,
+//       west, and south walls.
+//
+// EXTERIOR (visual-only — userData.no_acoustic = true on every mesh; the
+// precision tracer's triangulator works from state.room not roomGroup so
+// these never enter the BVH, but the flag documents intent and future-
+// proofs against a triangulator change):
+//   (7)  raised clerestory tower with ribbon windows above the hip roof
+//   (8)  slender corner minaret with crescent finial
+//   (9)  arcade / serambi with pointed Moorish arches around the building
+//   (10) jali screens (perforated geometric panels) on the front facade
+//   (11) raised concrete podium extending past the building footprint
+//   (12) projecting front-entrance portico with its own pyramid roof
+//
+// The exterior elements sit OUTSIDE the room's wall planes and DO NOT
+// modify the existing wall / floor / ceiling meshes built upstream by
+// rebuildRoom(). Walk-collision: the arcade columns, podium, portico
+// walls, minaret shaft, and jali panels are solid blockers (default —
+// raycaster picks them up from material.opacity > 0). Clerestory sits
+// above the main hip roof apex, well out of avatar reach, so it can't
+// be reached on foot anyway.
 //
 // Coordinate convention (state space):
 //   +x = east  (room width is width_m  E–W)
@@ -6795,6 +6819,48 @@ function rebuildMultiLevelStructure(room) {
 //       // listing them here is allowed but optional — the partition gates
 //       // the actual cutout.
 //     ],
+//
+//     // ----- EXTERIOR (visual-only; no_acoustic = true) -----
+//     clerestory: {                // raised window-box on top of the hip roof
+//       width_m:         number,   // square footprint side length (8–12 m)
+//       height_m:        number,   // wall height of the clerestory box
+//       sill_m:          number,   // window sill, metres above the box floor
+//       window_height_m: number,   // ribbon-window strip height
+//       apexRise_m:      number,   // own small pyramid rise (default 1.0)
+//     },
+//     minaret: {                   // slender corner tower
+//       corner:       'NW'|'NE'|'SW'|'SE',  // building corner (relative to room)
+//       base_size_m:  number,      // square cross-section side (≤ 1.4 reads slender)
+//       height_m:     number,      // total tower height from ground
+//       cap_style:    'crescent'|'dome'|'stepped',  // apex treatment
+//     },
+//     arcade: {                    // covered porch wrapping the building
+//       sides:                ('south'|'east'|'west'|'north')[],  // walls to wrap
+//       depth_m:              number,  // arcade depth from outer wall (~3 m)
+//       column_spacing_m:     number,  // bay spacing centre-to-centre (2.5–3 m)
+//       column_thickness_m:   number,  // column cross-section (~0.30 m)
+//       arch_height_m:        number,  // arch springing line above arcade floor
+//       arch_peak_height_m:   number,  // pointed-arch peak height
+//       roof_height_m:        number,  // arcade flat-roof height (~main eave)
+//     },
+//     jaliScreens: {               // perforated geometric screen panels
+//       sides:        ('south'|'east'|'west'|'north')[],
+//       sill_m:       number,      // bottom of screen above ground
+//       height_m:     number,      // screen panel height
+//       cell_size_m:  number,      // single repeat-unit size (0.20–0.30 m)
+//       opacity:      number,      // 0..1, default 0.7
+//     },
+//     podium: {                    // raised concrete base extending past walls
+//       extension_m: number,       // metres past building footprint on each side
+//       height_m:    number,       // step height above ground
+//     },
+//     portico: {                   // projecting entrance pavilion
+//       side:       'south'|'east'|'west'|'north',
+//       width_m:    number,        // along the wall (3–4 m)
+//       depth_m:    number,        // projection out from wall
+//       height_m:   number,        // eave height (matches main eave)
+//       apexRise_m: number,        // own small pyramid rise on top
+//     },
 //   }
 //
 // Every mesh carries userData.acoustic_material so the precision ray
@@ -7249,6 +7315,782 @@ function rebuildSurauStructure(room) {
         continue;
       }
       roomGroup.add(frameGroup);
+    }
+  }
+
+  // =======================================================================
+  // EXTERIOR ELEMENTS — visual only (userData.no_acoustic = true).
+  //
+  // None of these enter the precision tracer (the triangulator works from
+  // state.room, not from roomGroup), and none of them are tagged with
+  // acoustic_material (so the surface-picker UI ignores them too).
+  // Tagged no_acoustic = true to document intent and survive any future
+  // change that pulls roomGroup meshes into the BVH.
+  //
+  // Walk-collision: solid-by-default (raycaster picks meshes with
+  // material.opacity > 0). The minaret cap, crescent finial, and roof
+  // shingle planes are tagged no_walk_collide because they sit above
+  // 4.5 m and would otherwise produce false ceiling hits.
+  // =======================================================================
+
+  // Shared exterior materials. Hoisted so the six element renderers
+  // share material instances (cheaper than allocating per-element) and so
+  // a future colour-tuning pass can adjust the whole exterior palette in
+  // one place.
+  const stuccoMat = new THREE.MeshStandardMaterial({
+    color: 0xf2ede2, roughness: 0.92, metalness: 0.0,   // warm white plaster
+  });
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: 0x6b4a2a, roughness: 0.75, metalness: 0.04,  // dark wood / window frame
+  });
+  const concreteMat = new THREE.MeshStandardMaterial({
+    color: 0xc9c2b3, roughness: 0.95, metalness: 0.0,   // raised podium
+  });
+  const shingleMat = new THREE.MeshStandardMaterial({
+    color: 0x4a525c, roughness: 0.78, metalness: 0.05,  // grey hip-roof shingles
+    side: THREE.DoubleSide,
+  });
+  const greenMetalMat = new THREE.MeshStandardMaterial({
+    color: 0x2f5f3a, roughness: 0.55, metalness: 0.4,   // minaret cap (canonical
+  });                                                    // Malaysian copper-green
+  const goldMat = new THREE.MeshStandardMaterial({
+    color: 0xd4af37, roughness: 0.30, metalness: 0.85,  // crescent finial
+  });
+  const ribbonGlassMat = new THREE.MeshStandardMaterial({
+    color: 0x88a8b8, roughness: 0.18, metalness: 0.05,
+    transparent: true, opacity: 0.55,
+    side: THREE.DoubleSide,
+  });
+
+  // Helper: tag a mesh / group as visual-only exterior. Walk through
+  // controller-managed sub-meshes too if a Group is passed.
+  const tagExterior = (obj, tagName, opts = {}) => {
+    obj.userData.no_acoustic = true;
+    if (tagName) obj.userData.tag = tagName;
+    if (opts.noWalk) obj.userData.no_walk_collide = true;
+    if (obj.children?.length) {
+      for (const c of obj.children) {
+        c.userData.no_acoustic = true;
+        if (tagName && !c.userData.tag) c.userData.tag = tagName;
+        if (opts.noWalk) c.userData.no_walk_collide = true;
+      }
+    }
+  };
+
+  // Helper: build a 4-sided pyramid cap (apex centred on the box top) as
+  // four BufferGeometry triangles. Used for the clerestory cap, the
+  // portico cap, and (with metal material) the minaret cap.
+  const buildPyramidCap = (cx, cy_state, baseZ, halfX, halfY, apexRise, mat, tagName) => {
+    const apexZ = baseZ + apexRise;
+    const corners = [
+      { x: cx - halfX, y: cy_state - halfY },  // SW
+      { x: cx + halfX, y: cy_state - halfY },  // SE
+      { x: cx + halfX, y: cy_state + halfY },  // NE
+      { x: cx - halfX, y: cy_state + halfY },  // NW
+    ];
+    const group = new THREE.Group();
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i];
+      const b = corners[(i + 1) % 4];
+      const verts = new Float32Array([
+        a.x, baseZ, a.y,
+        b.x, baseZ, b.y,
+        cx, apexZ, cy_state,
+      ]);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+      geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geo.computeVertexNormals();
+      const face = new THREE.Mesh(geo, mat);
+      face.userData.tag = tagName;
+      face.userData.no_acoustic = true;
+      face.userData.no_walk_collide = true;
+      group.add(face);
+    }
+    return group;
+  };
+
+  // ------------- 7. Clerestory tower above the hip roof ------------------
+  // A smaller square box centred on the room, sitting on top of the main
+  // hip-roof apex (z = H + hipRise). Walls have horizontal ribbon windows
+  // around all 4 sides; the box is capped by its own small pyramid roof.
+  // This is the architectural focal point of the silhouette — without it
+  // the building reads as "hut with a hat", with it as "Malaysian surau".
+  if (s.clerestory) {
+    const cl = s.clerestory;
+    const cl_w = Number.isFinite(cl.width_m) ? cl.width_m : 10;
+    const cl_h = Number.isFinite(cl.height_m) ? cl.height_m : 3.5;
+    const cl_sill = Number.isFinite(cl.sill_m) ? cl.sill_m : 0.5;
+    const cl_winH = Number.isFinite(cl.window_height_m) ? cl.window_height_m : 2.0;
+    const cl_apex = Number.isFinite(cl.apexRise_m) ? cl.apexRise_m : 1.0;
+    // Stack the clerestory ON TOP of the main hip roof apex. If the user
+    // didn't provide a hipRoof, fall back to the eave height — the box
+    // then sits flush on the flat ceiling, which still reads OK.
+    const baseZ = H + (Number.isFinite(s.hipRoof?.apexRise_m) ? s.hipRoof.apexRise_m : 0);
+    const cx = W / 2;
+    const cy_state = D / 2;
+    const halfW = cl_w / 2;
+
+    // Each of 4 walls is built as 3 horizontal slabs:
+    //   - sill band     (0 .. cl_sill)
+    //   - ribbon window (cl_sill .. cl_sill + cl_winH)  ← translucent glass
+    //   - top band      (cl_sill + cl_winH .. cl_h)
+    // Walls are oriented inward (normals into the box centre).
+    const winTop = cl_sill + cl_winH;
+    if (winTop > cl_h - 0.05) {
+      // window over-runs the wall; skip glass strip but still render walls.
+    }
+
+    // Each wall: 4 sides at +/- halfW along world-X or world-Z (state-y).
+    // sides[i] = { axis, sign } where axis is which world axis the wall's
+    // normal lies along, sign +1 = wall faces outward in +axis direction.
+    const sides = [
+      { nAxis: 'x', sign:  1 },  // east wall (+x face)
+      { nAxis: 'x', sign: -1 },  // west wall (-x face)
+      { nAxis: 'z', sign:  1 },  // north wall (+z face = state +y = qibla side)
+      { nAxis: 'z', sign: -1 },  // south wall (-z face)
+    ];
+
+    for (const side of sides) {
+      const wallLen = cl_w;
+      const wallX = side.nAxis === 'x' ? cx + side.sign * halfW : cx;
+      const wallZ = side.nAxis === 'z' ? cy_state + side.sign * halfW : cy_state;
+      // Three slabs, stacked vertically. Slab thickness 0.08 m so it
+      // reads as solid plaster from outside without floating.
+      const slabT = 0.08;
+      const slabs = [
+        { z1: 0,         z2: cl_sill, mat: stuccoMat },
+        { z1: cl_sill,   z2: winTop,  mat: ribbonGlassMat },
+        { z1: winTop,    z2: cl_h,    mat: stuccoMat },
+      ];
+      for (const slab of slabs) {
+        const slabH = Math.max(0.001, slab.z2 - slab.z1);
+        if (slabH < 0.01) continue;
+        // Slab geometry: (length, height, thickness). For x-normal walls
+        // length runs along Z (state-y); for z-normal walls length runs
+        // along X. Build with length on local-x and rotate as needed.
+        const geo = new THREE.BoxGeometry(wallLen, slabH, slabT);
+        const mesh = new THREE.Mesh(geo, slab.mat);
+        if (side.nAxis === 'x') {
+          mesh.rotation.y = Math.PI / 2;          // length now along Z
+          mesh.position.set(wallX, baseZ + (slab.z1 + slab.z2) / 2, wallZ);
+        } else {
+          mesh.position.set(wallX, baseZ + (slab.z1 + slab.z2) / 2, wallZ);
+        }
+        mesh.userData.tag = 'surau_clerestory_wall';
+        mesh.userData.no_acoustic = true;
+        mesh.userData.no_walk_collide = true;
+        roomGroup.add(mesh);
+      }
+    }
+
+    // Cap: small pyramid roof on top of the clerestory walls. Use
+    // shingleMat so it reads as part of the same roofing system as the
+    // main hip roof.
+    const cap = buildPyramidCap(cx, cy_state, baseZ + cl_h, halfW, halfW, cl_apex, shingleMat, 'surau_clerestory_cap');
+    roomGroup.add(cap);
+  }
+
+  // ------------- 8. Minaret — slender corner tower -----------------------
+  // Square shaft + small cap. Cap style is one of:
+  //   'crescent' — small dome + thin crescent finial (canonical)
+  //   'dome'     — small dome only
+  //   'stepped'  — three boxes of decreasing size
+  if (s.minaret) {
+    const mn = s.minaret;
+    const corner = mn.corner || 'NW';
+    const baseSize = Number.isFinite(mn.base_size_m) ? mn.base_size_m : 1.2;
+    const totalH = Number.isFinite(mn.height_m) ? mn.height_m : 8.5;
+    const capStyle = mn.cap_style || 'crescent';
+
+    // Place the minaret OUTSIDE the building, set back from its corner by
+    // a comfortable clearance. The clearance keeps the shaft from clashing
+    // with the arcade colonnade if both are enabled on adjacent sides.
+    const clearance = 0.6 + baseSize / 2;
+    const cornerOffsets = {
+      'SW': { x: -clearance,        y: -clearance        },
+      'SE': { x:  W + clearance,    y: -clearance        },
+      'NW': { x: -clearance,        y:  D + clearance    },
+      'NE': { x:  W + clearance,    y:  D + clearance    },
+    };
+    const co = cornerOffsets[corner] || cornerOffsets['NW'];
+
+    // Tapered shaft: base_size at ground, 90% width at top. Use BoxGeometry
+    // and scale upper face via a CylinderGeometry-substitute: actually we
+    // just use a box (no taper) — a 1.2 m base reads slender enough that
+    // taper isn't needed at simulation distance.
+    const shaftH = totalH * 0.90;   // shaft = 90% of total, cap = 10%
+    const shaftGeo = new THREE.BoxGeometry(baseSize, shaftH, baseSize);
+    const shaft = new THREE.Mesh(shaftGeo, stuccoMat);
+    shaft.position.set(co.x, shaftH / 2, co.y);
+    shaft.userData.tag = 'surau_minaret_shaft';
+    shaft.userData.no_acoustic = true;
+    roomGroup.add(shaft);
+
+    // Decorative belt: dark band 60% up the shaft. Reads as "this tower
+    // has architectural detail" without modelling balconies.
+    const beltY = shaftH * 0.60;
+    const beltH = 0.20;
+    const beltSize = baseSize * 1.05;   // slight overhang
+    const beltGeo = new THREE.BoxGeometry(beltSize, beltH, beltSize);
+    const belt = new THREE.Mesh(beltGeo, trimMat);
+    belt.position.set(co.x, beltY, co.y);
+    belt.userData.tag = 'surau_minaret_belt';
+    belt.userData.no_acoustic = true;
+    belt.userData.no_walk_collide = true;
+    roomGroup.add(belt);
+
+    // Cap. All variants leave the top of the shaft at z = shaftH and add
+    // their structure above.
+    const capBaseZ = shaftH;
+    const capRoom = totalH - shaftH;   // vertical budget for cap
+
+    // Small "lantern" box just above the shaft — common to all cap styles.
+    const lanternH = capRoom * 0.30;
+    const lanternSize = baseSize * 0.85;
+    const lantern = new THREE.Mesh(
+      new THREE.BoxGeometry(lanternSize, lanternH, lanternSize), stuccoMat,
+    );
+    lantern.position.set(co.x, capBaseZ + lanternH / 2, co.y);
+    lantern.userData.tag = 'surau_minaret_lantern';
+    lantern.userData.no_acoustic = true;
+    lantern.userData.no_walk_collide = true;
+    roomGroup.add(lantern);
+
+    if (capStyle === 'dome' || capStyle === 'crescent') {
+      // Half-sphere dome on top of the lantern. Radius = lantern size / 2
+      // so the dome sits flush on the lantern's top face.
+      const domeR = lanternSize / 2;
+      const domeGeo = new THREE.SphereGeometry(domeR, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+      const dome = new THREE.Mesh(domeGeo, greenMetalMat);
+      dome.position.set(co.x, capBaseZ + lanternH, co.y);
+      dome.userData.tag = 'surau_minaret_dome';
+      dome.userData.no_acoustic = true;
+      dome.userData.no_walk_collide = true;
+      roomGroup.add(dome);
+
+      if (capStyle === 'crescent') {
+        // Spike + crescent. Thin gold pole rising from the dome apex,
+        // topped with an open-ring TorusGeometry partially rotated to
+        // suggest a crescent moon. The pole length absorbs the remaining
+        // cap budget so the total minaret height matches mn.height_m.
+        const poleH = Math.max(0.4, capRoom - lanternH - domeR);
+        const poleGeo = new THREE.CylinderGeometry(0.025, 0.025, poleH, 8);
+        const pole = new THREE.Mesh(poleGeo, goldMat);
+        pole.position.set(co.x, capBaseZ + lanternH + domeR + poleH / 2, co.y);
+        pole.userData.tag = 'surau_minaret_finial_pole';
+        pole.userData.no_acoustic = true;
+        pole.userData.no_walk_collide = true;
+        roomGroup.add(pole);
+
+        // Crescent: a partial torus. tube radius ~0.04, ring radius ~0.20.
+        // Sweep about 270° (3π/2) and rotate so the opening points away
+        // from the building centre — reads as a crescent silhouette.
+        const crescentR = 0.22;
+        const crescentTube = 0.045;
+        const crescentGeo = new THREE.TorusGeometry(crescentR, crescentTube, 8, 24, Math.PI * 1.5);
+        const crescent = new THREE.Mesh(crescentGeo, goldMat);
+        const finialZ = capBaseZ + lanternH + domeR + poleH;
+        crescent.position.set(co.x, finialZ + crescentR, co.y);
+        // Torus default: ring lies in XY plane, opening along +x. We want
+        // ring vertical (XZ plane in world = local: rotate around X by π/2)
+        // and opening to point AWAY from room centre (yaw rotation).
+        crescent.rotation.x = Math.PI / 2;
+        const dxToCenter = (W / 2) - co.x;
+        const dyToCenter = (D / 2) - co.y;
+        crescent.rotation.z = Math.atan2(dyToCenter, dxToCenter) + Math.PI / 2;
+        crescent.userData.tag = 'surau_minaret_crescent';
+        crescent.userData.no_acoustic = true;
+        crescent.userData.no_walk_collide = true;
+        roomGroup.add(crescent);
+      }
+    } else {
+      // 'stepped' — three boxes of decreasing size, classic stupa-like cap.
+      const steps = 3;
+      let zCursor = capBaseZ + lanternH;
+      const stepBudget = (capRoom - lanternH) / steps;
+      for (let i = 0; i < steps; i++) {
+        const sz = lanternSize * (0.85 - i * 0.20);
+        const stepMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(sz, stepBudget, sz), greenMetalMat,
+        );
+        stepMesh.position.set(co.x, zCursor + stepBudget / 2, co.y);
+        stepMesh.userData.tag = 'surau_minaret_step';
+        stepMesh.userData.no_acoustic = true;
+        stepMesh.userData.no_walk_collide = true;
+        roomGroup.add(stepMesh);
+        zCursor += stepBudget;
+      }
+    }
+  }
+
+  // ------------- 9. Arcade — pointed-arch covered porch ------------------
+  // For each requested side, build a colonnade of pointed-arch bays. Each
+  // bay = a wall slab (height = arcade roof height, width = column spacing)
+  // with a pointed-arch hole punched through it via THREE.Shape. The
+  // bay slab is thin (depth = column thickness) and stands at the OUTER
+  // edge of the arcade (depth_m metres out from the building wall). A
+  // flat slab roof at roof_height_m connects the colonnade back to the
+  // building wall.
+  if (s.arcade?.sides?.length) {
+    const ar = s.arcade;
+    const depth = Number.isFinite(ar.depth_m) ? ar.depth_m : 3.0;
+    const bayW = Number.isFinite(ar.column_spacing_m) ? ar.column_spacing_m : 2.8;
+    const colT = Number.isFinite(ar.column_thickness_m) ? ar.column_thickness_m : 0.30;
+    const archSpring = Number.isFinite(ar.arch_height_m) ? ar.arch_height_m : 3.2;
+    const archPeak = Number.isFinite(ar.arch_peak_height_m) ? ar.arch_peak_height_m : 4.0;
+    const roofH = Number.isFinite(ar.roof_height_m) ? ar.roof_height_m : 4.4;
+
+    // Build the per-bay shape ONCE, in a local 2D coord frame:
+    //   local x in [0, bayW]  (along the wall)
+    //   local y in [0, roofH]  (vertical)
+    // Outer rectangle = bayW × roofH. Hole = pointed arch:
+    //   bottom corners at (colT, 0) and (bayW - colT, 0)
+    //   side rises straight to (colT, archSpring) and (bayW - colT, archSpring)
+    //   then two quadratic Bezier curves arch up to the peak at
+    //   (bayW/2, archPeak). The peak height > springline height = pointed.
+    const bayShape = new THREE.Shape();
+    bayShape.moveTo(0, 0);
+    bayShape.lineTo(bayW, 0);
+    bayShape.lineTo(bayW, roofH);
+    bayShape.lineTo(0, roofH);
+    bayShape.lineTo(0, 0);
+
+    // Pointed-arch hole.
+    const hole = new THREE.Path();
+    hole.moveTo(colT, 0);
+    hole.lineTo(colT, archSpring);
+    // Left ogee curve: control point pulled inward along the springline,
+    // arch peak at (bayW/2, archPeak). quadraticCurveTo gives a single
+    // Bezier — the small lateral pull on the control gives the
+    // characteristic pointed silhouette.
+    hole.quadraticCurveTo((bayW / 2 - bayW * 0.08), archPeak * 0.92, bayW / 2, archPeak);
+    // Right ogee curve, mirror.
+    hole.quadraticCurveTo((bayW / 2 + bayW * 0.08), archPeak * 0.92, bayW - colT, archSpring);
+    hole.lineTo(bayW - colT, 0);
+    hole.lineTo(colT, 0);
+    bayShape.holes.push(hole);
+
+    const bayGeo = new THREE.ExtrudeGeometry(bayShape, {
+      depth: colT, bevelEnabled: false, curveSegments: 12,
+    });
+
+    // Place bays along each requested side. Side defines a line segment
+    // along the building's outer wall AT the arcade depth. Walk that
+    // segment with bayW spacing, instancing the bay geometry at each step.
+    // The side names refer to compass orientation:
+    //   'south' = -y face of state (where the main entrance is)
+    //   'north' = +y face (qibla — never wrapped)
+    //   'east'  = +x face,  'west' = -x face
+    //
+    // For each side compute (sideStart, sideEnd, perp, normalOut) where:
+    //   sideStart, sideEnd are state-coord endpoints along the building face
+    //   perp is the unit vector AWAY from the building (outward)
+    //   normalOut.angle = yaw rotation to apply to the bay so its local x
+    //                     runs along the side and its extrusion thickness
+    //                     points outward.
+    const sideSpec = {
+      'south': { p1: [0, 0],     p2: [W, 0],     perp: [0, -1], yaw: 0           },
+      'north': { p1: [0, D],     p2: [W, D],     perp: [0,  1], yaw: Math.PI     },
+      'east':  { p1: [W, 0],     p2: [W, D],     perp: [1,  0], yaw: -Math.PI / 2 },
+      'west':  { p1: [0, 0],     p2: [0, D],     perp: [-1, 0], yaw:  Math.PI / 2 },
+    };
+
+    // Track corner-overlap regions so adjacent sides don't double up
+    // bays at the corners. We inset the start/end of each side's bay
+    // run by `depth` so the arcade returns cleanly at the corner — the
+    // corner itself becomes an open square turn, which is how Malaysian
+    // mosque arcades typically resolve at the corner.
+    for (const sideName of ar.sides) {
+      const spec = sideSpec[sideName];
+      if (!spec) continue;
+      // Side direction (unit)
+      const dx = spec.p2[0] - spec.p1[0];
+      const dy = spec.p2[1] - spec.p1[1];
+      const sideLen = Math.hypot(dx, dy);
+      if (sideLen < bayW) continue;
+      const sx = dx / sideLen;
+      const sy = dy / sideLen;
+
+      // Inset the bay run by the arcade depth at each end to leave a
+      // clean square corner if the adjacent side is also wrapped.
+      // (If the corner is open we still inset — looks intentional.)
+      const startInset = depth * 0.5;
+      const endInset = depth * 0.5;
+      const usableLen = sideLen - startInset - endInset;
+      if (usableLen < bayW) continue;
+
+      const nBays = Math.max(1, Math.floor(usableLen / bayW));
+      // Distribute evenly — adjust per-bay width slightly so the run
+      // exactly fills the usable length (no awkward sliver at the end).
+      const actualBayW = usableLen / nBays;
+
+      // Build a per-side bay geometry if the actual width differs from
+      // the canonical bay (avoids a visible mid-bay seam). Tiny perf
+      // hit — N + 1 geometries instead of 1. For the surau preset N=4
+      // worst case so this is negligible.
+      let perSideBayGeo = bayGeo;
+      let disposable = false;
+      if (Math.abs(actualBayW - bayW) > 0.02) {
+        const shape = new THREE.Shape();
+        shape.moveTo(0, 0);
+        shape.lineTo(actualBayW, 0);
+        shape.lineTo(actualBayW, roofH);
+        shape.lineTo(0, roofH);
+        shape.lineTo(0, 0);
+        const h = new THREE.Path();
+        h.moveTo(colT, 0);
+        h.lineTo(colT, archSpring);
+        h.quadraticCurveTo((actualBayW / 2 - actualBayW * 0.08), archPeak * 0.92, actualBayW / 2, archPeak);
+        h.quadraticCurveTo((actualBayW / 2 + actualBayW * 0.08), archPeak * 0.92, actualBayW - colT, archSpring);
+        h.lineTo(actualBayW - colT, 0);
+        h.lineTo(colT, 0);
+        shape.holes.push(h);
+        perSideBayGeo = new THREE.ExtrudeGeometry(shape, {
+          depth: colT, bevelEnabled: false, curveSegments: 12,
+        });
+        disposable = true;
+      }
+
+      // Outer arcade line is `depth` metres outward from the wall. Place
+      // each bay so the OUTER face of the bay slab sits on this line.
+      // ExtrudeGeometry extrudes along +z in its local frame; we want the
+      // bay flush with the outer edge so we offset half the slab depth
+      // INWARD (back toward the building).
+      for (let i = 0; i < nBays; i++) {
+        const u = startInset + (i + 0.5) * actualBayW;   // bay centre along side
+        const ux = spec.p1[0] + sx * u;
+        const uy = spec.p1[1] + sy * u;
+        // Outward shift: bay outer face at depth metres from the wall.
+        // Bay slab thickness is colT; centre of slab sits at (depth - colT/2)
+        // outward from the wall.
+        const cxBay = ux + spec.perp[0] * (depth - colT / 2);
+        const cyBay = uy + spec.perp[1] * (depth - colT / 2);
+
+        const bay = new THREE.Mesh(perSideBayGeo, stuccoMat);
+        // Bay shape's local origin is at the bottom-LEFT corner of the bay
+        // (local x along the side, local y = vertical, local z = extrusion
+        // thickness outward). We need to translate so the centre of the
+        // local-x range and the bottom of local-y line up with the world
+        // placement. Place centre-x at cxBay along the side direction
+        // (rotated), bottom-y at floor (z=0 in world), and extrusion
+        // pointing outward.
+        // Translate the geometry's local origin: shift local x by -bayW/2
+        // so local-x=0 is the bay centre along the side.
+        // We do this via mesh.position + rotation rather than mutating geo.
+        // Rotation: yaw the bay so its local +x maps to side direction +s.
+        // ExtrudeGeometry's local frame: x = shape x, y = shape y (vertical),
+        // z = extrusion direction. We want shape-x to align with side
+        // direction (sx, sy in state coords → world (sx, _, sy) since
+        // world.x = state.x and world.z = state.y).
+        // In a Three.js group: local +z = extrusion, we want +z to point
+        // OUTWARD = perp. So apply rotation.y = atan2(perp_x_world, perp_y_world)
+        // measuring from the +z world axis.
+        const yawRad = Math.atan2(spec.perp[0], spec.perp[1]);
+        bay.rotation.y = yawRad;
+        // After yaw, the bay's local-x aligns with (cos(yaw), -sin(yaw)) in
+        // (world.x, world.z) — i.e. perpendicular to perp, which IS the
+        // side direction. Good. Now position so the local origin (bottom-
+        // left of the bay shape) sits at the side-centre minus half the
+        // bay along the side direction.
+        // Bay local origin in world = cxBay - (actualBayW/2)·sx, 0,
+        //                              cyBay - (actualBayW/2)·sy
+        bay.position.set(
+          cxBay - (actualBayW / 2) * sx,
+          0,
+          cyBay - (actualBayW / 2) * sy,
+        );
+        bay.userData.tag = 'surau_arcade_bay';
+        bay.userData.no_acoustic = true;
+        roomGroup.add(bay);
+      }
+
+      // Flat arcade roof: a thin slab covering the colonnade from the
+      // building wall out to the outer arcade line.
+      const roofL = sideLen - startInset - endInset;
+      const roofGeo = new THREE.BoxGeometry(roofL, 0.10, depth);
+      const roof = new THREE.Mesh(roofGeo, shingleMat);
+      // Roof centre: along the side direction at midpoint of usable
+      // length, perpendicular at depth/2 outward, vertical at roofH + 0.05
+      // (so its bottom sits at roofH).
+      const sideMidU = startInset + roofL / 2;
+      const rcx = spec.p1[0] + sx * sideMidU + spec.perp[0] * (depth / 2);
+      const rcy = spec.p1[1] + sy * sideMidU + spec.perp[1] * (depth / 2);
+      roof.position.set(rcx, roofH + 0.05, rcy);
+      roof.rotation.y = Math.atan2(spec.perp[0], spec.perp[1]);
+      roof.userData.tag = 'surau_arcade_roof';
+      roof.userData.no_acoustic = true;
+      roof.userData.no_walk_collide = true;
+      roomGroup.add(roof);
+
+      // Tally so the disposable per-side geometry doesn't leak. (Three.js
+      // doesn't auto-dispose on mesh removal — but these meshes survive
+      // for the lifetime of the rebuild, so they're cleaned up the next
+      // time rebuildRoom() disposes the whole roomGroup.)
+      void disposable;
+    }
+  }
+
+  // ------------- 10. Jali screens — perforated geometric panels ----------
+  // A textured PlaneGeometry standing in front of each requested wall. The
+  // texture is a procedural diamond-grid drawn on a CanvasTexture, with
+  // the alpha channel cutting out the diamonds — the screen reads as
+  // perforated even though the underlying geometry is a single plane.
+  if (s.jaliScreens?.sides?.length) {
+    const js = s.jaliScreens;
+    const sill = Number.isFinite(js.sill_m) ? js.sill_m : 1.0;
+    const screenH = Number.isFinite(js.height_m) ? js.height_m : 2.4;
+    const cell = Number.isFinite(js.cell_size_m) ? js.cell_size_m : 0.25;
+    const opc = Number.isFinite(js.opacity) ? js.opacity : 0.7;
+
+    // Procedural canvas: NxN grid of diamonds, cells filled with screen
+    // colour, gaps between filled = transparent.
+    const canvasSize = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvasSize;
+    canvas.height = canvasSize;
+    const ctx = canvas.getContext('2d');
+    // Background: fully transparent. Then paint diamonds in a grid.
+    ctx.clearRect(0, 0, canvasSize, canvasSize);
+    ctx.fillStyle = `rgba(242, 237, 226, ${opc})`;   // matches stuccoMat colour
+    const gridN = 4;   // 4 diamonds per tile (each diamond ~one cell_size_m)
+    const cellPx = canvasSize / gridN;
+    for (let gy = 0; gy < gridN; gy++) {
+      for (let gx = 0; gx < gridN; gx++) {
+        const cx = (gx + 0.5) * cellPx;
+        const cy = (gy + 0.5) * cellPx;
+        // Diamond inscribed in the cell, with 12% margin between cells
+        // so the gaps (= transparent) read as "perforated".
+        const r = cellPx * 0.42;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r);
+        ctx.lineTo(cx + r, cy);
+        ctx.lineTo(cx, cy + r);
+        ctx.lineTo(cx - r, cy);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    // Optional cross-tick at each cell corner for extra geometric detail.
+    ctx.strokeStyle = `rgba(180, 165, 130, ${Math.min(1, opc + 0.15)})`;
+    ctx.lineWidth = 1.5;
+    for (let gy = 0; gy <= gridN; gy++) {
+      for (let gx = 0; gx <= gridN; gx++) {
+        const x = gx * cellPx, y = gy * cellPx;
+        ctx.beginPath();
+        ctx.moveTo(x - 4, y); ctx.lineTo(x + 4, y);
+        ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 4);
+        ctx.stroke();
+      }
+    }
+
+    const jaliTex = new THREE.CanvasTexture(canvas);
+    jaliTex.colorSpace = THREE.SRGBColorSpace;
+    jaliTex.wrapS = THREE.RepeatWrapping;
+    jaliTex.wrapT = THREE.RepeatWrapping;
+    jaliTex.anisotropy = 4;
+    jaliTex.needsUpdate = true;
+
+    const jaliMat = new THREE.MeshStandardMaterial({
+      map: jaliTex,
+      transparent: true,
+      alphaTest: 0.35,             // preserves perforation rather than blending
+      side: THREE.DoubleSide,
+      roughness: 0.85, metalness: 0.0,
+      color: 0xffffff,
+    });
+
+    // Where to mount the screen. If the arcade wraps a side, the screen
+    // sits BETWEEN the columns (at the outer arcade line so it's visible
+    // from outside). If no arcade on that side, the screen sits 0.05 m
+    // outboard of the wall plane.
+    const arcadeSides = Array.isArray(s.arcade?.sides) ? s.arcade.sides : [];
+    const arcadeDepthM = Number.isFinite(s.arcade?.depth_m) ? s.arcade.depth_m : 3.0;
+    const arcadeDepthFor = (sd) => arcadeSides.includes(sd) ? arcadeDepthM : 0;
+
+    const sideMounts = {
+      'south': { axis: 'x', wallY: 0,         outDir: -1, len: W },
+      'north': { axis: 'x', wallY: D,         outDir:  1, len: W },
+      'east':  { axis: 'y', wallY: W,         outDir:  1, len: D },
+      'west':  { axis: 'y', wallY: 0,         outDir: -1, len: D },
+    };
+
+    for (const sideName of js.sides) {
+      const sm = sideMounts[sideName];
+      if (!sm) continue;
+
+      const screenLen = sm.len * 0.7;   // central 70% of wall, leaves trim
+      const tileRepeat = screenLen / cell;   // diamonds across (each cell ~cell_size_m)
+      const tileRepeatV = screenH / cell;
+
+      // Clone the texture so per-side wrap repeat doesn't cross-contaminate.
+      const sideTex = jaliTex.clone();
+      sideTex.repeat.set(Math.max(1, tileRepeat / 4), Math.max(1, tileRepeatV / 4));
+      sideTex.needsUpdate = true;
+      const sideMat = jaliMat.clone();
+      sideMat.map = sideTex;
+
+      const planeGeo = new THREE.PlaneGeometry(screenLen, screenH);
+      const screen = new THREE.Mesh(planeGeo, sideMat);
+
+      // Place + rotate. Use arcade depth if this side is wrapped (screen
+      // sits at the outer arcade line, just inside the column row), else
+      // small 0.06 m standoff so the screen reads as IN FRONT of the wall.
+      const arcD = arcadeDepthFor(sideName);
+      const standoff = arcD > 0 ? arcD - 0.10 : 0.06;
+      if (sm.axis === 'x') {
+        // wall runs along x; centre at (W/2, _, sm.wallY)
+        screen.position.set(W / 2, sill + screenH / 2, sm.wallY + sm.outDir * standoff);
+        screen.rotation.y = sm.outDir > 0 ? Math.PI : 0;
+      } else {
+        // wall runs along y; centre at (sm.wallY, _, D/2)
+        screen.position.set(sm.wallY + sm.outDir * standoff, sill + screenH / 2, D / 2);
+        screen.rotation.y = sm.outDir > 0 ? Math.PI / 2 : -Math.PI / 2;
+      }
+      screen.userData.tag = 'surau_jali_screen';
+      screen.userData.no_acoustic = true;
+      // Walk-through is fine — these are screens, not walls — but the
+      // arcade is between them and the avatar from outside.
+      screen.userData.no_walk_collide = true;
+      roomGroup.add(screen);
+    }
+  }
+
+  // ------------- 11. Podium — raised concrete base -----------------------
+  // A flat slab extending outward past the building footprint. Steps up
+  // to the entrances are implied by the slab thickness (0.4 m default —
+  // single-step stoop). Reads from any iso angle as "the building is
+  // raised on a plinth".
+  if (s.podium) {
+    const ext = Number.isFinite(s.podium.extension_m) ? s.podium.extension_m : 1.5;
+    const podH = Number.isFinite(s.podium.height_m) ? s.podium.height_m : 0.4;
+    const podW = W + 2 * ext;
+    const podD = D + 2 * ext;
+    const podGeo = new THREE.BoxGeometry(podW, podH, podD);
+    const podium = new THREE.Mesh(podGeo, concreteMat);
+    podium.position.set(W / 2, -podH / 2, D / 2);   // top face at z = 0 (floor plane)
+    podium.userData.tag = 'surau_podium';
+    podium.userData.no_acoustic = true;
+    podium.userData.no_walk_collide = true;   // avatar is at floor level (z=0)
+    roomGroup.add(podium);
+
+    // Stair lip on the south side — single step out from the podium edge,
+    // directly in front of the main entrance. Pure visual; the avatar
+    // teleports between presets so doesn't actually walk up to the door.
+    const stepW = 4.0;
+    const stepDepth = 0.4;
+    const stepH = podH * 0.5;
+    const stepGeo = new THREE.BoxGeometry(stepW, stepH, stepDepth);
+    const step = new THREE.Mesh(stepGeo, concreteMat);
+    step.position.set(W / 2, -stepH / 2, -ext - stepDepth / 2);
+    step.userData.tag = 'surau_podium_step';
+    step.userData.no_acoustic = true;
+    step.userData.no_walk_collide = true;
+    roomGroup.add(step);
+  }
+
+  // ------------- 12. Portico — projecting entrance pavilion --------------
+  // A 3D box jutting outward from one wall, capped by its own pyramid
+  // roof. Frames the main entrance arch — visually announces "this is
+  // where you go in" from a distance. Three walls + roof; the wall on
+  // the BUILDING side is omitted (open onto the building). Front wall
+  // also has a pointed-arch opening for the entrance.
+  if (s.portico) {
+    const po = s.portico;
+    const side = po.side || 'south';
+    const poW = Number.isFinite(po.width_m) ? po.width_m : 3.0;
+    const poD = Number.isFinite(po.depth_m) ? po.depth_m : 3.0;
+    const poH = Number.isFinite(po.height_m) ? po.height_m : 4.5;
+    const poApex = Number.isFinite(po.apexRise_m) ? po.apexRise_m : 1.0;
+    const wallT = 0.15;
+
+    // Validate side; anchor + yaw are computed below per-side.
+    if (['south', 'north', 'east', 'west'].includes(side)) {
+      // Build a Group so all portico parts can be positioned + rotated
+      // together.
+      const group = new THREE.Group();
+
+      // FRONT WALL (the wall facing OUTWARD with the entrance arch hole)
+      // Built as a flat ExtrudeGeometry (poW × poH) with a pointed arch.
+      const frontShape = new THREE.Shape();
+      frontShape.moveTo(0, 0);
+      frontShape.lineTo(poW, 0);
+      frontShape.lineTo(poW, poH);
+      frontShape.lineTo(0, poH);
+      frontShape.lineTo(0, 0);
+      const archW = Math.min(poW * 0.55, 1.6);
+      const archSpring = poH * 0.62;
+      const archPk = poH * 0.85;
+      const archHole = new THREE.Path();
+      const ax0 = (poW - archW) / 2;
+      const ax1 = (poW + archW) / 2;
+      archHole.moveTo(ax0, 0);
+      archHole.lineTo(ax0, archSpring);
+      archHole.quadraticCurveTo(poW / 2 - archW * 0.08, archPk * 0.92, poW / 2, archPk);
+      archHole.quadraticCurveTo(poW / 2 + archW * 0.08, archPk * 0.92, ax1, archSpring);
+      archHole.lineTo(ax1, 0);
+      archHole.lineTo(ax0, 0);
+      frontShape.holes.push(archHole);
+
+      const frontGeo = new THREE.ExtrudeGeometry(frontShape, {
+        depth: wallT, bevelEnabled: false, curveSegments: 12,
+      });
+      const frontWall = new THREE.Mesh(frontGeo, stuccoMat);
+      // Front wall sits at the OUTER edge of the portico (local z = poD)
+      // facing OUTWARD. ExtrudeGeometry extrudes along +local-z, so the
+      // wall thickness goes from local z = poD-wallT (inner) to z = poD
+      // (outer). Position the geometry origin at (0, 0, poD - wallT).
+      frontWall.position.set(-poW / 2, 0, poD - wallT);
+      group.add(frontWall);
+
+      // SIDE WALLS — left and right slabs joining the front wall back to
+      // the building. Each is poD long, poH tall, wallT thick.
+      for (const side2 of ['left', 'right']) {
+        const sw = new THREE.Mesh(
+          new THREE.BoxGeometry(wallT, poH, poD), stuccoMat,
+        );
+        const xLocal = side2 === 'left' ? -poW / 2 + wallT / 2 : poW / 2 - wallT / 2;
+        sw.position.set(xLocal, poH / 2, poD / 2);
+        sw.userData.tag = 'surau_portico_sidewall';
+        group.add(sw);
+      }
+
+      // PYRAMID ROOF on top — base = portico footprint, apex centred,
+      // apex height = poH + poApex. Use shingleMat to match the main hip.
+      const cap = buildPyramidCap(0, poD / 2, poH, poW / 2, poD / 2, poApex, shingleMat, 'surau_portico_cap');
+      group.add(cap);
+
+      // Place the group: rotate by yaw, position so the centre of the
+      // local-x range = ms.cx (state-x) and local-z=0 (the building-side
+      // edge of the portico) sits ON the building wall.
+      // After yaw rotation about world-y axis, group.position becomes the
+      // anchor point. Use group.position = (cx, 0, building-wall-y-coord)
+      // and let the yaw rotate the local frame appropriately.
+      // For 'south' (yaw=0): local +z = world +z = state +y. We want the
+      // group's local origin (centre-x, z=0) to sit on the SOUTH wall at
+      // state-y=0 — but local +z extends INTO the building from there if
+      // not flipped. We actually want the portico to project OUTWARD, so
+      // we anchor the inner edge of the portico to the building wall and
+      // extend outward = in the -outVec direction in world coords.
+      // Easier: anchor the FRONT wall (local z = poD - wallT) so the
+      // portico front lands exactly poD metres outboard of the building.
+      // Compute group anchor:
+      //   south: anchor at (W/2, 0, 0); rotate yaw=π so local +z maps to
+      //          world -z (state -y), so local z=poD lands at state y=-poD.
+      //   north: anchor at (W/2, 0, D); yaw=0; local +z maps to world +z,
+      //          so local z=poD lands at state y=D+poD.
+      //   east:  anchor at (W, 0, D/2); yaw=π/2; local +z maps to world +x.
+      //   west:  anchor at (0, 0, D/2); yaw=-π/2; local +z maps to world -x.
+      let anchorX = 0, anchorZ = 0, anchorYaw = 0;
+      if (side === 'south') { anchorX = W / 2; anchorZ = 0;            anchorYaw = Math.PI; }
+      if (side === 'north') { anchorX = W / 2; anchorZ = D;            anchorYaw = 0; }
+      if (side === 'east')  { anchorX = W;     anchorZ = D / 2;        anchorYaw = Math.PI / 2; }
+      if (side === 'west')  { anchorX = 0;     anchorZ = D / 2;        anchorYaw = -Math.PI / 2; }
+      group.position.set(anchorX, 0, anchorZ);
+      group.rotation.y = anchorYaw;
+      tagExterior(group, 'surau_portico');
+      roomGroup.add(group);
     }
   }
 }
