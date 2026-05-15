@@ -347,7 +347,32 @@ export function roomEffectiveBounds(room) {
     return { minX: 0, minY: 0,
              maxX: room?.width_m ?? 10, maxY: room?.depth_m ?? 10 };
   }
+  // Surau podium extends past the parent footprint on every side. The
+  // SPL heatmap should cover the full podium so coverage from arcade
+  // speakers is visible — extend the bounds outward by podium.extension_m.
+  // Other surauStructure consumers (mihrab, minbar, etc.) are inside the
+  // parent footprint already; only the podium pushes outward.
+  const podiumExt = room?.surauStructure?.podium?.extension_m;
+  if (Number.isFinite(podiumExt) && podiumExt > 0) {
+    minX -= podiumExt;
+    maxX += podiumExt;
+    minY -= podiumExt;
+    maxY += podiumExt;
+  }
   return { minX, minY, maxX, maxY };
+}
+
+// Helper: true if (x, y) sits within the surau podium extent — i.e.
+// outside the parent footprint but within podium.extension_m of every
+// wall. Used by isInsideRoom3D so SPL grid cells over the arcade get
+// computed instead of returning -Infinity.
+function isOnSurauPodium(x, y, room) {
+  const podiumExt = room?.surauStructure?.podium?.extension_m;
+  if (!Number.isFinite(podiumExt) || podiumExt <= 0) return false;
+  // Rectangular surau footprint (the only shape surauStructure supports).
+  // Podium spans (-ext, -ext) to (W + ext, D + ext) in state coords.
+  return (x >= -podiumExt && x <= (room.width_m ?? 0) + podiumExt &&
+          y >= -podiumExt && y <= (room.depth_m ?? 0) + podiumExt);
 }
 
 // Parent footprint only — does NOT include broken-out enclosures. Use
@@ -429,6 +454,14 @@ export function isInsideRoom3D(pos, room) {
       if (room.enclosure !== 'outdoor' && pos.z > elev + h) continue;
       return true;
     }
+  }
+  // Surau podium — outdoor measurement surface around the building.
+  // Accept positions on the podium (outside the room walls but within
+  // the podium extent) at any reasonable height so the SPL heatmap
+  // covers the arcade and the surrounding raised concrete base. The
+  // arcade flat roof is at ~4.4 m so cap the height check generously.
+  if (isOnSurauPodium(pos.x, pos.y, room) && pos.z >= 0 && pos.z <= 5.0) {
+    return true;
   }
   return false;
 }
