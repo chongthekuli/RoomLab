@@ -7099,13 +7099,21 @@ function rebuildSurauStructure(room) {
     roomGroup.add(railMesh);
   }
 
-  // ------------- 3. Hip roof — 4-sided pyramidal cap ---------------------
+  // ------------- 3. Hip roof — 4-sided pyramid OR truncated frustum ------
   // The flat ceiling at z = H was already suppressed up in rebuildRoom
-  // (see `hipRoofActive` gate). Replace it with a 4-sided pyramid whose
-  // base is the room footprint at z = H (eaves) and whose apex sits at
-  // z = H + apexRise_m, centred on the room. Four triangle faces become
-  // the visible interior ceiling. Each triangle is a separate BufferGeometry
-  // so future per-face tagging (e.g. north slope = qibla-facing) is possible.
+  // (see `hipRoofActive` gate). Replace it with a 4-sided hip roof whose
+  // base is the room footprint at z = H (eaves) and whose top sits at
+  // z = H + apexRise_m, centred on the room.
+  //
+  // Two construction modes:
+  //   * If `s.clerestory` is present, build a TRUNCATED PYRAMID (frustum)
+  //     whose top is a flat plateau matching the clerestory footprint
+  //     (clerestory.width_m × clerestory.width_m). Four trapezoid faces
+  //     meet a small central rectangle. The clerestory walls then rise
+  //     from this plateau with no gap.
+  //   * If `s.clerestory` is absent, build the original full pyramid (four
+  //     triangles meeting at a single apex point) — preserves behaviour
+  //     for presets that use a hip roof without a clerestory tower.
   if (s.hipRoof) {
     const apexRise = Number.isFinite(s.hipRoof.apexRise_m) ? s.hipRoof.apexRise_m : 1.5;
     const apexX = Number.isFinite(s.hipRoof.apex_x_m) ? s.hipRoof.apex_x_m : W / 2;
@@ -7113,52 +7121,135 @@ function rebuildSurauStructure(room) {
     const apexZ = H + apexRise;
 
     // Four eave corners (state-coords). Order chosen so consecutive pairs
-    // make the four roof slope edges.
-    const corners = [
+    // make the four roof slope edges. Walking S→E→N→W (CCW from above).
+    const eaves = [
       { x: 0, y: 0 },     // SW
       { x: W, y: 0 },     // SE
       { x: W, y: D },     // NE
       { x: 0, y: D },     // NW
     ];
 
-    for (let i = 0; i < 4; i++) {
-      const a = corners[i];
-      const b = corners[(i + 1) % 4];
-      // Triangle vertices in WORLD coords: (state.x, state.z, state.y).
-      const verts = new Float32Array([
-        a.x, H, a.y,
-        b.x, H, b.y,
-        apexX, apexZ, apexY,
-      ]);
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-      // UVs: simple (x, ratio-up) mapping so any texture on hipMat tiles
-      // along the slope. Not used by the default colour-only material.
-      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
-      geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-      geo.computeVertexNormals();
+    // Decide plateau vs single apex. Plateau dims derived from clerestory
+    // footprint; if no clerestory or width_m unset, fall back to pure
+    // pyramid behaviour by collapsing the plateau to zero size.
+    const plateauW = (s.clerestory && Number.isFinite(s.clerestory.width_m))
+      ? s.clerestory.width_m : 0;
+    const plateauD = plateauW;   // surau clerestory is always square
+    const usePlateau = plateauW > 0.05 && plateauD > 0.05
+      && plateauW < W - 0.5 && plateauD < D - 0.5;
 
-      const face = new THREE.Mesh(geo, hipMat);
-      // Acoustically the hip roof IS the ceiling — same material slot,
-      // same surface_id so the surface-picker and material-changer in
-      // the side panel still find it.
-      face.userData.acoustic_material = surfaces.ceiling;
-      face.userData.surface_id = 'ceiling';
-      face.userData.tag = `surau_hip_${['S','E','N','W'][i]}`;
-      roomGroup.add(face);
-    }
-
-    // Hip-roof ridges — four black lines from each eave corner up to the
-    // apex. Pure visual; helps the pyramidal form read at a glance.
-    const ridgeMat = new THREE.LineBasicMaterial({ color: 0x4a3826 });
-    for (const c of corners) {
-      const pts = [
-        new THREE.Vector3(c.x, H, c.y),
-        new THREE.Vector3(apexX, apexZ, apexY),
+    if (usePlateau) {
+      // Frustum: four trapezoid faces. Plateau corners ordered to match
+      // eaves (each plateau corner sits "above" the eave with the same
+      // index, just pulled inward toward apexX/apexY).
+      const halfPW = plateauW / 2;
+      const halfPD = plateauD / 2;
+      const plateau = [
+        { x: apexX - halfPW, y: apexY - halfPD },  // SW (above SW eave)
+        { x: apexX + halfPW, y: apexY - halfPD },  // SE
+        { x: apexX + halfPW, y: apexY + halfPD },  // NE
+        { x: apexX - halfPW, y: apexY + halfPD },  // NW
       ];
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ridgeMat);
-      line.userData.tag = 'surau_hip_ridge';
-      roomGroup.add(line);
+
+      for (let i = 0; i < 4; i++) {
+        const eA = eaves[i];
+        const eB = eaves[(i + 1) % 4];
+        const pA = plateau[i];
+        const pB = plateau[(i + 1) % 4];
+        // Trapezoid (eA, eB, pB, pA) as two triangles.
+        // World coords: (state.x, world.z = elev, state.y).
+        const verts = new Float32Array([
+          // Tri 1: eA, eB, pB
+          eA.x, H, eA.y,
+          eB.x, H, eB.y,
+          pB.x, apexZ, pB.y,
+          // Tri 2: eA, pB, pA
+          eA.x, H, eA.y,
+          pB.x, apexZ, pB.y,
+          pA.x, apexZ, pA.y,
+        ]);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+        const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
+        geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        geo.computeVertexNormals();
+
+        const face = new THREE.Mesh(geo, hipMat);
+        face.userData.acoustic_material = surfaces.ceiling;
+        face.userData.surface_id = 'ceiling';
+        face.userData.tag = `surau_hip_${['S','E','N','W'][i]}`;
+        roomGroup.add(face);
+      }
+
+      // Plateau cap — flat rectangle at z = apexZ inside the four
+      // trapezoid edges. Without it the clerestory would have an open
+      // floor below, which reads as a hole through the roof when viewed
+      // from a low angle. Tagged as ceiling acoustically.
+      const plateauGeo = new THREE.PlaneGeometry(plateauW, plateauD);
+      const plateauMesh = new THREE.Mesh(plateauGeo, hipMat);
+      plateauMesh.rotation.x = -Math.PI / 2;
+      plateauMesh.position.set(apexX, apexZ, apexY);
+      plateauMesh.userData.acoustic_material = surfaces.ceiling;
+      plateauMesh.userData.surface_id = 'ceiling';
+      plateauMesh.userData.tag = 'surau_hip_plateau';
+      roomGroup.add(plateauMesh);
+
+      // Ridges — four hip ridges (eave corner → matching plateau corner)
+      // plus four plateau-perimeter ridges. Pure visual decoration.
+      const ridgeMat = new THREE.LineBasicMaterial({ color: 0x4a3826 });
+      for (let i = 0; i < 4; i++) {
+        const pts = [
+          new THREE.Vector3(eaves[i].x, H, eaves[i].y),
+          new THREE.Vector3(plateau[i].x, apexZ, plateau[i].y),
+        ];
+        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ridgeMat);
+        line.userData.tag = 'surau_hip_ridge';
+        roomGroup.add(line);
+      }
+      for (let i = 0; i < 4; i++) {
+        const a = plateau[i];
+        const b = plateau[(i + 1) % 4];
+        const pts = [
+          new THREE.Vector3(a.x, apexZ, a.y),
+          new THREE.Vector3(b.x, apexZ, b.y),
+        ];
+        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ridgeMat);
+        line.userData.tag = 'surau_hip_plateau_edge';
+        roomGroup.add(line);
+      }
+    } else {
+      // Original full pyramid — four triangles meeting at one apex point.
+      for (let i = 0; i < 4; i++) {
+        const a = eaves[i];
+        const b = eaves[(i + 1) % 4];
+        const verts = new Float32Array([
+          a.x, H, a.y,
+          b.x, H, b.y,
+          apexX, apexZ, apexY,
+        ]);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+        const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+        geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        geo.computeVertexNormals();
+
+        const face = new THREE.Mesh(geo, hipMat);
+        face.userData.acoustic_material = surfaces.ceiling;
+        face.userData.surface_id = 'ceiling';
+        face.userData.tag = `surau_hip_${['S','E','N','W'][i]}`;
+        roomGroup.add(face);
+      }
+
+      const ridgeMat = new THREE.LineBasicMaterial({ color: 0x4a3826 });
+      for (const c of eaves) {
+        const pts = [
+          new THREE.Vector3(c.x, H, c.y),
+          new THREE.Vector3(apexX, apexZ, apexY),
+        ];
+        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ridgeMat);
+        line.userData.tag = 'surau_hip_ridge';
+        roomGroup.add(line);
+      }
     }
   }
 
@@ -7584,22 +7675,67 @@ function rebuildSurauStructure(room) {
         pole.userData.no_walk_collide = true;
         roomGroup.add(pole);
 
-        // Crescent: a partial torus. tube radius ~0.04, ring radius ~0.20.
-        // Sweep about 270° (3π/2) and rotate so the opening points away
-        // from the building centre — reads as a crescent silhouette.
-        const crescentR = 0.22;
-        const crescentTube = 0.045;
-        const crescentGeo = new THREE.TorusGeometry(crescentR, crescentTube, 8, 24, Math.PI * 1.5);
+        // Crescent: an OPEN arc, not a closed ring. Built as a Shape from
+        // two circular arcs — outer arc minus inner arc, the two meeting at
+        // the crescent tips. Extruded shallowly along its normal so it has
+        // visible thickness in 3D.
+        //
+        // Construction (in shape-local 2D, before extrude):
+        //   * outer arc: radius R, sweep 0..π (a half-circle "U" opening up)
+        //   * inner arc: radius r, centre offset upward by (R - r), sweep
+        //     π..0 (reversed). Subtracting it carves the inner concavity,
+        //     leaving a thin moon-sliver shape.
+        // The extruded shape lives in the XY plane locally; rotate the mesh
+        // so the U opens UP in WORLD (toward +y). Because it's a U from
+        // every front view, no yaw-toward-centre rotation is needed.
+        // Geometry constraint: innerOffsetY + innerR < outerR, otherwise
+        // the inner arc pokes through the outer arc and the resulting shape
+        // self-intersects (a hole would appear at the top of the crescent).
+        // With outerR=0.18 and innerR=0.155, max innerOffsetY = 0.025 — we
+        // pick 0.020 to leave a small visible "belly" of metal at the top
+        // and slightly thicker horns at the tips.
+        const outerR = 0.18;             // ~36 cm wide
+        const innerR = 0.155;            // controls crescent body thickness
+        const innerOffsetY = 0.020;      // < (outerR - innerR) = 0.025, no self-intersect
+        const crescentDepth = 0.04;      // extrude thickness along the spike axis
+
+        const crescentShape = new THREE.Shape();
+        // Outer arc: start at (-outerR, 0), sweep CCW through (0, outerR) to (outerR, 0).
+        crescentShape.absarc(0, 0, outerR, Math.PI, 0, true);
+        // Inner arc: start at (innerR, innerOffsetY), sweep CW back to (-innerR, innerOffsetY).
+        // Path automatically lineTo's to the inner-arc start before drawing it.
+        crescentShape.absarc(0, innerOffsetY, innerR, 0, Math.PI, false);
+
+        const crescentGeo = new THREE.ExtrudeGeometry(crescentShape, {
+          depth: crescentDepth,
+          bevelEnabled: false,
+          curveSegments: 24,
+        });
+        // The shape as built has horns at y=0 and convex back at y=+outerR
+        // (a frown / ∩). Flip vertically so horns point UP and the convex
+        // back is at the bottom — the canonical Islamic crescent
+        // orientation (U-shape, tips skyward).
+        crescentGeo.scale(1, -1, 1);
+        // Centre depth so the spike runs through the middle of the crescent,
+        // not its back face.
+        crescentGeo.translate(0, 0, -crescentDepth / 2);
+        // After the Y-flip ExtrudeGeometry's per-face winding is reversed —
+        // recompute normals so lighting reads correctly on the gold metal
+        // material instead of looking matte/dark.
+        crescentGeo.computeVertexNormals();
+
         const crescent = new THREE.Mesh(crescentGeo, goldMat);
         const finialZ = capBaseZ + lanternH + domeR + poleH;
-        crescent.position.set(co.x, finialZ + crescentR, co.y);
-        // Torus default: ring lies in XY plane, opening along +x. We want
-        // ring vertical (XZ plane in world = local: rotate around X by π/2)
-        // and opening to point AWAY from room centre (yaw rotation).
-        crescent.rotation.x = Math.PI / 2;
-        const dxToCenter = (W / 2) - co.x;
-        const dyToCenter = (D / 2) - co.y;
-        crescent.rotation.z = Math.atan2(dyToCenter, dxToCenter) + Math.PI / 2;
+        // Shape lies in local XY (X across, Y up). World wants Y-up, so
+        // local-Y → world-Y is already correct. Extrude axis is local-Z;
+        // shape reads as a U from any direction perpendicular to local-Z,
+        // so default orientation works for any minaret corner.
+        //
+        // Place the crescent so its lowest point (convex back, local y=-outerR
+        // after the Y-flip above) sits ~2 cm above the pole tip — looks
+        // resting on the spike, not impaling it.
+        const crescentClear = 0.02;
+        crescent.position.set(co.x, finialZ + outerR + crescentClear, co.y);
         crescent.userData.tag = 'surau_minaret_crescent';
         crescent.userData.no_acoustic = true;
         crescent.userData.no_walk_collide = true;
