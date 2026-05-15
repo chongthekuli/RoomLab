@@ -613,6 +613,126 @@ function applyTreatmentOverlap(surfaces, treatments, room) {
   }
 }
 
+// Synthesise PR2-format wall openings from `room.surauStructure` for the
+// named SCENE wall key. Returned openings are merged into the wall slot's
+// own openings[] at both render time (scene.js → buildWallGeoWithHoles +
+// attachOpeningMesh) and acoustics time (expandWallWithOpenings below)
+// so the building's entrances become real holes in the wall mesh AND
+// real α=1.0 boundaries in the Sabine sum.
+//
+// Compass-name swap: the surau preset uses building-compass labels
+// (preset's `south` = the main entrance wall at state-y = 0), but
+// scene.js's wall keys are inverted (`wall_north` is the mesh at world
+// z = 0, which is the main entrance face). We bridge the swap inside
+// this helper so callers pass scene keys.
+//
+//   sceneWallKey      preset's wall   building face
+//   wall_north        'south'         main entrance (z = 0)
+//   wall_south        'north'         qibla / mihrab (z = D)
+//   wall_east         'east'          right side (x = W)
+//   wall_west         'west'          left side (x = 0)
+//
+// Coord mapping per wall (mesh-local x along wall, z from floor):
+//   wall_north (rot Y=π):   mesh-local +x → world -x.   x_m = W - center_x_m - w/2
+//   wall_south (rot Y=0):   mesh-local +x → world +x.   x_m = center_x_m - w/2
+//   wall_east  (rot Y=-π/2): mesh-local +x → world +z.   x_m = center_y_m - w/2
+//   wall_west  (rot Y=+π/2): mesh-local +x → world -z.   x_m = D - center_y_m - w/2
+//
+// All openings are returned with state='open', kind='door', and
+// system=false so attachOpeningMesh creates the no_walk_collide invisible
+// quad and the third-person-controller's collision filter (which honours
+// no_walk_collide explicitly) lets the avatar pass through.
+export function surauStructureWallOpenings(room, sceneWallKey) {
+  const s = room?.surauStructure;
+  if (!s) return [];
+  const W = Number(room.width_m) || 0;
+  const D = Number(room.depth_m) || 0;
+  const out = [];
+
+  const presetWall = (
+    sceneWallKey === 'wall_north' ? 'south' :
+    sceneWallKey === 'wall_south' ? 'north' :
+    sceneWallKey === 'wall_east'  ? 'east'  :
+    sceneWallKey === 'wall_west'  ? 'west'  : null
+  );
+  if (!presetWall) return [];
+
+  // entrances[] — east/west (and optionally north/south on user request).
+  if (Array.isArray(s.entrances)) {
+    for (const ent of s.entrances) {
+      if (!ent || ent.wall !== presetWall) continue;
+      const ow = Number.isFinite(ent.width_m)  ? ent.width_m  : 1.2;
+      const oh = Number.isFinite(ent.height_m) ? ent.height_m : 2.4;
+      if (ow <= 0 || oh <= 0) continue;
+      const cy = Number.isFinite(ent.center_y_m) ? ent.center_y_m : D / 2;
+
+      let x_m;
+      if      (sceneWallKey === 'wall_east')  x_m = cy - ow / 2;          // mesh-x → world +z
+      else if (sceneWallKey === 'wall_west')  x_m = (D - cy) - ow / 2;    // mesh-x → world -z
+      else if (sceneWallKey === 'wall_south') x_m = cy - ow / 2;          // preset 'north' on z=D wall, mesh-x → world +x
+      else /* wall_north */                   x_m = (W - cy) - ow / 2;    // preset 'south' on z=0 wall, mesh-x → world -x
+      // For north/south walls, ent.center_y_m is interpreted as the world
+      // x-coordinate of the door centre (caller is positioning along the
+      // long axis of that wall). For east/west walls it's world-z. The
+      // preset's existing usage matches this convention.
+
+      out.push({
+        id: `surau_${presetWall}_ent_${out.length}`,
+        kind: 'door',
+        x_m,
+        z_m: 0,
+        width_m: ow,
+        height_m: oh,
+        state: 'open',
+        materialId: 'open-air',
+        system: false,
+      });
+    }
+  }
+
+  // southPartition.doorCenters_x_m — three doors on the main entrance
+  // wall (preset 'south' = scene wall_north). Width / height come from
+  // shared southPartition fields.
+  if (sceneWallKey === 'wall_north' && s.southPartition) {
+    const sp = s.southPartition;
+    const ow = Number.isFinite(sp.doorWidth_m) ? sp.doorWidth_m : 1.0;
+    const oh = Number.isFinite(sp.height_m) ? sp.height_m : 2.4;
+    const centers = Array.isArray(sp.doorCenters_x_m) ? sp.doorCenters_x_m : [];
+    for (const dc of centers) {
+      const cx = Number(dc);
+      if (!Number.isFinite(cx) || ow <= 0 || oh <= 0) continue;
+      const x_m = (W - cx) - ow / 2;   // wall_north: mesh-x → world -x
+      out.push({
+        id: `surau_southdoor_${out.length}`,
+        kind: 'door',
+        x_m,
+        z_m: 0,
+        width_m: ow,
+        height_m: oh,
+        state: 'open',
+        materialId: 'open-air',
+        system: false,
+      });
+    }
+  }
+
+  return out;
+}
+
+// Merge any synthetic surauStructure openings into a wall slot's own
+// openings[]. Returns a NEW slot object (does not mutate `slot`) so
+// repeated calls during a single rebuild stay idempotent and the
+// underlying state.room.surfaces.* remains the user's authored data.
+export function applySurauOpeningsToSlot(slot, room, sceneWallKey) {
+  const synth = surauStructureWallOpenings(room, sceneWallKey);
+  if (synth.length === 0) return slot;
+  const norm = normalizeWallSlot(slot);
+  return {
+    materialId: norm.materialId,
+    openings: [...norm.openings, ...synth],
+  };
+}
+
 // Build a wall surface entry plus zero or more opening entries from a
 // raw wall slot. The wall's area is reduced by the total opening area so
 // the wall material doesn't double-count regions where there's actually a
@@ -668,10 +788,14 @@ export function roomSurfaces(room) {
   if (shape === 'rectangular') {
     const { width_m: w, depth_m: d, surfaces: s } = room;
     result = [floor, ceiling];
-    result.push(...expandWallWithOpenings(s.wall_north, 'wall_north', w * wallH, 'gypsum-board'));
-    result.push(...expandWallWithOpenings(s.wall_south, 'wall_south', w * wallH, 'gypsum-board'));
-    result.push(...expandWallWithOpenings(s.wall_east,  'wall_east',  d * wallH, 'gypsum-board'));
-    result.push(...expandWallWithOpenings(s.wall_west,  'wall_west',  d * wallH, 'gypsum-board'));
+    // surauStructure entrances + south-partition doors become α=1.0
+    // open-air surfaces here (alongside any user-authored openings on
+    // the wall slot itself). Idempotent — applySurauOpeningsToSlot
+    // returns the original slot unchanged when surauStructure is absent.
+    result.push(...expandWallWithOpenings(applySurauOpeningsToSlot(s.wall_north, room, 'wall_north'), 'wall_north', w * wallH, 'gypsum-board'));
+    result.push(...expandWallWithOpenings(applySurauOpeningsToSlot(s.wall_south, room, 'wall_south'), 'wall_south', w * wallH, 'gypsum-board'));
+    result.push(...expandWallWithOpenings(applySurauOpeningsToSlot(s.wall_east,  room, 'wall_east'),  'wall_east',  d * wallH, 'gypsum-board'));
+    result.push(...expandWallWithOpenings(applySurauOpeningsToSlot(s.wall_west,  room, 'wall_west'),  'wall_west',  d * wallH, 'gypsum-board'));
   } else if (shape === 'custom') {
     const v = room.custom_vertices || [];
     const edges = room.surfaces.edges || [];

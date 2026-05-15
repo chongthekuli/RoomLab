@@ -14,7 +14,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { buildRackGroup } from './rack-render.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
-import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, normalizeWallSlot } from '../physics/room-shape.js';
+import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, normalizeWallSlot, applySurauOpeningsToSlot } from '../physics/room-shape.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { openPanel } from '../ui/rail-system.js';
@@ -2576,7 +2576,14 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       [d, h, [0,  h/2, cz],  [0, Math.PI/2, 0],  surfaces.wall_west,  'wall_west'],
     ];
     for (const [ww, wh, pos, rot, slot, surfaceKey] of wallOpts) {
-      const { materialId: surfId, openings } = normalizeWallSlot(slot);
+      // surauStructure entrances + south-partition doors are merged into
+      // the wall slot's openings[] here so the same buildWallGeoWithHoles
+      // pipeline punches the holes (PR2 path) AND attachOpeningMesh
+      // creates the no_walk_collide invisible quad for the avatar to pass
+      // through. No-op when room.surauStructure is absent. Acoustic side
+      // is handled in roomSurfaces() via the matching call there.
+      const slotWithSurau = applySurauOpeningsToSlot(slot, room, surfaceKey);
+      const { materialId: surfId, openings } = normalizeWallSlot(slotWithSurau);
       const geo = buildWallGeoWithHoles(ww, wh, openings);
       const mat = buildSurfaceMat(surfId, ww, wh, { opacity: 0.55 });
       const m = new THREE.Mesh(geo, mat);
@@ -7338,12 +7345,12 @@ function rebuildSurauStructure(room) {
 
   // ------------- 6. Side-wall entrance frames ----------------------------
   // Slim dark inset bands around each side opening, flush with the wall.
-  // These don't punch a hole in the wall mesh (that requires a wall slot
-  // opening, which is preset-data-driven and orthogonal to surauStructure)
-  // — they're decorative trim that reads as a doorway from inside the
-  // hall. For a future polish pass: emit the matching wall_east /
-  // wall_west openings into the preset's surfaces slots so the wall
-  // mesh actually gets a hole and air-coupling becomes physical.
+  // The actual wall HOLE is punched by rebuildRoom() via
+  // applySurauOpeningsToSlot() — these frames are pure decorative trim
+  // that reads as a door surround around the real opening. The avatar
+  // walks through (no_walk_collide on the synthesised opening mesh) and
+  // the acoustic engine sees α=1.0 boundaries (open-air surface) on
+  // those rectangles via roomSurfaces() in room-shape.js.
   if (Array.isArray(s.entrances)) {
     const frameThick = 0.04;
     const frameDepth = 0.10;   // how far inset frame protrudes inward
