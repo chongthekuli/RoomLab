@@ -2551,7 +2551,13 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     floor.userData.surface_id = 'floor';
     roomGroup.add(floor);
 
-    if (room.ceiling_type !== 'dome' && room.enclosure !== 'outdoor') {
+    // Suppress the flat ceiling when surauStructure.hipRoof is defined —
+    // the hip-roof renderer in rebuildSurauStructure() builds a 4-sided
+    // pyramidal cap whose four interior triangle faces become the new
+    // visible "ceiling". Same acoustic surface_id ('ceiling'), same
+    // material slot (surfaces.ceiling) — only the geometry changes.
+    const hipRoofActive = !!room.surauStructure?.hipRoof;
+    if (room.ceiling_type !== 'dome' && room.enclosure !== 'outdoor' && !hipRoofActive) {
       const ceilGeo = new THREE.PlaneGeometry(w, d);
       const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
       ceiling.rotation.x = Math.PI / 2;
@@ -2837,6 +2843,10 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
   // Solid stadium bowl structures (LatheGeometry) if the preset provides stadiumStructure.
   rebuildBowlStructure(room);
   rebuildMultiLevelStructure(room);
+  // Mosque prayer-hall architecture: mihrab niche, minbar pulpit, hip
+  // roof, saf prayer lines, south-side partition with door cutouts, side
+  // entrance frames. Driven by room.surauStructure. No-op when undefined.
+  rebuildSurauStructure(room);
 
   // Sub-structures (saved rooms placed into this room). Phase 1 = visual
   // only; the meshes go into roomGroup so aim raycasts terminate on them
@@ -6714,6 +6724,532 @@ function rebuildMultiLevelStructure(room) {
     carpet.userData.acoustic_material = 'carpet-heavy';
     carpet.userData.tag = 'food_court_carpet';
     roomGroup.add(carpet);
+  }
+}
+
+// -------------------------------------------------------------------------
+// Mosque prayer-hall architecture from `room.surauStructure`.
+//
+// Renders six visual elements that turn a plain rectangular shoebox into a
+// recognizable surau: (1) a concave mihrab niche on the qibla wall, (2) a
+// stepped minbar pulpit beside the mihrab, (3) a 4-sided pyramidal hip roof
+// replacing the flat ceiling, (4) parallel saf prayer-row markers on the
+// floor, (5) a thin south-wall partition band suggesting side rooms behind
+// the entrance wall, (6) inset frames around the three entrance openings
+// on the east, west, and south walls.
+//
+// Coordinate convention (state space):
+//   +x = east  (room width is width_m  E–W)
+//   +y = north toward the mihrab / qibla
+//   +z = up   (vertical)
+// Mapped to world by the standard project rule: world.x = state.x,
+// world.y = state.z, world.z = state.y. The mihrab therefore renders at
+// world Z = depth_m (the +y face of the box). The internal wall slot at
+// that face is named `wall_south` for historical reasons — names here
+// follow the architectural drawing (north = qibla), not the slot id.
+//
+// Schema (all dimensions in metres, all coordinates in state space):
+//   surauStructure: {
+//     mihrab: {                    // concave half-cylinder niche on qibla wall
+//       center_x_m: number,        // niche centre, x-axis (default width/2)
+//       width_m:    number,        // niche opening width (1.6–2.0 typical)
+//       depth_m:    number,        // how far it bulges INTO the wall (0.5–0.7)
+//       height_m:   number,        // niche top above floor (2.8–3.2)
+//       sill_m:     number,        // floor inset (default 0 — runs to floor)
+//       materialId: string,        // catalogue id for interior (default 'gypsum-board')
+//     },
+//     minbar: {                    // stepped pulpit beside the mihrab
+//       footprint: {x_m, y_m, width_m, depth_m},  // base rectangle (state-coords)
+//       steps:        number,      // step count (typically 3)
+//       step_rise_m:  number,      // per-step rise (0.18–0.22 architectural)
+//       platform_height_m: number, // top platform total height (default sum of steps + 0.05)
+//       materialId:   string,      // wood id (default 'wood-floor')
+//     },
+//     hipRoof: {                   // 4-sided pyramidal cap replacing flat ceiling
+//       apexRise_m: number,        // metres ABOVE height_m at the central apex (1.0–1.8)
+//       apex_x_m:   number?,       // optional apex x (default width_m/2)
+//       apex_y_m:   number?,       // optional apex y (default depth_m/2)
+//     },
+//     safLines: {                  // parallel prayer-row markers on the floor
+//       rows:               number,   // count (10–14 fits an 18 m hall)
+//       spacing_m:          number,   // row-to-row gap (1.2 m canonical)
+//       start_y_m:          number,   // y of front-most line (south of mihrab)
+//       lineThickness_m:    number,   // line thickness in y (default 0.05)
+//       edge_inset_m:       number,   // line runs from x = inset to width-inset
+//       opacity:            number,   // 0..1 (default 0.55 — reads as woven)
+//     },
+//     southPartition: {            // thin band suggesting side rooms behind south wall
+//       thickness_m:   number,     // depth into the room from y=0 (default 0.2)
+//       height_m:      number,     // band height (default 2.4 — door-head)
+//       doorCenters_x_m: number[], // x-positions of door cutouts in the band
+//       doorWidth_m:   number,     // single door clear width (default 1.0)
+//       materialId:    string,     // default 'plaster-smooth' (wall material)
+//     },
+//     entrances: [                 // inset frames around side-wall openings
+//       { wall: 'east'|'west',     // east = +x face, west = -x face
+//         center_y_m: number,      // y-position centre of opening
+//         width_m: number,         // clear width
+//         height_m: number,        // clear height
+//       },
+//       // south-wall entrances are implied by southPartition.doorCenters_x_m;
+//       // listing them here is allowed but optional — the partition gates
+//       // the actual cutout.
+//     ],
+//   }
+//
+// Every mesh carries userData.acoustic_material so the precision ray
+// tracer's surface lookup keeps working — values default to
+// room.surfaces.* where appropriate, so absorption coefficients reflect
+// the room's existing material catalogue choices.
+//
+// Walk-collision flags: saf lines are flush with the floor and tagged
+// `userData.no_walk_collide = true` so the avatar can't snag on them.
+// Mihrab, minbar, partition band and entrance frames are solid obstacles.
+// -------------------------------------------------------------------------
+function rebuildSurauStructure(room) {
+  const s = room.surauStructure;
+  if (!s) return;
+  if (room.shape !== 'rectangular') {
+    // Schema is shoebox-only for now — the niche, partition band, and hip
+    // roof all assume a flat rectangular footprint. Polygon / round
+    // surau presets would need their own pyramidal-cap maths.
+    console.warn('[surau] non-rectangular shape — skipping surauStructure render');
+    return;
+  }
+
+  const W = room.width_m;
+  const D = room.depth_m;
+  const H = room.height_m;
+  if (!(W > 0 && D > 0 && H > 0)) return;
+
+  const surfaces = room.surfaces || {};
+
+  // Cream marble interior for the mihrab niche, slightly warmer than the
+  // wall plaster so the focal point reads from across the hall.
+  const mihrabMat = new THREE.MeshStandardMaterial({
+    color: 0xe8dcc4, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide,
+  });
+  // Dark teak / merbau for the minbar — Malaysia's mosque-furniture
+  // baseline timber. Slightly satin (roughness 0.5) so it picks up the
+  // directional fill light without going plasticky.
+  const woodMat = new THREE.MeshStandardMaterial({
+    color: 0x5a3a22, roughness: 0.52, metalness: 0.02,
+  });
+  // Hip-roof interior — a touch warmer than the plaster ceiling so the
+  // pyramid reads as an exposed truss surface, not a continuation of the
+  // wall plaster. Still tagged as the room's `surfaces.ceiling`
+  // acoustically (same absorption coefficient).
+  const hipMat = new THREE.MeshStandardMaterial({
+    color: 0xddd2bf, roughness: 0.78, metalness: 0.02,
+    side: THREE.DoubleSide,
+  });
+  // White carpet stripes (saf lines) — translucent so they read as woven
+  // into the mat rather than painted on top.
+  const safMat = new THREE.MeshBasicMaterial({
+    color: 0xf4ede0,
+    transparent: true,
+    opacity: Number.isFinite(s.safLines?.opacity) ? s.safLines.opacity : 0.55,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  // Partition band uses the wall material so it visually matches.
+  const partitionMat = new THREE.MeshStandardMaterial({
+    color: 0xebe6dd, roughness: 0.92, metalness: 0.0,
+  });
+  // Dark entrance-frame inset — a slim portal that reads as door trim
+  // around the opening on the side walls.
+  const frameMat = new THREE.MeshStandardMaterial({
+    color: 0x3a2d20, roughness: 0.62, metalness: 0.08,
+  });
+
+  // ------------- 1. Mihrab — concave half-cylinder niche -----------------
+  // Qibla wall sits at world Z = D (state y = D). We build the niche as a
+  // half-cylinder bulging OUTWARD from the wall (away from the room
+  // interior, toward +y), with its open face flush with the wall plane.
+  // From inside the prayer hall the niche reads as a concave alcove —
+  // the wall plane in front of it is unchanged (it's plaster — we leave
+  // it alone so we don't have to surgically punch a hole in the existing
+  // wall mesh). The marble half-cylinder peeks through the wall's 55 %
+  // opacity, which is enough to communicate the focal niche; for a
+  // future polish pass we can punch a true hole via buildWallGeoWithHoles
+  // and an extra wallSlot opening on wall_south.
+  if (s.mihrab) {
+    const mh = s.mihrab;
+    const niche_w = Number.isFinite(mh.width_m) ? mh.width_m : 1.8;
+    const niche_d = Number.isFinite(mh.depth_m) ? mh.depth_m : 0.6;
+    const niche_h = Number.isFinite(mh.height_m) ? mh.height_m : 3.0;
+    const niche_cx = Number.isFinite(mh.center_x_m) ? mh.center_x_m : W / 2;
+    const niche_sill = Number.isFinite(mh.sill_m) ? mh.sill_m : 0.0;
+    const matId = mh.materialId || 'gypsum-board';
+    // Radius of the cylinder is chosen so the half-cylinder's chord
+    // (= niche_w) sits in the wall plane and its sagitta (= niche_d)
+    // bulges outward. For a true half-cylinder the chord = diameter =
+    // niche_w, depth = niche_w/2. If the requested depth differs, we
+    // scale the cylinder's depth-axis to match — a "shallow half-pipe"
+    // (depth < width/2) or "deep grotto" (depth > width/2) both read as
+    // a concave niche from inside the hall.
+    const cyl_r = niche_w / 2;
+    const cyl_h = niche_h - niche_sill;
+    // CylinderGeometry's default axis is local-y; we want the cylinder
+    // axis vertical (matches world-y) so a half-cylinder cut along the
+    // axial plane bulges along +z (= state +y).
+    const segments = 24;
+    // Three.js CylinderGeometry vertex layout: x = r·cos(θ), z = r·sin(θ),
+    // y = cylinder axis. We want a half-cylinder whose curved wall bulges
+    // along +world_z (so a viewer inside the hall looking north into the
+    // qibla wall sees a concave alcove receding past z = D). That means
+    // theta ∈ [0, π] (starts at +x, arcs through +z, ends at -x). The
+    // open chord lies along the local x-axis with normal facing -z — i.e.
+    // facing back into the prayer hall.
+    const geo = new THREE.CylinderGeometry(
+      cyl_r, cyl_r, cyl_h,
+      segments, 1,
+      true,                    // open ended — curved wall only, no end caps
+      0,                       // thetaStart: 0 = +x axis
+      Math.PI,                 // thetaLength: π → arc through +z to -x
+    );
+    // Scale the niche depth: native half-cylinder bulges by cyl_r along +z.
+    // Caller may request a different niche depth (shallower or deeper than
+    // a true half-cylinder), so apply a uniaxial scale along local z. The
+    // curved surface stays watertight under uniform-Z scaling.
+    const depthScale = niche_d / cyl_r;
+    geo.scale(1, 1, depthScale);
+    // Recompute normals after the non-uniform scale so the interior face
+    // shades correctly under the directional fill.
+    geo.computeVertexNormals();
+    const niche = new THREE.Mesh(geo, mihrabMat);
+    // Place at world (state.x = niche_cx, state.z = sill + cyl_h/2, state.y = D).
+    // Push 5 mm SOUTH of the wall plane so the marble half-cylinder
+    // occludes the qibla wall locally — visually the niche becomes a
+    // strong focal point instead of a faint silhouette muted by the
+    // wall's 55 % plaster overlay. The cylinder's curved face still
+    // recesses past z = D, so from inside the hall the marble reads as
+    // a concave alcove. (For a true wall hole, the future polish is to
+    // emit a matching opening into surfaces.wall_south so the wall mesh
+    // actually has its plane punched.)
+    const wallOffset = 0.005;
+    niche.position.set(niche_cx, niche_sill + cyl_h / 2, D - wallOffset);
+    niche.userData.acoustic_material = matId;
+    niche.userData.surface_id = 'mihrab';
+    niche.userData.materialId = 'marble-mihrab';
+    niche.userData.tag = 'surau_mihrab';
+    roomGroup.add(niche);
+
+    // Top arch cap — semicircular disc closing the cylinder at z = height_m.
+    // Without it the open-ended cylinder shows daylight at the top. The
+    // disc's local-space semicircle spans θ∈[0,π] in the XY plane (matches
+    // the cylinder wall's theta range). After rotation.x = -π/2 the disc
+    // lies horizontal with normal pointing downward into the niche, and
+    // local +y maps to world +z so the bulge sits on the +z side of the
+    // wall plane — same half-space as the cylinder.
+    const archGeo = new THREE.CircleGeometry(cyl_r, segments, 0, Math.PI);
+    archGeo.scale(1, depthScale, 1);
+    const arch = new THREE.Mesh(archGeo, mihrabMat);
+    arch.rotation.x = -Math.PI / 2;
+    arch.position.set(niche_cx, niche_sill + cyl_h, D);
+    arch.userData.acoustic_material = matId;
+    arch.userData.materialId = 'marble-mihrab';
+    arch.userData.tag = 'surau_mihrab_top';
+    roomGroup.add(arch);
+
+    // Sill cap at the bottom (skip when flush with floor — the floor
+    // plane itself caps the open bottom of the cylinder).
+    if (niche_sill > 0.01) {
+      const sillGeo = new THREE.CircleGeometry(cyl_r, segments, 0, Math.PI);
+      sillGeo.scale(1, depthScale, 1);
+      const sillCap = new THREE.Mesh(sillGeo, mihrabMat);
+      sillCap.rotation.x = Math.PI / 2;
+      sillCap.position.set(niche_cx, niche_sill, D);
+      sillCap.userData.tag = 'surau_mihrab_sill';
+      roomGroup.add(sillCap);
+    }
+  }
+
+  // ------------- 2. Minbar — stepped pulpit ------------------------------
+  // Three rectangular step blocks of increasing height, terminating in a
+  // platform. Built as solid BoxGeometry obstacles; the avatar walks
+  // around them since terrainHeightAt() doesn't index into surauStructure.
+  if (s.minbar?.footprint) {
+    const fp = s.minbar.footprint;
+    const mb_x = Number.isFinite(fp.x_m) ? fp.x_m : (W / 2 - 1.5);
+    const mb_y = Number.isFinite(fp.y_m) ? fp.y_m : (D - 1.6);
+    const mb_w = Number.isFinite(fp.width_m) ? fp.width_m : 1.0;
+    const mb_d = Number.isFinite(fp.depth_m) ? fp.depth_m : 0.6;
+    const nSteps = Math.max(1, Math.min(8, Math.floor(s.minbar.steps ?? 3)));
+    const stepRise = Number.isFinite(s.minbar.step_rise_m) ? s.minbar.step_rise_m : 0.20;
+    const platformH = Number.isFinite(s.minbar.platform_height_m)
+      ? s.minbar.platform_height_m
+      : (nSteps * stepRise + 0.05);
+    const matId = s.minbar.materialId || 'wood-floor';
+
+    // Each step's tread depth is the full footprint depth (mb_d) divided
+    // across (steps + platform). Step n (0-indexed) occupies the front
+    // strip; step n+1 is one strip back; the platform is the deepest
+    // strip nearest the qibla wall.
+    const stripDepth = mb_d / (nSteps + 1);
+    for (let step = 0; step < nSteps; step++) {
+      const stepH = (step + 1) * stepRise;
+      // y-strip: step 0 is the front (south end of minbar), step nSteps-1
+      // the back. State-y of strip front = mb_y + step * stripDepth.
+      const yFront = mb_y + step * stripDepth;
+      const yCentre = yFront + stripDepth / 2;
+      const boxGeo = new THREE.BoxGeometry(mb_w, stepH, stripDepth);
+      const stepMesh = new THREE.Mesh(boxGeo, woodMat);
+      stepMesh.position.set(mb_x + mb_w / 2, stepH / 2, yCentre);
+      stepMesh.userData.acoustic_material = matId;
+      stepMesh.userData.materialId = matId;
+      stepMesh.userData.surface_id = `minbar_step_${step}`;
+      stepMesh.userData.tag = 'surau_minbar_step';
+      roomGroup.add(stepMesh);
+    }
+    // Platform — the deepest strip, full requested height.
+    const platY = mb_y + nSteps * stripDepth;
+    const platMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(mb_w, platformH, stripDepth),
+      woodMat,
+    );
+    platMesh.position.set(mb_x + mb_w / 2, platformH / 2, platY + stripDepth / 2);
+    platMesh.userData.acoustic_material = matId;
+    platMesh.userData.materialId = matId;
+    platMesh.userData.surface_id = 'minbar_platform';
+    platMesh.userData.tag = 'surau_minbar_platform';
+    roomGroup.add(platMesh);
+
+    // Back rail — a simple 0.9 m tall slab at the back of the platform
+    // (qibla side) for the imam to lean against during khutbah.
+    const railH = 0.9;
+    const railT = 0.05;
+    const railMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(mb_w, railH, railT),
+      woodMat,
+    );
+    railMesh.position.set(
+      mb_x + mb_w / 2,
+      platformH + railH / 2,
+      platY + stripDepth - railT / 2,
+    );
+    railMesh.userData.acoustic_material = matId;
+    railMesh.userData.tag = 'surau_minbar_rail';
+    roomGroup.add(railMesh);
+  }
+
+  // ------------- 3. Hip roof — 4-sided pyramidal cap ---------------------
+  // The flat ceiling at z = H was already suppressed up in rebuildRoom
+  // (see `hipRoofActive` gate). Replace it with a 4-sided pyramid whose
+  // base is the room footprint at z = H (eaves) and whose apex sits at
+  // z = H + apexRise_m, centred on the room. Four triangle faces become
+  // the visible interior ceiling. Each triangle is a separate BufferGeometry
+  // so future per-face tagging (e.g. north slope = qibla-facing) is possible.
+  if (s.hipRoof) {
+    const apexRise = Number.isFinite(s.hipRoof.apexRise_m) ? s.hipRoof.apexRise_m : 1.5;
+    const apexX = Number.isFinite(s.hipRoof.apex_x_m) ? s.hipRoof.apex_x_m : W / 2;
+    const apexY = Number.isFinite(s.hipRoof.apex_y_m) ? s.hipRoof.apex_y_m : D / 2;
+    const apexZ = H + apexRise;
+
+    // Four eave corners (state-coords). Order chosen so consecutive pairs
+    // make the four roof slope edges.
+    const corners = [
+      { x: 0, y: 0 },     // SW
+      { x: W, y: 0 },     // SE
+      { x: W, y: D },     // NE
+      { x: 0, y: D },     // NW
+    ];
+
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i];
+      const b = corners[(i + 1) % 4];
+      // Triangle vertices in WORLD coords: (state.x, state.z, state.y).
+      const verts = new Float32Array([
+        a.x, H, a.y,
+        b.x, H, b.y,
+        apexX, apexZ, apexY,
+      ]);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+      // UVs: simple (x, ratio-up) mapping so any texture on hipMat tiles
+      // along the slope. Not used by the default colour-only material.
+      const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+      geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geo.computeVertexNormals();
+
+      const face = new THREE.Mesh(geo, hipMat);
+      // Acoustically the hip roof IS the ceiling — same material slot,
+      // same surface_id so the surface-picker and material-changer in
+      // the side panel still find it.
+      face.userData.acoustic_material = surfaces.ceiling;
+      face.userData.surface_id = 'ceiling';
+      face.userData.tag = `surau_hip_${['S','E','N','W'][i]}`;
+      roomGroup.add(face);
+    }
+
+    // Hip-roof ridges — four black lines from each eave corner up to the
+    // apex. Pure visual; helps the pyramidal form read at a glance.
+    const ridgeMat = new THREE.LineBasicMaterial({ color: 0x4a3826 });
+    for (const c of corners) {
+      const pts = [
+        new THREE.Vector3(c.x, H, c.y),
+        new THREE.Vector3(apexX, apexZ, apexY),
+      ];
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ridgeMat);
+      line.userData.tag = 'surau_hip_ridge';
+      roomGroup.add(line);
+    }
+  }
+
+  // ------------- 4. Saf lines — parallel prayer-row markers --------------
+  // Thin elongated strips running E–W (perpendicular to qibla = +y), each
+  // raised 5 mm off the floor to avoid z-fighting with the carpet plane.
+  // Lines are stacked southward from `start_y_m` at the canonical 1.2 m
+  // saf spacing. Walk-through (no_walk_collide).
+  if (s.safLines) {
+    const sl = s.safLines;
+    const nRows = Math.max(0, Math.min(40, Math.floor(sl.rows ?? 12)));
+    const spacing = Number.isFinite(sl.spacing_m) ? sl.spacing_m : 1.2;
+    const startY = Number.isFinite(sl.start_y_m) ? sl.start_y_m : (D - 1.5);
+    const thickness = Number.isFinite(sl.lineThickness_m) ? sl.lineThickness_m : 0.05;
+    const inset = Number.isFinite(sl.edge_inset_m) ? sl.edge_inset_m : 0.5;
+    const lineLen = Math.max(0.1, W - 2 * inset);
+    const lineZ = 0.005;
+
+    for (let r = 0; r < nRows; r++) {
+      const yC = startY - r * spacing;
+      if (yC < 0.5) break;   // ran out of room before the entrance wall
+      const geo = new THREE.PlaneGeometry(lineLen, thickness);
+      const line = new THREE.Mesh(geo, safMat);
+      line.rotation.x = -Math.PI / 2;   // lay flat on floor
+      line.position.set(W / 2, lineZ, yC);
+      line.userData.tag = 'surau_saf_line';
+      line.userData.no_walk_collide = true;
+      // Not tagged with acoustic_material — saf lines are part of the
+      // floor's acoustic surface (carpet), not a separate material.
+      roomGroup.add(line);
+    }
+  }
+
+  // ------------- 5. South-wall partition band ----------------------------
+  // A thin slab inside the room, full width, running from y = 0 to
+  // y = thickness, with rectangular door cutouts. Implemented as
+  // BoxGeometries between cutouts — simpler than punching ShapeGeometry
+  // holes and works with the standard collision filter.
+  if (s.southPartition) {
+    const sp = s.southPartition;
+    const thick = Number.isFinite(sp.thickness_m) ? sp.thickness_m : 0.2;
+    const bandH = Number.isFinite(sp.height_m) ? sp.height_m : 2.4;
+    const doorW = Number.isFinite(sp.doorWidth_m) ? sp.doorWidth_m : 1.0;
+    const doorCenters = Array.isArray(sp.doorCenters_x_m) ? [...sp.doorCenters_x_m].sort((a, b) => a - b) : [];
+
+    // Build the band as a series of x-segments interrupted by door gaps.
+    // Walk from x = 0 across the wall: each segment runs from the
+    // previous-segment-end to (door_center - doorW/2). After the door,
+    // resume from (door_center + doorW/2). End at x = W.
+    const segments = [];
+    let xPrev = 0;
+    for (const dc of doorCenters) {
+      const gapStart = dc - doorW / 2;
+      const gapEnd = dc + doorW / 2;
+      if (gapStart > xPrev + 0.01) {
+        segments.push({ x1: xPrev, x2: gapStart });
+      }
+      xPrev = Math.max(xPrev, gapEnd);
+    }
+    if (xPrev < W - 0.01) segments.push({ x1: xPrev, x2: W });
+
+    for (const seg of segments) {
+      const segW = seg.x2 - seg.x1;
+      if (segW < 0.05) continue;
+      const segGeo = new THREE.BoxGeometry(segW, bandH, thick);
+      const segMesh = new THREE.Mesh(segGeo, partitionMat);
+      segMesh.position.set((seg.x1 + seg.x2) / 2, bandH / 2, thick / 2);
+      segMesh.userData.acoustic_material = sp.materialId || surfaces.wall_north || 'plaster-smooth';
+      segMesh.userData.surface_id = 'south_partition';
+      segMesh.userData.tag = 'surau_partition';
+      roomGroup.add(segMesh);
+    }
+
+    // Lintel above each door cutout — keeps the doors looking like doors
+    // (head height continuous with band top) instead of full-height gaps.
+    for (const dc of doorCenters) {
+      const lintelH = 0.25;
+      const lintelGeo = new THREE.BoxGeometry(doorW, lintelH, thick);
+      const lintel = new THREE.Mesh(lintelGeo, partitionMat);
+      lintel.position.set(dc, bandH - lintelH / 2, thick / 2);
+      lintel.userData.acoustic_material = sp.materialId || surfaces.wall_north || 'plaster-smooth';
+      lintel.userData.tag = 'surau_partition_lintel';
+      roomGroup.add(lintel);
+    }
+  }
+
+  // ------------- 6. Side-wall entrance frames ----------------------------
+  // Slim dark inset bands around each side opening, flush with the wall.
+  // These don't punch a hole in the wall mesh (that requires a wall slot
+  // opening, which is preset-data-driven and orthogonal to surauStructure)
+  // — they're decorative trim that reads as a doorway from inside the
+  // hall. For a future polish pass: emit the matching wall_east /
+  // wall_west openings into the preset's surfaces slots so the wall
+  // mesh actually gets a hole and air-coupling becomes physical.
+  if (Array.isArray(s.entrances)) {
+    const frameThick = 0.04;
+    const frameDepth = 0.10;   // how far inset frame protrudes inward
+    for (const ent of s.entrances) {
+      if (!ent || !ent.wall) continue;
+      const w_clear = Number.isFinite(ent.width_m) ? ent.width_m : 1.2;
+      const h_clear = Number.isFinite(ent.height_m) ? ent.height_m : 2.4;
+      const cy = Number.isFinite(ent.center_y_m) ? ent.center_y_m : D / 2;
+
+      // Build frame geometry in its own LOCAL coord frame (frame's long
+      // axis along local x, width along local y vertical, depth into the
+      // wall along local z) and then place + rotate in world.
+      const frameGroup = new THREE.Group();
+      // Top header
+      const hdrGeo = new THREE.BoxGeometry(w_clear + 2 * frameThick, frameThick, frameDepth);
+      const hdr = new THREE.Mesh(hdrGeo, frameMat);
+      hdr.position.set(0, h_clear + frameThick / 2, 0);
+      frameGroup.add(hdr);
+      // Left jamb
+      const jambGeo = new THREE.BoxGeometry(frameThick, h_clear + frameThick, frameDepth);
+      const left = new THREE.Mesh(jambGeo, frameMat);
+      left.position.set(-w_clear / 2 - frameThick / 2, (h_clear + frameThick) / 2, 0);
+      frameGroup.add(left);
+      // Right jamb
+      const right = new THREE.Mesh(jambGeo.clone(), frameMat);
+      right.position.set(w_clear / 2 + frameThick / 2, (h_clear + frameThick) / 2, 0);
+      frameGroup.add(right);
+
+      // Mark each child for tagging. Frame trim is treated as a wood
+      // door surround acoustically (matches the preset's wood-floor
+      // catalogue material — close enough for an inset trim that's
+      // ≤0.2 % of the room's total surface area). Override per-entrance
+      // via ent.materialId when needed.
+      const trimMatId = ent.materialId || 'wood-floor';
+      for (const c of frameGroup.children) {
+        c.userData.acoustic_material = trimMatId;
+        c.userData.materialId = trimMatId;
+        c.userData.tag = `surau_entrance_${ent.wall}`;
+      }
+
+      // Place + rotate. East wall is at world x = W facing -x; west at
+      // world x = 0 facing +x; south on world z = 0 facing +z (handled
+      // by southPartition.doorCenters_x_m above so we skip 'south' here
+      // unless explicitly requested).
+      if (ent.wall === 'east') {
+        frameGroup.position.set(W - frameDepth / 2, 0, cy);
+        frameGroup.rotation.y = Math.PI / 2;
+      } else if (ent.wall === 'west') {
+        frameGroup.position.set(frameDepth / 2, 0, cy);
+        frameGroup.rotation.y = -Math.PI / 2;
+      } else if (ent.wall === 'south') {
+        // Optional — typically covered by southPartition doors. Render
+        // anyway if caller asks for it, on the wall_north face at z=0.
+        frameGroup.position.set(cy, 0, frameDepth / 2);
+        frameGroup.rotation.y = 0;
+      } else if (ent.wall === 'north') {
+        frameGroup.position.set(cy, 0, D - frameDepth / 2);
+        frameGroup.rotation.y = Math.PI;
+      } else {
+        continue;
+      }
+      roomGroup.add(frameGroup);
+    }
   }
 }
 

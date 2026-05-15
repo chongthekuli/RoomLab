@@ -46,10 +46,71 @@ const IMAM_STRIP = 1.5;  // depth of imam zone in front of mihrab
 export default {
   label: 'Surau (mosque prayer hall)',
   shape: 'rectangular',
-  ceiling_type: 'flat',
+  ceiling_type: 'flat',  // flat is overridden by surauStructure.hipRoof below
   width_m: W,
   depth_m: D,
   height_m: H,
+  // Architectural elements that turn the plain shoebox into a recognisable
+  // surau. Each element is rendered by rebuildSurauStructure() in scene.js
+  // — see the schema header comment there for field-level documentation.
+  surauStructure: {
+    // Mihrab — concave semicircular niche on the qibla wall (state +y).
+    // 1.8 m × 0.6 m × 3.0 m, centred E–W. Marble would be ideal; gypsum-
+    // board is the closest catalogued material until a stone is added.
+    mihrab: {
+      center_x_m: W / 2,
+      width_m: 1.8,
+      depth_m: 0.6,
+      height_m: 3.0,
+      sill_m: 0.0,
+      materialId: 'gypsum-board',
+    },
+    // Minbar — stepped pulpit, west of the mihrab, abutting the qibla wall.
+    // 3 steps × 0.5 m rise + 1.0 × 0.6 m platform = ~1.8 m total.
+    minbar: {
+      footprint: { x_m: 6.3, y_m: 16.1, width_m: 1.0, depth_m: 0.6 },
+      steps: 3,
+      step_rise_m: 0.5,
+      platform_height_m: 1.8,
+      materialId: 'wood-floor',
+    },
+    // Hip roof — replaces the flat ceiling with a 4-sided pyramid rising
+    // 1.5 m above the eaves. Matches the FALL 25° pitched roof in the
+    // tender drawing (4.5 m at eaves → 6.0 m at apex). Apex defaults to
+    // room centre.
+    hipRoof: {
+      apexRise_m: 1.5,
+    },
+    // Saf lines — prayer-row alignment markers on the carpet. 13 rows ×
+    // 1.2 m spacing covers ~15.6 m of usable congregation depth, leaving
+    // ~1.5 m clear at the back near the main entrance.
+    safLines: {
+      rows: 13,
+      spacing_m: 1.2,
+      start_y_m: 16.0,
+      lineThickness_m: 0.05,
+      edge_inset_m: 0.5,
+      opacity: 0.55,
+    },
+    // South-wall partition — thin band hinting at the side rooms (Imam,
+    // Bilal, AV, etc.) that sit behind the south wall in the real building.
+    // Acoustically a no-op (it's part of the south wall surface); visually
+    // a strong cue that this side has doors, not open space.
+    southPartition: {
+      thickness_m: 0.2,
+      height_m: 2.4,
+      doorCenters_x_m: [5.0, 9.0, 13.0],
+      doorWidth_m: 1.0,
+      materialId: 'plaster-smooth',
+    },
+    // Three entrance openings — east + west match the porches in the PDF;
+    // south central is the MAIN ENTRANCE (already cut by the southPartition
+    // doorCenters above, so not duplicated here).
+    entrances: [
+      { wall: 'east', center_y_m: D / 2, width_m: 1.2, height_m: 2.4 },
+      { wall: 'west', center_y_m: D / 2, width_m: 1.2, height_m: 2.4 },
+    ],
+  },
   surfaces: {
     // Carpet over concrete is the prayer-time floor across modern
     // Malaysian surau. Plastered painted blockwork walls. Plasterboard

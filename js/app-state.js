@@ -637,6 +637,7 @@ const DEFAULT_ROOM_STATE = {
   custom_vertices: null,
   stadiumStructure: null,
   multiLevelStructure: null,
+  surauStructure: null,
   // See state.room.subStructures comment above. Default-empty so a
   // preset/template/blank-custom apply starts with no sub-rooms; the
   // canonical reset path picks this up automatically.
@@ -689,6 +690,7 @@ export function applyPresetToState(key) {
   if (p.custom_vertices)                  state.room.custom_vertices = deepClone(p.custom_vertices);
   if (p.stadiumStructure)                 state.room.stadiumStructure = deepClone(p.stadiumStructure);
   if (p.multiLevelStructure)              state.room.multiLevelStructure = deepClone(p.multiLevelStructure);
+  if (p.surauStructure)                   state.room.surauStructure = deepClone(p.surauStructure);
   if (p.surfaces) Object.assign(state.room.surfaces, p.surfaces);
   if (p.shape === 'polygon' || p.shape === 'round') {
     const r = p.shape === 'polygon' ? state.room.polygon_radius_m : state.room.round_radius_m;
@@ -881,6 +883,9 @@ export function deserializeProject(obj) {
     }
     if (r.multiLevelStructure && typeof r.multiLevelStructure === 'object') {
       state.room.multiLevelStructure = deepClone(r.multiLevelStructure);
+    }
+    if (r.surauStructure && typeof r.surauStructure === 'object') {
+      state.room.surauStructure = deepClone(r.surauStructure);
     }
     // Sub-structures (Phase 1: visual only). Each entry is self-contained —
     // sourceRoom is a full snapshot captured at placement time, so the
