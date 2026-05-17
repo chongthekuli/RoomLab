@@ -783,7 +783,10 @@ function renderCustomDraw(vp) {
     for (let m = startMy; m <= endMy; m += 5) {
       if (m === 0) continue;
       const worldY = v0.y + m;
-      svg += `<text x="6" y="${y0 + worldY * CUSTOM_SCALE + 3}" fill="#5a6677" font-size="9">${m} m</text>`;
+      // Y-axis flipped — label text is the NEGATION of the world-Y
+      // offset so the user sees math convention (positive labels above
+      // origin, negative below) instead of SVG convention.
+      svg += `<text x="6" y="${y0 + worldY * CUSTOM_SCALE + 3}" fill="#5a6677" font-size="9">${-m} m</text>`;
     }
     // Origin crosshair sits at the FIRST click — it marks the new (0, 0)
     // not the canvas centre.
@@ -918,9 +921,10 @@ function renderDrawOverlay(x0, y0, scale, color) {
       s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">Click to set origin (0, 0)</text>`;
     } else if (drawVertices.length >= 1) {
       // Cursor coords RELATIVE to vertex[0] which is the new origin.
+      // Y-axis flipped so screen-up reads positive (math convention).
       const v0 = drawVertices[0];
       const relX = drawCursor.rx - v0.x;
-      const relY = drawCursor.ry - v0.y;
+      const relY = v0.y - drawCursor.ry;
       s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">${relX.toFixed(1)}, ${relY.toFixed(1)} m</text>`;
     } else {
       // Zone-draw mode etc. — keep the old world-coord readout.
@@ -1012,7 +1016,10 @@ function commitCoordPair(dx, dy) {
   if (!drawActive || drawVertices.length < 1) return false;
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) return false;
   const v0 = drawVertices[0];
-  drawVertices.push({ x: v0.x + dx, y: v0.y + dy });
+  // Y-axis flip — user-facing convention is math-style (Y-up = positive)
+  // but internal SVG world-Y goes DOWN as positive. So typed dy=+3
+  // means "3 m up on screen" = world-Y v0.y − 3 (smaller world Y).
+  drawVertices.push({ x: v0.x + dx, y: v0.y - dy });
   return true;
 }
 
