@@ -897,6 +897,85 @@ html[data-more-menu] .vp-more-panel {
   border-color: #242830;
 }
 .vp-toggle:disabled::before { opacity: 0.25; }
+
+/* Heatmap octave-band selector — horizontal row of 7 pills under the
+   Layers toggle grid in the "•••" panel. Mirrors a graphic-EQ band row
+   (engineers think "the 4k", not "position 6 of 7"). Driven by
+   js/labs/roomlab/main.js → setHeatmapFrequency() in scene.js. */
+.vp-freq-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  margin-top: 8px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  position: relative;
+}
+/* Faint baseline that ties the 7 pills into one continuum — reads as
+   an octave-band ribbon, not 7 unrelated buttons. */
+.vp-freq-row::after {
+  content: '';
+  position: absolute;
+  left: 8px; right: 8px; bottom: 3px;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(90, 122, 176, 0.25) 15%,
+    rgba(90, 122, 176, 0.45) 50%,
+    rgba(90, 122, 176, 0.25) 85%,
+    transparent 100%);
+  pointer-events: none;
+}
+.vp-freq-pill {
+  position: relative;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #89929d;
+  padding: 5px 0;
+  font: inherit;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: center;
+  transition: color 180ms ease-out, background-color 200ms ease-out,
+              border-color 200ms ease-out, transform 120ms ease-out;
+}
+.vp-freq-pill:hover:not(:disabled):not(.active) {
+  color: #c5ccd4;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.vp-freq-pill:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.vp-freq-pill.active {
+  color: #fff;
+  background: #3a5a8a;
+  border-color: #5a7ab0;
+  box-shadow: 0 0 0 1px rgba(90, 122, 176, 0.35), 0 2px 6px rgba(58, 90, 138, 0.25);
+}
+.vp-freq-pill:focus-visible {
+  outline: 2px solid var(--accent, #5a7ab0);
+  outline-offset: 2px;
+  z-index: 1;
+}
+.vp-freq-pill:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  color: #5a616a;
+}
+.vp-freq-row[aria-disabled="true"]::after {
+  opacity: 0.3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-freq-pill { transition: none; }
+  .vp-freq-pill:active:not(:disabled) { transform: none; }
+}
+
 .vp-help-btn { min-width: 28px; padding: 0.3rem 0.5rem; font-weight: 600; }
 .vp-help-btn::before { content: '' !important; }
 

@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=475" />
-  <link rel="stylesheet" href="css/theme.css?v=475" />
-  <link rel="stylesheet" href="css/print.css?v=475" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=476" />
+  <link rel="stylesheet" href="css/theme.css?v=476" />
+  <link rel="stylesheet" href="css/print.css?v=476" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -127,6 +127,21 @@
               <button class="vp-toggle active" id="toggle-isobars" title="Show/hide contour lines — shortcut I">Isobars</button>
               <button class="vp-toggle" id="toggle-stipa-mode" title="Switch heatmap metric: SPL (dB) ↔ STIPA — shortcut M">STIPA mode</button>
               <button class="vp-toggle" id="toggle-reverb" title="Include statistical reverberant field — shortcut R">Reverb field</button>
+            </div>
+            <!-- Octave-band selector for the SPL/STIPA heatmap. Drives
+                 state.physics.freq_hz; engine already responds per-band.
+                 Pill row mirrors a graphic-EQ layout (engineers think
+                 "the 4k", not "position 6"). Disabled when the heatmap
+                 layer is off — same dependency rule as Isobars / STIPA
+                 mode / Reverb field. -->
+            <div class="vp-freq-row" role="radiogroup" aria-label="Heatmap octave band">
+              <button class="vp-freq-pill" data-freq="125"  role="radio" aria-checked="false" type="button" title="125 Hz octave band — low bass. Diffraction zone is wide (λ≈2.7 m), so shadow boundaries look soft and walls leak more sound.">125</button>
+              <button class="vp-freq-pill" data-freq="250"  role="radio" aria-checked="false" type="button" title="250 Hz octave band — bass. Shadows still wide; absorber NRC dominates here.">250</button>
+              <button class="vp-freq-pill" data-freq="500"  role="radio" aria-checked="false" type="button" title="500 Hz octave band — low-mid. Speech intelligibility starts here (STIPA-weighted).">500</button>
+              <button class="vp-freq-pill active" data-freq="1000" role="radio" aria-checked="true" type="button" title="1 kHz octave band — reference. Speaker sensitivity is rated here; default for SPL coverage maps.">1k</button>
+              <button class="vp-freq-pill" data-freq="2000" role="radio" aria-checked="false" type="button" title="2 kHz octave band — speech presence. Shadow boundaries sharpen here.">2k</button>
+              <button class="vp-freq-pill" data-freq="4000" role="radio" aria-checked="false" type="button" title="4 kHz octave band — consonant clarity. Sharp shadows, strong air absorption beyond ~10 m.">4k</button>
+              <button class="vp-freq-pill" data-freq="8000" role="radio" aria-checked="false" type="button" title="8 kHz octave band — high. Sharpest shadows, biggest air-absorption rolloff; A/B with 125 Hz to validate diffraction physics.">8k</button>
             </div>
           </div>
           <div class="vp-more-section">
@@ -344,6 +359,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=475"></script>
+  <script type="module" src="js/main.js?v=476"></script>
 </body>
 </html>

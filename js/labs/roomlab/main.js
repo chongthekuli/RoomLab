@@ -14,7 +14,7 @@
 
 import { state, SPEAKER_CATALOG, DEFAULT_PRESET_KEY, applyPresetToState, serializeProject, deserializeProject } from '../../app-state.js';
 import { readAutosave, scheduleAutosave, flushAutosave } from '../../shared/autosave.js';
-import { on } from '../../shared/events.js';
+import { on, emit } from '../../shared/events.js';
 import { loadMaterials } from '../../physics/materials.js';
 import { loadLoudspeaker } from '../../physics/loudspeaker.js';
 import { applyHashStateOnLoad } from '../../io/share-link.js';
@@ -35,6 +35,7 @@ import {
   toggleReverbField, toggleHeatmapMode, toggleRayViz, frameCameraToRoom,
   setRackCatalogues, setWalkthroughMode,
   applyCameraPreset, detectActiveCameraPreset,
+  setHeatmapFrequency,
 } from '../../graphics/scene.js';
 import { installCollapsibles } from '../../ui/collapsibles.js';
 import { mountWalkTouchHUD } from '../../ui/walk-touch-hud.js';
@@ -107,11 +108,17 @@ function setupTabs() {
   }
 
   const heatBtn = document.getElementById('toggle-heatmaps');
+  const freqRow = document.querySelector('.vp-freq-row');
+  const freqPills = freqRow ? Array.from(freqRow.querySelectorAll('.vp-freq-pill')) : [];
   const heatmapDependents = () => ['toggle-isobars', 'toggle-reverb', 'toggle-stipa-mode']
     .map(id => document.getElementById(id)).filter(Boolean);
   const syncHeatmapDependents = () => {
     const onState = !!state.display.showHeatmaps;
     for (const el of heatmapDependents()) el.disabled = !onState;
+    // Freq pills follow the same on/off rule — choosing a band is
+    // meaningless when no heatmap is being painted.
+    for (const p of freqPills) p.disabled = !onState;
+    if (freqRow) freqRow.setAttribute('aria-disabled', onState ? 'false' : 'true');
   };
   if (heatBtn) {
     heatBtn.addEventListener('click', () => {
@@ -121,6 +128,45 @@ function setupTabs() {
     });
   }
   syncHeatmapDependents();
+
+  // Heatmap octave-band selector — Maya design pass 2026-05-17. Click a
+  // pill → write state.physics.freq_hz → ask scene.js to re-sample. The
+  // pill row mirrors a graphic-EQ band layout because engineers think
+  // "the 4k", not "position 6 of 7". Keyboard nav follows WAI-ARIA
+  // radiogroup pattern (Arrow keys move active state + focus together).
+  const applyFreq = (freq_hz, focusEl) => {
+    if (!Number.isFinite(freq_hz)) return;
+    if ((state.physics.freq_hz ?? 1000) === freq_hz) return;
+    setHeatmapFrequency(freq_hz);
+    for (const p of freqPills) {
+      const active = Number(p.dataset.freq) === freq_hz;
+      p.classList.toggle('active', active);
+      p.setAttribute('aria-checked', active ? 'true' : 'false');
+      p.setAttribute('tabindex', active ? '0' : '-1');
+    }
+    if (focusEl) focusEl.focus();
+    // Refresh the right-rail per-listener SPL breakdown — panel-results
+    // subscribes to listener:changed and re-renders from state.physics.freq_hz.
+    try { emit('listener:changed'); } catch (_) {}
+  };
+  freqPills.forEach((pill, idx) => {
+    pill.setAttribute('tabindex', pill.classList.contains('active') ? '0' : '-1');
+    pill.addEventListener('click', () => {
+      applyFreq(Number(pill.dataset.freq), pill);
+    });
+    pill.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight'
+          && e.key !== 'Home' && e.key !== 'End') return;
+      e.preventDefault();
+      let next = idx;
+      if (e.key === 'ArrowLeft')  next = (idx - 1 + freqPills.length) % freqPills.length;
+      if (e.key === 'ArrowRight') next = (idx + 1) % freqPills.length;
+      if (e.key === 'Home') next = 0;
+      if (e.key === 'End')  next = freqPills.length - 1;
+      const target = freqPills[next];
+      applyFreq(Number(target.dataset.freq), target);
+    });
+  });
 
   const aimBtn = document.getElementById('toggle-aim-lines');
   if (aimBtn) {

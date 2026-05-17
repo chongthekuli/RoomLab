@@ -123,6 +123,21 @@ export function toggleHeatmaps(force) {
   if (heatmapMesh) heatmapMesh.visible = next;
 }
 
+// Heatmap octave-band setter. Distinct from toggleReverbField because the
+// freq isn't a boolean — it's one of 7 octave-band centres. Same rebuild
+// pattern: mutate state.physics.freq_hz, then re-sample every heatmap
+// surface so vertex colours pick up the new per-band attenuation /
+// per-band absorption / per-band directivity. Caller (UI) is responsible
+// for guarding against no-op writes (current === next).
+//
+// Maya design pass 2026-05-17 — pill row in vp-more-panel calls this.
+export function setHeatmapFrequency(freq_hz) {
+  if (!Number.isFinite(freq_hz) || freq_hz <= 0) return;
+  state.physics.freq_hz = freq_hz;
+  rebuildZones();
+  rebuildHeatmap();
+}
+
 // Aim-line indicator toggle — draws a thin coloured line from every speaker
 // element along its aim direction, extending ~8 m so the user can see where
 // each box is actually pointing. Off by default (adds visual noise when on).
