@@ -833,6 +833,20 @@ function renderDrawOverlay(x0, y0, scale, color) {
 function buildDrawHtml(svg) {
   const guideText = drawGuideText();
   const ready = drawCursorNearStart && drawVertices.length >= 3;
+  // Coordinate input row — appears after vertex 1 is placed. Lets the
+  // user type relative coords ("5, 3" = 5 m east + 3 m south of the
+  // first click which is the new origin) instead of clicking. Combines
+  // CAD-style keyboard precision with the existing click-to-place flow.
+  const coordInputRow = drawVertices.length >= 1 && drawConfig?.mode === 'room-shape'
+    ? `<div class="draw-coord-row">
+        <label for="draw-coord-input">Next point (m, rel to first click):</label>
+        <input id="draw-coord-input" type="text" placeholder="e.g. 5, 3 or -2 4"
+               autocomplete="off" spellcheck="false"
+               title="Type x, y in metres relative to the first click — Enter to add. Negative values allowed." />
+        <button id="btn-draw-coord-add" title="Add point at the typed coordinates">add <kbd>Enter</kbd></button>
+        <span class="draw-coord-help">— or just click on the canvas</span>
+      </div>`
+    : '';
   return `
     <div class="viewport-2d draw-mode">
       <div class="draw-toolbar">
@@ -844,6 +858,7 @@ function buildDrawHtml(svg) {
           <button id="btn-draw-cancel" title="discard and exit draw mode — shortcut Esc">cancel <kbd>Esc</kbd></button>
         </div>
       </div>
+      ${coordInputRow}
       <div class="draw-canvas">${svg}</div>
     </div>
   `;
@@ -878,6 +893,58 @@ function wireDrawEvents(vp) {
   vp.querySelector('#btn-draw-undo').addEventListener('click', undoDrawVertex);
   vp.querySelector('#btn-draw-finish').addEventListener('click', finishDraw);
   vp.querySelector('#btn-draw-cancel').addEventListener('click', cancelDraw);
+
+  // Coordinate input — appears in the toolbar after vertex 1 is placed.
+  // Type "x, y" (or "x y") in metres relative to the first click and
+  // press Enter to add a vertex. After each Enter the field clears and
+  // refocuses so the user can type the next point without reaching for
+  // the mouse. Click handlers on the SVG still work in parallel.
+  const coordInput = vp.querySelector('#draw-coord-input');
+  const coordAddBtn = vp.querySelector('#btn-draw-coord-add');
+  if (coordInput) {
+    coordInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commitCoordInput(coordInput);
+      }
+    });
+    // Auto-focus so the user can start typing immediately after the
+    // first click without clicking into the field.
+    setTimeout(() => coordInput.focus(), 0);
+  }
+  if (coordAddBtn && coordInput) {
+    coordAddBtn.addEventListener('click', () => commitCoordInput(coordInput));
+  }
+}
+
+// Parse "x, y" / "x y" / "x;y" — accept any separator (comma, space,
+// semicolon). Returns null on malformed input. Negative + decimal
+// values accepted. Adds a vertex at world coords offset from the
+// first-placed vertex; onFinish later shifts so verts[0] = (0,0) so
+// the typed values literally become the stored coords.
+function commitCoordInput(input) {
+  if (!drawActive || drawVertices.length < 1) return;
+  const raw = (input.value || '').trim();
+  if (!raw) return;
+  const m = raw.match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)$/);
+  if (!m) {
+    input.classList.add('draw-coord-err');
+    setTimeout(() => input.classList.remove('draw-coord-err'), 400);
+    return;
+  }
+  const dx = parseFloat(m[1]);
+  const dy = parseFloat(m[2]);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+  const v0 = drawVertices[0];
+  drawVertices.push({ x: v0.x + dx, y: v0.y + dy });
+  input.value = '';
+  render();
+  // After render the input element is regenerated; find the new one
+  // and refocus so the next Enter keeps working.
+  setTimeout(() => {
+    const fresh = document.querySelector('#draw-coord-input');
+    if (fresh) fresh.focus();
+  }, 0);
 }
 
 function renderNormal(vp) {

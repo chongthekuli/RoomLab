@@ -3892,6 +3892,75 @@ section h3 {
 .draw-hint { color: #cfd6e0; font-size: 0.78rem; line-height: 1.2; }
 .draw-hint-ready { color: #ffd000; font-weight: 500; }
 .draw-canvas svg:focus { outline: none; }     /* keyboard-focused SVG shouldn't gain a browser default outline */
+
+/* Coordinate input row — appears in the draw toolbar after the first
+   vertex is placed. CAD-style "Next point (rel)" prompt so the user
+   can type relative coords instead of (or alongside) clicking. */
+.draw-coord-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: #15191f;
+  border-bottom: 1px solid #2a2f38;
+  font-size: 0.76rem;
+  color: #cfd6e0;
+  flex-wrap: wrap;
+}
+.draw-coord-row label {
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.draw-coord-row input {
+  padding: 0.32rem 0.6rem;
+  border: 1px solid #2a2f38;
+  background: #0d1015;
+  color: var(--fg-strong, #e5e7eb);
+  border-radius: 4px;
+  font: inherit;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  width: 9rem;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.draw-coord-row input:focus {
+  outline: none;
+  border-color: var(--accent, #4aa3ff);
+  box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.18);
+}
+.draw-coord-row input.draw-coord-err {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.20);
+}
+.draw-coord-row button {
+  padding: 0.28rem 0.7rem;
+  border: 1px solid #2a2f38;
+  background: #1a1f27;
+  color: #cde;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+}
+.draw-coord-row button:hover { background: #2a2f38; color: #fff; }
+.draw-coord-row button kbd {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.62rem;
+  color: #cfd3d9;
+}
+.draw-coord-help {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: italic;
+}
 .draw-actions { display: flex; gap: 0.3rem; }
 .draw-actions button {
   padding: 0.28rem 0.7rem;
