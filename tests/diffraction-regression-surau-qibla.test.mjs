@@ -190,8 +190,13 @@ const probe_vals = probe_xs.map(x => computeMultiSourceSPL({
   ...commonArgs, listenerPos: { x, y: -0.5, z: 1.7 },
 }));
 const corner_gradient = Math.max(...probe_vals) - Math.min(...probe_vals);
-assertTrue(corner_gradient < 15 && corner_gradient > 3,
-  `(5a) NE-corner gradient is a real continuous transition (3 < ${corner_gradient.toFixed(2)} < 15 dB)`,
+// Bound updated for Tier 1a commit (h): multi-path vertical-edge
+// diffraction + ground reflection lifts the past-corner peak by ~1-2 dB
+// vs pre-(h), so the total gradient (deep shadow → past-corner peak)
+// grew from ~14 dB to ~16 dB. Still continuous, still smoothing better
+// than a binary step. Allow up to 20 dB.
+assertTrue(corner_gradient < 20 && corner_gradient > 3,
+  `(5a) NE-corner gradient is a real continuous transition (3 < ${corner_gradient.toFixed(2)} < 20 dB)`,
   `probes: ${probe_xs.map((x, i) => `x=${x}=${probe_vals[i].toFixed(1)}`).join(', ')}`);
 // Continuous monotonicity: each step from in-shadow to past-corner
 // must be ≤ 8 dB (was ~10+ dB pre-(e) as a single hard cliff).

@@ -11,7 +11,9 @@
       "transmission_loss_db": [39, 41, 47, 53, 58, 62, 65],
       "surface_density_kg_m2": 345,
       "tl_estimated": false,
-      "_tl_source": "Hopkins, Sound Insulation ch.7 + CRC Handbook of Architectural Acoustics table 3.7 — 150 mm dense reinforced concrete (2300 kg/m³). Paint film does not measurably affect TL."
+      "_tl_source": "Hopkins, Sound Insulation ch.7 + CRC Handbook of Architectural Acoustics table 3.7 — 150 mm dense reinforced concrete (2300 kg/m³). Paint film does not measurably affect TL.",
+      "ground_absorption_G": 0.0,
+      "_ground_G_source": "ISO 9613-2 §7.3.1 table 3 — hard ground (concrete / asphalt) G=0. Used for ground reflection on diffracted paths (Tier 1a commit h). Single-value MVP; per-band G is P17 deferred."
     },
     {
       "id": "carpet-heavy",

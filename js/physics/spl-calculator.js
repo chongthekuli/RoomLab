@@ -8,9 +8,7 @@ import {
 import {
   wallsCrossedByPath, transmissionLossDb, bandIndexForFreq,
 } from './wall-path.js';
-import {
-  computeDiffractionContributions, computeCornerDiffractionContributions,
-} from './diffraction.js';
+import { computeDiffractionContributions } from './diffraction.js';
 import {
   computeReradiationContributions, computeReverberantInsideSPL,
 } from './reradiation.js';
@@ -363,9 +361,16 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     // the TL term applied, so we reconstruct it from spl_db + tl_db.
     if (useP15 && d.wallsCrossed?.length > 0) {
       const sourceLpFreeField_db = spl_db + d.tl_db_applied;
+      // Ground absorption coefficient G ∈ [0,1] for outdoor reflection
+      // on the diffracted path (Tier 1a commit (h), ISO 9613-2 §7.3).
+      // Read from the floor material's optional ground_absorption_G
+      // field; default 0 (hard concrete / fully reflective).
+      const floorMatId = room?.surfaces?.floor;
+      const groundG = (floorMatId && materials?.byId?.[floorMatId]?.ground_absorption_G) ?? 0;
       const diff = computeDiffractionContributions({
         src, listener: listenerPos, room, wallsCrossed: d.wallsCrossed,
         materials, freq_hz, sourceLpFreeField_db, temperature_C, airAbsorption,
+        groundG, groundPlaneZ: 0,
       });
       diffractionPowerSum += diff.totalPower;
       if (Number.isFinite(L_p_rev_inside_band_db)) {
@@ -378,20 +383,12 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
         reradiationPowerSum += rerad.totalPower;
       }
     }
-    // Pierce-Hadden wedge diffraction around outdoor vertical building
-    // corners — gates on its own shadow test (cornerIsInShadowPath),
-    // independent of wallsCrossed. The corner-bend path goes AROUND
-    // the building, not through any wall, so a listener can be in a
-    // corner's shadow without the direct path crossing any wall.
-    if (useP15) {
-      const sourceLpFreeField_db = spl_db + d.tl_db_applied;
-      const corner = computeCornerDiffractionContributions({
-        src, listener: listenerPos, room,
-        materials, freq_hz, sourceLpFreeField_db,
-        temperature_C, airAbsorption,
-      });
-      diffractionPowerSum += corner.totalPower;
-    }
+    // Tier 1a commit (h): the +1.25 dB Pierce-Hadden wedge correction
+    // that USED to live here has been REPLACED by the full multi-path
+    // Maekawa-applied-to-the-vertical-edge geometry inside
+    // computeDiffractionContributions. Same physics done explicitly,
+    // no scalar fudge. computeCornerDiffractionContributions is now
+    // deprecated and will be deleted in commit (i).
   }
   const totalPower = (coherent ? (Re * Re + Im * Im) : directPressureSum)
                    + reverbPowerSum + diffractionPowerSum + reradiationPowerSum;

@@ -7,7 +7,6 @@
 
 import {
   wedgeIL, maekawaIL, enumerateRoomCorners, cornerIsInShadowPath,
-  computeCornerDiffractionContributions,
   MAEKAWA_IL_MAX_DB, MAEKAWA_IL_GRAZE_DB,
 } from '../js/physics/diffraction.js';
 
@@ -114,20 +113,14 @@ const assertTrue = (c, l, e = '') => c ? pass(l) : fail(l, e);
     'Deep-shadow listener behind north wall: ≥2 north-side corners candidate');
 }
 
-// ---- Integration: computeCornerDiffractionContributions ----
-// With the flag off (default in this test process), the function must
-// return zero contribution regardless of geometry — flag-off parity.
-{
-  const room = { shape: 'rectangular', width_m: 9, depth_m: 12, height_m: 4.5 };
-  const result = computeCornerDiffractionContributions({
-    src: { position: { x: 4.5, y: 6, z: 1.7 } },
-    listener: { x: 9.5, y: -0.5, z: 1.7 },
-    room, materials: { frequency_bands_hz: [125, 250, 500, 1000, 2000, 4000, 8000] },
-    freq_hz: 1000, sourceLpFreeField_db: 80,
-  });
-  assertEq(result.totalPower, 0, '(flag OFF) corner contribution totalPower = 0');
-  assertEq(result.paths.length, 0, '(flag OFF) corner paths empty');
-}
+// computeCornerDiffractionContributions integration test removed in
+// Tier 1a commit (h) — the function is @deprecated, no longer called
+// from production code paths. Full deletion (function + this file's
+// wedgeIL/enumerateRoomCorners/cornerIsInShadowPath assertions) lands
+// in commit (i). Until then, the formula-level wedgeIL assertions
+// above stay valuable as documentation of the Pierce-Hadden math even
+// though it's no longer used in the SPL hot loop. (Martina pre-commit
+// audit: integration block was testing dead code; removed.)
 
 if (failed > 0) { console.log(`\n${failed} wedge test(s) FAILED`); process.exit(1); }
 console.log('\nAll wedge diffraction tests passed.');

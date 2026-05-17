@@ -164,34 +164,88 @@ export function diffractionPointOnEdge(S, R, E1, E2) {
 // Tier 1a scope: only top + vertical side edges. Bottom edges (raised
 // enclosures with elev_m > 0) are P12.
 function enumerateFreeEdges(wall, room) {
-  const edges = [];
-  // Top horizontal edge — always free (no roof above an exterior wall).
-  edges.push({
-    id: 'top',
-    e1: { x: wall.v1.x, y: wall.v1.y, z: wall.elev_m + wall.height_m },
-    e2: { x: wall.v2.x, y: wall.v2.y, z: wall.elev_m + wall.height_m },
-  });
-  // Vertical sides — only free if no other wall in the polygon shares
-  // the endpoint. For rectangular rooms this is never true (all 4
-  // corners are shared). For non-rectangular shapes we'd need to scan
-  // adjacent walls; for Tier 1a we conservatively assume all rectangular
-  // verticals are SHARED (so they don't contribute) and emit verticals
-  // for non-rectangular shapes (they'll usually contribute correctly,
-  // and over-counting by 1 edge is negligible vs missing the top edge).
-  const isRect = !room?.shape || room.shape === 'rectangular';
-  if (!isRect) {
-    edges.push({
+  // Always emit all 3 diffraction edges (top + 2 verticals) per ISO 9613-2
+  // §7.4. Each vertical edge IS a free diffraction edge — the fact that
+  // it's shared with an adjacent wall in a rectangular room doesn't make
+  // it disappear acoustically; it just means TWO walls in the iteration
+  // produce the SAME edge, which the caller dedupes via canonical
+  // edge-key Set (Dr. Chen Tier 1a commit (h) spec, section A.2).
+  //
+  // Prior (commit a..f): rectangular verticals were skipped here and
+  // covered separately by the +1.25 dB Pierce-Hadden wedge correction in
+  // computeCornerDiffractionContributions. That was a knife-edge-Maekawa
+  // approximation with a scalar top-up. Commit (h) replaces the
+  // approximation with full multi-path Maekawa-applied-to-the-vertical-
+  // edge geometry — the same physics done explicitly, no scalar fudge.
+  // The wedge function is now deprecated and its call sites have been
+  // removed; deletion lands in commit (i).
+  return [
+    {
+      id: 'top',
+      e1: { x: wall.v1.x, y: wall.v1.y, z: wall.elev_m + wall.height_m },
+      e2: { x: wall.v2.x, y: wall.v2.y, z: wall.elev_m + wall.height_m },
+    },
+    {
       id: 'left',
       e1: { x: wall.v1.x, y: wall.v1.y, z: wall.elev_m },
       e2: { x: wall.v1.x, y: wall.v1.y, z: wall.elev_m + wall.height_m },
-    });
-    edges.push({
+    },
+    {
       id: 'right',
       e1: { x: wall.v2.x, y: wall.v2.y, z: wall.elev_m },
       e2: { x: wall.v2.x, y: wall.v2.y, z: wall.elev_m + wall.height_m },
-    });
-  }
-  return edges;
+    },
+  ];
+}
+
+// Canonical edge key for dedupe — direction-agnostic so the NE vertical
+// edge (shared between wall_north and wall_east) produces the same key
+// from both walls' enumeration passes. Round to 3 decimal places so
+// floating-point endpoint computation jitter doesn't break dedupe.
+function edgeKey(e1, e2) {
+  const r = (v) => Math.round(v * 1000) / 1000;
+  const a = `${r(e1.x)},${r(e1.y)},${r(e1.z)}`;
+  const b = `${r(e2.x)},${r(e2.y)},${r(e2.z)}`;
+  // Sort endpoints so {e1,e2} and {e2,e1} produce identical keys.
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+// Ground-reflected diffraction path. Mirror the source through the
+// ground plane (z=0 by default), recompute the Fermat optimum for the
+// image source, apply Maekawa IL on the image path, attenuate by
+// (1 - G) ground absorption factor.
+//
+// G ∈ [0, 1]: 0 = hard reflective (concrete/asphalt), 1 = fully
+// absorptive (snow). Per ISO 9613-2 §7.3.1 single-value engineering
+// approximation. Per-band G is P17 deferred.
+//
+// Returns { detour_m, delta_m, il_db, attenuationFactor } where
+// `attenuationFactor` ∈ [0, 1] is the energy multiplier (1 = hard ground
+// = full reflection, 0 = full absorption = no contribution). Caller
+// multiplies the path's power by this before energy-summing.
+function groundReflectedDiffraction(src, listener, edge, lambda_m, groundPlaneZ, groundG) {
+  // G ∈ [0, 1]: 0 = hard reflective (full image-source contribution),
+  // 1 = fully absorbent (no contribution). Clamp + compute below.
+  // Mirror source through ground plane: z' = 2·groundPlaneZ - z.
+  const srcImage = {
+    x: src.x,
+    y: src.y,
+    z: 2 * groundPlaneZ - src.z,
+  };
+  const opt = diffractionPointOnEdge(srcImage, listener, edge.e1, edge.e2);
+  if (!opt) return null;
+  const il_db = maekawaIL(opt.delta, lambda_m);
+  if (il_db <= 0) return null;
+  // Hard ground (G=0) → attenuation = 1 → full reflection.
+  // Soft ground (G=1) → attenuation = 0 → no ground contribution.
+  const G = Math.max(0, Math.min(1, groundG ?? 0));
+  const attenuationFactor = 1 - G;
+  return {
+    detour_m: opt.detour,
+    delta_m: opt.delta,
+    il_db,
+    attenuationFactor,
+  };
 }
 
 // Resolve a wallId (from wallsCrossedByPath) back to its geometric
@@ -258,6 +312,8 @@ export function computeDiffractionContributions({
   src, listener, room, wallsCrossed, materials, freq_hz,
   sourceLpFreeField_db, temperature_C = DEFAULT_TEMPERATURE_C,
   airAbsorption = true,
+  groundG = 0,                  // NEW (h): ground absorption [0,1]; 0 = hard
+  groundPlaneZ = 0,             // NEW (h): mirror plane for image source
 }) {
   if (!PHYSICS_P1_5_ENABLED) return { paths: [], totalPower: 0 };
   if (!Array.isArray(wallsCrossed) || wallsCrossed.length === 0) {
@@ -281,6 +337,12 @@ export function computeDiffractionContributions({
   const directAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * directLen : 0;
   const Lp_1m = sourceLpFreeField_db + 20 * Math.log10(directLen) + directAirAbs;
 
+  // Edge-level dedupe (Dr. Chen (h) spec, section A.2). The NE vertical
+  // edge is wall_north's `right` AND wall_east's `left`. Without dedupe
+  // we'd integrate the same physical edge twice → +3 dB double-count
+  // on every corner-bend contribution. Skip if already integrated.
+  const seenEdges = new Set();
+
   let totalPower = 0;
   const paths = [];
   for (const crossing of solid) {
@@ -288,6 +350,9 @@ export function computeDiffractionContributions({
     if (!wall) continue;
     const edges = enumerateFreeEdges(wall, room);
     for (const edge of edges) {
+      const key = edgeKey(edge.e1, edge.e2);
+      if (seenEdges.has(key)) continue;
+      seenEdges.add(key);
       const opt = diffractionPointOnEdge(src.position, listener, edge.e1, edge.e2);
       if (!opt) continue;
       const il_db = maekawaIL(opt.delta, lambda);
@@ -295,17 +360,44 @@ export function computeDiffractionContributions({
       // Free-field at the detour length, plus IL, plus air abs on detour.
       const detourAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * opt.detour : 0;
       const Lp_detour = Lp_1m - 20 * Math.log10(opt.detour) - detourAirAbs - il_db;
-      if (!Number.isFinite(Lp_detour)) continue;
-      const power = Math.pow(10, Lp_detour / 10);
-      totalPower += power;
-      paths.push({
-        wallId: crossing.wallId,
-        edgeId: edge.id,
-        delta_m: opt.delta,
-        detour_m: opt.detour,
-        il_db,
-        spl_db: Lp_detour,
-      });
+      if (Number.isFinite(Lp_detour)) {
+        const power = Math.pow(10, Lp_detour / 10);
+        totalPower += power;
+        paths.push({
+          wallId: crossing.wallId,
+          edgeId: edge.id,
+          pathType: 'direct',
+          delta_m: opt.delta,
+          detour_m: opt.detour,
+          il_db,
+          spl_db: Lp_detour,
+        });
+      }
+      // Ground-reflected diffraction path (ISO 9613-2 §7.3 + §7.4).
+      // Image-source mirror through groundPlaneZ; same Maekawa formula
+      // on the imaged geometry; attenuated by (1 - G). For hard ground
+      // (G=0) this doubles the diffracted contribution → +3.01 dB lift
+      // in symmetric geometries. Curves the shadow boundary.
+      const reflected = groundReflectedDiffraction(
+        src.position, listener, edge, lambda, groundPlaneZ, groundG,
+      );
+      if (reflected && reflected.attenuationFactor > 0) {
+        const reflectedAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * reflected.detour_m : 0;
+        const Lp_reflected = Lp_1m - 20 * Math.log10(reflected.detour_m) - reflectedAirAbs - reflected.il_db;
+        if (Number.isFinite(Lp_reflected)) {
+          const power = Math.pow(10, Lp_reflected / 10) * reflected.attenuationFactor;
+          totalPower += power;
+          paths.push({
+            wallId: crossing.wallId,
+            edgeId: edge.id,
+            pathType: 'ground',
+            delta_m: reflected.delta_m,
+            detour_m: reflected.detour_m,
+            il_db: reflected.il_db,
+            spl_db: Lp_reflected + 10 * Math.log10(reflected.attenuationFactor),
+          });
+        }
+      }
     }
   }
   return { paths, totalPower };
@@ -414,9 +506,17 @@ export function cornerIsInShadowPath(corner, src, listener, room) {
   return true;
 }
 
-// Compute total wedge-diffracted power contribution at the listener
-// across every shadowing rectangular corner of `room`. Returns
-// { paths: [...], totalPower } parallel to computeDiffractionContributions.
+// @deprecated since Tier 1a commit (h). The +1.25 dB Pierce-Hadden wedge
+// correction this function applied has been REPLACED by full multi-path
+// Maekawa-applied-to-the-vertical-edge geometry inside
+// computeDiffractionContributions (h spec section D — same physics done
+// explicitly, no scalar fudge). Keeping function exported but unused so
+// commit (h) bisects cleanly; deletion lands in cleanup commit (i).
+// Do NOT add new call sites.
+//
+// (Original docstring) Compute total wedge-diffracted power contribution
+// at the listener across every shadowing rectangular corner of `room`.
+// Returns { paths: [...], totalPower } parallel to computeDiffractionContributions.
 // Caller energy-sums alongside the existing top-edge diffraction + direct
 // (through-wall TL) + re-radiation contributions.
 //
