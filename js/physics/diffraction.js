@@ -273,3 +273,7 @@ export function computeDiffractionContributions({
 // Test-only export so the unit test can verify enumerateFreeEdges
 // behaviour without exporting it to the public API surface.
 export const _testing = { enumerateFreeEdges, resolveWallGeometry };
+
+// Public re-export — reradiation.js needs the same wall-id → geometry
+// resolution, no point duplicating it in two modules.
+export { resolveWallGeometry };
