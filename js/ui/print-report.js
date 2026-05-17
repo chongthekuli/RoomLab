@@ -826,9 +826,6 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <section class="pr-cover-proposal">
         <p class="pr-cover-proposal-para">${escapeHtml(proposalParagraph)}</p>
       </section>
-      <div class="pr-cover-foot">
-        <span>schema v${model.project.schemaVersion} · generated ${escapeHtml(model.project.generatedAt)}</span>
-      </div>
     </div>`;
 
   // The standalone B&W floor-plan page used to live here. Killed in
