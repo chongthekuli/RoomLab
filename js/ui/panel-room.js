@@ -51,11 +51,15 @@ export function mountRoomPanel({ materials }) {
     </div>
     <div class="picker-row">
       <span class="picker-label" title="Signature pre-built scenes that load with their full geometry, audience, and PA system as authored.">Presets</span>
-      <div class="picker-buttons" id="preset-row"></div>
+      <select class="picker-dropdown" id="preset-dropdown" title="Choose a signature pre-built scene to load verbatim.">
+        <option value="">— Choose a preset —</option>
+      </select>
     </div>
     <div class="picker-row">
       <span class="picker-label" title="Parametric room shapes — pick a starting layout and edit the dimensions below to whatever size you need. The speakers and listener auto-scale with the room.">Templates</span>
-      <div class="picker-buttons" id="template-row"></div>
+      <select class="picker-dropdown" id="template-dropdown" title="Choose a parametric room template — dimensions are editable after loading.">
+        <option value="">— Choose a template —</option>
+      </select>
     </div>
     <div class="picker-row">
       <span class="picker-label" title="Draw your own room outline on the 2D floor plan — click to place vertices, click point 1 to close the loop. Snap is 0.5 m.">Custom</span>
@@ -101,27 +105,44 @@ export function mountRoomPanel({ materials }) {
     <div id="surface-materials"></div>
   `;
 
-  // Presets row — signature scenes (Arena, Pavilion) load verbatim.
-  const presetRow = root.querySelector('#preset-row');
+  // Presets dropdown — signature scenes (Arena, Pavilion, Surau) load
+  // verbatim. Refactored from a button row to a dropdown 2026-05-17 so
+  // adding presets doesn't visually clutter the panel. Picking '' (the
+  // placeholder) is a no-op; only real keys fire applyPreset.
+  const presetDropdown = root.querySelector('#preset-dropdown');
   for (const [key, p] of Object.entries(PRESETS)) {
-    const btn = document.createElement('button');
-    btn.textContent = p.label;
-    btn.dataset.preset = key;
-    btn.addEventListener('click', () => applyPreset(key));
-    presetRow.appendChild(btn);
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = p.label;
+    presetDropdown.appendChild(opt);
   }
+  presetDropdown.addEventListener('change', (e) => {
+    const key = e.target.value;
+    if (!key) return;
+    applyPreset(key);
+    // Reset the OTHER dropdown so the UI shows one active selection at a time.
+    const td = root.querySelector('#template-dropdown');
+    if (td) td.value = '';
+  });
 
-  // Templates row — parametric rooms regenerate when the user changes
-  // dimensions. Tracks which template was last applied so dimension
-  // edits can re-call generate(dims) with the user's overrides.
-  const templateRow = root.querySelector('#template-row');
+  // Templates dropdown — parametric rooms regenerate when the user
+  // changes dimensions. Tracks which template was last applied so
+  // dimension edits can re-call generate(dims) with the user's overrides.
+  const templateDropdown = root.querySelector('#template-dropdown');
   for (const [key, t] of Object.entries(TEMPLATES)) {
-    const btn = document.createElement('button');
-    btn.textContent = t.label;
-    btn.dataset.template = key;
-    btn.addEventListener('click', () => applyTemplate(key));
-    templateRow.appendChild(btn);
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = t.label;
+    templateDropdown.appendChild(opt);
   }
+  templateDropdown.addEventListener('change', (e) => {
+    const key = e.target.value;
+    if (!key) return;
+    applyTemplate(key);
+    // Reset the OTHER dropdown so the UI shows one active selection at a time.
+    const pd = root.querySelector('#preset-dropdown');
+    if (pd) pd.value = '';
+  });
 
   // Custom row — entry to the draw-custom-room flow.
   //
