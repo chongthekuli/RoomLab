@@ -5888,6 +5888,20 @@ function currentPhysicsOpts(room) {
     roomConstantR: phys.reverberantField && materialsRef
       ? computeRoomConstant(room, materialsRef, freq, state.zones, { treatments: state.treatments })
       : 0,
+    // Per-band room constant — drives the Tier 1a Kuttruff wall
+    // re-radiation term. ~7× the cost of the single-band R at frame
+    // build (negligible, ~1 ms on surau / arena). When reverb is off
+    // or materials catalogue absent we skip — re-radiation early-
+    // returns zero downstream.
+    roomR_per_band: phys.reverberantField && materialsRef
+      ? materialsRef.frequency_bands_hz.map(fhz =>
+          computeRoomConstant(room, materialsRef, fhz, state.zones, { treatments: state.treatments }))
+      : null,
+    // Excludes outdoor sources (e.g. surau arcade speakers on the
+    // podium) from the interior reverberant aggregate used by the
+    // wall re-radiation term. Arcade speakers contribute to outdoor
+    // listeners directly, not via wall re-radiation.
+    isSourceInside: (src) => isInsideRoom3D(src.position, room),
     // Master EQ gain at the current heatmap frequency. eqGainAt returns 0
     // when the EQ is bypassed so SPL / heatmap physics is identical to
     // before when eq.enabled === false.
@@ -5921,6 +5935,11 @@ function sampleSurfaceColors(geo, anchors, sources, room, splOpts = {}) {
         sources, getSpeakerDef: getDef,
         freq_hz: splOpts.freq_hz ?? 1000,
         roomConstantR: splOpts.roomConstantR ?? 0,
+        // Tier 1a re-radiation needs per-band R + an inside-source
+        // predicate. Both come through currentPhysicsOpts when reverb
+        // is on; absent when reverb is off → rerad early-returns 0.
+        roomR_per_band: splOpts.roomR_per_band ?? null,
+        isSourceInside: splOpts.isSourceInside ?? null,
         eqGainDb: splOpts.eqGainDb ?? 0,
       })
     : null;

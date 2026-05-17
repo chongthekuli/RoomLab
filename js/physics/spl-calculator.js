@@ -8,6 +8,11 @@ import {
 import {
   wallsCrossedByPath, transmissionLossDb, bandIndexForFreq,
 } from './wall-path.js';
+import { computeDiffractionContributions } from './diffraction.js';
+import {
+  computeReradiationContributions, computeReverberantInsideSPL,
+} from './reradiation.js';
+import { PHYSICS_P1_5_ENABLED } from './feature-flags.js';
 
 // Re-exports for backward compatibility with existing callers (tests, scene.js).
 export const AIR_ABSORPTION_DB_PER_M = AIR_ABS_TABLE;
@@ -245,6 +250,11 @@ function approxSoundPowerLevel(speakerDef, power_watts) {
 export function precomputeSPLContext({
   sources, getSpeakerDef,
   freq_hz = 1000, roomConstantR = 0,
+  roomR_per_band = null,    // optional number[7] — enables per-band L_p_rev
+                            // for the Tier 1a wall re-radiation contribution.
+                            // When omitted, re-radiation is silently skipped.
+  isSourceInside = null,    // optional (src) => bool — excludes outdoor sources
+                            // from the interior reverberant aggregate.
   eqGainDb = 0,
 }) {
   const reverbActive = roomConstantR > 0;
@@ -254,12 +264,35 @@ export function precomputeSPLContext({
     const def = getSpeakerDef(src.modelUrl);
     if (!def) continue;
     // L_w including EQ gain — constant across listener positions.
-    const L_w_with_eq = reverbActive
-      ? approxSoundPowerLevel(def, src.power_watts) + eqGainDb
-      : 0;
+    // For Tier 1a we ALWAYS compute it (the wall re-radiation term
+    // needs L_w even when the listener is in a free-field zone) but
+    // the active-listener reverb leak still gates on reverbActive.
+    const L_w_with_eq = approxSoundPowerLevel(def, src.power_watts) + eqGainDb;
     sourceCtx.push({ src, def, L_w_with_eq });
   }
-  return { sourceCtx, freq_hz, roomConstantR, reverbActive, revConst_db, eqGainDb };
+  // Per-band reverberant SPL inside the room — listener-independent,
+  // computed once per frame. Drives the Kuttruff wall re-radiation
+  // term in computeMultiSourceSPLFromContext. Per-band array (not
+  // per-active-frequency) per the Tier 1a "per-band always" decision:
+  // future per-band UI + STIPA both need all 7 values.
+  let L_p_rev_inside_per_band = null;
+  if (PHYSICS_P1_5_ENABLED && Array.isArray(roomR_per_band) && roomR_per_band.length === 7) {
+    const sourceLwPerBand = sourceCtx.map(s => ({
+      src: s.src,
+      // Source L_w is band-independent under the current model
+      // (sensitivity + power + DI scalar). Broadcast to 7 bands.
+      Lw_per_band: new Float64Array(7).fill(s.L_w_with_eq),
+    }));
+    L_p_rev_inside_per_band = computeReverberantInsideSPL({
+      sourceLwPerBand,
+      roomR_per_band,
+      isSourceInside: isSourceInside || (() => true),
+    });
+  }
+  return {
+    sourceCtx, freq_hz, roomConstantR, reverbActive, revConst_db, eqGainDb,
+    L_p_rev_inside_per_band,
+  };
 }
 
 /**
@@ -273,12 +306,23 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   temperature_C = DEFAULT_TEMPERATURE_C,
   airAbsorption = true,
 } = {}) {
-  const { sourceCtx, freq_hz, reverbActive, revConst_db, eqGainDb } = ctx;
+  const { sourceCtx, freq_hz, reverbActive, revConst_db, eqGainDb, L_p_rev_inside_per_band } = ctx;
   let directPressureSum = 0;
   let Re = 0, Im = 0;
   const c = coherent ? speedOfSound(temperature_C) : 0;
   const angFreq = 2 * Math.PI * freq_hz;
   let reverbPowerSum = 0;
+  // Tier 1a — diffraction + re-radiation. Both modules early-return
+  // zero when PHYSICS_P1_5_ENABLED is false, so this block is a no-op
+  // on public deploys. The bandIdx + per-band L_p_rev scalar are resolved
+  // once per call (constant across sources).
+  const useP15 = PHYSICS_P1_5_ENABLED && materials && room;
+  const bandIdx = useP15 ? bandIndexForFreq(materials, freq_hz) : -1;
+  const L_p_rev_inside_band_db = (useP15 && L_p_rev_inside_per_band)
+    ? L_p_rev_inside_per_band[bandIdx]
+    : -Infinity;
+  let diffractionPowerSum = 0;
+  let reradiationPowerSum = 0;
 
   for (let i = 0; i < sourceCtx.length; i++) {
     const { src, def, L_w_with_eq } = sourceCtx[i];
@@ -308,8 +352,33 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
       const L_rev = L_w + revConst_db;
       reverbPowerSum += Math.pow(10, L_rev / 10);
     }
+    // Tier 1a — energy-sum diffraction over wall edges and Kuttruff
+    // wall re-radiation alongside the direct (through-wall TL) path.
+    // Both contributions early-return zero when the flag is off OR
+    // when wallsCrossed is empty / all-openings — no extra cost on
+    // the public-deploy path. The direct path's Lp at distance r is
+    // already net-of-TL; diffraction needs the free-field Lp WITHOUT
+    // the TL term applied, so we reconstruct it from spl_db + tl_db.
+    if (useP15 && d.wallsCrossed?.length > 0) {
+      const sourceLpFreeField_db = spl_db + d.tl_db_applied;
+      const diff = computeDiffractionContributions({
+        src, listener: listenerPos, room, wallsCrossed: d.wallsCrossed,
+        materials, freq_hz, sourceLpFreeField_db, temperature_C, airAbsorption,
+      });
+      diffractionPowerSum += diff.totalPower;
+      if (Number.isFinite(L_p_rev_inside_band_db)) {
+        const rerad = computeReradiationContributions({
+          src, listener: listenerPos, room, wallsCrossed: d.wallsCrossed,
+          materials, freq_hz,
+          L_p_rev_inside_band_db,
+          airAbsorption,
+        });
+        reradiationPowerSum += rerad.totalPower;
+      }
+    }
   }
-  const totalPower = (coherent ? (Re * Re + Im * Im) : directPressureSum) + reverbPowerSum;
+  const totalPower = (coherent ? (Re * Re + Im * Im) : directPressureSum)
+                   + reverbPowerSum + diffractionPowerSum + reradiationPowerSum;
   return totalPower > 0 ? 10 * Math.log10(totalPower) : -Infinity;
 }
 
@@ -335,6 +404,8 @@ export function computeMultiSourceSPL({
   sources, getSpeakerDef, listenerPos,
   freq_hz = 1000, room = null, materials = null,
   roomConstantR = 0,
+  roomR_per_band = null,         // optional — enables Tier 1a re-radiation
+  isSourceInside = null,         // optional — excludes outdoor sources from rev aggregate
   coherent = false,
   temperature_C = DEFAULT_TEMPERATURE_C,
   airAbsorption = true,
@@ -345,7 +416,8 @@ export function computeMultiSourceSPL({
   // `precomputeSPLContext` + `computeMultiSourceSPLFromContext` directly
   // to avoid redoing the per-source resolution on every vertex.
   const ctx = precomputeSPLContext({
-    sources, getSpeakerDef, freq_hz, roomConstantR, eqGainDb,
+    sources, getSpeakerDef, freq_hz, roomConstantR,
+    roomR_per_band, isSourceInside, eqGainDb,
   });
   return computeMultiSourceSPLFromContext(ctx, listenerPos, {
     room, materials, coherent, temperature_C, airAbsorption,
