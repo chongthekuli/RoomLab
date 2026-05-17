@@ -137,6 +137,19 @@ let drawVertices = [];
 let drawCursor = null;
 let drawCursorNearStart = false;     // updated by handleDrawMove for visual feedback
 let pendingMove = false;
+
+// Floating coord-entry panel — CAD-style "next point (x, y)" input that
+// follows the cursor. Lives as a direct child of #view-2d (NOT inside
+// the SVG and NOT inside the .draw-canvas innerHTML, which is rewritten
+// on every mousemove and would destroy the input + focus). Created on
+// first vertex placement, destroyed on cancel/finish. Position updates
+// are batched through requestAnimationFrame so the panel can follow the
+// pointer without jank.
+let floatCoordEl = null;             // root .draw-float-coord div, or null
+let floatCoordCursor = { clientX: 0, clientY: 0 };
+let floatCoordPosRAF = 0;
+let floatCoordCachedX = '';          // preserves typed value across re-renders if we ever rebuild
+let floatCoordCachedY = '';
 // Maya §4: drag-pan moves the canvas origin without touching state.
 // Hold middle-mouse OR space+left to pan. Reset via double-click on empty
 // canvas (when drawVertices is still 0) or the dedicated recentre button.
@@ -290,6 +303,7 @@ function finishDraw() {
   drawCursorNearStart = false;
   drawPan.dx = 0; drawPan.dy = 0;
   stopEdgePan();
+  destroyFloatCoordEl();
   removeWindowKeyHandler();
   cfg.onFinish(verts);
   emit('room:changed');
@@ -307,6 +321,7 @@ function cancelDraw() {
   drawVertices = [];
   drawCursor = null;
   stopEdgePan();
+  destroyFloatCoordEl();
   removeWindowKeyHandler();
   render();
 }
@@ -340,7 +355,27 @@ function handleDrawClick(event) {
     }
   }
   drawVertices.push({ x: c.rx, y: c.ry });
+  // A mouse-placed vertex is the most recent intent — clear any half-
+  // typed values in the floating panel so the next field shows blank
+  // (ready to accept the next coord). The render() below re-uses the
+  // existing panel; this just zeroes its inputs first.
+  clearFloatCoordFields();
   render();
+}
+
+function clearFloatCoordFields() {
+  floatCoordCachedX = '';
+  floatCoordCachedY = '';
+  if (!floatCoordEl) return;
+  const xInput = floatCoordEl.querySelector('#draw-float-x');
+  const yInput = floatCoordEl.querySelector('#draw-float-y');
+  if (xInput) xInput.value = '';
+  if (yInput) yInput.value = '';
+  xInput?.classList.remove('draw-float-coord-input-close');
+  yInput?.classList.remove('draw-float-coord-input-close');
+  // Refocus x so the user can immediately type the next pair without
+  // clicking back into the field.
+  setTimeout(() => { xInput?.focus(); xInput?.select(); }, 0);
 }
 
 function handleDrawMove(event) {
@@ -376,6 +411,10 @@ function handleDrawMove(event) {
   } else {
     drawCursorNearStart = false;
   }
+  // Floating panel: track cursor position (RAF-batched) and refresh
+  // close-state highlight. Both are cheap; doing them inline is fine.
+  scheduleFloatCoordPosUpdate(event.clientX, event.clientY);
+  updateFloatCoordState();
   // Edge auto-pan — start the RAF loop the first time the cursor
   // crosses into the edge band. The loop self-stops when the
   // cursor leaves the band.
@@ -530,6 +569,17 @@ function handleDrawKey(event) {
   else if ((k === 'z' || k === 'Z') && (event.ctrlKey || event.metaKey)) {
     undoDrawVertex();
     event.preventDefault();
+  }
+  // Close-loop shortcut. Picked 'C' over Space (Space is held-for-pan;
+  // a tap-vs-hold dual binding produces ambiguous affordances). 'C' is
+  // unambiguous, sits on the home row for the off-mouse hand, and the
+  // letter matches the verb ("Close"). Only fires when ≥3 vertices
+  // exist, otherwise it's a no-op.
+  else if ((k === 'c' || k === 'C') && drawConfig?.mode === 'room-shape') {
+    if (drawVertices.length >= 3) {
+      finishDraw();
+      event.preventDefault();
+    }
   }
 }
 function handleDrawKeyUp(event) {
@@ -809,7 +859,26 @@ function renderDrawOverlay(x0, y0, scale, color) {
       endX = x0 + first.x * scale;
       endY = y0 + first.y * scale;
     }
-    s += `<line x1="${x0 + last.x * scale}" y1="${y0 + last.y * scale}" x2="${endX}" y2="${endY}" stroke="${color}" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.7"/>`;
+    const startX = x0 + last.x * scale;
+    const startY = y0 + last.y * scale;
+    s += `<line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" stroke="${color}" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.7"/>`;
+    // Dimension label on the rubber-band line — shows length of the
+    // PROSPECTIVE edge in metres at its midpoint. Hides when the cursor
+    // sits on the last vertex (zero-length segment) to avoid a "0.0 m"
+    // strobing artefact during clicks.
+    const dxW = (drawCursorNearStart && drawVertices.length >= 3 ? drawVertices[0].x : drawCursor.rx) - last.x;
+    const dyW = (drawCursorNearStart && drawVertices.length >= 3 ? drawVertices[0].y : drawCursor.ry) - last.y;
+    const dist = Math.sqrt(dxW * dxW + dyW * dyW);
+    if (dist >= 0.25) {
+      const mx = (startX + endX) / 2;
+      const my = (startY + endY) / 2;
+      // Tiny background plate keeps the number readable on top of the
+      // grid + heatmap. 30×14 px, centred on the midpoint, with a 2 px
+      // pad above the line so the text doesn't overlap the dashes.
+      const labelW = Math.max(34, 8 + dist.toFixed(1).length * 6);
+      s += `<rect x="${mx - labelW / 2}" y="${my - 16}" width="${labelW}" height="13" rx="2" fill="#0e1116" fill-opacity="0.82" stroke="${color}" stroke-width="0.6" stroke-opacity="0.4"/>`;
+      s += `<text x="${mx}" y="${my - 6}" fill="#dde3ec" font-size="10" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">${dist.toFixed(1)} m</text>`;
+    }
     if (drawVertices.length >= 2) {
       const first = drawVertices[0];
       // Maya §2: closing dashed line goes solid + opaque when ready to commit.
@@ -864,20 +933,10 @@ function renderDrawOverlay(x0, y0, scale, color) {
 function buildDrawHtml(svg) {
   const guideText = drawGuideText();
   const ready = drawCursorNearStart && drawVertices.length >= 3;
-  // Coordinate input row — appears after vertex 1 is placed. Lets the
-  // user type relative coords ("5, 3" = 5 m east + 3 m south of the
-  // first click which is the new origin) instead of clicking. Combines
-  // CAD-style keyboard precision with the existing click-to-place flow.
-  const coordInputRow = drawVertices.length >= 1 && drawConfig?.mode === 'room-shape'
-    ? `<div class="draw-coord-row">
-        <label for="draw-coord-input">Next point (m, rel to first click):</label>
-        <input id="draw-coord-input" type="text" placeholder="e.g. 5, 3 or -2 4"
-               autocomplete="off" spellcheck="false"
-               title="Type x, y in metres relative to the first click — Enter to add. Negative values allowed." />
-        <button id="btn-draw-coord-add" title="Add point at the typed coordinates">add <kbd>Enter</kbd></button>
-        <span class="draw-coord-help">— or just click on the canvas</span>
-      </div>`
-    : '';
+  // Coord entry is handled by the floating panel that follows the
+  // cursor (see ensureFloatCoordEl). The toolbar no longer hosts a
+  // second input — two surfaces for the same job created split focus
+  // and ambiguity about which "Enter" did what.
   return `
     <div class="viewport-2d draw-mode">
       <div class="draw-toolbar">
@@ -885,11 +944,10 @@ function buildDrawHtml(svg) {
         <div class="draw-actions">
           <button id="btn-draw-recentre" title="reset pan — shortcut R (or double-click empty canvas)">recentre <kbd>R</kbd></button>
           <button id="btn-draw-undo" ${drawVertices.length === 0 ? 'disabled' : ''} title="remove the last placed point — shortcut Backspace or Ctrl+Z">undo <kbd>Backspace</kbd></button>
-          <button id="btn-draw-finish" ${drawVertices.length < 3 ? 'disabled' : ''} title="close the polygon — shortcut Enter">finish (${drawVertices.length} pt${drawVertices.length === 1 ? '' : 's'}) <kbd>Enter</kbd></button>
+          <button id="btn-draw-finish" ${drawVertices.length < 3 ? 'disabled' : ''} title="close the polygon — shortcut C (or Enter)">finish (${drawVertices.length} pt${drawVertices.length === 1 ? '' : 's'}) <kbd>C</kbd></button>
           <button id="btn-draw-cancel" title="discard and exit draw mode — shortcut Esc">cancel <kbd>Esc</kbd></button>
         </div>
       </div>
-      ${coordInputRow}
       <div class="draw-canvas">${svg}</div>
     </div>
   `;
@@ -925,57 +983,253 @@ function wireDrawEvents(vp) {
   vp.querySelector('#btn-draw-finish').addEventListener('click', finishDraw);
   vp.querySelector('#btn-draw-cancel').addEventListener('click', cancelDraw);
 
-  // Coordinate input — appears in the toolbar after vertex 1 is placed.
-  // Type "x, y" (or "x y") in metres relative to the first click and
-  // press Enter to add a vertex. After each Enter the field clears and
-  // refocuses so the user can type the next point without reaching for
-  // the mouse. Click handlers on the SVG still work in parallel.
-  const coordInput = vp.querySelector('#draw-coord-input');
-  const coordAddBtn = vp.querySelector('#btn-draw-coord-add');
-  if (coordInput) {
-    coordInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commitCoordInput(coordInput);
-      }
-    });
-    // Auto-focus so the user can start typing immediately after the
-    // first click without clicking into the field.
-    setTimeout(() => coordInput.focus(), 0);
-  }
-  if (coordAddBtn && coordInput) {
-    coordAddBtn.addEventListener('click', () => commitCoordInput(coordInput));
+  // Floating coord-entry panel. Mounted on #viewport (the outer
+  // container) so it survives the per-frame innerHTML rewrite of
+  // #view-2d that happens on every mousemove. Appears once the first
+  // vertex is placed (room-shape mode only).
+  if (drawConfig?.mode === 'room-shape' && drawVertices.length >= 1) {
+    ensureFloatCoordEl(vp);
+    updateFloatCoordState();
+  } else {
+    destroyFloatCoordEl();
   }
 }
 
-// Parse "x, y" / "x y" / "x;y" — accept any separator (comma, space,
-// semicolon). Returns null on malformed input. Negative + decimal
-// values accepted. Adds a vertex at world coords offset from the
-// first-placed vertex; onFinish later shifts so verts[0] = (0,0) so
-// the typed values literally become the stored coords.
-function commitCoordInput(input) {
-  if (!drawActive || drawVertices.length < 1) return;
-  const raw = (input.value || '').trim();
-  if (!raw) return;
-  const m = raw.match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)$/);
-  if (!m) {
-    input.classList.add('draw-coord-err');
-    setTimeout(() => input.classList.remove('draw-coord-err'), 400);
-    return;
-  }
-  const dx = parseFloat(m[1]);
-  const dy = parseFloat(m[2]);
-  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+// Commit a vertex from two already-parsed coordinates (the floating
+// panel's path — its x and y are separate <input>s). Returns true on
+// success. Does NOT call render() so the caller can re-render and then
+// restore focus to the x field in a controlled sequence.
+function commitCoordPair(dx, dy) {
+  if (!drawActive || drawVertices.length < 1) return false;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return false;
   const v0 = drawVertices[0];
   drawVertices.push({ x: v0.x + dx, y: v0.y + dy });
-  input.value = '';
+  return true;
+}
+
+// ---------------------------------------------------------------------
+// Floating coord-entry panel
+// ---------------------------------------------------------------------
+// Lives as a direct child of #view-2d so the per-frame innerHTML
+// rewrite of .viewport-2d never destroys its inputs (and never blows
+// away the typing focus). All position changes happen via
+// requestAnimationFrame so mousemove doesn't trigger a layout per
+// event.
+function ensureFloatCoordEl(vp) {
+  // Mount the panel as a child of #viewport (the outer container) NOT
+  // #view-2d, because #view-2d.innerHTML gets rewritten on every
+  // mousemove — that would obliterate the panel + the user's typing
+  // focus per frame. #viewport is position:relative + overflow:hidden,
+  // a perfect anchor for the absolute panel.
+  const host = document.getElementById('viewport') || document.getElementById('view-2d');
+  if (!host) return;
+  if (floatCoordEl && host.contains(floatCoordEl)) return;
+  const el = document.createElement('div');
+  el.className = 'draw-float-coord';
+  el.setAttribute('role', 'group');
+  el.setAttribute('aria-label', 'Next point — type coordinates');
+  el.innerHTML = `
+    <div class="draw-float-coord-row">
+      <label class="draw-float-coord-label" for="draw-float-x">x</label>
+      <input id="draw-float-x" class="draw-float-coord-input" type="text"
+             inputmode="decimal" autocomplete="off" spellcheck="false"
+             maxlength="7" aria-label="x in metres relative to first click" />
+      <span class="draw-float-coord-unit">m</span>
+      <label class="draw-float-coord-label" for="draw-float-y">y</label>
+      <input id="draw-float-y" class="draw-float-coord-input" type="text"
+             inputmode="decimal" autocomplete="off" spellcheck="false"
+             maxlength="7" aria-label="y in metres relative to first click" />
+      <span class="draw-float-coord-unit">m</span>
+    </div>
+    <div class="draw-float-coord-hint">
+      <kbd>Enter</kbd> add point
+      <span class="draw-float-coord-sep">·</span>
+      <kbd>C</kbd> close room
+      <span class="draw-float-coord-sep">·</span>
+      <kbd>Esc</kbd> cancel
+    </div>
+  `;
+  host.appendChild(el);
+  floatCoordEl = el;
+  const xInput = el.querySelector('#draw-float-x');
+  const yInput = el.querySelector('#draw-float-y');
+  // Restore any cached typed values that survived a re-render (we keep
+  // the cache so accidental destroys don't lose user typing).
+  if (floatCoordCachedX) xInput.value = floatCoordCachedX;
+  if (floatCoordCachedY) yInput.value = floatCoordCachedY;
+  const onFieldKey = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitFloatCoord();
+    } else if (e.key === 'Escape') {
+      // Don't swallow — pass through to window handler so the user can
+      // cancel draw mode while focus is in the input.
+      cancelDraw();
+      e.preventDefault();
+    } else if (e.key === 'Tab') {
+      // Trap Tab inside the panel: forward x → y, forward y → x;
+      // Shift+Tab y → x, Shift+Tab x → y. Without trapping, Tab
+      // would escape to a random toolbar button and the user would
+      // lose typing context.
+      e.preventDefault();
+      if (e.target === xInput) { yInput.focus(); yInput.select(); }
+      else                     { xInput.focus(); xInput.select(); }
+    }
+  };
+  const onFieldInput = (e) => {
+    // Cache + live-validate. Green if the typed pair would land within
+    // the close-radius of vertex[0] (so the user knows pressing Enter
+    // here will close the loop, not place a new edge).
+    if (e.target === xInput) floatCoordCachedX = xInput.value;
+    if (e.target === yInput) floatCoordCachedY = yInput.value;
+    updateFloatCoordState();
+  };
+  xInput.addEventListener('keydown', onFieldKey);
+  yInput.addEventListener('keydown', onFieldKey);
+  xInput.addEventListener('input', onFieldInput);
+  yInput.addEventListener('input', onFieldInput);
+  // Auto-focus x so the user can start typing immediately after the
+  // first click without reaching for the panel.
+  setTimeout(() => { xInput.focus(); xInput.select(); }, 0);
+  // Initial position — use the last known cursor sample if we have one
+  // (e.g., the user moved the mouse before placing vertex 1), otherwise
+  // anchor near the SVG centre so the panel doesn't flash at 0,0.
+  positionFloatCoord();
+}
+
+function destroyFloatCoordEl() {
+  if (!floatCoordEl) return;
+  floatCoordEl.remove();
+  floatCoordEl = null;
+  floatCoordCachedX = '';
+  floatCoordCachedY = '';
+}
+
+// Re-position the panel near the current cursor. Called on every
+// mousemove (batched through RAF) and once at mount time.
+function scheduleFloatCoordPosUpdate(clientX, clientY) {
+  floatCoordCursor.clientX = clientX;
+  floatCoordCursor.clientY = clientY;
+  if (floatCoordPosRAF) return;
+  floatCoordPosRAF = requestAnimationFrame(() => {
+    floatCoordPosRAF = 0;
+    positionFloatCoord();
+  });
+}
+
+function positionFloatCoord() {
+  if (!floatCoordEl) return;
+  const host = document.getElementById('viewport') || document.getElementById('view-2d');
+  if (!host) return;
+  const hostRect = host.getBoundingClientRect();
+  // Anchor the auto-flip math to the actual draw canvas inside
+  // #view-2d (the visible drawing region) — not to #viewport, which
+  // includes the floating toolbar/segmented controls + side rails.
+  // Without this the panel could clip cleanly inside #viewport but
+  // sit on top of the segmented control.
+  const view2d = document.getElementById('view-2d');
+  const canvas = view2d?.querySelector('.draw-canvas') || view2d || host;
+  const canvasRect = canvas.getBoundingClientRect();
+  // Measure panel size after a layout pass. Use offsetWidth/Height
+  // which doesn't trigger an extra layout for absolutely-positioned
+  // siblings whose size hasn't changed.
+  const pw = floatCoordEl.offsetWidth || 220;
+  const ph = floatCoordEl.offsetHeight || 56;
+  const OFFSET = 14;       // px diagonal offset from the cursor crosshair
+  const GAP    = 8;        // min gap to the canvas edge
+  // Fall back to canvas centre if we don't yet have a real cursor sample
+  // (happens on initial mount before the first mousemove).
+  let cx = floatCoordCursor.clientX;
+  let cy = floatCoordCursor.clientY;
+  if (!cx && !cy) {
+    cx = canvasRect.left + canvasRect.width / 2;
+    cy = canvasRect.top + canvasRect.height / 2;
+  }
+  // Default: below-right of cursor.
+  let left = cx + OFFSET;
+  let top  = cy + OFFSET;
+  // Auto-flip horizontally if we'd clip the canvas's right edge.
+  if (left + pw + GAP > canvasRect.right) left = cx - OFFSET - pw;
+  if (left < canvasRect.left + GAP)       left = canvasRect.left + GAP;
+  // Auto-flip vertically if we'd clip the bottom edge. Ceiling is the
+  // canvas top (not viewport top) so the panel can never slide up over
+  // the draw toolbar / mode segmented control above the canvas.
+  if (top + ph + GAP > canvasRect.bottom) top = cy - OFFSET - ph;
+  if (top < canvasRect.top + GAP)         top = canvasRect.top + GAP;
+  // Convert to host-relative (the panel is absolutely positioned inside #view-2d).
+  floatCoordEl.style.left = `${Math.round(left - hostRect.left)}px`;
+  floatCoordEl.style.top  = `${Math.round(top  - hostRect.top)}px`;
+}
+
+// Decide the panel's visual state — "ready to close" (when cursor is
+// inside close-radius and ≥3 pts placed) or default. Also colours the
+// y/x fields green when typed coords would commit at the close point.
+function updateFloatCoordState() {
+  if (!floatCoordEl) return;
+  const readyClose = drawCursorNearStart && drawVertices.length >= 3;
+  floatCoordEl.classList.toggle('draw-float-coord-ready-close', readyClose);
+  // Typed-coord-near-close highlight — only if we have a v0 to compare against.
+  const xInput = floatCoordEl.querySelector('#draw-float-x');
+  const yInput = floatCoordEl.querySelector('#draw-float-y');
+  if (!xInput || !yInput) return;
+  if (drawVertices.length >= 3) {
+    const dx = parseFloat(xInput.value);
+    const dy = parseFloat(yInput.value);
+    let typedNearClose = false;
+    if (Number.isFinite(dx) && Number.isFinite(dy)) {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      typedNearClose = dist <= CLOSE_RADIUS_M;
+    }
+    xInput.classList.toggle('draw-float-coord-input-close', typedNearClose);
+    yInput.classList.toggle('draw-float-coord-input-close', typedNearClose);
+  } else {
+    xInput.classList.remove('draw-float-coord-input-close');
+    yInput.classList.remove('draw-float-coord-input-close');
+  }
+}
+
+// Commit the typed (x, y) pair as a new vertex. If the typed point
+// lands within the close-radius of vertex[0] AND we have ≥3 pts, that's
+// a close-loop intent — finishDraw() instead of pushing a vertex on top
+// of the origin. Refocuses x and clears both fields on success.
+function submitFloatCoord() {
+  if (!floatCoordEl) return;
+  const xInput = floatCoordEl.querySelector('#draw-float-x');
+  const yInput = floatCoordEl.querySelector('#draw-float-y');
+  if (!xInput || !yInput) return;
+  const dx = parseFloat(xInput.value);
+  const dy = parseFloat(yInput.value);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+    // Flash whichever field is bad so the user sees what to fix. If
+    // both are bad, flash both.
+    if (!Number.isFinite(dx)) flashField(xInput);
+    if (!Number.isFinite(dy)) flashField(yInput);
+    return;
+  }
+  // Close-loop intent — typed point sits within close-radius of v0 (the
+  // new origin) and we already have a closeable polygon.
+  if (drawVertices.length >= 3 && Math.sqrt(dx * dx + dy * dy) <= CLOSE_RADIUS_M) {
+    finishDraw();
+    return;
+  }
+  if (!commitCoordPair(dx, dy)) { flashField(xInput); flashField(yInput); return; }
+  xInput.value = '';
+  yInput.value = '';
+  floatCoordCachedX = '';
+  floatCoordCachedY = '';
   render();
-  // After render the input element is regenerated; find the new one
-  // and refocus so the next Enter keeps working.
+  // render() rebuilds .viewport-2d but ensureFloatCoordEl keeps the
+  // panel intact, so the x input still exists — refocus it for the
+  // next entry.
   setTimeout(() => {
-    const fresh = document.querySelector('#draw-coord-input');
-    if (fresh) fresh.focus();
+    const fresh = document.getElementById('draw-float-x');
+    if (fresh) { fresh.focus(); fresh.select(); }
   }, 0);
+}
+
+function flashField(el) {
+  el.classList.add('draw-float-coord-err');
+  setTimeout(() => el.classList.remove('draw-float-coord-err'), 360);
 }
 
 function renderNormal(vp) {

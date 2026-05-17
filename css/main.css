@@ -3961,6 +3961,144 @@ section h3 {
   font-size: 0.72rem;
   font-style: italic;
 }
+
+/* ---------------------------------------------------------------
+   Floating coord-entry panel — CAD-style "next point (x, y)" input
+   that follows the cursor while the user is drawing a custom room.
+   Replaces the toolbar coord row; mounted on #viewport (NOT
+   #view-2d, whose innerHTML is rewritten per frame and would
+   destroy the input + typing focus). Position math anchors to the
+   .draw-canvas inside #view-2d so auto-flip respects the actual
+   drawing region, not the surrounding chrome.
+   --------------------------------------------------------------- */
+.draw-float-coord {
+  position: absolute;
+  z-index: 40;
+  /* Wrapper itself is click-through — only the inputs catch clicks.
+     This lets the user mouse-click to place a vertex in the area the
+     panel happens to overlap without first having to mouse-out of the
+     panel chrome. A classic CAD-tool affordance. */
+  pointer-events: none;
+  background: var(--bg-elev, #1c2028);
+  border: 1px solid var(--border, #2a2f38);
+  border-radius: 6px;
+  padding: 6px 8px 5px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45),
+              0 1px 2px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Make the panel feel weightless — no movement transition on
+     left/top (would lag the cursor), only a fade-in on first paint. */
+  animation: drawFloatCoordIn 120ms ease-out;
+}
+@keyframes drawFloatCoordIn {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.draw-float-coord-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.draw-float-coord-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--muted, #8a8e99);
+  user-select: none;
+}
+.draw-float-coord-input {
+  /* Inputs DO catch clicks (wrapper is click-through) so the user can
+     focus the field with the mouse if they prefer. */
+  pointer-events: auto;
+  width: 5ch;
+  padding: 3px 5px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--fg-strong, #e5e7eb);
+  background: #0d1015;
+  border: 1px solid var(--border, #2a2f38);
+  border-radius: 3px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.draw-float-coord-input:focus {
+  outline: none;
+  border-color: var(--accent, #4aa3ff);
+  box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.20);
+}
+.draw-float-coord-unit {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.68rem;
+  color: var(--muted, #8a8e99);
+  margin-right: 4px;
+  user-select: none;
+}
+.draw-float-coord-input.draw-float-coord-err {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.22);
+  animation: drawFloatCoordShake 220ms ease-in-out;
+}
+@keyframes drawFloatCoordShake {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-2px); }
+  75%      { transform: translateX(2px); }
+}
+/* Typed coords would land within the close-radius — flag both fields
+   green so the user knows pressing Enter here will CLOSE the loop,
+   not place a new vertex on top of the origin. */
+.draw-float-coord-input.draw-float-coord-input-close {
+  border-color: #1faa5e;
+  box-shadow: 0 0 0 2px rgba(31, 170, 94, 0.22);
+  background: #0c1812;
+}
+.draw-float-coord-hint {
+  font-size: 0.66rem;
+  color: var(--muted, #8a8e99);
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.draw-float-coord-hint kbd {
+  display: inline-block;
+  padding: 0 4px;
+  min-width: 14px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.60rem;
+  color: #cfd6e0;
+  line-height: 1.4;
+}
+.draw-float-coord-sep {
+  color: #3a4150;
+  margin: 0 1px;
+}
+/* Cursor is in the close-radius — entire panel shifts to a green
+   "click to close" affordance. The hint text is replaced via the
+   ::before pseudo so we don't have to touch the JS template; the
+   inputs stay usable (a typed pair still commits via Enter). */
+.draw-float-coord.draw-float-coord-ready-close {
+  border-color: #1faa5e;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45),
+              0 0 0 2px rgba(31, 170, 94, 0.30);
+}
+.draw-float-coord.draw-float-coord-ready-close .draw-float-coord-hint {
+  color: #6ee0a0;
+}
+.draw-float-coord.draw-float-coord-ready-close .draw-float-coord-hint::before {
+  content: "click to close the room  ";
+  color: #6ee0a0;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  margin-right: 6px;
+}
 .draw-actions { display: flex; gap: 0.3rem; }
 .draw-actions button {
   padding: 0.28rem 0.7rem;
