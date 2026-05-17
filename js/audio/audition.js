@@ -70,9 +70,11 @@ function computeAuditionSplDb(pos) {
 }
 
 let _audioCtx = null;
-let _sampleBuffer = null;
+// Per-URL sample cache. Keyed by URL so switching presets (and therefore
+// sample file) is a fresh fetch + decode, not a stale buffer replay.
+const _sampleBuffersByUrl = new Map();   // url → AudioBuffer
+const _samplePromisesByUrl = new Map();  // url → Promise<AudioBuffer> (in-flight)
 let _activeChain = null;          // { source, convolver, gain }
-let _samplePromise = null;
 let _saturatorCurve = null;
 let _lastDebugLogTs = 0;          // walk-mode SPL-trim debug print throttle
 // Phase 10 — multiband limiter worklet registration state.
@@ -92,7 +94,21 @@ const LIMITER_WORKLET_URL = 'js/audio/multiband-limiter-worklet.js';
 // Baseline audition is therefore quieter than pre-W.1 — user can
 // crank speaker / headphone volume; trade is full SPL-field dynamics.
 const DEFAULT_GAIN = 0.25;
-const SAMPLE_URL = 'assets/audio/testing-1-2-3.mp3';
+
+// Default speech sample, used for every room/preset except the surau.
+const DEFAULT_SAMPLE_URL = 'assets/audio/testing-1-2-3.mp3';
+// Surau-only sample (azan call to prayer). Only chosen when the active
+// scene has state.room.surauStructure — i.e. the surau preset is loaded.
+// Drop the file at assets/audio/azan.mp3; checkSampleAvailable() will
+// HEAD-probe it and the audition button stays disabled if it's missing.
+const SURAU_SAMPLE_URL = 'assets/audio/azan.mp3';
+
+// Picks the right test signal for the currently loaded scene. Surau
+// preset → azan; everything else → speech. Resolved on each play /
+// HEAD-probe so swapping presets at runtime just works.
+export function getSampleUrl() {
+  return state?.room?.surauStructure ? SURAU_SAMPLE_URL : DEFAULT_SAMPLE_URL;
+}
 
 // Phase 9.8 — hard-knee soft-clip curve, linear below -3 dBFS. Previous
 // tanh-everywhere curve compressed at all amplitudes, colouring even
@@ -165,27 +181,34 @@ async function ensureLimiterWorklet() {
   return _limiterWorkletState;
 }
 
-// Fetches and decodes the speech sample exactly once per session.
-// Returns the cached AudioBuffer for subsequent calls.
+// Fetches and decodes the active sample (speech or surau azan, chosen
+// by getSampleUrl()). Each URL is cached separately so switching presets
+// at runtime swaps the test signal without re-fetching a sample we
+// already have.
 function loadSample() {
-  if (_sampleBuffer) return Promise.resolve(_sampleBuffer);
-  if (_samplePromise) return _samplePromise;
+  const url = getSampleUrl();
+  const cached = _sampleBuffersByUrl.get(url);
+  if (cached) return Promise.resolve(cached);
+  const inFlight = _samplePromisesByUrl.get(url);
+  if (inFlight) return inFlight;
   const ctx = getCtx();
-  _samplePromise = fetch(SAMPLE_URL)
+  const p = fetch(url)
     .then(res => {
       if (!res.ok) throw new Error(`Sample fetch failed: ${res.status}`);
       return res.arrayBuffer();
     })
     .then(buf => ctx.decodeAudioData(buf))
     .then(decoded => {
-      _sampleBuffer = decoded;
+      _sampleBuffersByUrl.set(url, decoded);
+      _samplePromisesByUrl.delete(url);
       return decoded;
     })
     .catch(err => {
-      _samplePromise = null;
+      _samplePromisesByUrl.delete(url);
       throw err;
     });
-  return _samplePromise;
+  _samplePromisesByUrl.set(url, p);
+  return p;
 }
 
 // Convert the precision tracer's per-band histogram for ONE listener
@@ -979,13 +1002,15 @@ export function setAuditionGain(linear01) {
   }
 }
 
-// HEAD-probe the sample once at app boot so the audition button can
-// disable itself if the file isn't shipped (tooltip explains).
+// HEAD-probe the currently-selected sample so the audition button can
+// disable itself if the file isn't shipped (tooltip explains). Returns
+// { ok, url } so the panel can show a preset-aware tooltip.
 export async function checkSampleAvailable() {
+  const url = getSampleUrl();
   try {
-    const res = await fetch(SAMPLE_URL, { method: 'HEAD' });
-    return res.ok;
+    const res = await fetch(url, { method: 'HEAD' });
+    return { ok: res.ok, url };
   } catch (_) {
-    return false;
+    return { ok: false, url };
   }
 }

@@ -97,21 +97,32 @@ export function mountPrecisionPanel({ materials }) {
   // Click anywhere on the echogram mini view → open the large modal.
   root.querySelector('#precision-echogram-zoom')?.addEventListener('click', openEchogramModal);
 
-  // HEAD-probe the audio sample at panel mount so the buttons can show
-  // a clear disabled-state tooltip if the file isn't shipped yet.
-  checkSampleAvailable().then(ok => {
-    const btn = root.querySelector('#precision-audition-btn');
-    const dry = root.querySelector('#precision-original-btn');
-    if (!btn || !dry) return;
-    if (!ok) {
-      btn.title = 'No audio sample at assets/audio/testing-1-2-3.mp3 — drop one in to enable.';
-      dry.title = 'No audio sample at assets/audio/testing-1-2-3.mp3 — drop one in to enable.';
-    } else {
-      btn.dataset.sampleReady = '1';
-      dry.dataset.sampleReady = '1';
-    }
-    updateAuditionUI();
-  });
+  // HEAD-probe the audio sample at panel mount + on every scene reset
+  // (preset switch) so the buttons can show a clear disabled-state
+  // tooltip when the active sample file isn't shipped yet. Sample URL
+  // is preset-aware — surau gets assets/audio/azan.mp3, everything else
+  // gets assets/audio/testing-1-2-3.mp3.
+  function refreshAuditionSampleAvailability() {
+    checkSampleAvailable().then(({ ok, url }) => {
+      const btn = root.querySelector('#precision-audition-btn');
+      const dry = root.querySelector('#precision-original-btn');
+      if (!btn || !dry) return;
+      if (!ok) {
+        const msg = `No audio sample at ${url} — drop one in to enable.`;
+        btn.title = msg;
+        dry.title = msg;
+        delete btn.dataset.sampleReady;
+        delete dry.dataset.sampleReady;
+      } else {
+        btn.title = '';
+        dry.title = '';
+        btn.dataset.sampleReady = '1';
+        dry.dataset.sampleReady = '1';
+      }
+      updateAuditionUI();
+    });
+  }
+  refreshAuditionSampleAvailability();
 
   // Any scene edit invalidates a cached render.
   on('room:changed', markStale);
@@ -132,6 +143,10 @@ export function mountPrecisionPanel({ materials }) {
     state.results.engines.precision.staleAt = null;
     updateUI();
     emit('precision:changed');
+    // Preset switch may have toggled the active sample (e.g. surau ↔
+    // any other preset). Re-probe so the tooltip + disabled state
+    // reflect the file that will actually be loaded on next play.
+    refreshAuditionSampleAvailability();
   });
   // Listener selection changes only the displayed receiver, not the trace.
   // Phase 11.C — in 3D / 2D view, if audition is playing in convolved
