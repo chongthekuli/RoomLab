@@ -169,6 +169,27 @@ export function shiftSplGridByDb(splGrid, offsetDb) {
 //   compact (default false) — drop the scale bar, north arrow, and
 //     source/listener labels for use in a small thumbnail (e.g.
 //     Drawing 02's 1×3 strip). Markers still draw but un-labeled.
+// Returns { viewW, viewH } in metres for the SVG viewBox that
+// buildHeatmapPageSVG would produce. Exported separately so the print
+// page wrapper can set `aspect-ratio: viewW / viewH` on its CSS
+// container and avoid preserveAspectRatio centering empty space.
+export function heatmapPageViewBox(state, splGrid) {
+  const room = state.room;
+  if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return null;
+  if (!splGrid) return null;
+  const gridOX = splGrid.originX_m ?? 0;
+  const gridOY = splGrid.originY_m ?? 0;
+  const gridW = (splGrid.cellW_m ?? 0) * splGrid.cellsX || room.width_m;
+  const gridD = (splGrid.cellD_m ?? 0) * splGrid.cellsY || room.depth_m;
+  const minX = Math.min(0, gridOX);
+  const minY = Math.min(0, gridOY);
+  const maxX = Math.max(room.width_m, gridOX + gridW);
+  const maxY = Math.max(room.depth_m, gridOY + gridD);
+  const viewW = (maxX - minX) + 2 * MARGIN_M;
+  const viewH = (maxY - minY) + 2 * MARGIN_M;
+  return { viewW, viewH };
+}
+
 export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
   const room = state.room;
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';

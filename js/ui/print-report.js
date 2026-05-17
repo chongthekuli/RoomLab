@@ -31,7 +31,7 @@ import { roomVolume, baseArea } from '../physics/room-shape.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
-import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend } from './print-heatmap.js';
+import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend, heatmapPageViewBox } from './print-heatmap.js';
 import { buildFloorPlanSVG } from './print-plan-svg.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
 import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
@@ -1206,6 +1206,15 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // (and the operating-range strip below) remain unchanged.
   const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid) : '';
   const heatLegend = (model.heatmap && splGrid) ? buildHeatmapLegend(splGrid) : '';
+  // Compute the SVG's viewBox aspect so the stage CSS can size itself
+  // to match the room — eliminates the preserveAspectRatio centering
+  // empty space the user reported (tall room → no empty top/bottom;
+  // wide room → no empty left/right). Falls back to no aspect-ratio
+  // style when grid is unavailable.
+  const heatViewBox = (model.heatmap && splGrid) ? heatmapPageViewBox(state, splGrid) : null;
+  const heatStageStyle = heatViewBox
+    ? ` style="aspect-ratio: ${heatViewBox.viewW.toFixed(3)} / ${heatViewBox.viewH.toFixed(3)}"`
+    : '';
   const rt60_1k = model.rt60[3];
   let heatmapPage = '';
   if (heatSvg) {
@@ -1223,7 +1232,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <div class="pr-page pr-page-heatmap">
         <span class="pr-eyebrow">Drawing 01 · Coverage map, top-down view</span>
         <div class="pr-heatmap-grid">
-          <div class="pr-heatmap-stage">${heatSvg}</div>
+          <div class="pr-heatmap-stage"${heatStageStyle}>${heatSvg}</div>
           ${heatLegend}
         </div>
         <p class="pr-caption">
