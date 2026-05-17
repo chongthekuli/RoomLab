@@ -2921,6 +2921,14 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     buildWallGeoWithHoles, attachOpeningMesh, buildSurfaceMat,
   });
 
+  // Roof-hide stash holds references to meshes that have just been
+  // disposed by the rebuild above. Drop the stale refs and, if the live
+  // camera is currently parked in the top-down preset, re-apply the
+  // hide to the freshly-built overhead meshes so the heatmap stays
+  // visible across preset/material swaps.
+  _topDownRoofStash.length = 0;
+  if (detectActiveCameraPreset() === 'top') _setRoofsDimmedForTopDown(true);
+
   if (isFirst) frameCameraToRoom();
 }
 
@@ -4204,6 +4212,66 @@ export function captureViewportImage(opts = {}) {
   return dataUrl;
 }
 
+// Stash of {mesh, visible} for overhead meshes we've hidden for top-down
+// view. Stays populated as long as the camera is in the 'top' preset;
+// emptied (and originals restored) when the camera moves to any other
+// preset. Per-mesh toggle (not per-material) so shared materials like
+// concreteMat (used by both an overhead wall and a floor-level podium
+// platform) don't cause floor meshes to vanish along with the roof.
+const _topDownRoofStash = [];
+
+// Walks roomGroup and dims (or restores) any mesh whose bounding-box
+// bottom sits above the heatmap plane (≈ear height). When the user is
+// looking straight down, anything overhead is between the camera and
+// the floor heatmap, and an opaque-grey roof/ceiling reads as a flat
+// occluder masking the bright SPL field below. Without this dim, the
+// south/east/west podium strips (covered by the arcade roof at
+// z≈4.45 m and the portico cap above it) read as flat grey while the
+// unroofed north podium correctly shows the heatmap — making the user
+// think the physics is wrong when in fact the bright cells are just
+// physically hidden under the roof slab.
+//
+// Geometric (bounding-box) gate rather than userData regex because the
+// surau scene has many overhead structures (arcade flat-roofs, portico
+// roof + pyramid cap, main hip-roof + atap tumpang tiers, clerestory
+// cap, jali screens) and a per-tag allowlist keeps missing some new
+// addition. The bounding-box rule is invariant: anything overhead is
+// dimmed, period. Skips structural reference lines (no material) and
+// the heatmap mesh itself (heatmapMesh is added to `scene`, not
+// roomGroup, so this traversal never touches it anyway).
+const TOPDOWN_DIM_FLOOR_Z = 1.6;   // a hair above ear-mic height (1.5 m)
+function _setRoofsDimmedForTopDown(dim) {
+  if (!roomGroup) return;
+  if (dim) {
+    if (_topDownRoofStash.length > 0) return; // already hidden
+    const bb = new THREE.Box3();
+    roomGroup.traverse((obj) => {
+      if (!obj.isMesh || !obj.geometry) return;
+      if (obj.visible === false) return;   // already hidden by other logic; don't disturb
+      // Compute bbox in WORLD space — many surau meshes are positioned
+      // via their THREE object transform rather than baked vertices,
+      // so the geometry-local bbox would lie about their actual height.
+      try {
+        bb.setFromObject(obj);
+      } catch { return; }
+      if (!isFinite(bb.min.y) || !isFinite(bb.max.y)) return;
+      // Mesh is "overhead" if its LOWEST point is above the heatmap
+      // plane. Using min.y (not centroid) avoids hiding a tall mesh
+      // whose top juts overhead but whose base sits on the floor —
+      // e.g. minaret shaft, speaker columns, column posts.
+      if (bb.min.y < TOPDOWN_DIM_FLOOR_Z) return;
+      _topDownRoofStash.push({ mesh: obj, visible: obj.visible });
+      obj.visible = false;
+    });
+  } else {
+    if (_topDownRoofStash.length === 0) return;
+    for (const s of _topDownRoofStash) {
+      s.mesh.visible = s.visible;
+    }
+    _topDownRoofStash.length = 0;
+  }
+}
+
 // Public — kick off a smooth tween to one of the named presets.
 // 'top' | 'front' | 'back' | 'left' | 'right' | 'iso'
 export function applyCameraPreset(name) {
@@ -4218,6 +4286,11 @@ export function applyCameraPreset(name) {
     t0: performance.now(),
     durationMs: 500,
   };
+  // Top-down view dims roof/ceiling meshes so the floor heatmap is
+  // visible; any other preset restores them. Applied immediately (not
+  // post-tween) so the user sees the heatmap unblock as the camera
+  // rises into the top frame, not 500 ms later.
+  _setRoofsDimmedForTopDown(name === 'top');
 }
 
 // Best-guess which preset the camera is currently sitting near. Returns

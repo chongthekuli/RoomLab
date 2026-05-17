@@ -90,9 +90,23 @@ export function buildScalarTexture(splInfo) {
 
   const data = new Uint8Array(cellsX * cellsY * 4);
   const mask = new Uint8Array(cellsX * cellsY);
+  // Row-flip when writing: the consumer UV math in scene.js was authored
+  // against CanvasTexture (which defaults flipY=true so the canvas's top
+  // row lands at UV.v=1). DataTexture IGNORES the flipY hint per
+  // Three.js docs — without flipping here, south physics cells (grid
+  // row j=0) land at UV.v=0 (bottom) but the UV mapping
+  // `uv.v = 1 - (sy - minY) / d` looks them up at UV.v=1 (top), so
+  // SOUTH data is painted at the NORTH screen position and vice versa.
+  // The bug was user-visible in the surau preset 2026-05-18 — south
+  // podium (with 3 arcade speakers, ~99 dB at 1 kHz) read as cool blue
+  // while the north qibla podium (no speakers, ~74 dB) read as warm
+  // yellow. Pre-emptively flipping the data row order here keeps the
+  // shader path output identical to the legacy CanvasTexture path
+  // without needing to branch the UV code in scene.js.
   for (let j = 0; j < cellsY; j++) {
+    const jSrc = cellsY - 1 - j;            // mirror to match flipY=true
     for (let i = 0; i < cellsX; i++) {
-      const v = grid[j][i];
+      const v = grid[jSrc][i];
       const idx = j * cellsX + i;
       if (!Number.isFinite(v)) {
         // Sentinel — write 0 to scalar (so bilinear blend doesn't pull
