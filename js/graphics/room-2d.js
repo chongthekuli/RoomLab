@@ -676,15 +676,20 @@ function drawCoordsFromEvent(event) {
 
   if (drawConfig.mode === 'room-shape') {
     const rx = (sx - CUSTOM_ORIGIN.x - drawPan.dx) / CUSTOM_SCALE;
-    const ry = (sy - CUSTOM_ORIGIN.y - drawPan.dy) / CUSTOM_SCALE;
+    // Y-flip inverse: world ry = (y0_pixel - sy) / scale. y0_pixel is
+    // (CUSTOM_ORIGIN.y + drawPan.dy) since that's the SVG pixel where
+    // world-Y=0 lands. Cursor BELOW origin (larger sy) → ry negative.
+    const ry = (CUSTOM_ORIGIN.y + drawPan.dy - sy) / CUSTOM_SCALE;
     if (!Number.isFinite(rx) || !Number.isFinite(ry)) return null;
     const snap = (v) => Math.round(v / SNAP_M) * SNAP_M;
     return { sx, sy, rx: snap(rx), ry: snap(ry) };
   }
-  // zone mode: use current room scale
+  // zone mode: use current room scale, with the same Y-flip as
+  // clientToWorldXY so a click on the canvas reads its world coords in
+  // math convention (screen-up = +Y).
   const geom = currentRoomGeom();
   const rx = (sx - geom.x0) / geom.scale;
-  const ry = (sy - geom.y0) / geom.scale;
+  const ry = (geom.y0 - sy) / geom.scale;
   if (!Number.isFinite(rx) || !Number.isFinite(ry)) return null;
   return { sx, sy, rx: Math.round(rx * 100) / 100, ry: Math.round(ry * 100) / 100 };
 }
@@ -721,7 +726,15 @@ function currentRoomGeom() {
   // pulls the viewport so the podium edge (e.g. world x = -3.5)
   // becomes the leftmost visible point.
   const x0 = (vbW - pxTotalW) / 2 - bounds.minX * scale;
-  const y0 = (vbH - pxTotalD) / 2 - bounds.minY * scale;
+  // Y-axis math convention (v=458, Lindqvist) — world-Y=0 renders at
+  // SCREEN-BOTTOM, world-Y=depth_m renders at SCREEN-TOP. Every screen-Y
+  // call site now uses `y0 - worldY * scale` (was `y0 + worldY * scale`).
+  // y0 is the screen pixel where world-Y=0 lands (bottom edge of the
+  // effective bounds). To put bounds.maxY at the TOP of the canvas band:
+  //   y_top_canvas = (vbH - pxTotalD) / 2
+  //   y0 - bounds.maxY * scale = y_top_canvas
+  //   y0 = y_top_canvas + bounds.maxY * scale
+  const y0 = (vbH - pxTotalD) / 2 + bounds.maxY * scale;
   return { scale, pxW, pxD, x0, y0, bounds };
 }
 
@@ -828,12 +841,17 @@ function renderCustomDraw(vp) {
   if (drawVertices.length >= 1) {
     const v0 = drawVertices[0];
     const ox = x0 + v0.x * CUSTOM_SCALE;
-    const oy = y0 + v0.y * CUSTOM_SCALE;
+    // Y-flip: world +Y now maps to SVG -Y (screen up). Vertex v0's
+    // pixel-Y is y0 minus its world-Y times scale.
+    const oy = y0 - v0.y * CUSTOM_SCALE;
     // Tick world-x = v0.x + m for each integer m in the visible range.
     const minXm = -x0 / CUSTOM_SCALE;
     const maxXm = (CUSTOM_VB_W - x0) / CUSTOM_SCALE;
-    const minYm = -y0 / CUSTOM_SCALE;
-    const maxYm = (CUSTOM_VB_H - y0) / CUSTOM_SCALE;
+    // Visible world-Y range, given the inverse `ry = (y0 - sy)/scale`.
+    // sy=0 (top of canvas) → ry = y0/scale (maxYm).
+    // sy=CUSTOM_VB_H (bottom) → ry = (y0 - CUSTOM_VB_H)/scale (minYm).
+    const minYm = (y0 - CUSTOM_VB_H) / CUSTOM_SCALE;
+    const maxYm = y0 / CUSTOM_SCALE;
     const startMx = Math.ceil((minXm - v0.x) / 5) * 5;
     const endMx   = Math.floor((maxXm - v0.x) / 5) * 5;
     for (let m = startMx; m <= endMx; m += 5) {
@@ -846,10 +864,10 @@ function renderCustomDraw(vp) {
     for (let m = startMy; m <= endMy; m += 5) {
       if (m === 0) continue;
       const worldY = v0.y + m;
-      // Y-axis flipped — label text is the NEGATION of the world-Y
-      // offset so the user sees math convention (positive labels above
-      // origin, negative below) instead of SVG convention.
-      svg += `<text x="6" y="${y0 + worldY * CUSTOM_SCALE + 3}" fill="#5a6677" font-size="9">${-m} m</text>`;
+      // With math-convention rendering (y0 - worldY*scale), a label at
+      // world delta +5 m from v0 already renders 5 m ABOVE the origin
+      // line — so the label text matches the delta directly.
+      svg += `<text x="6" y="${y0 - worldY * CUSTOM_SCALE + 3}" fill="#5a6677" font-size="9">${m} m</text>`;
     }
     // Origin crosshair sits at the FIRST click — it marks the new (0, 0)
     // not the canvas centre.
@@ -907,10 +925,12 @@ function renderZoneDraw(vp) {
 
 function renderDrawOverlay(x0, y0, scale, color) {
   let s = '';
+  // Y-flip throughout: world +Y → SVG -Y. Every vertex/cursor world-Y
+  // becomes `y0 - worldY * scale` in pixel space.
   // Edges between placed vertices
   for (let i = 0; i < drawVertices.length - 1; i++) {
     const a = drawVertices[i], b = drawVertices[i + 1];
-    s += `<line x1="${x0 + a.x * scale}" y1="${y0 + a.y * scale}" x2="${x0 + b.x * scale}" y2="${y0 + b.y * scale}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`;
+    s += `<line x1="${x0 + a.x * scale}" y1="${y0 - a.y * scale}" x2="${x0 + b.x * scale}" y2="${y0 - b.y * scale}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`;
   }
   if (drawVertices.length > 0 && drawCursor) {
     const last = drawVertices[drawVertices.length - 1];
@@ -919,14 +939,14 @@ function renderDrawOverlay(x0, y0, scale, color) {
     // committing a vertex. Was using sx/sy directly, which made the
     // line lag/lead the snap by up to 10 px.
     let endX = x0 + drawCursor.rx * scale;
-    let endY = y0 + drawCursor.ry * scale;
+    let endY = y0 - drawCursor.ry * scale;
     if (drawCursorNearStart && drawVertices.length >= 3) {
       const first = drawVertices[0];
       endX = x0 + first.x * scale;
-      endY = y0 + first.y * scale;
+      endY = y0 - first.y * scale;
     }
     const startX = x0 + last.x * scale;
-    const startY = y0 + last.y * scale;
+    const startY = y0 - last.y * scale;
     s += `<line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" stroke="${color}" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.7"/>`;
     // Dimension label on the rubber-band line — shows length of the
     // PROSPECTIVE edge in metres at its midpoint. Hides when the cursor
@@ -952,12 +972,12 @@ function renderDrawOverlay(x0, y0, scale, color) {
       const widthPx = ready ? 2.5 : 1;
       const dash = ready ? 'none' : '2,3';
       const opacity = ready ? 1 : 0.4;
-      s += `<line x1="${endX}" y1="${endY}" x2="${x0 + first.x * scale}" y2="${y0 + first.y * scale}" stroke="${color}" stroke-width="${widthPx}" stroke-dasharray="${dash}" opacity="${opacity}"/>`;
+      s += `<line x1="${endX}" y1="${endY}" x2="${x0 + first.x * scale}" y2="${y0 - first.y * scale}" stroke="${color}" stroke-width="${widthPx}" stroke-dasharray="${dash}" opacity="${opacity}"/>`;
     }
   }
   // Vertex 1 grows + highlights when cursor is near; other vertices stay regular
   drawVertices.forEach((v, i) => {
-    const sx = x0 + v.x * scale, sy = y0 + v.y * scale;
+    const sx = x0 + v.x * scale, sy = y0 - v.y * scale;
     const isFirstReady = i === 0 && drawCursorNearStart && drawVertices.length >= 3;
     const r = isFirstReady ? 10 : 6;
     const stroke = isFirstReady ? 3 : 2;
@@ -973,7 +993,7 @@ function renderDrawOverlay(x0, y0, scale, color) {
   // can chase the cursor across as much canvas as they need).
   if (drawCursor) {
     const cx = x0 + drawCursor.rx * scale;
-    const cy = y0 + drawCursor.ry * scale;
+    const cy = y0 - drawCursor.ry * scale;
     s += `<circle cx="${cx}" cy="${cy}" r="6" fill="#4a8ff0" fill-opacity="0.5" stroke="#ffffff" stroke-width="1.5"/>`;
     if (drawVertices.length === 0 && drawConfig?.mode === 'room-shape') {
       // No origin chosen yet — prompt user to place the first dot.
@@ -984,10 +1004,12 @@ function renderDrawOverlay(x0, y0, scale, color) {
       s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">Click to set origin (0, 0)</text>`;
     } else if (drawVertices.length >= 1) {
       // Cursor coords RELATIVE to vertex[0] which is the new origin.
-      // Y-axis flipped so screen-up reads positive (math convention).
+      // Storage already in math convention (drawCoordsFromEvent inverts
+      // sy → ry with `y0 - sy`), so a cursor 3 m ABOVE v0 has
+      // drawCursor.ry = v0.y + 3 → relY = +3. Direct subtract.
       const v0 = drawVertices[0];
       const relX = drawCursor.rx - v0.x;
-      const relY = v0.y - drawCursor.ry;
+      const relY = drawCursor.ry - v0.y;
       s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">${relX.toFixed(1)}, ${relY.toFixed(1)} m</text>`;
     } else {
       // Zone-draw mode etc. — keep the old world-coord readout.
@@ -1079,10 +1101,10 @@ function commitCoordPair(dx, dy) {
   if (!drawActive || drawVertices.length < 1) return false;
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) return false;
   const v0 = drawVertices[0];
-  // Y-axis flip — user-facing convention is math-style (Y-up = positive)
-  // but internal SVG world-Y goes DOWN as positive. So typed dy=+3
-  // means "3 m up on screen" = world-Y v0.y − 3 (smaller world Y).
-  drawVertices.push({ x: v0.x + dx, y: v0.y - dy });
+  // The whole 2D plan now renders in math convention (world +Y = screen
+  // up). Typed dy=+3 ("3 m up on screen") translates directly to storage
+  // delta +3 — the renderer's flip puts it 3 m above origin pixelwise.
+  drawVertices.push({ x: v0.x + dx, y: v0.y + dy });
   return true;
 }
 
@@ -1443,7 +1465,7 @@ function renderNormal(vp) {
         <g clip-path="url(#room-clip)">${splSvg}</g>
         ${roomOutline.walls}
         ${roomOutline.labels}
-        ${renderNorthArrowSVG(x0, y0, pxW)}
+        ${renderNorthArrowSVG(x0, y0, pxW, pxD)}
         ${zonesSvg}
         ${subSvg}
         ${encSvg}
@@ -1453,7 +1475,7 @@ function renderNormal(vp) {
         ${speakerSvg}
         ${vertexSvg}
         ${renderOriginCrosshair(x0, y0, '#5a6677')}
-        ${splResult ? '' : `<text x="${x0 + pxW/2}" y="${y0 + pxD/2}" text-anchor="middle" class="vp-lbl vp-lbl-empty">no sources placed</text><text x="${x0 + pxW/2}" y="${y0 + pxD/2 + 18}" text-anchor="middle" class="vp-lbl vp-lbl-empty-hint">add a speaker to compute SPL</text>`}
+        ${splResult ? '' : `<text x="${x0 + pxW/2}" y="${y0 - pxD/2}" text-anchor="middle" class="vp-lbl vp-lbl-empty">no sources placed</text><text x="${x0 + pxW/2}" y="${y0 - pxD/2 + 18}" text-anchor="middle" class="vp-lbl vp-lbl-empty-hint">add a speaker to compute SPL</text>`}
       </svg>
       <!-- Meta text moved OUT of the SVG so wheel-zoom (which adjusts
            the SVG viewBox) doesn't scale it. Lives below the SVG as
@@ -1480,14 +1502,14 @@ function renderZones(zones, selectedId, x0, y0, pxW, pxD, room, isDrawBackdrop) 
     const strokeOpacity = isSel ? 1 : 0.75;
     const points = z.vertices.map(v => {
       const sx = x0 + (v.x / room.width_m) * pxW;
-      const sy = y0 + (v.y / room.depth_m) * pxD;
+      const sy = y0 - (v.y / room.depth_m) * pxD;
       return `${sx.toFixed(1)},${sy.toFixed(1)}`;
     }).join(' ');
     s += `<polygon points="${points}" fill="${color}" fill-opacity="${fillOpacity}" stroke="${color}" stroke-width="${isSel ? 3 : 2}" stroke-opacity="${strokeOpacity}" />`;
     const cx = z.vertices.reduce((a, v) => a + v.x, 0) / z.vertices.length;
     const cy = z.vertices.reduce((a, v) => a + v.y, 0) / z.vertices.length;
     const scx = x0 + (cx / room.width_m) * pxW;
-    const scy = y0 + (cy / room.depth_m) * pxD;
+    const scy = y0 - (cy / room.depth_m) * pxD;
     s += `<text x="${scx.toFixed(1)}" y="${scy.toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone" fill="${color}">${z.label}</text>`;
     s += `<text x="${scx.toFixed(1)}" y="${(scy + 13).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub">elev ${z.elevation_m} m</text>`;
   });
@@ -1531,11 +1553,11 @@ function renderSubStructures(subs, x0, y0, pxW, pxD, parentRoom) {
       const rx = p.x * cosR - p.y * sinR + px;
       const ry = p.x * sinR + p.y * cosR + py;
       const sx = x0 + (rx / parentRoom.width_m) * pxW;
-      const sy = y0 + (ry / parentRoom.depth_m) * pxD;
+      const sy = y0 - (ry / parentRoom.depth_m) * pxD;
       return `${sx.toFixed(1)},${sy.toFixed(1)}`;
     }).join(' ');
     const labelX = x0 + (px / parentRoom.width_m) * pxW;
-    const labelY = y0 + (py / parentRoom.depth_m) * pxD;
+    const labelY = y0 - (py / parentRoom.depth_m) * pxD;
     const lbl = (sub.sourceRoomName || 'Sub-room').replace(/[<>&]/g, '');
     out += `<polygon points="${points}" fill="#4aa3ff" fill-opacity="0.18" stroke="#7fc7ff" stroke-width="1.5" stroke-dasharray="4,3" />`;
     out += `<text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#7fc7ff">${lbl}</text>`;
@@ -1557,14 +1579,14 @@ function renderStandaloneEnclosures(encs, x0, y0, pxW, pxD, parentRoom) {
     if (!enc || !Array.isArray(enc.polygon) || enc.polygon.length < 3) continue;
     const points = enc.polygon.map(p => {
       const sx = x0 + (p.x / parentRoom.width_m) * pxW;
-      const sy = y0 + (p.y / parentRoom.depth_m) * pxD;
+      const sy = y0 - (p.y / parentRoom.depth_m) * pxD;
       return `${sx.toFixed(1)},${sy.toFixed(1)}`;
     }).join(' ');
     let lcx = 0, lcy = 0;
     for (const p of enc.polygon) { lcx += p.x; lcy += p.y; }
     lcx /= enc.polygon.length; lcy /= enc.polygon.length;
     const labelX = x0 + (lcx / parentRoom.width_m) * pxW;
-    const labelY = y0 + (lcy / parentRoom.depth_m) * pxD;
+    const labelY = y0 - (lcy / parentRoom.depth_m) * pxD;
     const lbl = (enc.label || 'Enclosure').replace(/[<>&]/g, '');
     out += `<polygon points="${points}" fill="#4aa3ff" fill-opacity="0.10" stroke="#7fc7ff" stroke-width="1.8" />`;
     out += `<text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#7fc7ff">${lbl}</text>`;
@@ -1586,9 +1608,9 @@ function renderSharedWallSegments(segs, x0, y0, pxW, pxD, parentRoom) {
     if (!Number.isFinite(seg.x1) || !Number.isFinite(seg.y1)
         || !Number.isFinite(seg.x2) || !Number.isFinite(seg.y2)) continue;
     const ax = x0 + (seg.x1 / parentRoom.width_m) * pxW;
-    const ay = y0 + (seg.y1 / parentRoom.depth_m) * pxD;
+    const ay = y0 - (seg.y1 / parentRoom.depth_m) * pxD;
     const bx = x0 + (seg.x2 / parentRoom.width_m) * pxW;
-    const by = y0 + (seg.y2 / parentRoom.depth_m) * pxD;
+    const by = y0 - (seg.y2 / parentRoom.depth_m) * pxD;
     out += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#f59e0b" stroke-width="6" stroke-linecap="round" stroke-opacity="0.85" />`;
   }
   return out;
@@ -1605,16 +1627,18 @@ function renderClipPath(room, x0, y0, pxW, pxD) {
     const w = room.width_m, d = room.depth_m;
     const sxPerM = pxW / w, syPerM = pxD / d;
     const x1 = (x0 + (-podiumExt) * sxPerM).toFixed(1);
-    const y1 = (y0 + (-podiumExt) * syPerM).toFixed(1);
+    // After Y-flip, the SMALLER world Y (south podium edge at -podiumExt)
+    // maps to the LARGER screen Y (bottom of canvas), and vice versa.
+    const y1 = (y0 - (-podiumExt) * syPerM).toFixed(1);   // south podium edge → bottom of canvas
     const x2 = (x0 + (w + podiumExt) * sxPerM).toFixed(1);
-    const y2 = (y0 + (d + podiumExt) * syPerM).toFixed(1);
+    const y2 = (y0 - (d + podiumExt) * syPerM).toFixed(1); // north podium edge → top of canvas
     return `<clipPath id="room-clip"><polygon points="${x1},${y1} ${x2},${y1} ${x2},${y2} ${x1},${y2}" /></clipPath>`;
   }
   const verts = roomPlanVertices(room);
   if (verts.length === 0) return '';
   const points = verts.map(v => {
     const sx = x0 + (v.x / room.width_m) * pxW;
-    const sy = y0 + (v.y / room.depth_m) * pxD;
+    const sy = y0 - (v.y / room.depth_m) * pxD;
     return `${sx.toFixed(1)},${sy.toFixed(1)}`;
   }).join(' ');
   return `<clipPath id="room-clip"><polygon points="${points}" /></clipPath>`;
@@ -1635,10 +1659,13 @@ function matIdOf(slot) {
 // In the live 2D plan the FRONT wall is at the top, which is also
 // where the arrow points — sources with yaw=180 in state coordinates
 // fire toward the front, so 'north = front' is the canonical map.
-function renderNorthArrowSVG(x0, y0, pxW) {
+function renderNorthArrowSVG(x0, y0, pxW, pxD) {
   const size = 14;                          // half-height of the arrow
   const cx = x0 + pxW - 10;                 // top-right, just inside the right edge
-  const cy = y0 - 18;                       // sits above the FRONT label band
+  // After Y-flip, world-Y=depth_m (the "north / FRONT" wall) lives at
+  // screen-Y = y0 - pxD. The arrow sits just ABOVE that wall in the
+  // top margin band.
+  const cy = y0 - pxD - 18;
   const apexY = cy - size;
   const midY = cy + size * 0.25;
   const baseY = cy + size * 0.05;
@@ -1656,29 +1683,38 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
   const verts = roomPlanVertices(room);
   const svgPts = verts.map(v => ({
     sx: x0 + (v.x / room.width_m) * pxW,
-    sy: y0 + (v.y / room.depth_m) * pxD,
+    sy: y0 - (v.y / room.depth_m) * pxD,
   }));
 
   if (shape === 'rectangular') {
     const wN = matIdOf(surfaces.wall_north), wS = matIdOf(surfaces.wall_south);
     const wE = matIdOf(surfaces.wall_east),  wW = matIdOf(surfaces.wall_west);
-    const floorFill = `<rect x="${x0}" y="${y0}" width="${pxW}" height="${pxD}" fill="${colorFor(alphaOf(surfaces.floor))}" fill-opacity="0.15" rx="2" />`;
+    // Y-flip: world-Y=0 lives at screen-Y=y0 (bottom edge of room band);
+    // world-Y=depth_m lives at screen-Y=y0-pxD (top edge).
+    //   yTop    = y0 - pxD   (wall at world-Y=depth_m — scene.js wall_south)
+    //   yBottom = y0         (wall at world-Y=0       — scene.js wall_north)
+    const yTop = y0 - pxD;
+    const yBottom = y0;
+    const floorFill = `<rect x="${x0}" y="${yTop}" width="${pxW}" height="${pxD}" fill="${colorFor(alphaOf(surfaces.floor))}" fill-opacity="0.15" rx="2" />`;
     const walls = `
-      <line x1="${x0}" y1="${y0}" x2="${x0 + pxW}" y2="${y0}" stroke="${colorFor(alphaOf(wN))}" stroke-width="8" stroke-linecap="round" />
-      <line x1="${x0}" y1="${y0 + pxD}" x2="${x0 + pxW}" y2="${y0 + pxD}" stroke="${colorFor(alphaOf(wS))}" stroke-width="8" stroke-linecap="round" />
-      <line x1="${x0 + pxW}" y1="${y0}" x2="${x0 + pxW}" y2="${y0 + pxD}" stroke="${colorFor(alphaOf(wE))}" stroke-width="8" stroke-linecap="round" />
-      <line x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + pxD}" stroke="${colorFor(alphaOf(wW))}" stroke-width="8" stroke-linecap="round" />
+      <line x1="${x0}" y1="${yBottom}" x2="${x0 + pxW}" y2="${yBottom}" stroke="${colorFor(alphaOf(wN))}" stroke-width="8" stroke-linecap="round" />
+      <line x1="${x0}" y1="${yTop}" x2="${x0 + pxW}" y2="${yTop}" stroke="${colorFor(alphaOf(wS))}" stroke-width="8" stroke-linecap="round" />
+      <line x1="${x0 + pxW}" y1="${yTop}" x2="${x0 + pxW}" y2="${yBottom}" stroke="${colorFor(alphaOf(wE))}" stroke-width="8" stroke-linecap="round" />
+      <line x1="${x0}" y1="${yTop}" x2="${x0}" y2="${yBottom}" stroke="${colorFor(alphaOf(wW))}" stroke-width="8" stroke-linecap="round" />
     `;
     // Maya v9 audit §2 — direction tags only (small caps, muted),
     // material name moves to a hover tooltip on the wall stroke and
     // is restated authoritatively in the page footer. Drops the
     // "Front — Gypsum board 13mm on studs" inline label that was
     // shouting louder than the architecture.
+    //
+    // FRONT stays at the TOP of the canvas (north arrow points to it).
+    // After Y-flip, the topmost wall is at yTop = y0 - pxD.
     const labels = `
-      <text x="${x0 + pxW/2}" y="${y0 - 14}" text-anchor="middle" class="vp-lbl vp-lbl-wall">FRONT</text>
-      <text x="${x0 + pxW/2}" y="${y0 + pxD + 22}" text-anchor="middle" class="vp-lbl vp-lbl-wall">BACK</text>
-      <text x="${x0 + pxW + 14}" y="${y0 + pxD/2 + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">RIGHT</text>
-      <text x="${x0 - 14}" y="${y0 + pxD/2 + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">LEFT</text>
+      <text x="${x0 + pxW/2}" y="${yTop - 14}" text-anchor="middle" class="vp-lbl vp-lbl-wall">FRONT</text>
+      <text x="${x0 + pxW/2}" y="${yBottom + 22}" text-anchor="middle" class="vp-lbl vp-lbl-wall">BACK</text>
+      <text x="${x0 + pxW + 14}" y="${(yTop + pxD/2) + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">RIGHT</text>
+      <text x="${x0 - 14}" y="${(yTop + pxD/2) + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">LEFT</text>
     `;
     return { floorFill, walls, labels };
   }
@@ -1741,7 +1777,10 @@ function renderHeatmapSVG(splResult, x0, y0, pxW, pxD, room) {
       const wxm = ox + i * cwm;
       const wym = oy + j * cdm;
       const sx = x0 + wxm * sxPerM;
-      const sy = y0 + wym * syPerM;
+      // After Y-flip: cell at world Y=wym sits at screen-Y=y0-wym*syPerM,
+      // but `<rect y="...">` is the TOP-LEFT corner, so subtract a full
+      // cell height to anchor the rect's BOTTOM at that line.
+      const sy = y0 - wym * syPerM - chPx;
       s += `<rect x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" width="${(cwPx + 0.5).toFixed(2)}" height="${(chPx + 0.5).toFixed(2)}" fill="${splColor(spl)}" fill-opacity="0.55" />`;
     }
   }
@@ -1787,15 +1826,19 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room, selectedIdx, draggin
 // line-array elements (0..N-1).
 function renderOneSpeakerSymbol(src, parentIdx, elemIdx, x0, y0, pxW, pxD, room, isSelected, isDragging, labelText) {
   const sx = x0 + (src.position.x / room.width_m) * pxW;
-  const sy = y0 + (src.position.y / room.depth_m) * pxD;
+  const sy = y0 - (src.position.y / room.depth_m) * pxD;
   const outside = !isInsideRoom3D(src.position, room);
   const groupColor = src.groupId ? colorForGroup(src.groupId) : null;
   const baseFill = outside ? '#ff5a3c' : (groupColor || '#fff');
   const baseStroke = outside ? '#8a1200' : '#000';
   const yaw_rad = (src.aim?.yaw ?? 0) * Math.PI / 180;
   const size = 13;
-  const aimX = Math.sin(yaw_rad), aimY = Math.cos(yaw_rad);
-  const rightX = Math.cos(yaw_rad), rightY = -Math.sin(yaw_rad);
+  // Y-flip: world +Y now maps to SVG -Y (up on screen). World aim vector
+  // is (sin yaw, cos yaw); the SVG-pixel offset is (sin yaw, -cos yaw).
+  // Without the negation, yaw=180 (fires toward state -Y, e.g. surau
+  // qibla → mihrab) would visually point AWAY from the qibla wall.
+  const aimX = Math.sin(yaw_rad), aimY = -Math.cos(yaw_rad);
+  const rightX = Math.cos(yaw_rad), rightY = Math.sin(yaw_rad);
   // Vertices are written relative to (0, 0) so the parent <g>'s
   // transform=translate(sx,sy) places them in the viewport AND so a
   // scale(2) appended during drag scales about the icon's centre.
@@ -1895,7 +1938,10 @@ function clientToWorldXY(svg, clientX, clientY) {
   const geom = currentRoomGeom();
   const room = state.room;
   const rx = ((local.x - geom.x0) / geom.pxW) * room.width_m;
-  const ry = ((local.y - geom.y0) / geom.pxD) * room.depth_m;
+  // Y-axis math convention: screen Y grows DOWN, world Y grows UP, so
+  // the inverse subtracts in the other order. local.y > y0 (clicked
+  // BELOW the world-Y=0 line) → ry < 0 (storage south of origin).
+  const ry = ((geom.y0 - local.y) / geom.pxD) * room.depth_m;
   return { x: rx, y: ry };
 }
 
@@ -2350,7 +2396,7 @@ function escapeMenuHtml(s) {
 function renderTreatmentsSVG(treatments, selectedId, draggingId, x0, y0, pxW, pxD, room) {
   if (!Array.isArray(treatments) || treatments.length === 0) return '';
   const stateToSvgX = (x) => x0 + (x / room.width_m) * pxW;
-  const stateToSvgY = (y) => y0 + (y / room.depth_m) * pxD;
+  const stateToSvgY = (y) => y0 - (y / room.depth_m) * pxD;
   // World-metres → SVG-pixels scale (uniform — assume the floor plan is
   // aspect-correct because the renderer fits the room into pxW × pxD).
   const px_per_m_x = pxW / Math.max(0.01, room.width_m);
@@ -2401,10 +2447,14 @@ function renderTreatmentsSVG(treatments, selectedId, draggingId, x0, y0, pxW, px
       const idx = t.anchor.wallIndex % polygonVerts.length;
       const a = polygonVerts[idx];
       const b = polygonVerts[(idx + 1) % polygonVerts.length];
-      // SVG +Y is downward so flip the sign on dy when computing the
-      // tangent angle — this keeps the rectangle hugging the same edge
-      // the renderRoomOutline draws.
-      tangAngleDeg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+      // The polygon edge is in WORLD coords (a.y, b.y in state units).
+      // The 2D plan now uses math convention: world +Y maps to SVG -Y
+      // (screen-up). The treatment panel rectangle is in SVG-local
+      // coords (rotation applied to a horizontal rect), so the tangent
+      // angle must be computed in SVG space → negate dy when forming
+      // atan2 so the rect orients along the same SVG line the room
+      // outline draws.
+      tangAngleDeg = (Math.atan2(-(b.y - a.y), b.x - a.x) * 180) / Math.PI;
     }
     const wPx = w * px_per_m_avg;
     const dPx = Math.max(2, d * px_per_m_avg);
@@ -2438,7 +2488,7 @@ function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, dragg
   let s = '';
   listeners.forEach((lst) => {
     const sx = x0 + (lst.position.x / room.width_m) * pxW;
-    const sy = y0 + (lst.position.y / room.depth_m) * pxD;
+    const sy = y0 - (lst.position.y / room.depth_m) * pxD;
     const isSel = lst.id === selectedId;
     const isDragging = lst.id === draggingId;
     const radius = isSel ? 10 : 7;
@@ -2504,7 +2554,7 @@ function renderVertexHandlesSVG(room, selectedIdx, draggingIdx, x0, y0, pxW, pxD
   const n = verts.length;
   const toScreen = (v) => ({
     x: x0 + (v.x / w) * pxW,
-    y: y0 + (v.y / d) * pxD,
+    y: y0 - (v.y / d) * pxD,
   });
 
   let s = '';

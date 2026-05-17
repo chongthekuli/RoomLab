@@ -6,10 +6,11 @@
 // pipeline rasterises it as vector (sharp at any DPI, BOMBA-reviewer
 // zoom-friendly).
 //
-// Coordinate convention:
-//   State plan coords: (x, y) where y is depth (north-south).
+// Coordinate convention (v=458, Lindqvist Y-flip):
+//   State plan coords: (x, y) where y is depth (north-south, +y = north).
 //   SVG coords: (svgX, svgY) where svgY goes DOWN.
-//   We invert y at write time so north points UP on the page.
+//   We invert y at write time so north (large state y) renders at the
+//   TOP of the page. Matches the live 2D plan in room-2d.js exactly.
 //
 // Layout: room outline + zones + sources + listeners + scale bar +
 // north arrow. ViewBox is sized to room bbox plus a 1-metre margin
@@ -42,32 +43,39 @@ function pickScaleBar(roomWidth_m) {
 }
 
 // Build the room-outline path. Returns an SVG element string
-// (or empty on degenerate state). Coordinate frame is the same as
-// the rest of the SVG — caller has already applied the +MARGIN_M
-// translation by passing offsetX / offsetY.
-function buildRoomOutline(room, depth_m, offsetX, offsetY) {
+// (or empty on degenerate state). Caller passes `anchorY` = the SVG
+// pixel y where world-Y=0 lives (bottom edge of the effective room
+// band). Every world-Y is mapped to `anchorY - y_m` so larger world Y
+// renders HIGHER on the page (math convention; v=458 Y-flip).
+function buildRoomOutline(room, offsetX, anchorY) {
   const stroke = '#222';
   const sw = 0.06; // 6 cm in plan, scales as a hairline at print DPI
   if (room.shape === 'rectangular') {
-    return `<rect x="${offsetX.toFixed(3)}" y="${offsetY.toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
+    // Rect top-left is at (offsetX, anchorY - depth_m).
+    return `<rect x="${offsetX.toFixed(3)}" y="${(anchorY - room.depth_m).toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   }
   if (room.shape === 'polygon') {
     const cx = room.width_m / 2 + offsetX;
-    const cy = room.depth_m / 2 + offsetY;
+    const cy = anchorY - room.depth_m / 2;
     const r = room.polygon_radius_m;
     const N = room.polygon_sides;
     const pts = [];
     for (let i = 0; i < N; i++) {
       const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
+      // World vertex = (cx_world + r*cos, cy_world + r*sin). Map cx
+      // directly (X-axis unchanged) and subtract sin since world +Y
+      // now maps to SVG -Y. For symmetric N-gons (even sides) the
+      // result is visually identical to the previous render; odd-N
+      // polygons flip mirror-image, as expected.
+      const py = cy - r * Math.sin(angle);
       const px = cx + r * Math.cos(angle);
-      const py = cy + r * Math.sin(angle);
       pts.push(`${px.toFixed(3)},${py.toFixed(3)}`);
     }
     return `<polygon points="${pts.join(' ')}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   }
   if (room.shape === 'round') {
     const cx = room.width_m / 2 + offsetX;
-    const cy = room.depth_m / 2 + offsetY;
+    const cy = anchorY - room.depth_m / 2;
     return `<circle cx="${cx.toFixed(3)}" cy="${cy.toFixed(3)}" r="${room.round_radius_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   }
   if (room.shape === 'custom') {
@@ -75,7 +83,7 @@ function buildRoomOutline(room, depth_m, offsetX, offsetY) {
     if (verts.length < 3) return '';
     const pts = verts.map(v => {
       const sx = v.x + offsetX;
-      const sy = v.y + offsetY;
+      const sy = anchorY - v.y;
       return `${sx.toFixed(3)},${sy.toFixed(3)}`;
     }).join(' ');
     return `<polygon points="${pts}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
@@ -83,27 +91,32 @@ function buildRoomOutline(room, depth_m, offsetX, offsetY) {
   return '';
 }
 
-// State y=0 is FRONT (where the north arrow points); state +y grows
-// toward the BACK wall. SVG y also grows downward, so we map state y
-// directly to SVG y — no flip. Matches room-2d.js so the printed plan
-// and the in-app 2D plan show the same room in the same orientation.
-function projectXY(x_m, y_m, depth_m, offsetX, offsetY) {
+// State y grows toward the north / FRONT wall. SVG y grows DOWN. We
+// invert y so state +y renders UP the page — math convention, matching
+// the live 2D plan in room-2d.js.
+//
+// Signature note: the third arg used to be `depth_m`. With the Y-flip
+// the world→SVG anchor is `anchorY` = SVG pixel where world-Y=0 sits
+// (i.e. the bottom edge of the room band on the printed page).
+function projectXY(x_m, y_m, anchorY, offsetX) {
   return {
     sx: x_m + offsetX,
-    sy: y_m + offsetY,
+    sy: anchorY - y_m,
   };
 }
 
 // Aim-triangle builder: apex points in the source yaw direction.
-// yaw=0 aims along state +y (toward BACK), which in the SVG is +sy
-// (downward), so apex Y uses +cos(yaw).
+// Source aim yaw=0 fires along state +y (north / toward the FRONT
+// wall). After the Y-flip, state +y maps to SVG -y (page-up), so the
+// SVG-pixel aim vector is (sin yaw, -cos yaw). yaw=180 (fires south /
+// toward BACK) → apex points DOWN on the page.
 function aimTrianglePoints(cx, cy, r, yawDeg) {
   const yaw = (yawDeg || 0) * Math.PI / 180;
-  const dx = Math.sin(yaw), dy = Math.cos(yaw);
-  const px = -dy, py = dx;
-  const ax = cx + dx * r;
+  const dx = Math.sin(yaw), dy = -Math.cos(yaw);   // unit aim in SVG coords (Y-flipped)
+  const px = -dy, py = dx;                          // perpendicular (right-hand)
+  const ax = cx + dx * r;                           // apex along aim
   const ay = cy + dy * r;
-  const bcx = cx - dx * r * 0.4;
+  const bcx = cx - dx * r * 0.4;                    // base center slightly back
   const bcy = cy - dy * r * 0.4;
   const bw = r * 0.75;
   const blx = bcx + px * bw, bly = bcy + py * bw;
@@ -129,25 +142,28 @@ export function buildFloorPlanSVG(state, opts = {}) {
   const minX = -ext, minY = -ext;
   const maxX = room.width_m + ext, maxY = room.depth_m + ext;
   const offsetX = MARGIN_M - minX;
-  const offsetY = MARGIN_M - minY;
   const viewW = (maxX - minX) + 2 * MARGIN_M;
   const viewH = (maxY - minY) + 2 * MARGIN_M;
-  const depth_m = room.depth_m;
+  // Y-flip anchor: SVG pixel where world-Y=0 lands. The room band is
+  // centered between MARGIN_M and viewH-MARGIN_M; world-Y=maxY (north
+  // podium edge) renders at SVG y=MARGIN_M. So world-Y=0 renders at
+  // SVG y=MARGIN_M + maxY = anchorY.
+  const anchorY = MARGIN_M + maxY;
 
-  const roomEl = buildRoomOutline(room, depth_m, offsetX, offsetY);
+  const roomEl = buildRoomOutline(room, offsetX, anchorY);
 
   // Zone fills + centroid labels.
   const zonesEl = (state.zones || []).map((z, idx) => {
     if (!z.vertices || z.vertices.length < 3) return '';
     const color = colorForZone(idx);
     const pts = z.vertices.map(v => {
-      const p = projectXY(v.x, v.y, depth_m, offsetX, offsetY);
+      const p = projectXY(v.x, v.y, anchorY, offsetX);
       return `${p.sx.toFixed(3)},${p.sy.toFixed(3)}`;
     }).join(' ');
     // Centroid for label placement.
     const sumX = z.vertices.reduce((a, v) => a + v.x, 0) / z.vertices.length;
     const sumY = z.vertices.reduce((a, v) => a + v.y, 0) / z.vertices.length;
-    const c = projectXY(sumX, sumY, depth_m, offsetX, offsetY);
+    const c = projectXY(sumX, sumY, anchorY, offsetX);
     return `<polygon points="${pts}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="0.04" />`
       + `<text x="${c.sx.toFixed(3)}" y="${c.sy.toFixed(3)}" font-size="0.45" text-anchor="middle" fill="#222">${escapeText(z.label || z.id)}</text>`;
   }).join('');
@@ -164,7 +180,7 @@ export function buildFloorPlanSVG(state, opts = {}) {
       const px = (el.position?.x ?? el.origin?.x);
       const py = (el.position?.y ?? el.origin?.y);
       if (px == null || py == null) return;
-      const p = projectXY(px, py, depth_m, offsetX, offsetY);
+      const p = projectXY(px, py, anchorY, offsetX);
       const color = el.groupId ? colorForGroup(el.groupId) : '#1f5faa';
       const label = s.kind === 'line-array' ? `${srcCounter}.${eIdx + 1}` : `${srcCounter}`;
       const tri = aimTrianglePoints(p.sx, p.sy, 0.32, el.aim?.yaw ?? 0);
@@ -180,7 +196,7 @@ export function buildFloorPlanSVG(state, opts = {}) {
     const px = l.position?.x;
     const py = l.position?.y;
     if (px == null || py == null) return '';
-    const p = projectXY(px, py, depth_m, offsetX, offsetY);
+    const p = projectXY(px, py, anchorY, offsetX);
     const r = 0.26;
     return `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="#0a8a4a" stroke="#000" stroke-width="0.04" />`
       + `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28">${escapeText(l.label || l.id)}</text>`;

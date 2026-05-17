@@ -1800,35 +1800,38 @@ function buildTreatmentPlanSVG(stateRef) {
 
   const MARGIN = 1.5;
   const offsetX = MARGIN;
-  const offsetY = MARGIN;
   const viewW = room.width_m + 2 * MARGIN;
   const viewH = room.depth_m + 2 * MARGIN;
-  const depth_m = room.depth_m;
+  // Y-flip anchor (v=458): SVG pixel where world-Y=0 lands. World-Y=
+  // depth_m (north / FRONT wall) renders at SVG y=MARGIN (top of page).
+  // Matches print-plan-svg.js + print-heatmap.js exactly.
+  const anchorY = MARGIN + room.depth_m;
 
-  // State y=0 is FRONT (top of plan); state +y grows toward BACK (bottom)
-  // — same orientation as room-2d.js and print-heatmap.js. No Y flip.
-  const project = (x, y) => ({ sx: x + offsetX, sy: y + offsetY });
+  // State +y grows toward the north / FRONT wall. SVG y grows DOWN. We
+  // invert y so state +y renders UP the page — math convention, matching
+  // the live 2D plan in room-2d.js.
+  const project = (x, y) => ({ sx: x + offsetX, sy: anchorY - y });
 
   // ---- Room outline -------------------------------------------------
   const stroke = '#222';
   const sw = 0.06;
   let outlineEl = '';
   if (room.shape === 'rectangular') {
-    outlineEl = `<rect x="${offsetX.toFixed(3)}" y="${offsetY.toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="#F8F6F1" stroke="${stroke}" stroke-width="${sw}" />`;
+    outlineEl = `<rect x="${offsetX.toFixed(3)}" y="${(anchorY - room.depth_m).toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="#F8F6F1" stroke="${stroke}" stroke-width="${sw}" />`;
   } else if (room.shape === 'polygon') {
     const cx = room.width_m / 2 + offsetX;
-    const cy = room.depth_m / 2 + offsetY;
+    const cy = anchorY - room.depth_m / 2;
     const r = room.polygon_radius_m;
     const N = room.polygon_sides;
     const pts = [];
     for (let i = 0; i < N; i++) {
       const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
-      pts.push(`${(cx + r * Math.cos(angle)).toFixed(3)},${(cy + r * Math.sin(angle)).toFixed(3)}`);
+      pts.push(`${(cx + r * Math.cos(angle)).toFixed(3)},${(cy - r * Math.sin(angle)).toFixed(3)}`);
     }
     outlineEl = `<polygon points="${pts.join(' ')}" fill="#F8F6F1" stroke="${stroke}" stroke-width="${sw}" />`;
   } else if (room.shape === 'round') {
     const cx = room.width_m / 2 + offsetX;
-    const cy = room.depth_m / 2 + offsetY;
+    const cy = anchorY - room.depth_m / 2;
     outlineEl = `<circle cx="${cx.toFixed(3)}" cy="${cy.toFixed(3)}" r="${room.round_radius_m.toFixed(3)}" fill="#F8F6F1" stroke="${stroke}" stroke-width="${sw}" />`;
   } else if (room.shape === 'custom') {
     const verts = room.custom_vertices || [];

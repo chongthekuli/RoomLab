@@ -46,21 +46,24 @@ function pickScaleBar(roomWidth_m) {
   return best;
 }
 
-// State y=0 is the FRONT wall (where the north arrow points); state y
-// grows toward the BACK wall. SVG y also grows downward, so we map
-// state y directly to SVG y — no flip. This matches the live 2D plan
-// in room-2d.js so the printed report and the in-app view show the
-// same room in the same orientation.
-function projectXY(x_m, y_m, depth_m, offsetX, offsetY) {
-  return { sx: x_m + offsetX, sy: y_m + offsetY };
+// State y grows toward the north / FRONT wall (where the north arrow
+// points). SVG y grows DOWN. We invert y so state +y renders UP the
+// page — math convention, matching the live 2D plan in room-2d.js.
+//
+// Signature note: the third arg used to be `depth_m`. With the v=458
+// Y-flip the world→SVG anchor is `anchorY` = SVG pixel where world-Y=0
+// sits (i.e. the bottom of the room band on the printed page).
+function projectXY(x_m, y_m, anchorY, offsetX) {
+  return { sx: x_m + offsetX, sy: anchorY - y_m };
 }
 
 // Build a triangle whose apex points in the source aim direction.
-// Source aim yaw=0 means firing along state +y (toward the BACK wall),
-// which in the SVG is +sy (downward), so apex Y uses +cos(yaw).
+// Source aim yaw=0 fires along state +y (north / toward the FRONT
+// wall). After the Y-flip, state +y maps to SVG -y (page-up), so the
+// SVG-pixel aim vector is (sin yaw, -cos yaw).
 function aimTrianglePoints(cx, cy, r, yawDeg) {
   const yaw = (yawDeg || 0) * Math.PI / 180;
-  const dx = Math.sin(yaw), dy = Math.cos(yaw);    // unit aim in SVG coords
+  const dx = Math.sin(yaw), dy = -Math.cos(yaw);   // unit aim in SVG coords (Y-flipped)
   const px = -dy, py = dx;                          // perpendicular (right-hand)
   const ax = cx + dx * r;                           // apex along aim
   const ay = cy + dy * r;
@@ -87,10 +90,13 @@ export function buildHeatmapDataURL(splGrid) {
   canvas.height = cellsY;
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(cellsX, cellsY);
-  // State y=0 is FRONT and lines up with the top of the SVG; state +y
-  // grows toward the BACK wall and toward the bottom of the SVG. Both
-  // raster and SVG share that direction now (was previously flipped),
-  // so grid row j renders at image row j directly.
+  // Raster row order is grid-native (row j = world cell j, growing
+  // toward state +y). The page SVG flips the image vertically via a
+  // group transform (see buildHeatmapPageSVG → heatEl), so this
+  // function stays trivial and unit-testable. Keeping the row order
+  // grid-native also means downstream raster consumers (a future PDF
+  // exporter, a thumbnail strip) see the same pixel layout as the
+  // splGrid arrays themselves.
   for (let j = 0; j < cellsY; j++) {
     const srcRow = j;
     for (let i = 0; i < cellsX; i++) {
@@ -185,18 +191,23 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
   const maxX = Math.max(room.width_m, gridOX + gridW);
   const maxY = Math.max(room.depth_m, gridOY + gridD);
   const offsetX = MARGIN_M - minX;   // shift world (0,0) so minX maps to MARGIN_M
-  const offsetY = MARGIN_M - minY;
   const viewW = (maxX - minX) + 2 * MARGIN_M;
   const viewH = (maxY - minY) + 2 * MARGIN_M;
-  const depth_m = room.depth_m;
+  // Y-flip anchor: SVG pixel where world-Y=0 lands. World-Y=maxY (north
+  // podium edge) renders at SVG y=MARGIN_M (top of band).
+  const anchorY = MARGIN_M + maxY;
 
-  // Heatmap raster — placed at the grid's effective bounds (the
-  // gridOX/gridOY/gridW/gridD declared above above the viewBox sizing).
-  // State y=gridOY (front of grid) maps to SVG y=gridOY+offsetY at the
-  // TOP of the image's vertical span — no flip, raster row order matches.
+  // Heatmap raster — placed at the grid's effective bounds. The raster
+  // data URL is grid-native (row 0 = world cell row 0, growing with
+  // +world-Y), but we want world +Y to render UP the page. Solve with
+  // a per-image SVG transform: translate to the row's TOP-LEFT after
+  // flip, then scale(1,-1) so the image draws upside-down inside its
+  // own width×height box. Net: image bottom-row pixels end up at the
+  // BOTTOM of the SVG band — matches world-Y=gridOY rendering at
+  // SVG y = anchorY - gridOY.
   const imgX = gridOX + offsetX;
-  const imgY = gridOY + offsetY;
-  const heatEl = `<image href="${dataURL}" x="${imgX.toFixed(3)}" y="${imgY.toFixed(3)}" width="${gridW.toFixed(3)}" height="${gridD.toFixed(3)}" preserveAspectRatio="none" image-rendering="optimizeQuality" />`;
+  const imgYTop = anchorY - (gridOY + gridD);   // SVG y of grid's max-Y edge
+  const heatEl = `<g transform="translate(${imgX.toFixed(3)} ${(imgYTop + gridD).toFixed(3)}) scale(1 -1)"><image href="${dataURL}" x="0" y="0" width="${gridW.toFixed(3)}" height="${gridD.toFixed(3)}" preserveAspectRatio="none" image-rendering="optimizeQuality" /></g>`;
 
   // Room outline — drawn over the heatmap so the architectural reads
   // first. Same 6 cm hairline as the plan view.
@@ -204,30 +215,31 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
   const sw = 0.06;
   let outlineEl = '';
   if (room.shape === 'rectangular') {
-    outlineEl = `<rect x="${offsetX.toFixed(3)}" y="${offsetY.toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
+    // Rect top-left after Y-flip is at (offsetX, anchorY - depth_m).
+    outlineEl = `<rect x="${offsetX.toFixed(3)}" y="${(anchorY - room.depth_m).toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   } else if (room.shape === 'polygon') {
     const cx = room.width_m / 2 + offsetX;
-    const cy = room.depth_m / 2 + offsetY;
+    const cy = anchorY - room.depth_m / 2;
     const r = room.polygon_radius_m;
     const N = room.polygon_sides;
     const pts = [];
     for (let i = 0; i < N; i++) {
       const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
       const px = cx + r * Math.cos(angle);
-      const py = cy + r * Math.sin(angle);
+      const py = cy - r * Math.sin(angle);
       pts.push(`${px.toFixed(3)},${py.toFixed(3)}`);
     }
     outlineEl = `<polygon points="${pts.join(' ')}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   } else if (room.shape === 'round') {
     const cx = room.width_m / 2 + offsetX;
-    const cy = room.depth_m / 2 + offsetY;
+    const cy = anchorY - room.depth_m / 2;
     outlineEl = `<circle cx="${cx.toFixed(3)}" cy="${cy.toFixed(3)}" r="${room.round_radius_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
   } else if (room.shape === 'custom') {
     const verts = room.custom_vertices || [];
     if (verts.length >= 3) {
       const pts = verts.map(v => {
         const sx = v.x + offsetX;
-        const sy = v.y + offsetY;
+        const sy = anchorY - v.y;
         return `${sx.toFixed(3)},${sy.toFixed(3)}`;
       }).join(' ');
       outlineEl = `<polygon points="${pts}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
@@ -240,12 +252,12 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
     if (!z.vertices || z.vertices.length < 3) return '';
     const color = colorForZone(idx);
     const pts = z.vertices.map(v => {
-      const p = projectXY(v.x, v.y, depth_m, offsetX, offsetY);
+      const p = projectXY(v.x, v.y, anchorY, offsetX);
       return `${p.sx.toFixed(3)},${p.sy.toFixed(3)}`;
     }).join(' ');
     const sumX = z.vertices.reduce((a, v) => a + v.x, 0) / z.vertices.length;
     const sumY = z.vertices.reduce((a, v) => a + v.y, 0) / z.vertices.length;
-    const c = projectXY(sumX, sumY, depth_m, offsetX, offsetY);
+    const c = projectXY(sumX, sumY, anchorY, offsetX);
     const polyEl = `<polygon points="${pts}" fill="none" stroke="${color}" stroke-width="0.06" stroke-dasharray="0.3 0.18" />`;
     if (compact) return polyEl;
     return polyEl
@@ -265,7 +277,7 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
       const px = (el.position?.x ?? el.origin?.x);
       const py = (el.position?.y ?? el.origin?.y);
       if (px == null || py == null) return;
-      const p = projectXY(px, py, depth_m, offsetX, offsetY);
+      const p = projectXY(px, py, anchorY, offsetX);
       const color = el.groupId ? colorForGroup(el.groupId) : '#1f5faa';
       const label = s.kind === 'line-array' ? `${srcCounter}.${eIdx + 1}` : `${srcCounter}`;
       const tri = aimTrianglePoints(p.sx, p.sy, 0.32, el.aim?.yaw ?? 0);
@@ -284,7 +296,7 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
     const px = l.position?.x;
     const py = l.position?.y;
     if (px == null || py == null) return '';
-    const p = projectXY(px, py, depth_m, offsetX, offsetY);
+    const p = projectXY(px, py, anchorY, offsetX);
     const r = 0.26;
     const base = `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="#0a8a4a" stroke="#fff" stroke-width="0.08" />`
       + `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="none" stroke="#000" stroke-width="0.04" />`;
