@@ -2,7 +2,9 @@ import { airAbsorptionAt, computeRoomConstant, localAngles } from './spl-calcula
 import { computeRT60Band } from './rt60.js';
 import { interpolateAttenuation } from './loudspeaker.js';
 import { wallsCrossedByPath, transmissionLossDb } from './wall-path.js';
-import { computeDiffractionContributions } from './diffraction.js';
+import {
+  computeDiffractionContributions, computeCornerDiffractionContributions,
+} from './diffraction.js';
 import {
   computeReradiationContributions, computeReverberantInsideSPL,
 } from './reradiation.js';
@@ -231,6 +233,18 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
           reverbPower += rerad.totalPower;
         }
       }
+      // Pierce-Hadden wedge diffraction at outdoor rectangular corners
+      // — independent of wall crossings (the corner path goes AROUND
+      // the building). Joins direct power same as top-edge diffraction.
+      if (useP15) {
+        const sourceLpFreeField_db = direct_db + tlBand_db;
+        const corner = computeCornerDiffractionContributions({
+          src: s.src, listener: listenerPos, room,
+          materials, freq_hz: fhz, sourceLpFreeField_db,
+          airAbsorption: true,
+        });
+        directPower += corner.totalPower;
+      }
     }
     const ambient_k = ambientNoise_per_band[k] ?? 40;
     const noisePower = Math.pow(10, ambient_k / 10);
@@ -319,6 +333,15 @@ export function computeSTIPA({
           });
           R_p += rerad.totalPower;
         }
+      }
+      if (useP15) {
+        const sourceLpFreeField_db = direct_db + tlBand_db;
+        const corner = computeCornerDiffractionContributions({
+          src: s.src, listener: listenerPos, room,
+          materials, freq_hz: fhz, sourceLpFreeField_db,
+          airAbsorption: true,
+        });
+        D += corner.totalPower;
       }
     }
     return { D, R: R_p };

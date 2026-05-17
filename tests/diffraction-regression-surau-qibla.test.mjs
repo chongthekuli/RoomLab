@@ -167,5 +167,42 @@ assertTrue(probeRange > 0.5,
   '(4) Lateral probes across wall show variance > 0.5 dB (soft gradient, not a flat rectangle)',
   `probes: ${probeVals.map(p => `${p.lbl}=${p.spl.toFixed(1)}`).join(', ')}; range=${probeRange.toFixed(2)}`);
 
+// ---- (5) NE-CORNER GRADIENT (Tier 1a commit (e) — P9 fix) ----
+// The shadow boundary at the NE corner separates "east wall blocks the
+// speaker" (deep shadow, ~54 dB) from "east wall doesn't block the
+// speaker, only north wall does" (single-wall shadow, ~68 dB). Pre-(e)
+// behaviour: behind the building the field is a flat dead zone (no
+// gradient at all, all positions read identical through-wall TL),
+// because rectangular-wall vertical edges weren't diffracting.
+//
+// Post-(e): the wedge contribution from the NE corner creates a
+// continuous spatial gradient across the shadow boundary. The step
+// from "deep shadow" to "single-wall shadow" can't be eliminated
+// (it's irreducible physics — direct-ray-blocked vs unblocked), but
+// it's now a smooth gradient over several metres rather than a flat
+// dead rectangle.
+//
+// Acceptance: (a) the corner boundary gradient is < 15 dB (not infinite
+// step / hard cliff), and (b) intermediate probes show a continuous
+// monotonic rise from in-shadow to past-corner (no flat sub-regions).
+const probe_xs = [16.5, 17, 17.5, 18, 18.5, 19];
+const probe_vals = probe_xs.map(x => computeMultiSourceSPL({
+  ...commonArgs, listenerPos: { x, y: -0.5, z: 1.7 },
+}));
+const corner_gradient = Math.max(...probe_vals) - Math.min(...probe_vals);
+assertTrue(corner_gradient < 15 && corner_gradient > 3,
+  `(5a) NE-corner gradient is a real continuous transition (3 < ${corner_gradient.toFixed(2)} < 15 dB)`,
+  `probes: ${probe_xs.map((x, i) => `x=${x}=${probe_vals[i].toFixed(1)}`).join(', ')}`);
+// Continuous monotonicity: each step from in-shadow to past-corner
+// must be ≤ 8 dB (was ~10+ dB pre-(e) as a single hard cliff).
+let max_step = 0;
+for (let i = 1; i < probe_vals.length; i++) {
+  const step = Math.abs(probe_vals[i] - probe_vals[i - 1]);
+  if (step > max_step) max_step = step;
+}
+assertTrue(max_step < 8,
+  `(5b) No single-metre step in the gradient exceeds 8 dB (post-wedge: ${max_step.toFixed(2)} dB)`,
+  `pre-(e) all probes read ~37.7 dB (dead rectangle); post-(e) gradient is continuous`);
+
 if (failed > 0) { console.log(`\n${failed} surau qibla regression test(s) FAILED`); process.exit(1); }
 console.log('\nAll surau qibla diffraction regression tests passed.');

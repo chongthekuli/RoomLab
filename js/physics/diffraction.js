@@ -31,13 +31,24 @@
 // render as a visible 5-dB ring along every wall on the heatmap.
 //
 // Simplifications logged with the regression-curator (Theo):
-//   P9  — Single-edge diffraction only; no wedge diffraction at
-//         outdoor wall-wall corners (Pierce §9). Off by ~2-4 dB
-//         directly behind a corner.
+//   P9  — Resolved in Tier 1a commit (e) for RECTANGULAR rooms via the
+//         Pierce-Hadden wedge correction (wedgeIL + enumerateRoomCorners
+//         + cornerIsInShadowPath + computeCornerDiffractionContributions
+//         below). Polygon-room corners + standaloneEnclosure corners
+//         remain deferred — see P14/P15.
 //   P11 — Diffraction not modelled across coupled-rooms shared walls;
 //         interior partitions use through-wall TL only.
 //   P12 — Bottom-edge diffraction for raised standaloneEnclosures
 //         (elev_m > 0) not enumerated. Top + verticals only.
+//   P14 — Polygon-room exterior corner enumeration not implemented.
+//         Needs interior-angle math + convex/concave sign handling.
+//         Defer until a polygon-room preset ships outdoor listeners.
+//   P15 — standaloneEnclosure exterior corners not enumerated. Same
+//         wedge physics as P14, different geometry source.
+//   P16 — Wedge correction frequency-independent (the +ΔIL term is
+//         a pure geometric solid-angle factor). Real wedge diffraction
+//         has a small UTD-style frequency dependence too (~±0.5 dB
+//         at HF) that Maekawa-baseline doesn't capture. Docs-only.
 
 import { airAbsorptionDbPerM } from './air-absorption.js';
 import { PHYSICS_P1_5_ENABLED } from './feature-flags.js';
@@ -75,6 +86,36 @@ export function maekawaIL(delta_m, lambda_m) {
   const x = Math.sqrt(2 * Math.PI * N);
   const il = MAEKAWA_IL_GRAZE_DB + 20 * Math.log10(x / Math.tanh(x));
   return Math.min(MAEKAWA_IL_MAX_DB, il);
+}
+
+// Pierce-Hadden wedge correction on top of Maekawa for an outdoor
+// building corner (Dr. Chen Tier 1a commit (e) spec, derived from
+// Pierce *Acoustics* §9.5 collapsed to the right-angle case).
+//
+// Formula:
+//   ΔIL_wedge(β_solid) = 10·log10(2π / (2π − β_solid))
+//
+// Sample values:
+//   β = 0       → ΔIL = 0   dB (thin knife edge — returns Maekawa unchanged)
+//   β = π/2     → ΔIL ≈ +1.25 dB (90° outdoor building corner — typical case)
+//   β = π       → ΔIL ≈ +3.01 dB
+//   β = 3π/2    → ΔIL ≈ +6.02 dB (270° re-entrant indoor corner — rare)
+//   β → 2π      → ΔIL → ∞   (closed solid; defensive clamp at 2π − 0.01)
+//
+// The correction is scaled by `base_il / GRAZE_DB` through the smooth
+// handoff zone so the corner-shadow boundary doesn't show a visible
+// step at δ=0. Above the graze plateau (base_il ≥ 5) the full
+// correction is applied.
+export function wedgeIL(delta_m, lambda_m, beta_solid_rad) {
+  const base = maekawaIL(delta_m, lambda_m);
+  if (base <= 0) return 0;
+  if (!Number.isFinite(beta_solid_rad) || beta_solid_rad <= 0) return base;
+  // β_solid → 2π is a closed solid with no edge; clamp to 2π − 0.01 rad
+  // to keep the formula finite if a malformed corner ever reaches here.
+  const beta = Math.min(beta_solid_rad, 2 * Math.PI - 0.01);
+  const dIL = 10 * Math.log10(2 * Math.PI / (2 * Math.PI - beta));
+  const scale = Math.min(1, base / MAEKAWA_IL_GRAZE_DB);
+  return Math.min(MAEKAWA_IL_MAX_DB, base + dIL * scale);
 }
 
 // Closest path-via-edge point on a finite edge segment, by image-source
@@ -270,9 +311,166 @@ export function computeDiffractionContributions({
   return { paths, totalPower };
 }
 
+// ============================================================================
+// Wedge / vertical-corner diffraction (Tier 1a commit (e) — P9 fix)
+// ============================================================================
+//
+// Maekawa-Tachibana single-edge IL handles paths bending over the TOP of a
+// wall. Real buildings ALSO let sound bend around the VERTICAL corners
+// where two walls meet. For a rectangular building these are right-angle
+// (90° exterior) wedges. The Pierce-Hadden correction adds ~+1.25 dB IL
+// on top of the Maekawa base — small in magnitude but visually decisive:
+// it smooths the ~10 dB shadow-boundary step at every corner into a
+// soft 2-4 dB gradient (the artifact the user spotted on the live page).
+
+// Enumerate the outdoor vertical corner wedges of `room`. Each corner
+// returns its world position, the two wall faces meeting there, the
+// vertical edge endpoints (for the Fermat optimizer), and the solid-
+// angle β occupied by the building material at this corner.
+//
+// Tier 1a scope: rectangular rooms only (4 corners, β = π/2 each).
+// Polygon-room corners (P14) and standaloneEnclosure corners (P15)
+// return empty arrays for now and are documented in the header.
+export function enumerateRoomCorners(room) {
+  if (!room) return [];
+  const shape = room.shape;
+  const isRect = !shape || shape === 'rectangular';
+  if (!isRect) return [];   // P14 / P15 deferred
+  const W = Number(room.width_m) || 0;
+  const D = Number(room.depth_m) || 0;
+  const H = Number(room.height_m) || 0;
+  if (W <= 0 || D <= 0 || H <= 0) return [];
+  const halfPi = Math.PI / 2;
+  return [
+    { id: 'corner_NW', x: 0, y: 0,
+      faces: ['parent_wall_north', 'parent_wall_west'],
+      edge_bottom: { x: 0, y: 0, z: 0 },
+      edge_top:    { x: 0, y: 0, z: H },
+      beta_solid: halfPi },
+    { id: 'corner_NE', x: W, y: 0,
+      faces: ['parent_wall_north', 'parent_wall_east'],
+      edge_bottom: { x: W, y: 0, z: 0 },
+      edge_top:    { x: W, y: 0, z: H },
+      beta_solid: halfPi },
+    { id: 'corner_SE', x: W, y: D,
+      faces: ['parent_wall_south', 'parent_wall_east'],
+      edge_bottom: { x: W, y: D, z: 0 },
+      edge_top:    { x: W, y: D, z: H },
+      beta_solid: halfPi },
+    { id: 'corner_SW', x: 0, y: D,
+      faces: ['parent_wall_south', 'parent_wall_west'],
+      edge_bottom: { x: 0, y: D, z: 0 },
+      edge_top:    { x: 0, y: D, z: H },
+      beta_solid: halfPi },
+  ];
+}
+
+// Signed perpendicular distance from `point` to the infinite line through
+// `(v1, v2)` in the XY plane. Sign follows the standard 2D cross product
+// convention: positive when `point` lies to the LEFT of the directed line
+// v1 → v2. For the canonical wall_<side> orientations this puts the room
+// interior on the +Z-cross side; we don't need to know which side is
+// "inside" — we only need to compare two signs to test if S and R are
+// on opposite sides of the same face.
+function signedDistanceToLine2D(point, v1, v2) {
+  const ex = v2.x - v1.x, ey = v2.y - v1.y;
+  const px = point.x - v1.x, py = point.y - v1.y;
+  return ex * py - ey * px;
+}
+
+// Resolve a wall id to its (v1, v2) endpoints. Cheap helper for the
+// shadow-path gate — we don't need the full wall geometry, just the
+// 2D footprint line.
+function wallFootprintLine(wallId, room) {
+  const w = resolveWallGeometry(room, wallId);
+  if (!w) return null;
+  return { v1: w.v1, v2: w.v2 };
+}
+
+// Does the corner's wedge actually shadow the listener from the source?
+// The two faces meeting at the corner define two half-planes; sound can
+// reach a receiver from the source without diffracting around the corner
+// IFF the receiver is on the source's side of BOTH faces (a lit zone).
+// If the receiver is on the opposite side of AT LEAST ONE face, the
+// corner's wedge contributes (case 2 single-face shadow / case 3 deep
+// shadow). Tier 1a uses signed-distance in the wall's 2D plane only —
+// vertical containment is enforced by `diffractionPointOnEdge`'s
+// segment clamp downstream.
+export function cornerIsInShadowPath(corner, src, listener, room) {
+  if (!corner || !room) return false;
+  const lineA = wallFootprintLine(corner.faces[0], room);
+  const lineB = wallFootprintLine(corner.faces[1], room);
+  if (!lineA || !lineB) return false;
+  const sideA_S = signedDistanceToLine2D(src,      lineA.v1, lineA.v2);
+  const sideA_R = signedDistanceToLine2D(listener, lineA.v1, lineA.v2);
+  const sideB_S = signedDistanceToLine2D(src,      lineB.v1, lineB.v2);
+  const sideB_R = signedDistanceToLine2D(listener, lineB.v1, lineB.v2);
+  const crossedA = (sideA_S * sideA_R) < 0;
+  const crossedB = (sideB_S * sideB_R) < 0;
+  // No-shadow lit zone: both faces have R on the same side as S.
+  if (!crossedA && !crossedB) return false;
+  // Either single-face shadow (case 2 — the smoothing case) or deep
+  // shadow (case 3 — small contribution but still nonzero). Include both.
+  return true;
+}
+
+// Compute total wedge-diffracted power contribution at the listener
+// across every shadowing rectangular corner of `room`. Returns
+// { paths: [...], totalPower } parallel to computeDiffractionContributions.
+// Caller energy-sums alongside the existing top-edge diffraction + direct
+// (through-wall TL) + re-radiation contributions.
+//
+// Early-returns zero contribution when flag is off, when the room has no
+// rectangular corners (P14/P15 deferred shapes), or when no corner gates
+// in the shadow test.
+export function computeCornerDiffractionContributions({
+  src, listener, room, materials, freq_hz,
+  sourceLpFreeField_db, temperature_C = DEFAULT_TEMPERATURE_C,
+  airAbsorption = true,
+}) {
+  if (!PHYSICS_P1_5_ENABLED) return { paths: [], totalPower: 0 };
+  if (!room || !src?.position || !listener) return { paths: [], totalPower: 0 };
+  const corners = enumerateRoomCorners(room);
+  if (corners.length === 0) return { paths: [], totalPower: 0 };
+
+  const c = speedOfSound(temperature_C);
+  const lambda = c / freq_hz;
+  const dx = listener.x - src.position.x;
+  const dy = listener.y - src.position.y;
+  const dz = listener.z - src.position.z;
+  const directLen = Math.max(0.1, Math.hypot(dx, dy, dz));
+  const directAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * directLen : 0;
+  // Reconstruct Lp at 1 m from the direct-path Lp (caller passes Lp at
+  // direct length WITHOUT wall TL applied; the corner-bend path bypasses
+  // the wall entirely so we don't reapply TL).
+  const Lp_1m = sourceLpFreeField_db + 20 * Math.log10(directLen) + directAirAbs;
+
+  let totalPower = 0;
+  const paths = [];
+  for (const corner of corners) {
+    if (!cornerIsInShadowPath(corner, src.position, listener, room)) continue;
+    const opt = diffractionPointOnEdge(src.position, listener, corner.edge_bottom, corner.edge_top);
+    if (!opt) continue;
+    const il_db = wedgeIL(opt.delta, lambda, corner.beta_solid);
+    if (il_db <= 0) continue;
+    const detourAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * opt.detour : 0;
+    const Lp_detour = Lp_1m - 20 * Math.log10(opt.detour) - detourAirAbs - il_db;
+    if (!Number.isFinite(Lp_detour)) continue;
+    totalPower += Math.pow(10, Lp_detour / 10);
+    paths.push({
+      cornerId: corner.id,
+      delta_m: opt.delta,
+      detour_m: opt.detour,
+      il_db,
+      spl_db: Lp_detour,
+    });
+  }
+  return { paths, totalPower };
+}
+
 // Test-only export so the unit test can verify enumerateFreeEdges
 // behaviour without exporting it to the public API surface.
-export const _testing = { enumerateFreeEdges, resolveWallGeometry };
+export const _testing = { enumerateFreeEdges, resolveWallGeometry, signedDistanceToLine2D };
 
 // Public re-export — reradiation.js needs the same wall-id → geometry
 // resolution, no point duplicating it in two modules.

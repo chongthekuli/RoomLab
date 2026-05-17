@@ -8,7 +8,9 @@ import {
 import {
   wallsCrossedByPath, transmissionLossDb, bandIndexForFreq,
 } from './wall-path.js';
-import { computeDiffractionContributions } from './diffraction.js';
+import {
+  computeDiffractionContributions, computeCornerDiffractionContributions,
+} from './diffraction.js';
 import {
   computeReradiationContributions, computeReverberantInsideSPL,
 } from './reradiation.js';
@@ -375,6 +377,20 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
         });
         reradiationPowerSum += rerad.totalPower;
       }
+    }
+    // Pierce-Hadden wedge diffraction around outdoor vertical building
+    // corners — gates on its own shadow test (cornerIsInShadowPath),
+    // independent of wallsCrossed. The corner-bend path goes AROUND
+    // the building, not through any wall, so a listener can be in a
+    // corner's shadow without the direct path crossing any wall.
+    if (useP15) {
+      const sourceLpFreeField_db = spl_db + d.tl_db_applied;
+      const corner = computeCornerDiffractionContributions({
+        src, listener: listenerPos, room,
+        materials, freq_hz, sourceLpFreeField_db,
+        temperature_C, airAbsorption,
+      });
+      diffractionPowerSum += corner.totalPower;
     }
   }
   const totalPower = (coherent ? (Re * Re + Im * Im) : directPressureSum)
