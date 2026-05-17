@@ -385,25 +385,25 @@ export default {
       power_watts: 20,
       groupId: 'D',
     },
-    // IMAM MIC SOURCE — represents the imam's amplified voice projecting
-    // forward from the mihrab toward the congregation. Without this, the
-    // STIPA / D-R metrics only measure the reinforcement system (groups
-    // A-D), not the actual prayer-leader experience the worshippers hear.
-    // Per audit 2026-05-15 (Malaysian Islamic architecture review).
+    // IMAM-ZONE CEILING SPEAKER — covers the imam strip in front of the
+    // mihrab, reinforcing the imam's voice for the congregation. Per
+    // user 2026-05-17: was previously modelled as a wall-mounted 1 W
+    // lapel-mic source at the qibla wall (z = 1.5 m, aim south); that
+    // floated visibly out of the wall in the 3D viewport and didn't
+    // match the typical Malaysian-surau convention of a dedicated
+    // ceiling unit above the imam fed by the mic mixer.
     //
-    // Position: at the mihrab niche centre, 1.5 m above the floor (imam
-    // mouth height when standing). Aim: south (yaw = -90 = -Y direction)
-    // toward the congregation; level pitch so direct field carries to
-    // the back rows. Power: 1 W — represents the human voice fed through
-    // a lapel mic + low-power amplification (the imam isn't shouting at
-    // 20 W, but the mic-fed reinforcement adds maybe 10-15 dB to the
-    // direct field). Group I (for Imam) is its own routing zone so it
-    // can be soloed/muted independently of the congregational PA.
+    // Position: centred over the imam strip (y = D - IMAM_STRIP/2),
+    // mounted at the ceiling-speaker plane (z = SPK_CEILING_Z). Aim:
+    // straight down (pitch = -90) like the other prayer-hall ceiling
+    // speakers. Power: 20 W to match the rest of the ceiling array.
+    // Group I (for Imam) stays its own routing zone so it can be soloed
+    // / muted independently of the congregational PA (groups A–D).
     {
       modelUrl: SPK_MODEL,
-      position: { x: W / 2, y: D - 0.3, z: 1.5 },
-      aim: { yaw: -90, pitch: 0, roll: 0 },
-      power_watts: 1,
+      position: { x: W / 2, y: D - IMAM_STRIP / 2, z: SPK_CEILING_Z },
+      aim: { yaw: 0, pitch: -90, roll: 0 },
+      power_watts: 20,
       groupId: 'I',
     },
   ],

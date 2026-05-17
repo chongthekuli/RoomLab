@@ -95,19 +95,58 @@ const LIMITER_WORKLET_URL = 'js/audio/multiband-limiter-worklet.js';
 // crank speaker / headphone volume; trade is full SPL-field dynamics.
 const DEFAULT_GAIN = 0.25;
 
-// Default speech sample, used for every room/preset except the surau.
+// Default speech sample, available in every scene.
 const DEFAULT_SAMPLE_URL = 'assets/audio/testing-1-2-3.mp3';
-// Surau-only sample (azan call to prayer). Only chosen when the active
-// scene has state.room.surauStructure — i.e. the surau preset is loaded.
+// Surau-only sample (azan call to prayer). Becomes the surau preset's
+// default test signal; in any non-surau scene this URL is not offered.
 // Drop the file at assets/audio/azan.mp3; checkSampleAvailable() will
 // HEAD-probe it and the audition button stays disabled if it's missing.
 const SURAU_SAMPLE_URL = 'assets/audio/azan.mp3';
 
-// Picks the right test signal for the currently loaded scene. Surau
-// preset → azan; everything else → speech. Resolved on each play /
-// HEAD-probe so swapping presets at runtime just works.
+// Catalogue of every sample the audition engine knows about, keyed by a
+// short stable id. Panels read this to render the selector dropdown.
+export const AUDITION_SAMPLES = {
+  speech: { id: 'speech', label: 'Speech (testing 1-2-3)',     url: DEFAULT_SAMPLE_URL },
+  azan:   { id: 'azan',   label: 'Azan (call to prayer)',      url: SURAU_SAMPLE_URL   },
+};
+
+// Returns the list of samples the user is allowed to choose from in the
+// current scene. Surau scenes offer both speech AND azan (azan default);
+// every other scene offers speech only. Selector UI hides itself when
+// the list has length 1.
+export function listAuditionSamplesForScene() {
+  if (state?.room?.surauStructure) {
+    return [AUDITION_SAMPLES.azan, AUDITION_SAMPLES.speech];
+  }
+  return [AUDITION_SAMPLES.speech];
+}
+
+// User's explicit choice this session. null = use scene default (first
+// entry of listAuditionSamplesForScene). Reset to null on scene:reset
+// from panel-precision.js so a preset switch always re-defaults.
+let _sampleOverrideId = null;
+export function setAuditionSample(id) {
+  const avail = listAuditionSamplesForScene();
+  if (id && avail.some(s => s.id === id)) {
+    _sampleOverrideId = id;
+  } else {
+    _sampleOverrideId = null;
+  }
+}
+export function getAuditionSampleId() {
+  const avail = listAuditionSamplesForScene();
+  if (_sampleOverrideId && avail.some(s => s.id === _sampleOverrideId)) {
+    return _sampleOverrideId;
+  }
+  return avail[0].id;
+}
+
+// Picks the URL for the currently selected (or scene-default) test
+// signal. Resolved on each play / HEAD-probe so swapping presets or
+// flipping the dropdown at runtime just works.
 export function getSampleUrl() {
-  return state?.room?.surauStructure ? SURAU_SAMPLE_URL : DEFAULT_SAMPLE_URL;
+  const id = getAuditionSampleId();
+  return AUDITION_SAMPLES[id]?.url || DEFAULT_SAMPLE_URL;
 }
 
 // Phase 9.8 — hard-knee soft-clip curve, linear below -3 dBFS. Previous

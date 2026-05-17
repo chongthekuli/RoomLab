@@ -19,7 +19,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { runPrecisionRender } from '../physics/precision/precision-engine.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { applyGlossary } from './glossary.js';
-import { startAudition, startOriginalPlayback, stopAudition, isAuditionPlaying, getAuditionMode, isAuditionInWalkMode, checkSampleAvailable } from '../audio/audition.js';
+import { startAudition, startOriginalPlayback, stopAudition, isAuditionPlaying, getAuditionMode, isAuditionInWalkMode, checkSampleAvailable, listAuditionSamplesForScene, getAuditionSampleId, setAuditionSample } from '../audio/audition.js';
 import { airAbsorptionDbPerM } from '../physics/air-absorption.js';
 
 let materialsRef;
@@ -71,14 +71,19 @@ export function mountPrecisionPanel({ materials }) {
           Use closed-back headphones — speakers add their own room reverb on top of the simulation.
         </div>
         <div id="precision-schroeder-note" class="audition-schroeder" hidden></div>
+        <div id="precision-audition-sample-row" class="audition-sample-row" hidden>
+          <label for="precision-audition-sample" class="audition-sample-label">Test signal</label>
+          <select id="precision-audition-sample" class="audition-sample-select"
+                  title="Switch between the available test signals for this scene."></select>
+        </div>
         <div class="audition-controls">
           <button id="precision-audition-btn" class="btn-audition" type="button" disabled
-                  title="Play the speech sample convolved with this listener’s impulse response.">
+                  title="Play the test signal convolved with this listener’s impulse response.">
             <span class="audition-icon" aria-hidden="true">▶</span>
             <span class="audition-label">Audition at this listener</span>
           </button>
           <button id="precision-original-btn" class="btn-audition btn-audition-dry" type="button" disabled
-                  title="Play the original speech sample dry (no room) — A/B reference for the audition.">
+                  title="Play the original test signal dry (no room) — A/B reference for the audition.">
             <span class="audition-icon" aria-hidden="true">▶</span>
             <span class="audition-label">Play original</span>
           </button>
@@ -100,8 +105,9 @@ export function mountPrecisionPanel({ materials }) {
   // HEAD-probe the audio sample at panel mount + on every scene reset
   // (preset switch) so the buttons can show a clear disabled-state
   // tooltip when the active sample file isn't shipped yet. Sample URL
-  // is preset-aware — surau gets assets/audio/azan.mp3, everything else
-  // gets assets/audio/testing-1-2-3.mp3.
+  // is preset-aware — surau scenes default to assets/audio/azan.mp3
+  // (with speech available as a second choice in the selector below);
+  // every other scene uses assets/audio/testing-1-2-3.mp3.
   function refreshAuditionSampleAvailability() {
     checkSampleAvailable().then(({ ok, url }) => {
       const btn = root.querySelector('#precision-audition-btn');
@@ -122,6 +128,36 @@ export function mountPrecisionPanel({ materials }) {
       updateAuditionUI();
     });
   }
+
+  // Render the test-signal selector. Only shown when the active scene
+  // offers more than one sample (currently: surau preset → speech + azan;
+  // every other scene → speech only, selector stays hidden).
+  function refreshAuditionSampleSelector() {
+    const row = root.querySelector('#precision-audition-sample-row');
+    const sel = root.querySelector('#precision-audition-sample');
+    if (!row || !sel) return;
+    const samples = listAuditionSamplesForScene();
+    if (samples.length <= 1) {
+      row.hidden = true;
+      return;
+    }
+    row.hidden = false;
+    const currentId = getAuditionSampleId();
+    sel.innerHTML = samples
+      .map(s => `<option value="${s.id}"${s.id === currentId ? ' selected' : ''}>${s.label}</option>`)
+      .join('');
+  }
+
+  root.querySelector('#precision-audition-sample').addEventListener('change', (e) => {
+    setAuditionSample(e.target.value);
+    // Sample switched mid-play would keep the previous buffer looping
+    // until the next play; stop so the user gets the new signal on the
+    // next click without a stale tail.
+    if (isAuditionPlaying()) stopAudition();
+    refreshAuditionSampleAvailability();
+  });
+
+  refreshAuditionSampleSelector();
   refreshAuditionSampleAvailability();
 
   // Any scene edit invalidates a cached render.
@@ -143,9 +179,12 @@ export function mountPrecisionPanel({ materials }) {
     state.results.engines.precision.staleAt = null;
     updateUI();
     emit('precision:changed');
-    // Preset switch may have toggled the active sample (e.g. surau ↔
-    // any other preset). Re-probe so the tooltip + disabled state
-    // reflect the file that will actually be loaded on next play.
+    // Preset switch may have toggled the available samples (e.g. surau
+    // ↔ any other preset). Reset the user's override so the new scene
+    // re-defaults, then re-render the selector + re-probe so the tooltip
+    // and disabled state reflect the file that will actually load next.
+    setAuditionSample(null);
+    refreshAuditionSampleSelector();
     refreshAuditionSampleAvailability();
   });
   // Listener selection changes only the displayed receiver, not the trace.

@@ -4956,6 +4956,29 @@ section h3 {
   gap: 10px;
   flex-wrap: wrap;
 }
+.audition-sample-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.audition-sample-row[hidden] { display: none; }
+.audition-sample-label {
+  color: var(--text-muted, #8a8f99);
+  font-weight: 500;
+}
+.audition-sample-select {
+  background: var(--bg-elev, #1c2028);
+  color: var(--text, #cdd2db);
+  border: 1px solid var(--border, #2c313a);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.audition-sample-select:hover { border-color: var(--accent, #4a9eff); }
 .btn-audition {
   display: inline-flex;
   align-items: center;
