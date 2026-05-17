@@ -171,23 +171,32 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
   const dataURL = buildHeatmapDataURL(splGrid);
   if (!dataURL) return '';
 
-  const offsetX = MARGIN_M;
-  const offsetY = MARGIN_M;
-  const viewW = room.width_m + 2 * MARGIN_M;
-  const viewH = room.depth_m + 2 * MARGIN_M;
+  // Surau podium pushes the heatmap grid past the room bounds (origin
+  // can be negative, span can exceed width_m + depth_m). Compute the
+  // full extent so the SVG viewBox captures every cell instead of
+  // clipping the arcade. For non-surau rooms (no podium, no extension),
+  // the spans match room.width_m / room.depth_m exactly.
+  const gridOX = splGrid.originX_m ?? 0;
+  const gridOY = splGrid.originY_m ?? 0;
+  const gridW = (splGrid.cellW_m ?? 0) * splGrid.cellsX || room.width_m;
+  const gridD = (splGrid.cellD_m ?? 0) * splGrid.cellsY || room.depth_m;
+  const minX = Math.min(0, gridOX);
+  const minY = Math.min(0, gridOY);
+  const maxX = Math.max(room.width_m, gridOX + gridW);
+  const maxY = Math.max(room.depth_m, gridOY + gridD);
+  const offsetX = MARGIN_M - minX;   // shift world (0,0) so minX maps to MARGIN_M
+  const offsetY = MARGIN_M - minY;
+  const viewW = (maxX - minX) + 2 * MARGIN_M;
+  const viewH = (maxY - minY) + 2 * MARGIN_M;
   const depth_m = room.depth_m;
 
-  // Heatmap raster — placed at the grid's effective bounds. Falls
-  // back to the room bbox for the common case where origin = (0,0).
-  const ox = splGrid.originX_m ?? 0;
-  const oy = splGrid.originY_m ?? 0;
-  const planeW = (splGrid.cellW_m ?? 0) * splGrid.cellsX || room.width_m;
-  const planeD = (splGrid.cellD_m ?? 0) * splGrid.cellsY || room.depth_m;
-  // State y=oy (front of grid) maps to SVG y=oy+offsetY at the TOP of
-  // the image's vertical span — no flip, raster row order matches.
-  const imgX = ox + offsetX;
-  const imgY = oy + offsetY;
-  const heatEl = `<image href="${dataURL}" x="${imgX.toFixed(3)}" y="${imgY.toFixed(3)}" width="${planeW.toFixed(3)}" height="${planeD.toFixed(3)}" preserveAspectRatio="none" image-rendering="optimizeQuality" />`;
+  // Heatmap raster — placed at the grid's effective bounds (the
+  // gridOX/gridOY/gridW/gridD declared above above the viewBox sizing).
+  // State y=gridOY (front of grid) maps to SVG y=gridOY+offsetY at the
+  // TOP of the image's vertical span — no flip, raster row order matches.
+  const imgX = gridOX + offsetX;
+  const imgY = gridOY + offsetY;
+  const heatEl = `<image href="${dataURL}" x="${imgX.toFixed(3)}" y="${imgY.toFixed(3)}" width="${gridW.toFixed(3)}" height="${gridD.toFixed(3)}" preserveAspectRatio="none" image-rendering="optimizeQuality" />`;
 
   // Room outline — drawn over the heatmap so the architectural reads
   // first. Same 6 cm hairline as the plan view.

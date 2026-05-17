@@ -119,10 +119,19 @@ export function buildFloorPlanSVG(state, opts = {}) {
   const room = state.room;
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
 
-  const offsetX = MARGIN_M;
-  const offsetY = MARGIN_M;
-  const viewW = room.width_m + 2 * MARGIN_M;
-  const viewH = room.depth_m + 2 * MARGIN_M;
+  // Surau podium pushes the visible footprint past the room walls
+  // (state-x can go negative when podium.extension_m > 0; arcade
+  // speakers/listeners live at negative or past-wall coords). Expand
+  // the SVG viewBox to capture everything; non-surau presets keep
+  // the legacy minX=0, maxX=width_m bounds so this is a no-op.
+  const podiumExt = room?.surauStructure?.podium?.extension_m;
+  const ext = Number.isFinite(podiumExt) && podiumExt > 0 ? podiumExt : 0;
+  const minX = -ext, minY = -ext;
+  const maxX = room.width_m + ext, maxY = room.depth_m + ext;
+  const offsetX = MARGIN_M - minX;
+  const offsetY = MARGIN_M - minY;
+  const viewW = (maxX - minX) + 2 * MARGIN_M;
+  const viewH = (maxY - minY) + 2 * MARGIN_M;
   const depth_m = room.depth_m;
 
   const roomEl = buildRoomOutline(room, depth_m, offsetX, offsetY);

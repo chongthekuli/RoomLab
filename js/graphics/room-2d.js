@@ -5,7 +5,7 @@ import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
-import { roomPlanVertices, isInsideRoom3D } from '../physics/room-shape.js';
+import { roomPlanVertices, isInsideRoom3D, roomEffectiveBounds } from '../physics/room-shape.js';
 import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
 
 let materialsRef;
@@ -569,14 +569,39 @@ function drawCoordsFromEvent(event) {
 }
 
 function currentRoomGeom() {
+  // Scale based on the EFFECTIVE bounds (room footprint UNIONED with
+  // any surau podium extension and any broken-out enclosures) so the
+  // 2D viewport fits the whole walkable + acoustic region. Before
+  // this, surau presets clipped the arcade speakers/listeners and
+  // the SPL heatmap stopped at the prayer-hall wall — visible to the
+  // user as "corridor walkway has no heatmap".
+  //
+  // pxW / pxD are kept at `room.width_m * scale` (NOT totW * scale)
+  // so the legacy world→screen formulas in renderOneSpeakerSymbol,
+  // renderListenersSVG, etc. (which compute `x0 + (worldX /
+  // room.width_m) * pxW`) still work. x0/y0 absorb the bounds-offset
+  // so positions outside the room (world x < 0, etc.) still land at
+  // the correct screen pixel.
+  //
+  // For rooms without an extension (every non-surau preset + every
+  // template), bounds collapse to (0,0)→(width_m, depth_m), and this
+  // function behaves identically to the previous version.
   const { width_m: w, depth_m: d } = state.room;
+  const bounds = roomEffectiveBounds(state.room);
+  const totW = Math.max(1e-3, bounds.maxX - bounds.minX);
+  const totD = Math.max(1e-3, bounds.maxY - bounds.minY);
   const vbW = 800, vbH = 500, pad = 90;
-  const scale = Math.min((vbW - pad * 2) / w, (vbH - pad * 2) / d);
+  const scale = Math.min((vbW - pad * 2) / totW, (vbH - pad * 2) / totD);
   const pxW = w * scale;
   const pxD = d * scale;
-  const x0 = (vbW - pxW) / 2;
-  const y0 = (vbH - pxD) / 2;
-  return { scale, pxW, pxD, x0, y0 };
+  const pxTotalW = totW * scale;
+  const pxTotalD = totD * scale;
+  // Anchor: the world origin (0, 0) lands at (x0, y0). bounds.min
+  // pulls the viewport so the podium edge (e.g. world x = -3.5)
+  // becomes the leftmost visible point.
+  const x0 = (vbW - pxTotalW) / 2 - bounds.minX * scale;
+  const y0 = (vbH - pxTotalD) / 2 - bounds.minY * scale;
+  return { scale, pxW, pxD, x0, y0, bounds };
 }
 
 // --- Mount ---
@@ -1105,6 +1130,21 @@ function renderSharedWallSegments(segs, x0, y0, pxW, pxD, parentRoom) {
 }
 
 function renderClipPath(room, x0, y0, pxW, pxD) {
+  // Surau with podium: clip path extends to the podium rectangle so
+  // the SPL heatmap is visible across the arcade / corridor area
+  // (not just inside the prayer-hall walls). Previously the heatmap
+  // was clipped at the room polygon and the user saw an empty
+  // corridor even when arcade speakers were lighting it up.
+  const podiumExt = room?.surauStructure?.podium?.extension_m;
+  if (Number.isFinite(podiumExt) && podiumExt > 0 && room.width_m > 0 && room.depth_m > 0) {
+    const w = room.width_m, d = room.depth_m;
+    const sxPerM = pxW / w, syPerM = pxD / d;
+    const x1 = (x0 + (-podiumExt) * sxPerM).toFixed(1);
+    const y1 = (y0 + (-podiumExt) * syPerM).toFixed(1);
+    const x2 = (x0 + (w + podiumExt) * sxPerM).toFixed(1);
+    const y2 = (y0 + (d + podiumExt) * syPerM).toFixed(1);
+    return `<clipPath id="room-clip"><polygon points="${x1},${y1} ${x2},${y1} ${x2},${y2} ${x1},${y2}" /></clipPath>`;
+  }
   const verts = roomPlanVertices(room);
   if (verts.length === 0) return '';
   const points = verts.map(v => {
