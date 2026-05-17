@@ -217,11 +217,19 @@ export function startDrawCustomShape() {
     mode: 'room-shape',
     label: 'Draw custom room shape',
     onFinish: (verts) => {
-      const minX = Math.min(...verts.map(v => v.x));
-      const minY = Math.min(...verts.map(v => v.y));
-      const maxX = Math.max(...verts.map(v => v.x));
-      const maxY = Math.max(...verts.map(v => v.y));
-      const shifted = verts.map(v => ({ x: v.x - minX, y: v.y - minY }));
+      // Per user request 2026-05-17 (clarified): wherever the user's
+      // FIRST click landed becomes world (0, 0). Subsequent vertices
+      // get translated by the same amount so they sit at coords
+      // RELATIVE to the first click. Result: vertex[0] is always
+      // (0, 0) — predictable origin for saved-room library entries
+      // regardless of which corner the user started at.
+      const ox = verts[0].x;
+      const oy = verts[0].y;
+      const shifted = verts.map(v => ({ x: v.x - ox, y: v.y - oy }));
+      const minX = Math.min(...shifted.map(v => v.x));
+      const minY = Math.min(...shifted.map(v => v.y));
+      const maxX = Math.max(...shifted.map(v => v.x));
+      const maxY = Math.max(...shifted.map(v => v.y));
       state.room.shape = 'custom';
       state.room.custom_vertices = shifted;
       state.room.width_m = Math.max(maxX - minX, 0.5);
@@ -229,13 +237,7 @@ export function startDrawCustomShape() {
       state.room.surfaces.edges = shifted.map(() => state.room.surfaces.walls || 'gypsum-board');
     },
   };
-  // Pre-seed vertex 1 at the world origin (0, 0). Per user request
-  // 2026-05-17: every custom room starts at (0,0) by convention so
-  // saved rooms are positioned consistently — no need for the user
-  // to hunt for the origin crosshair as their first click. They can
-  // still backspace to remove this seed if they want to start
-  // elsewhere.
-  drawVertices = [{ x: 0, y: 0 }];
+  drawVertices = [];
   drawCursor = null;
   render();
 }
