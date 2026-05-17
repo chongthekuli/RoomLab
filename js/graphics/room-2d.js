@@ -1070,12 +1070,16 @@ function ensureFloatCoordEl(vp) {
     if (e.key === 'Enter') {
       e.preventDefault();
       submitFloatCoord();
-    } else if (e.key === 'Escape') {
+      return;
+    }
+    if (e.key === 'Escape') {
       // Don't swallow — pass through to window handler so the user can
       // cancel draw mode while focus is in the input.
       cancelDraw();
       e.preventDefault();
-    } else if (e.key === 'Tab') {
+      return;
+    }
+    if (e.key === 'Tab') {
       // Trap Tab inside the panel: forward x → y, forward y → x;
       // Shift+Tab y → x, Shift+Tab x → y. Without trapping, Tab
       // would escape to a random toolbar button and the user would
@@ -1083,6 +1087,28 @@ function ensureFloatCoordEl(vp) {
       e.preventDefault();
       if (e.target === xInput) { yInput.focus(); yInput.select(); }
       else                     { xInput.focus(); xInput.select(); }
+      return;
+    }
+    // 'C' (close room) — fire finishDraw if ≥3 pts placed. Without
+    // this guard the literal character 'C' enters the field, which
+    // the user reported 2026-05-17 (couldn't close the loop while
+    // focus was in a coord input).
+    if (e.key === 'c' || e.key === 'C') {
+      e.preventDefault();
+      if (drawVertices.length >= 3) finishDraw();
+      return;
+    }
+    // Numeric-input filter — block any key that can't legally appear
+    // in a metric coord string. Allow: digits, '-' (negative), '.'
+    // (decimal), plus all navigation / editing keys (arrows, Home,
+    // End, Tab handled above, Backspace, Delete, etc.) and modifier
+    // combos (Ctrl+A, Ctrl+C, Ctrl+V). Block everything else so 'c',
+    // 'r', 'q' etc. can't pollute the field.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;   // Ctrl+A, Cmd+V, etc.
+    if (e.key.length > 1) return;                     // navigation/editing keys
+    const ok = /^[0-9.\-]$/.test(e.key);
+    if (!ok) {
+      e.preventDefault();
     }
   };
   const onFieldInput = (e) => {
