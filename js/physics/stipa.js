@@ -2,6 +2,12 @@ import { airAbsorptionAt, computeRoomConstant, localAngles } from './spl-calcula
 import { computeRT60Band } from './rt60.js';
 import { interpolateAttenuation } from './loudspeaker.js';
 import { wallsCrossedByPath, transmissionLossDb } from './wall-path.js';
+import { computeDiffractionContributions } from './diffraction.js';
+import {
+  computeReradiationContributions, computeReverberantInsideSPL,
+} from './reradiation.js';
+import { PHYSICS_P1_5_ENABLED } from './feature-flags.js';
+import { isInsideRoom3D } from './room-shape.js';
 
 // --- STIPA — Speech Transmission Index for Public Address, per IEC
 // 60268-16:2011 Annex C (simplified STIPA version of the full STI).
@@ -107,7 +113,27 @@ export function precomputeSTIPAContext({ sources, getSpeakerDef, room, materials
   // varies per call so the path test runs in the hot loop, but
   // band-index resolution is cheap (1 indexOf into the catalogue's
   // frequency_bands_hz).
-  return { rt60_per_band, roomR_per_band, sourceCtx, room, materials };
+  //
+  // Tier 1a — pre-compute the per-band interior reverberant SPL once
+  // per frame for the Kuttruff wall re-radiation term. Outside sources
+  // (e.g. surau arcade speakers) are excluded from the interior
+  // aggregate — they radiate outdoors directly, not via wall vibration.
+  let L_p_rev_inside_per_band = null;
+  if (PHYSICS_P1_5_ENABLED && room && materials && Array.isArray(roomR_per_band)) {
+    const sourceLwPerBand = sourceCtx.map(s => ({
+      src: s.src,
+      Lw_per_band: new Float64Array(7).fill(s.L_w),
+    }));
+    L_p_rev_inside_per_band = computeReverberantInsideSPL({
+      sourceLwPerBand,
+      roomR_per_band,
+      isSourceInside: (src) => isInsideRoom3D(src.position, room),
+    });
+  }
+  return {
+    rt60_per_band, roomR_per_band, sourceCtx, room, materials,
+    L_p_rev_inside_per_band,
+  };
 }
 
 // Sample STIPA at one listener position using the precomputed context.
@@ -132,7 +158,7 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
   // state.physics.ambientNoise?.per_band (which is null when no profile
   // has been picked yet) don't have to special-case it.
   if (ambientNoise_per_band == null) ambientNoise_per_band = NC_35_PER_BAND;
-  const { rt60_per_band, roomR_per_band, sourceCtx, room, materials } = stipaCtx;
+  const { rt60_per_band, roomR_per_band, sourceCtx, room, materials, L_p_rev_inside_per_band } = stipaCtx;
   // Per-source wall crossings, computed ONCE per listener for ALL bands.
   // Geometry doesn't change between bands; only the TL[bandIdx] lookup
   // does, so the segment-vs-wall test runs once and the band loop just
@@ -140,6 +166,10 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
   const perSourceWalls = (room && materials)
     ? sourceCtx.map(s => wallsCrossedByPath(s.src.position, listenerPos, room))
     : null;
+  // Tier 1a — flag-gated diffraction + re-radiation. Both modules
+  // early-return zero when the flag is off, when wallsCrossed is empty,
+  // or when every crossing is through an opening.
+  const useP15 = PHYSICS_P1_5_ENABLED && room && materials && perSourceWalls;
   let sti = 0;
   let prevTi = 0;
 
@@ -149,6 +179,8 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
     // Materials catalogue bands are [125, 250, 500, 1k, 2k, 4k, 8k] —
     // identical to STIPA_BANDS so the band index is shared 1:1.
     const bandIdx = k;
+    const L_p_rev_band = (useP15 && L_p_rev_inside_per_band)
+      ? L_p_rev_inside_per_band[bandIdx] : -Infinity;
     let directPower = 0;
     let reverbPower = 0;
     for (let i = 0; i < sourceCtx.length; i++) {
@@ -169,6 +201,35 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
       if (R > 0) {
         const L_rev = s.L_w + 10 * Math.log10(4 / R) - tlBand_db;
         reverbPower += Math.pow(10, L_rev / 10);
+      }
+      // Tier 1a — diffraction joins direct power (preserves modulation,
+      // discrete delayed path); re-radiation joins reverb power
+      // (planar diffuse field). Both rely on perSourceWalls[i] being
+      // non-empty + non-all-openings; the modules early-return otherwise.
+      if (useP15 && perSourceWalls[i].length > 0) {
+        // Source's free-field Lp at unit distance, NO directivity yet —
+        // we apply directivity inside diffraction via the detour-path
+        // recompute. For STIPA the per-source per-band free-field Lp is
+        //   Lp_freefield = sens + 10·log10(P) − 20·log10(r) + attn − airAbs
+        // = direct_db + tlBand_db (undo the wall TL we just applied).
+        const sourceLpFreeField_db = direct_db + tlBand_db;
+        const diff = computeDiffractionContributions({
+          src: s.src, listener: listenerPos, room,
+          wallsCrossed: perSourceWalls[i],
+          materials, freq_hz: fhz, sourceLpFreeField_db,
+          airAbsorption: true,
+        });
+        directPower += diff.totalPower;
+        if (Number.isFinite(L_p_rev_band)) {
+          const rerad = computeReradiationContributions({
+            src: s.src, listener: listenerPos, room,
+            wallsCrossed: perSourceWalls[i],
+            materials, freq_hz: fhz,
+            L_p_rev_inside_band_db: L_p_rev_band,
+            airAbsorption: true,
+          });
+          reverbPower += rerad.totalPower;
+        }
       }
     }
     const ambient_k = ambientNoise_per_band[k] ?? 40;
@@ -213,9 +274,15 @@ export function computeSTIPA({
   const perSourceWalls = (room && materials)
     ? ctx.sourceCtx.map(s => wallsCrossedByPath(s.src.position, listenerPos, room))
     : null;
+  // Tier 1a — diffraction joins direct, re-radiation joins reverb.
+  // Same flag-gated logic + module signatures as computeSTIPAAt.
+  const useP15 = PHYSICS_P1_5_ENABLED && room && materials && perSourceWalls;
+  const L_p_rev_inside_per_band = ctx.L_p_rev_inside_per_band;
   const dr_per_band = STIPA_BANDS.map((fhz, k) => {
     let D = 0, R_p = 0;
     const R = roomR_per_band[k];
+    const L_p_rev_band = (useP15 && L_p_rev_inside_per_band)
+      ? L_p_rev_inside_per_band[k] : -Infinity;
     for (let i = 0; i < ctx.sourceCtx.length; i++) {
       const s = ctx.sourceCtx[i];
       const { r, azimuth_deg, elevation_deg } = localAngles(
@@ -232,6 +299,26 @@ export function computeSTIPA({
       if (R > 0) {
         const L_rev = s.L_w + 10 * Math.log10(4 / R) - tlBand_db;
         R_p += Math.pow(10, L_rev / 10);
+      }
+      if (useP15 && perSourceWalls[i].length > 0) {
+        const sourceLpFreeField_db = direct_db + tlBand_db;
+        const diff = computeDiffractionContributions({
+          src: s.src, listener: listenerPos, room,
+          wallsCrossed: perSourceWalls[i],
+          materials, freq_hz: fhz, sourceLpFreeField_db,
+          airAbsorption: true,
+        });
+        D += diff.totalPower;
+        if (Number.isFinite(L_p_rev_band)) {
+          const rerad = computeReradiationContributions({
+            src: s.src, listener: listenerPos, room,
+            wallsCrossed: perSourceWalls[i],
+            materials, freq_hz: fhz,
+            L_p_rev_inside_band_db: L_p_rev_band,
+            airAbsorption: true,
+          });
+          R_p += rerad.totalPower;
+        }
       }
     }
     return { D, R: R_p };
