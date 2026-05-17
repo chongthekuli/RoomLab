@@ -302,6 +302,18 @@ export function recordRayPaths({
             );
             if (tRec >= 0) { hitListener = true; break; }
           }
+          // SPEAKER RADIATION PATTERN — at bounce 0, ALWAYS commit even
+          // if no listener was crossed. User reported 2026-05-17 that
+          // arcade speakers showed only a tight cone of rays (the
+          // direction toward the single arcade listener beneath them)
+          // instead of the speaker's natural radial pattern. Without
+          // this fallback, listener-bias hides ~98 % of arcade-speaker
+          // first-bounce rays because they don't happen to cross a
+          // listener sphere on the way to the first surface hit. With
+          // it, every speaker shows ~20 first-bounce rays in different
+          // directions — the recognisable "speaker fires into the
+          // room" radiation pattern.
+          if (!hitListener && bounce === 0) hitListener = true;
         }
 
         // Advance to surface hit + apply mid-band absorption.
