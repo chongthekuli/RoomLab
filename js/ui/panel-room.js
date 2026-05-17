@@ -39,6 +39,36 @@ const NONRECT_SURFACE_LABELS = [
 
 let materialsRef;
 
+// Prompt before any preset / template change that would silently destroy
+// the user's current work. Returns true when the scene is empty (nothing
+// to lose, no prompt needed) OR the user accepts the prompt; false on
+// cancel. Caller must revert the dropdown's value on false so the UI
+// doesn't show the new selection while keeping the old scene. Counts
+// scene-mutating fields the resetSceneState path wipes: sources,
+// listeners, zones, treatments, sub-structures, standalone enclosures,
+// shared wall segments. Priya UAT v=467 item #3.
+function confirmDestructiveSceneChange(newSceneLabel) {
+  const sourceCount    = state.sources?.length ?? 0;
+  const listenerCount  = state.listeners?.length ?? 0;
+  const zoneCount      = state.zones?.length ?? 0;
+  const treatmentCount = state.treatments?.length ?? 0;
+  const subCount       = state.room?.subStructures?.length ?? 0;
+  const encCount       = state.room?.standaloneEnclosures?.length ?? 0;
+  const segCount       = state.room?.wallSegments?.length ?? 0;
+  const total = sourceCount + listenerCount + zoneCount + treatmentCount
+              + subCount + encCount + segCount;
+  if (total === 0) return true;
+  const parts = [];
+  if (sourceCount)    parts.push(`${sourceCount} source${sourceCount > 1 ? 's' : ''}`);
+  if (listenerCount)  parts.push(`${listenerCount} listener${listenerCount > 1 ? 's' : ''}`);
+  if (zoneCount)      parts.push(`${zoneCount} zone${zoneCount > 1 ? 's' : ''}`);
+  if (treatmentCount) parts.push(`${treatmentCount} treatment${treatmentCount > 1 ? 's' : ''}`);
+  if (subCount + encCount + segCount > 0) parts.push('custom geometry');
+  const msg = `Loading "${newSceneLabel}" will replace your current scene `
+            + `(${parts.join(', ')}). Continue?`;
+  return window.confirm(msg);
+}
+
 export function mountRoomPanel({ materials }) {
   materialsRef = materials;
   const root = document.getElementById('panel-room');
@@ -119,6 +149,11 @@ export function mountRoomPanel({ materials }) {
   presetDropdown.addEventListener('change', (e) => {
     const key = e.target.value;
     if (!key) return;
+    const label = PRESETS[key]?.label ?? key;
+    if (!confirmDestructiveSceneChange(label)) {
+      e.target.value = '';   // revert dropdown so the UI doesn't lie about state
+      return;
+    }
     applyPreset(key);
     // Reset the OTHER dropdown so the UI shows one active selection at a time.
     const td = root.querySelector('#template-dropdown');
@@ -138,6 +173,11 @@ export function mountRoomPanel({ materials }) {
   templateDropdown.addEventListener('change', (e) => {
     const key = e.target.value;
     if (!key) return;
+    const label = TEMPLATES[key]?.label ?? key;
+    if (!confirmDestructiveSceneChange(label)) {
+      e.target.value = '';   // revert dropdown so the UI doesn't lie about state
+      return;
+    }
     applyTemplate(key);
     // Reset the OTHER dropdown so the UI shows one active selection at a time.
     const pd = root.querySelector('#preset-dropdown');
