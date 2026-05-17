@@ -7862,7 +7862,11 @@ function rebuildSurauStructure(room) {
     const shaft = new THREE.Mesh(shaftGeo, stuccoMat);
     shaft.position.set(co.x, shaftH / 2, co.y);
     shaft.userData.tag = 'surau_minaret_shaft';
-    shaft.userData.no_acoustic = true;
+    // Clickable acoustic surface — painted-concrete shaft. Cap pieces
+    // (belt, lantern, dome, finial, mustaka) stay visual-only since their
+    // surface area is negligible against the room's reverberant field.
+    shaft.userData.surface_id = 'surau_minaret';
+    shaft.userData.acoustic_material = mn.materialId || s.materials?.minaret || 'concrete-painted';
     roomGroup.add(shaft);
 
     // Decorative belt: dark band 60% up the shaft. Reads as "this tower

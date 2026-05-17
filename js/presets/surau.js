@@ -87,6 +87,7 @@ export default {
       portico_walls:   'concrete-painted',
       portico_roof:    'gypsum-board',
       south_partition: 'concrete-painted',
+      minaret:         'concrete-painted',
     },
     // Mihrab — concave semicircular niche on the qibla wall (state +y).
     // 1.8 m × 0.6 m × 3.0 m, centred E–W. Marble would be ideal; gypsum-

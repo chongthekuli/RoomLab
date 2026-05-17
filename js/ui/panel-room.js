@@ -1524,7 +1524,7 @@ function renderSurauMaterialSection(root, renderWallRow) {
   const h4 = document.createElement('h4');
   h4.textContent = 'Surau exterior surfaces';
   h4.style.display = 'inline-block';
-  h4.title = 'Acoustic materials for the surau podium, arcade columns + roof, portico, and south-wall partition. These are real BVH surfaces — rays bounce off them, RT60 includes their absorption.';
+  h4.title = 'Acoustic materials for the surau podium, arcade columns + roof, portico, south-wall partition, and minaret shaft. These are real BVH surfaces — rays bounce off them, RT60 includes their absorption.';
   headerWrap.appendChild(h4);
   root.appendChild(headerWrap);
 
@@ -1539,6 +1539,7 @@ function renderSurauMaterialSection(root, renderWallRow) {
     ['portico_walls',   'surau_portico_walls',  'Portico walls',     'Three solid walls of the projecting entrance pavilion (front + two sides).'],
     ['portico_roof',    'surau_portico_roof',   'Portico roof (underside)', 'Underside of the pyramid cap above the entrance pavilion.'],
     ['south_partition', 'south_partition',      'South-wall partition', 'Thin interior partition between the three south doors. Wraps the doorways with lintels.'],
+    ['minaret',         'surau_minaret',        'Minaret',           'Tall slender tower with crescent / mustaka finial, set just outside the building corner. Acoustic surface = shaft only (cap pieces are visual).'],
   ];
   for (const [matKey, surfaceId, label, tooltip] of rows) {
     renderWallRow(
