@@ -9126,7 +9126,17 @@ function zoneHeatmapTexture(splInfo) {
 let _heatmapBuildTagLogged = false;
 function rebuildHeatmap() {
   if (!_heatmapBuildTagLogged) {
-    console.info('[scene] build 2026-05-17 v475 — rebuildHeatmap surau exception removed (single-annulus podium zone)');
+    // Read the cache version dynamically from this module's URL so the
+    // log always reflects what's actually served, not a hardcoded
+    // string that drifts every commit. Falls back to "live" when
+    // import.meta.url isn't available (Node test runners).
+    let cacheTag = 'live';
+    try {
+      const url = import.meta.url;
+      const m = /[?&]v=(\d+)/.exec(url);
+      if (m) cacheTag = `v=${m[1]}`;
+    } catch (_) { /* node test or older environment */ }
+    console.info(`[scene] build ${cacheTag} — Tier 1a: multi-path diffraction + ground reflection + Kuttruff re-radiation + Maekawa top + 2 vertical wall edges (rect rooms) + single-annulus surau podium zone`);
     _heatmapBuildTagLogged = true;
   }
   if (heatmapMesh) {
