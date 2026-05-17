@@ -464,24 +464,35 @@ function triangulateRectangularRoom(scene, tris) {
   // triangulateStandaloneEnclosures + triangulateWallSegments which
   // already handled openings correctly.
   //
-  // Wall vertex order matters here: each entry's bottom edge is v1 → v2
-  // (that ordering sets the wall-local +x direction wallQuadsAfterOpenings
-  // uses). Scene.js's PlaneGeometry-based renderer applies a π / ±π/2
-  // Y-rotation to each wall, which mirrors the local-x direction for
-  // wall_north and wall_west. surauStructureWallOpenings() emits x_m for
-  // THAT convention. The triangulator must mirror v1/v2 on the same two
-  // walls so the helper's x_m falls at the matching world position.
-  // Mismatch was the bug: openings were cut at WRONG x positions on
-  // wall_north (scene's south doors landed mirrored across the wall),
-  // so rays still saw solid concrete at the visible door positions.
+  // CRITICAL — scene.js's wall_north sits at z=0 (state-y=0; the main-
+  // entrance / preset-'south' side) and wall_south sits at z=d (state-
+  // y=d; the qibla / preset-'north' side). The triangulator must place
+  // each wall's quad at the SAME state-y as scene.js, otherwise
+  // surauStructureWallOpenings emits doors for the right key but they
+  // get cut from the wrong wall geometry — visible doors stay solid
+  // in the BVH and rays bounce back into the room.
+  //
+  // x_m mirror reasoning (per Martina audit 2026-05-16):
+  //   • Helper for wall_north emits x_m = (W − cx) − ow/2 (mirrored
+  //     relative to world-x) so the holes land at the rendered position
+  //     after scene.js's rotation.y = π flips local-x.
+  //   • Triangulator's v1 → v2 in +x direction makes that mirrored x_m
+  //     measure world-x backwards too → holes land at the correct
+  //     world-x (5, 9, 13 for the southPartition doors). Use v1=(w,0)
+  //     v2=(0,0) so the bottom edge runs from world-x=w toward world-x=0.
+  //   • Same reasoning for wall_west — helper mirrors via (D − cy),
+  //     triangulator uses v1=(0,d) v2=(0,0) so local-x runs from
+  //     state-y=d toward state-y=0.
+  //   • wall_south + wall_east use natural orientation (no scene.js
+  //     rotation flip, no helper mirror).
+  //
+  // Inward normals: room interior is at state-y ∈ [0, d], state-x ∈
+  // [0, w]. wall_north at y=0 → normal +y; wall_south at y=d → normal
+  // -y; wall_east at x=w → normal -x; wall_west at x=0 → normal +x.
   const wallSpecs = [
-    // wall_north (scene) = preset 'south' = main entrance side. MIRROR.
-    { key: 'wall_north', v1: { x: w, y: d }, v2: { x: 0, y: d }, n: [0, -1, 0] },
-    // wall_south (scene) = preset 'north' = qibla side. NATURAL.
-    { key: 'wall_south', v1: { x: 0, y: 0 }, v2: { x: w, y: 0 }, n: [0,  1, 0] },
-    // wall_east. NATURAL (helper x_m maps to world +z = state +y).
+    { key: 'wall_north', v1: { x: w, y: 0 }, v2: { x: 0, y: 0 }, n: [0,  1, 0] },
+    { key: 'wall_south', v1: { x: 0, y: d }, v2: { x: w, y: d }, n: [0, -1, 0] },
     { key: 'wall_east',  v1: { x: w, y: 0 }, v2: { x: w, y: d }, n: [-1, 0, 0] },
-    // wall_west. MIRROR (helper x_m maps to world -z = state -y).
     { key: 'wall_west',  v1: { x: 0, y: d }, v2: { x: 0, y: 0 }, n: [ 1, 0, 0] },
   ];
   for (const spec of wallSpecs) {
