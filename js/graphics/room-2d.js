@@ -1515,9 +1515,20 @@ function renderZones(zones, selectedId, x0, y0, pxW, pxD, room, isDrawBackdrop) 
       const sy = y0 - (v.y / room.depth_m) * pxD;
       return `${sx.toFixed(1)},${sy.toFixed(1)}`;
     }).join(' ');
-    s += `<polygon points="${points}" fill="${color}" fill-opacity="${fillOpacity}" stroke="${color}" stroke-width="${isSel ? 3 : 2}" stroke-opacity="${strokeOpacity}" />`;
-    const cx = z.vertices.reduce((a, v) => a + v.x, 0) / z.vertices.length;
-    const cy = z.vertices.reduce((a, v) => a + v.y, 0) / z.vertices.length;
+    s += `<polygon points="${points}" fill="${color}" fill-opacity="${fillOpacity}" stroke="${color}" stroke-width="${isSel ? 3 : 2}" stroke-opacity="${strokeOpacity}" fill-rule="evenodd" />`;
+    // Label placement: vertex-average centroid by default, but a non-convex
+    // zone (e.g. the surau podium annulus, whose centroid lies INSIDE the
+    // building hole at ~(5.9, 6.4) and would put the label text in the
+    // middle of the prayer hall) can override via `label_anchor: {x, y}`
+    // in the preset zone schema. Coords are state-space metres, same as
+    // vertices. Added 2026-05-17 (v475) for the Z_podium annulus.
+    const anchor = z.label_anchor;
+    const cx = (anchor && Number.isFinite(anchor.x))
+      ? anchor.x
+      : z.vertices.reduce((a, v) => a + v.x, 0) / z.vertices.length;
+    const cy = (anchor && Number.isFinite(anchor.y))
+      ? anchor.y
+      : z.vertices.reduce((a, v) => a + v.y, 0) / z.vertices.length;
     const scx = x0 + (cx / room.width_m) * pxW;
     const scy = y0 - (cy / room.depth_m) * pxD;
     s += `<text x="${scx.toFixed(1)}" y="${scy.toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone" fill="${color}">${z.label}</text>`;

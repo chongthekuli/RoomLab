@@ -9108,7 +9108,12 @@ function zoneHeatmapTexture(splInfo) {
   return tex;
 }
 
+let _heatmapBuildTagLogged = false;
 function rebuildHeatmap() {
+  if (!_heatmapBuildTagLogged) {
+    console.info('[scene] build 2026-05-17 v475 — rebuildHeatmap surau exception removed (single-annulus podium zone)');
+    _heatmapBuildTagLogged = true;
+  }
   if (heatmapMesh) {
     scene.remove(heatmapMesh);
     heatmapMesh.geometry.dispose();
@@ -9121,14 +9126,16 @@ function rebuildHeatmap() {
   // When zones exist, they carry per-elevation heatmaps. Skip the room-level
   // plane to avoid a giant translucent disc covering the stacked zone
   // visualization (arena's tiered bowls, pavilion's stacked levels, etc.).
-  // EXCEPTION — surau presets with a podium need the room-level heatmap so
-  // the SPL coverage extends past the prayer-hall walls onto the arcade /
-  // podium area. The surau's two zones (congregation + imam strip) are
-  // both at floor elevation 0; the room heatmap renders at ear-height
-  // (1.2 m) and does not z-fight with them.
-  const hasSurauPodium = Number.isFinite(state.room?.surauStructure?.podium?.extension_m)
-    && state.room.surauStructure.podium.extension_m > 0;
-  if (state.zones && state.zones.length > 0 && !hasSurauPodium) return;
+  //
+  // PRIOR EXCEPTION REMOVED 2026-05-17 (v475) — the surau preset used to
+  // need the room-level plane to cover the outdoor arcade/podium, but
+  // that produced TWO coplanar transparent meshes at slightly different
+  // Y (room plane at ear=1.6 m, zone planes at ear=1.2 m) which painter-
+  // flipped on every camera rotation — the "split-on-rotation" sheet.
+  // Surau now ships an explicit single-annulus podium ZONE (Z_podium in
+  // js/presets/surau.js) so this exception is no longer needed; zones
+  // are the sole source of heatmap rendering for every preset.
+  if (state.zones && state.zones.length > 0) return;
 
   const flat = expandSources(state.sources);
   if (flat.length === 0) return;
