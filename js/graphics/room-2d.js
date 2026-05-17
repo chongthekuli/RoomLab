@@ -2096,13 +2096,19 @@ function onPickablePointerMove(e) {
   const targetX = pickableDrag.startSrcWorldX + (liveWorld.x - startWorld.x);
   const targetY = pickableDrag.startSrcWorldY + (liveWorld.y - startWorld.y);
 
-  const w = state.room.width_m;
-  const d = state.room.depth_m;
   const margin = SOURCE_SNAP_M;
   let nx = snapToGrid(targetX);
   let ny = snapToGrid(targetY);
-  if (Number.isFinite(w)) nx = Math.max(margin, Math.min(w - margin, nx));
-  if (Number.isFinite(d)) ny = Math.max(margin, Math.min(d - margin, ny));
+  // Clamp to the EFFECTIVE bounds (room footprint UNIONED with surau
+  // podium extension + broken-out enclosures). Was clamped to just
+  // [0, width_m] × [0, depth_m] which prevented the user from
+  // dragging arcade listeners (L6/L7/L8 at y<0 or x<0 / x>W) once
+  // they were placed by the preset — they could TYPE the negative Y
+  // in the side panel but the drag would snap them back into the
+  // room boundary. Reported 2026-05-17.
+  const bounds = roomEffectiveBounds(state.room);
+  nx = Math.max(bounds.minX + margin, Math.min(bounds.maxX - margin, nx));
+  ny = Math.max(bounds.minY + margin, Math.min(bounds.maxY - margin, ny));
 
   if (pickableDrag.kind === 'source') {
     const src = state.sources[pickableDrag.sourceIdx];
