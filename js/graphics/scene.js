@@ -7361,13 +7361,22 @@ function rebuildSurauStructure(room) {
     }
     if (xPrev < W - 0.01) segments.push({ x1: xPrev, x2: W });
 
+    // Acoustic material: prefer the new s.materials.south_partition slot
+    // (data-driven schema added 2026-05-17), fall back to the legacy
+    // sp.materialId field for older presets, then the room's wall_north
+    // material, then a hardcoded default. Triangulator uses the same
+    // priority order so picker / Sabine / BVH stay in sync.
+    const partitionMatId = s.materials?.south_partition
+      || sp.materialId
+      || surfaces.wall_north
+      || 'concrete-painted';
     for (const seg of segments) {
       const segW = seg.x2 - seg.x1;
       if (segW < 0.05) continue;
       const segGeo = new THREE.BoxGeometry(segW, bandH, thick);
       const segMesh = new THREE.Mesh(segGeo, partitionMat);
       segMesh.position.set((seg.x1 + seg.x2) / 2, bandH / 2, thick / 2);
-      segMesh.userData.acoustic_material = sp.materialId || surfaces.wall_north || 'plaster-smooth';
+      segMesh.userData.acoustic_material = partitionMatId;
       segMesh.userData.surface_id = 'south_partition';
       segMesh.userData.tag = 'surau_partition';
       roomGroup.add(segMesh);
@@ -7380,7 +7389,8 @@ function rebuildSurauStructure(room) {
       const lintelGeo = new THREE.BoxGeometry(doorW, lintelH, thick);
       const lintel = new THREE.Mesh(lintelGeo, partitionMat);
       lintel.position.set(dc, bandH - lintelH / 2, thick / 2);
-      lintel.userData.acoustic_material = sp.materialId || surfaces.wall_north || 'plaster-smooth';
+      lintel.userData.acoustic_material = partitionMatId;
+      lintel.userData.surface_id = 'south_partition';
       lintel.userData.tag = 'surau_partition_lintel';
       roomGroup.add(lintel);
     }
@@ -8261,6 +8271,15 @@ function rebuildSurauStructure(room) {
         const cxBay = ux + spec.perp[0] * (depth - colT / 2);
         const cyBay = uy + spec.perp[1] * (depth - colT / 2);
 
+        // Per-side material lookup for arcade columns. Stays on the
+        // bay mesh so the surface picker pulses the arcade-columns row
+        // for any column click. surface_id is unique-per-bay so the
+        // tracer's hit reports the specific column (the click handler
+        // strips the suffix when looking up the panel row — surface_id
+        // 'surau_arcade_column_S_3' matches the data-surface-id base
+        // 'surau_arcade_columns' via a prefix check, or via the bay-
+        // specific row when one is added).
+        const arcadeColMatId = s.materials?.arcade_columns || 'concrete-painted';
         const bay = new THREE.Mesh(perSideBayGeo, stuccoMat);
         // Bay shape's local origin is at the bottom-LEFT corner of the bay
         // (local x along the side, local y = vertical, local z = extrusion
@@ -8295,12 +8314,24 @@ function rebuildSurauStructure(room) {
           cyBay - (actualBayW / 2) * sy,
         );
         bay.userData.tag = 'surau_arcade_bay';
-        bay.userData.no_acoustic = true;
+        // Arcade columns are now in the BVH (triangulateSurauStructure,
+        // 2026-05-17). Each bay carries a unique-per-side index so the
+        // surface picker can address them individually if/when the panel
+        // adds per-column rows; until then the tracer's hits report
+        // 'surau_arcade_column_<S/E/W>_<idx>' which the panel can match
+        // by prefix to a single 'arcade_columns' row.
+        bay.userData.acoustic_material = arcadeColMatId;
+        bay.userData.surface_id = `surau_arcade_column_${sideName.toUpperCase()[0]}_${i}`;
         roomGroup.add(bay);
       }
 
       // Flat arcade roof: a thin slab covering the colonnade from the
-      // building wall out to the outer arcade line.
+      // building wall out to the outer arcade line. UNDERSIDE is now
+      // in the BVH (triangulateSurauStructure) — rays going UP from
+      // listeners in the arcade hit it and reflect down. material from
+      // s.materials.arcade_roof (default gypsum-board). surface_id is
+      // per-side so each side's roof can be hovered/picked independently.
+      const arcadeRoofMatId = s.materials?.arcade_roof || 'gypsum-board';
       const roofL = sideLen - startInset - endInset;
       const roofGeo = new THREE.BoxGeometry(roofL, 0.10, depth);
       const roof = new THREE.Mesh(roofGeo, shingleMat);
@@ -8313,7 +8344,8 @@ function rebuildSurauStructure(room) {
       roof.position.set(rcx, roofH + 0.05, rcy);
       roof.rotation.y = Math.atan2(spec.perp[0], spec.perp[1]);
       roof.userData.tag = 'surau_arcade_roof';
-      roof.userData.no_acoustic = true;
+      roof.userData.acoustic_material = arcadeRoofMatId;
+      roof.userData.surface_id = `surau_arcade_roof_${sideName}`;
       roof.userData.no_walk_collide = true;
       roomGroup.add(roof);
 
@@ -8455,16 +8487,25 @@ function rebuildSurauStructure(room) {
   // to the entrances are implied by the slab thickness (0.4 m default —
   // single-step stoop). Reads from any iso angle as "the building is
   // raised on a plinth".
+  //
+  // Acoustically: the TOP FACE of the podium is now in the precision
+  // tracer's BVH (2026-05-17, via triangulateSurauStructure) so rays
+  // exiting through a south door bounce off it. surface_id matches the
+  // triangulator's emitted source key 'surau_podium_top' so the click
+  // handler can pulse the Room panel material row for the podium top.
+  // Material id comes from s.materials.podium_top (preset-authored).
   if (s.podium) {
     const ext = Number.isFinite(s.podium.extension_m) ? s.podium.extension_m : 1.5;
     const podH = Number.isFinite(s.podium.height_m) ? s.podium.height_m : 0.4;
     const podW = W + 2 * ext;
     const podD = D + 2 * ext;
+    const podiumMatId = s.materials?.podium_top || 'concrete-painted';
     const podGeo = new THREE.BoxGeometry(podW, podH, podD);
     const podium = new THREE.Mesh(podGeo, concreteMat);
     podium.position.set(W / 2, -podH / 2, D / 2);   // top face at z = 0 (floor plane)
     podium.userData.tag = 'surau_podium';
-    podium.userData.no_acoustic = true;
+    podium.userData.acoustic_material = podiumMatId;
+    podium.userData.surface_id = 'surau_podium_top';
     // WALKABLE — avatar must be able to stand on the podium when it
     // exits the prayer hall through any door (no other floor surface
     // exists outside the room walls). Inside the room the room's own
@@ -8476,6 +8517,9 @@ function rebuildSurauStructure(room) {
     // Stair lip on the south side — single step from ground level up
     // to the podium top, directly in front of the main entrance. Also
     // walkable so the avatar can ascend / descend at the porch.
+    // Same acoustic material as the podium top — the step is part of
+    // the same surface_id ('surau_podium_top') so a click on either
+    // pulses the same row.
     const stepW = 4.0;
     const stepDepth = 0.4;
     const stepH = podH * 0.5;
@@ -8483,7 +8527,8 @@ function rebuildSurauStructure(room) {
     const step = new THREE.Mesh(stepGeo, concreteMat);
     step.position.set(W / 2, -stepH / 2, -ext - stepDepth / 2);
     step.userData.tag = 'surau_podium_step';
-    step.userData.no_acoustic = true;
+    step.userData.acoustic_material = podiumMatId;
+    step.userData.surface_id = 'surau_podium_top';
     roomGroup.add(step);
   }
 
@@ -8493,6 +8538,14 @@ function rebuildSurauStructure(room) {
   // where you go in" from a distance. Three walls + roof; the wall on
   // the BUILDING side is omitted (open onto the building). Front wall
   // also has a pointed-arch opening for the entrance.
+  //
+  // Acoustically (2026-05-17): walls + roof underside are in the BVH via
+  // triangulateSurauStructure. The triangulator IGNORES the pointed-arch
+  // cutout on the front wall (treats it as solid) for simplicity — the
+  // southPartition doors actually gate entry/exit so listeners standing
+  // INSIDE the portico are rare in practice. surface_id stable across
+  // walls ('surau_portico_walls') and roof ('surau_portico_roof'). The
+  // material ids come from s.materials.portico_walls / portico_roof.
   if (s.portico) {
     const po = s.portico;
     const side = po.side || 'south';
@@ -8501,6 +8554,8 @@ function rebuildSurauStructure(room) {
     const poH = Number.isFinite(po.height_m) ? po.height_m : 4.5;
     const poApex = Number.isFinite(po.apexRise_m) ? po.apexRise_m : 1.0;
     const wallT = 0.15;
+    const porticoWallMatId = s.materials?.portico_walls || 'concrete-painted';
+    const porticoRoofMatId = s.materials?.portico_roof  || 'gypsum-board';
 
     // Validate side; anchor + yaw are computed below per-side.
     if (['south', 'north', 'east', 'west'].includes(side)) {
@@ -8539,6 +8594,9 @@ function rebuildSurauStructure(room) {
       // wall thickness goes from local z = poD-wallT (inner) to z = poD
       // (outer). Position the geometry origin at (0, 0, poD - wallT).
       frontWall.position.set(-poW / 2, 0, poD - wallT);
+      frontWall.userData.tag = 'surau_portico_frontwall';
+      frontWall.userData.acoustic_material = porticoWallMatId;
+      frontWall.userData.surface_id = 'surau_portico_walls';
       group.add(frontWall);
 
       // SIDE WALLS — left and right slabs joining the front wall back to
@@ -8550,12 +8608,23 @@ function rebuildSurauStructure(room) {
         const xLocal = side2 === 'left' ? -poW / 2 + wallT / 2 : poW / 2 - wallT / 2;
         sw.position.set(xLocal, poH / 2, poD / 2);
         sw.userData.tag = 'surau_portico_sidewall';
+        sw.userData.acoustic_material = porticoWallMatId;
+        sw.userData.surface_id = 'surau_portico_walls';
         group.add(sw);
       }
 
       // PYRAMID ROOF on top — base = portico footprint, apex centred,
       // apex height = poH + poApex. Use shingleMat to match the main hip.
+      // buildPyramidCap tags each face with no_acoustic=true by default;
+      // we OVERRIDE here so the cap's underside is in the picker (and
+      // the triangulator emits the matching surface_id for it too).
       const cap = buildPyramidCap(0, poD / 2, poH, poW / 2, poD / 2, poApex, shingleMat, 'surau_portico_cap');
+      for (const child of cap.children) {
+        if (!child.isMesh) continue;
+        delete child.userData.no_acoustic;
+        child.userData.acoustic_material = porticoRoofMatId;
+        child.userData.surface_id = 'surau_portico_roof';
+      }
       group.add(cap);
 
       // Place the group: rotate by yaw, position so the centre of the
@@ -8586,7 +8655,10 @@ function rebuildSurauStructure(room) {
       if (side === 'west')  { anchorX = 0;     anchorZ = D / 2;        anchorYaw = -Math.PI / 2; }
       group.position.set(anchorX, 0, anchorZ);
       group.rotation.y = anchorYaw;
-      tagExterior(group, 'surau_portico');
+      // Group-level tag only (avoid tagExterior — its blanket
+      // no_acoustic=true would shadow the per-mesh acoustic_material /
+      // surface_id we set above on the front/side walls + cap children).
+      group.userData.tag = 'surau_portico';
       roomGroup.add(group);
     }
   }

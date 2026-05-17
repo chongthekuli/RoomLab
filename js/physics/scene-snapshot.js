@@ -364,6 +364,17 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     stadiumStructure: srcRoom.stadiumStructure
       ? Object.freeze(JSON.parse(JSON.stringify(srcRoom.stadiumStructure)))
       : null,
+    // Surau exterior architecture — needed by triangulateScene() so the
+    // podium, arcade columns, arcade roof, portico walls, and south-
+    // partition segments enter the BVH as real acoustic surfaces. Before
+    // this propagation those elements existed only as Three.js meshes in
+    // roomGroup tagged userData.no_acoustic=true, so rays exiting the
+    // prayer hall through a door cutout passed straight through them and
+    // disappeared into nothing (no further reflections, no late energy
+    // contribution from the arcade). Reported 2026-05-17.
+    surauStructure: srcRoom.surauStructure
+      ? Object.freeze(JSON.parse(JSON.stringify(srcRoom.surauStructure)))
+      : null,
     // custom_vertices preserved for custom-polygon rooms.
     custom_vertices: Array.isArray(srcRoom.custom_vertices)
       ? Object.freeze(srcRoom.custom_vertices.map(v => Object.freeze({ x: v.x, y: v.y })))

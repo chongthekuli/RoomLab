@@ -860,7 +860,163 @@ export function roomSurfaces(room) {
   const interior = multiLevelInteriorSurfaces(room);
   if (interior.length) result = result.concat(interior);
 
+  // Append surauStructure exterior surfaces — podium top, arcade columns,
+  // arcade roof undersides, portico walls + roof, southPartition. These
+  // entered the precision-tracer BVH on 2026-05-17; this Sabine path
+  // catches them so the simplified (Sabine / Eyring) reverberation
+  // calculation reflects the same surface area. Capped at 30% of the
+  // outer wall area so the arcade roof (~150 m²) doesn't dominate the
+  // hall's own ~155 m² of wall area and crash RT60 unrealistically.
+  const surau = surauStructureSurfaces(room);
+  if (surau.length) result = result.concat(surau);
+
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Surfaces introduced by room.surauStructure (mosque prayer-hall preset).
+// Returns an array of { id, area_m2, materialId } entries appended to the
+// outer-shell surfaces by roomSurfaces().
+//
+// Geometry (all areas in m²; coordinate convention matches the renderer):
+//   • podium top   — flat rect at z=0, spans (-ext, -ext) to (W+ext, D+ext)
+//                    MINUS the prayer-hall footprint (W × D), since the
+//                    prayer-hall floor is already counted as the shell's
+//                    'floor' entry. Net podium area = (W+2ext)(D+2ext) − W·D.
+//   • arcade cols  — per side, n_bays+1 pillars, each pillar has 4 vertical
+//                    faces of colT × (roofH − 0) so per-pillar lateral
+//                    surface area = 4·colT·roofH. Pillar count per side
+//                    derived the same way the renderer derives it.
+//   • arcade roof  — per side, depth_m × (sideLen − 2·startInset). Each
+//                    side counts as one underside rectangle. Skip a side
+//                    with no requested wrap.
+//   • portico wall — front + 2 sides, area = poH·poW + 2·poH·poD. The
+//                    front-wall arch cutout is ignored (treated as solid)
+//                    matching the BVH simplification.
+//   • portico roof — pyramid underside, total slant area ≈ poW·poD ·
+//                    sqrt(1 + (poApex/min(poW,poD))²) — approximate as the
+//                    horizontal footprint scaled by 1.1 for the apex
+//                    slope. Cheap and accurate to ~5%.
+//   • south part'n — sum of segment widths × bandH, plus lintels above
+//                    each door cutout (small).
+//
+// Cap: the sum of new areas is reduced to at most 30% of the prayer-hall
+// total outer wall area. Mathematically equivalent to a global α-scale —
+// the additional area still has the right per-band absorption profile,
+// just multiplied by min(1, 0.3·wallArea / surauArea). The cap is a
+// modelling simplification (Dr. Chen's audit P-class) acknowledging that
+// the arcade is NOT inside the closed-room volume Sabine assumes; we're
+// only crediting the absorbing surface for its first-bounce effect, not
+// pretending it's a full reverberant participant.
+function surauStructureSurfaces(room) {
+  const s = room?.surauStructure;
+  if (!s || room.shape !== 'rectangular') return [];
+  const W = Number(room.width_m) || 0;
+  const D = Number(room.depth_m) || 0;
+  const wallH = Number(room.height_m) || 0;
+  if (!(W > 0 && D > 0 && wallH > 0)) return [];
+
+  const mats = s.materials || {};
+  const podiumMatId      = mats.podium_top      || 'concrete-painted';
+  const arcadeColMatId   = mats.arcade_columns  || 'concrete-painted';
+  const arcadeRoofMatId  = mats.arcade_roof     || 'gypsum-board';
+  const porticoWallMatId = mats.portico_walls   || 'concrete-painted';
+  const porticoRoofMatId = mats.portico_roof    || 'gypsum-board';
+  const partitionMatId   = mats.south_partition || s.southPartition?.materialId || 'concrete-painted';
+
+  const out = [];
+
+  // Podium top (extension area only — prayer-hall footprint is already
+  // counted by the shell's 'floor' entry).
+  if (s.podium && Number.isFinite(s.podium.extension_m) && s.podium.extension_m > 0.05) {
+    const ext = s.podium.extension_m;
+    const grossArea = (W + 2 * ext) * (D + 2 * ext);
+    const netArea = Math.max(0, grossArea - W * D);
+    if (netArea > 0.5) {
+      out.push({ id: 'surau_podium_top', area_m2: netArea, materialId: podiumMatId });
+    }
+  }
+
+  // Arcade columns + roof. Bay count per side mirrors the renderer's
+  // floor(usableLen / bayW) and emits (n+1) columns per side.
+  if (s.arcade && Array.isArray(s.arcade.sides) && s.arcade.sides.length > 0) {
+    const depth_m = Number.isFinite(s.arcade.depth_m) ? s.arcade.depth_m : 3.0;
+    const bayW    = Number.isFinite(s.arcade.column_spacing_m) ? s.arcade.column_spacing_m : 2.8;
+    const colT    = Number.isFinite(s.arcade.column_thickness_m) ? s.arcade.column_thickness_m : 0.30;
+    const roofZ   = Number.isFinite(s.arcade.roof_height_m) ? s.arcade.roof_height_m : 4.4;
+    const startInset = depth_m * 0.5;
+    const endInset   = depth_m * 0.5;
+    const perPillarArea = 4 * colT * roofZ;       // 4 wall faces × colT × height
+
+    let totalColArea = 0;
+    let totalRoofArea = 0;
+    for (const sideName of s.arcade.sides) {
+      const sideLen = (sideName === 'south' || sideName === 'north') ? W : D;
+      const usableLen = sideLen - startInset - endInset;
+      if (usableLen < bayW) continue;
+      const nBays = Math.max(1, Math.floor(usableLen / bayW));
+      totalColArea  += (nBays + 1) * perPillarArea;
+      totalRoofArea += depth_m * usableLen;
+    }
+    if (totalColArea > 0.5) {
+      out.push({ id: 'surau_arcade_columns', area_m2: totalColArea, materialId: arcadeColMatId });
+    }
+    if (totalRoofArea > 0.5) {
+      out.push({ id: 'surau_arcade_roof', area_m2: totalRoofArea, materialId: arcadeRoofMatId });
+    }
+  }
+
+  // Portico walls + pyramid roof underside.
+  if (s.portico) {
+    const poW = Number.isFinite(s.portico.width_m) ? s.portico.width_m : 3.0;
+    const poD = Number.isFinite(s.portico.depth_m) ? s.portico.depth_m : 3.0;
+    const poH = Number.isFinite(s.portico.height_m) ? s.portico.height_m : 4.5;
+    const poApex = Number.isFinite(s.portico.apexRise_m) ? s.portico.apexRise_m : 1.0;
+    const wallArea = poW * poH + 2 * poD * poH;
+    // Pyramid slant approximation: 4 triangles of base · slantH/2 each.
+    // For a rectangular pyramid with apex centred, two faces have base poW
+    // and slant √((poD/2)² + apex²); two have base poD and slant
+    // √((poW/2)² + apex²). Total = poW·√((poD/2)² + apex²) + poD·√((poW/2)² + apex²).
+    const slantA = Math.sqrt((poD / 2) ** 2 + poApex ** 2);
+    const slantB = Math.sqrt((poW / 2) ** 2 + poApex ** 2);
+    const roofArea = poW * slantA + poD * slantB;
+    if (wallArea > 0.5) {
+      out.push({ id: 'surau_portico_walls', area_m2: wallArea, materialId: porticoWallMatId });
+    }
+    if (roofArea > 0.5) {
+      out.push({ id: 'surau_portico_roof', area_m2: roofArea, materialId: porticoRoofMatId });
+    }
+  }
+
+  // South partition — segment widths × band height (excluding door gaps).
+  if (s.southPartition) {
+    const bandH = Number.isFinite(s.southPartition.height_m) ? s.southPartition.height_m : 2.4;
+    const doorW = Number.isFinite(s.southPartition.doorWidth_m) ? s.southPartition.doorWidth_m : 1.0;
+    const doorCount = Array.isArray(s.southPartition.doorCenters_x_m)
+      ? s.southPartition.doorCenters_x_m.length : 0;
+    const partitionSolidW = Math.max(0, W - doorCount * doorW);
+    const partitionArea = partitionSolidW * bandH + doorCount * 0.25 * doorW;  // lintels at 0.25 m tall
+    if (partitionArea > 0.5) {
+      out.push({ id: 'south_partition', area_m2: partitionArea, materialId: partitionMatId });
+    }
+  }
+
+  if (out.length === 0) return out;
+
+  // Cap total surauStructure area at 30% of the outer-wall area so the
+  // arcade roof + podium can't dominate the prayer hall's own wall
+  // absorption. Documented modelling simplification — the arcade is NOT
+  // inside Sabine's closed-volume assumption, so its absorption is
+  // credited but capped.
+  const outerWallArea = 2 * (W + D) * wallH;
+  const totalNewArea = out.reduce((acc, e) => acc + e.area_m2, 0);
+  const cap = 0.30 * outerWallArea;
+  if (totalNewArea > cap && cap > 0) {
+    const scale = cap / totalNewArea;
+    for (const e of out) e.area_m2 *= scale;
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------

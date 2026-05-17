@@ -55,6 +55,39 @@ export default {
   // surau. Each element is rendered by rebuildSurauStructure() in scene.js
   // — see the schema header comment there for field-level documentation.
   surauStructure: {
+    // ---- ACOUSTIC MATERIALS for the exterior surauStructure elements ----
+    // Schema (added 2026-05-17 when podium/arcade/portico/southPartition
+    // were promoted from visual-only to real acoustic surfaces in the
+    // precision-tracer BVH):
+    //   surauStructure.materials = {
+    //     podium_top:      string,   // top face of the raised podium plinth
+    //                                //   surface_id = 'surau_podium_top'
+    //     arcade_columns:  string,   // every column box on every arcade side
+    //                                //   surface_id = `surau_arcade_column_<side><idx>`
+    //     arcade_roof:     string,   // arcade flat-roof underside, per side
+    //                                //   surface_id = `surau_arcade_roof_<side>`
+    //     portico_walls:   string,   // portico's three solid walls (front+sides)
+    //                                //   surface_id = 'surau_portico_walls'
+    //     portico_roof:    string,   // portico's pyramid cap underside
+    //                                //   surface_id = 'surau_portico_roof'
+    //     south_partition: string,   // partition band segments between doors
+    //                                //   surface_id = 'south_partition' (matches scene.js)
+    //   }
+    // Every entry is a catalogue material id from data/materials.json.
+    // The Sabine sum in physics/room-shape.js#roomSurfaces capped the
+    // total exterior contribution at 30% of the prayer-hall wall area so
+    // adding these surfaces drops the broadband RT60 by ~5-10%, not a
+    // wholesale ~30% (which would happen if the full ~150 m² of arcade
+    // roof were counted alongside the hall's own ~155 m² of wall).
+    // Override individual entries to retune. UI editor: TBD.
+    materials: {
+      podium_top:      'concrete-painted',
+      arcade_columns:  'concrete-painted',
+      arcade_roof:     'gypsum-board',
+      portico_walls:   'concrete-painted',
+      portico_roof:    'gypsum-board',
+      south_partition: 'concrete-painted',
+    },
     // Mihrab — concave semicircular niche on the qibla wall (state +y).
     // 1.8 m × 0.6 m × 3.0 m, centred E–W. Marble would be ideal; gypsum-
     // board is the closest catalogued material until a stone is added.

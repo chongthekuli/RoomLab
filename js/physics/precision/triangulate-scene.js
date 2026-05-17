@@ -117,6 +117,7 @@ export function triangulateScene(scene, opts = {}) {
 
   triangulateZones(scene, tris);
   triangulateScoreboard(scene, tris);
+  triangulateSurauStructure(scene, tris);
   triangulateStandaloneEnclosures(scene, tris);
   triangulateWallSegments(scene, tris);
   triangulateTreatments(scene, tris);
@@ -853,6 +854,421 @@ function triangulateZones(scene, tris) {
       // (occupancy-blended) zone material.
       pushTri(tris, v0, v1, v2, [0, 0, 1],
         z.materialIdx, TAG_ZONE, `zone_${z.id}`);
+    }
+  }
+}
+
+// --- Surau exterior — podium, arcade, portico, south partition --------
+// All five elements live on scene.room.surauStructure (mirrored from the
+// preset by scene-snapshot.js). Before this 2026-05-17 commit they were
+// rendered as Three.js meshes only and tagged userData.no_acoustic=true
+// so the triangulator silently skipped them; rays exiting the prayer
+// hall through a door cutout passed through the visible columns and
+// disappeared into the void with no further bounces (and no late
+// reverberation from the arcade volume). Effect on user-visible metrics:
+// rays now hit columns / podium-top / arcade-roof-undersides and
+// reflect; Sabine RT60 drops 5-10% from the extra absorbing area; the
+// surface picker can click any of these and open the material UI.
+//
+// Schema reference (per element):
+//   podium          → top face at z = podium.height_m, spans
+//                     (-ext, -ext) to (W+ext, D+ext). Normal +z.
+//                     materialId = surauStructure.materials.podium_top
+//   arcade columns  → per side in arcade.sides[]: walk the side at
+//                     bay_spacing intervals, drop a vertical square
+//                     pillar at each bay-divider position. Each pillar
+//                     = 4 wall quads from z=podium.height_m to
+//                     z=arcade.roof_height_m (default 0.4 to 4.4). Each
+//                     pillar emits a unique surface_id so the picker
+//                     can distinguish columns. materialId =
+//                     surauStructure.materials.arcade_columns.
+//   arcade roof     → per side: flat rectangle at z=arcade.roof_height_m
+//                     covering the arcade footprint outside the room
+//                     wall. Normal -z (faces into the arcade).
+//                     materialId = surauStructure.materials.arcade_roof
+//   portico walls   → three vertical rectangles (front + 2 sides) of
+//                     the projecting entrance pavilion. The front-wall
+//                     pointed-arch cutout is NOT modelled in the BVH —
+//                     the simplification means rays hitting the arch
+//                     opening see a solid wall instead of an opening,
+//                     but the entrance proper is already gated by the
+//                     southPartition doors so listeners actually
+//                     standing INSIDE the portico are rare. Cheaper
+//                     than carving a Shape hole through the BVH wall.
+//                     materialId = surauStructure.materials.portico_walls
+//   portico roof    → underside of the pyramidal cap, four triangles
+//                     meeting at apex. Normal points down-and-inward.
+//                     materialId = surauStructure.materials.portico_roof
+//   south partition → thin partition between the south doors, full
+//                     band height; one rectangle per segment between
+//                     consecutive doorCenters_x_m gaps. Inward normal
+//                     +y. materialId = surauStructure.materials.south_partition
+//
+// Out of scope (visual-only, stays tagged no_acoustic):
+//   • minaret shaft / belt / cap / dome / crescent / mustaka — sits
+//     8 m+ above ground at the NW corner, no ray path reaches it
+//   • saf lines on the floor (flush with carpet, no acoustic effect)
+//   • atap tumpang multi-tier roof — apex >9 m, hipRoof already
+//     in the BVH for tier 0; upper tiers are above the ceiling
+//   • jali screens (currently disabled in the preset)
+//   • mihrab niche / minbar steps — already covered by the existing
+//     interior surauStructure render path (rebuildSurauStructure tags
+//     them with surface_id and acoustic_material)
+//   • portico's pointed-arch opening — treated as a solid wall in the
+//     BVH (see portico walls note above)
+function triangulateSurauStructure(scene, tris) {
+  const room = scene.room;
+  const s = room?.surauStructure;
+  if (!s) return;
+  if (room.shape !== 'rectangular') return;  // schema is shoebox-only
+
+  const W = Number(room.width_m), D = Number(room.depth_m);
+  if (!(W > 0 && D > 0)) return;
+
+  const mats = s.materials || {};
+  // Fallback material ids — chosen to match the legacy hard-coded
+  // colours in scene.js. If the preset author forgets to set a slot,
+  // the surface still enters the BVH with a sensible material rather
+  // than -1 (no material → tracer treats it as fully reflective).
+  const podiumMatId      = mats.podium_top      || 'concrete-painted';
+  const arcadeColMatId   = mats.arcade_columns  || 'concrete-painted';
+  const arcadeRoofMatId  = mats.arcade_roof     || 'gypsum-board';
+  const porticoWallMatId = mats.portico_walls   || 'concrete-painted';
+  const porticoRoofMatId = mats.portico_roof    || 'gypsum-board';
+  // Partition material lookup order matches scene.js#rebuildSurauStructure:
+  // prefer the new s.materials.south_partition slot (data-driven), fall
+  // back to the legacy southPartition.materialId for older presets, then
+  // a hardcoded default. Mismatched priority order between the renderer
+  // and triangulator would let the BVH report a different material than
+  // the user picked in the panel.
+  const partitionMatId   = mats.south_partition || (s.southPartition?.materialId) || 'concrete-painted';
+
+  // -------- Podium top face -------------------------------------------
+  // Renderer: BoxGeometry(W + 2·ext, podH, D + 2·ext) centred so top
+  // face is at z=0. For acoustic purposes the user-walked surface is
+  // the TOP face only; the sides are exposed by the 0.4 m step but
+  // only a ground-grazing ray (already escaped the BVH) would see them,
+  // and the BOTTOM face is buried in terrain.
+  //
+  // We CUT OUT the prayer-hall footprint (0..W) × (0..D) so the BVH has
+  // a single floor triangle at any (x, y) inside the hall instead of two
+  // coplanar triangles fighting for the hit (the hall's own floor mesh
+  // is already at z=0). Emit four ring rectangles around the inner cut:
+  //   S strip: x ∈ [-ext, W+ext], y ∈ [-ext, 0]
+  //   N strip: x ∈ [-ext, W+ext], y ∈ [D, D+ext]
+  //   W strip: x ∈ [-ext, 0],     y ∈ [0, D]
+  //   E strip: x ∈ [W, W+ext],    y ∈ [0, D]
+  // All four share the same surface_id ('surau_podium_top') so a click
+  // on any strip pulses the same Room-panel row.
+  if (s.podium) {
+    const ext = Number.isFinite(s.podium.extension_m) ? s.podium.extension_m : 0;
+    if (ext > 0.05) {
+      const matIdx = materialIdxFor(scene, podiumMatId);
+      // CCW from above (looking down at +z normal): (x0,y0)→(x1,y0)→(x1,y1)→(x0,y1).
+      const pushStrip = (x0, y0, x1, y1) => {
+        if (x1 - x0 < 0.05 || y1 - y0 < 0.05) return;
+        pushQuad(tris,
+          [x0, y0, 0], [x1, y0, 0], [x1, y1, 0], [x0, y1, 0],
+          [0, 0, 1], matIdx, TAG_FLOOR, 'surau_podium_top');
+      };
+      pushStrip(-ext, -ext,  W + ext, 0);       // S strip (south of hall)
+      pushStrip(-ext, D,     W + ext, D + ext); // N strip (north of hall)
+      pushStrip(-ext, 0,     0,       D);       // W strip (west of hall)
+      pushStrip(W,    0,     W + ext, D);       // E strip (east of hall)
+    }
+  }
+
+  // -------- Arcade columns + roof undersides --------------------------
+  // Renderer model: each side has nBays bays, each bay being a
+  // pointed-arch extrusion. The columns are the solid material between
+  // bay arches — for the BVH we approximate as one square pillar per
+  // bay DIVIDER (i.e. one column between bays + the two end columns at
+  // each side). Pillar cross-section = column_thickness_m square,
+  // height from podium top to arcade roof underside.
+  //
+  // Side geometry (mirrors scene.js sideSpec exactly):
+  //   'south': p1=(0,0)     p2=(W,0)     perp=(0,-1)  — arcade in y<0
+  //   'east':  p1=(W,0)     p2=(W,D)     perp=(1, 0)  — arcade in x>W
+  //   'west':  p1=(0,0)     p2=(0,D)     perp=(-1,0)  — arcade in x<0
+  //   'north': p1=(0,D)     p2=(W,D)     perp=(0, 1)  — never wrapped per preset
+  const ar = s.arcade;
+  if (ar && Array.isArray(ar.sides) && ar.sides.length > 0) {
+    const depth_m = Number.isFinite(ar.depth_m) ? ar.depth_m : 3.0;
+    const bayW    = Number.isFinite(ar.column_spacing_m) ? ar.column_spacing_m : 2.8;
+    const colT    = Number.isFinite(ar.column_thickness_m) ? ar.column_thickness_m : 0.30;
+    const roofZ   = Number.isFinite(ar.roof_height_m) ? ar.roof_height_m : 4.4;
+    // Pillar bottom: world z=0 (the podium top is flush with the prayer-
+    // hall floor — podium.position.y in scene.js = -podH/2 so its top
+    // face is at z=0). Pillar top: arcade roof underside at roofZ.
+    const pillarZ0 = 0;
+    const pillarZ1 = roofZ;
+    const half = colT / 2;
+
+    const sideSpec = {
+      south: { p1: [0, 0], p2: [W, 0], perpX:  0, perpY: -1, name: 'S' },
+      east:  { p1: [W, 0], p2: [W, D], perpX:  1, perpY:  0, name: 'E' },
+      west:  { p1: [0, 0], p2: [0, D], perpX: -1, perpY:  0, name: 'W' },
+      north: { p1: [0, D], p2: [W, D], perpX:  0, perpY:  1, name: 'N' },
+    };
+
+    const arcadeColMatIdx  = materialIdxFor(scene, arcadeColMatId);
+    const arcadeRoofMatIdx = materialIdxFor(scene, arcadeRoofMatId);
+
+    for (const sideName of ar.sides) {
+      const spec = sideSpec[sideName];
+      if (!spec) continue;
+      const dx = spec.p2[0] - spec.p1[0];
+      const dy = spec.p2[1] - spec.p1[1];
+      const sideLen = Math.hypot(dx, dy);
+      if (sideLen < bayW) continue;
+      const sx = dx / sideLen, sy = dy / sideLen;
+      // Match renderer: 0.5·depth inset at each end so corners stay clean.
+      const startInset = depth_m * 0.5;
+      const endInset   = depth_m * 0.5;
+      const usableLen  = sideLen - startInset - endInset;
+      if (usableLen < bayW) continue;
+      const nBays = Math.max(1, Math.floor(usableLen / bayW));
+      const actualBayW = usableLen / nBays;
+
+      // Column positions: one at each bay divider + the two end caps.
+      // (nBays + 1 columns total per side.) Position = u along the side
+      // (in metres from p1), then offset OUTWARD by (depth - colT/2)
+      // along perp — same convention as scene.js bay placement.
+      const outwardDist = depth_m - colT / 2;
+      for (let ci = 0; ci <= nBays; ci++) {
+        const u = startInset + ci * actualBayW;
+        const ux = spec.p1[0] + sx * u;
+        const uy = spec.p1[1] + sy * u;
+        const cx_col = ux + spec.perpX * outwardDist;
+        const cy_col = uy + spec.perpY * outwardDist;
+        // Pillar = 4 wall quads of a square cross-section box.
+        // Local axes: side direction (sx, sy) on one face pair; perp on
+        // the other. Each face's outward normal points AWAY from the
+        // pillar centre. CCW winding seen from outside the pillar.
+        const A = [cx_col - half * sx - half * spec.perpX, cy_col - half * sy - half * spec.perpY];
+        const B = [cx_col + half * sx - half * spec.perpX, cy_col + half * sy - half * spec.perpY];
+        const C = [cx_col + half * sx + half * spec.perpX, cy_col + half * sy + half * spec.perpY];
+        const Dp= [cx_col - half * sx + half * spec.perpX, cy_col - half * sy + half * spec.perpY];
+        const surfTagBase = `surau_arcade_column_${spec.name}_${ci}`;
+        // Face AB (normal = -perp, points back toward the prayer hall wall)
+        pushQuad(tris,
+          [A[0], A[1], pillarZ0], [B[0], B[1], pillarZ0],
+          [B[0], B[1], pillarZ1], [A[0], A[1], pillarZ1],
+          [-spec.perpX, -spec.perpY, 0], arcadeColMatIdx, TAG_WALL, surfTagBase);
+        // Face BC (normal = +s = side direction, points along the colonnade)
+        pushQuad(tris,
+          [B[0], B[1], pillarZ0], [C[0], C[1], pillarZ0],
+          [C[0], C[1], pillarZ1], [B[0], B[1], pillarZ1],
+          [sx, sy, 0], arcadeColMatIdx, TAG_WALL, surfTagBase);
+        // Face CD (normal = +perp, points OUTWARD away from building)
+        pushQuad(tris,
+          [C[0], C[1], pillarZ0], [Dp[0], Dp[1], pillarZ0],
+          [Dp[0], Dp[1], pillarZ1], [C[0], C[1], pillarZ1],
+          [spec.perpX, spec.perpY, 0], arcadeColMatIdx, TAG_WALL, surfTagBase);
+        // Face DA (normal = -s, points back along the colonnade)
+        pushQuad(tris,
+          [Dp[0], Dp[1], pillarZ0], [A[0], A[1], pillarZ0],
+          [A[0], A[1], pillarZ1], [Dp[0], Dp[1], pillarZ1],
+          [-sx, -sy, 0], arcadeColMatIdx, TAG_WALL, surfTagBase);
+      }
+
+      // Arcade roof underside — flat rectangle covering the arcade
+      // footprint at z=roofZ, normal pointing DOWN. Spans from the
+      // outer wall plane out to depth_m, and from startInset to
+      // (sideLen - endInset) along the side direction. CCW seen from
+      // BELOW gives -z normal.
+      const rl = sideLen - startInset - endInset;
+      const r0 = startInset;
+      const r1 = sideLen - endInset;
+      // Four corners (state coords): inner edge sits ON the wall plane
+      // (which is p1 + s*u; perpendicular offset 0), outer edge sits
+      // depth_m metres outward.
+      const ix0 = spec.p1[0] + sx * r0;
+      const iy0 = spec.p1[1] + sy * r0;
+      const ix1 = spec.p1[0] + sx * r1;
+      const iy1 = spec.p1[1] + sy * r1;
+      const ox0 = ix0 + spec.perpX * depth_m;
+      const oy0 = iy0 + spec.perpY * depth_m;
+      const ox1 = ix1 + spec.perpX * depth_m;
+      const oy1 = iy1 + spec.perpY * depth_m;
+      void rl;
+      // Winding for -z normal (face looks down): go CW when viewed from
+      // above = CCW when viewed from below. Order: inner-start, outer-
+      // start, outer-end, inner-end (so from below this is CCW).
+      pushQuad(tris,
+        [ix0, iy0, roofZ], [ox0, oy0, roofZ],
+        [ox1, oy1, roofZ], [ix1, iy1, roofZ],
+        [0, 0, -1], arcadeRoofMatIdx, TAG_CEILING, `surau_arcade_roof_${sideName}`);
+    }
+  }
+
+  // -------- Portico walls + roof --------------------------------------
+  // Renderer model: three solid walls (front + left + right) wrapping a
+  // pyramid cap. Front wall has a pointed-arch cutout — we IGNORE the
+  // cutout in the BVH (treat as solid; tracer will reflect off the
+  // closed plane, which is acoustically safe-ish since the southPartition
+  // doors actually gate entry/exit and listeners INSIDE the portico are
+  // rare). Pyramid cap: 4 triangles meeting at apex above the portico's
+  // centre, normals pointing down-and-inward.
+  //
+  // Side anchoring matches scene.js's anchor/yaw table:
+  //   south: anchorX=W/2, anchorZ=0,  yaw=π   → portico projects to y<0
+  //   north: anchorX=W/2, anchorZ=D,  yaw=0   → projects to y>D
+  //   east:  anchorX=W,   anchorZ=D/2, yaw=π/2 → projects to x>W
+  //   west:  anchorX=0,   anchorZ=D/2, yaw=-π/2 → projects to x<0
+  // For each side compute the four outer corners of the portico's
+  // footprint in WORLD coords (no Three.js rotation needed — we know
+  // the geometry); then emit walls and roof.
+  if (s.portico) {
+    const po = s.portico;
+    const side = po.side || 'south';
+    const poW = Number.isFinite(po.width_m) ? po.width_m : 3.0;
+    const poD = Number.isFinite(po.depth_m) ? po.depth_m : 3.0;
+    const poH = Number.isFinite(po.height_m) ? po.height_m : 4.5;
+    const poApex = Number.isFinite(po.apexRise_m) ? po.apexRise_m : 1.0;
+    const portWallMatIdx = materialIdxFor(scene, porticoWallMatId);
+    const portRoofMatIdx = materialIdxFor(scene, porticoRoofMatId);
+
+    // Inner edge (anchored on the building wall) and outer edge
+    // (projected away by poD along outNormal). Inner-edge corners:
+    // (ax-poW/2 · sideDir, ay-poW/2 · sideDir) and +; outer corners
+    // = inner + outNormal·poD.
+    let ax = 0, ay = 0;       // anchor on building wall (state coords)
+    let sxd = 0, syd = 0;     // side direction along the wall (unit)
+    let nx = 0, ny = 0;       // outward normal (from building → portico)
+    let validSide = true;
+    if (side === 'south') { ax = W/2; ay = 0; sxd = 1; syd = 0; nx = 0; ny = -1; }
+    else if (side === 'north') { ax = W/2; ay = D; sxd = 1; syd = 0; nx = 0; ny = 1; }
+    else if (side === 'east')  { ax = W; ay = D/2; sxd = 0; syd = 1; nx = 1; ny = 0; }
+    else if (side === 'west')  { ax = 0; ay = D/2; sxd = 0; syd = 1; nx = -1; ny = 0; }
+    else { validSide = false; }
+    // Skip portico (not return) so the southPartition step below still runs.
+    if (validSide) {
+
+    // Inner-edge corners (sit on the building wall plane, half-width
+    // apart along sideDir).
+    const iLeft  = [ax - sxd * poW/2, ay - syd * poW/2];
+    const iRight = [ax + sxd * poW/2, ay + syd * poW/2];
+    // Outer-edge corners (project by poD along outward normal).
+    const oLeft  = [iLeft[0]  + nx * poD, iLeft[1]  + ny * poD];
+    const oRight = [iRight[0] + nx * poD, iRight[1] + ny * poD];
+
+    // FRONT WALL — between oLeft and oRight at z∈[0, poH]. Inward normal
+    // points BACK toward the building (= -n).
+    pushQuad(tris,
+      [oLeft[0], oLeft[1], 0],  [oRight[0], oRight[1], 0],
+      [oRight[0], oRight[1], poH], [oLeft[0], oLeft[1], poH],
+      [-nx, -ny, 0], portWallMatIdx, TAG_WALL, 'surau_portico_walls');
+
+    // LEFT SIDE WALL — between iLeft and oLeft. Inward normal points
+    // ALONG +sideDir (toward the portico's interior centre line).
+    pushQuad(tris,
+      [iLeft[0], iLeft[1], 0], [oLeft[0], oLeft[1], 0],
+      [oLeft[0], oLeft[1], poH], [iLeft[0], iLeft[1], poH],
+      [sxd, syd, 0], portWallMatIdx, TAG_WALL, 'surau_portico_walls');
+
+    // RIGHT SIDE WALL — between oRight and iRight. Inward normal -sideDir.
+    pushQuad(tris,
+      [oRight[0], oRight[1], 0], [iRight[0], iRight[1], 0],
+      [iRight[0], iRight[1], poH], [oRight[0], oRight[1], poH],
+      [-sxd, -syd, 0], portWallMatIdx, TAG_WALL, 'surau_portico_walls');
+
+    // PYRAMID ROOF UNDERSIDE — 4 triangles from each edge of the
+    // portico's top rectangle (corners at z=poH) meeting at an apex
+    // centred on the portico, at z=poH+poApex. Normals point DOWN-AND-
+    // INWARD (toward the apex from below). Winding chosen so the face
+    // is visible from BELOW (inside the portico).
+    const apexX = (iLeft[0] + iRight[0] + oLeft[0] + oRight[0]) / 4;
+    const apexY = (iLeft[1] + iRight[1] + oLeft[1] + oRight[1]) / 4;
+    const apexZ = poH + poApex;
+    // Four edges of the top rect, walked CCW seen from above:
+    //   iLeft → iRight → oRight → oLeft → iLeft
+    // For each edge (a, b) the triangle (a, b, apex) faces DOWN when
+    // (b-a) × (apex-a) has negative z. Use that winding directly; the
+    // normal we store is the average down-inward direction.
+    const triEdges = [
+      [iLeft,  iRight],
+      [iRight, oRight],
+      [oRight, oLeft],
+      [oLeft,  iLeft],
+    ];
+    for (const [a, b] of triEdges) {
+      // Normal: cross((b-a), (apex-a)) flipped to point downward.
+      const ex = b[0] - a[0],         ey = b[1] - a[1],         ez = 0;
+      const fx = apexX - a[0],        fy = apexY - a[1],        fz = apexZ - poH;
+      let cx = ey * fz - ez * fy;
+      let cy = ez * fx - ex * fz;
+      let cz = ex * fy - ey * fx;
+      // Force downward-facing for "underside" reading.
+      if (cz > 0) { cx = -cx; cy = -cy; cz = -cz; }
+      const len = Math.hypot(cx, cy, cz) || 1;
+      cx /= len; cy /= len; cz /= len;
+      // Winding (a, b, apex) gives an UP-facing normal if cz>0; we
+      // flipped above, so emit triangle in (a, apex, b) order to match.
+      pushTri(tris,
+        [a[0], a[1], poH], [apexX, apexY, apexZ], [b[0], b[1], poH],
+        [cx, cy, cz], portRoofMatIdx, TAG_CEILING, 'surau_portico_roof');
+    }
+    }   // end if (validSide)
+  }
+
+  // -------- South partition segments ----------------------------------
+  // Renderer: a thin slab on the inside face of the south wall (state
+  // y = 0), full width W, with rectangular door cutouts at each
+  // doorCenters_x_m. Slab thickness = sp.thickness_m, height = sp.height_m.
+  // For the BVH we model each non-door segment as a single thin
+  // rectangle on the room-side face (z extending from y=thickness to
+  // y=0 would be the thin direction, but a 0.2 m slab is below the
+  // tracer's resolution — a single face on the room-facing side is
+  // enough). Inward normal = +y (faces into the prayer hall).
+  if (s.southPartition) {
+    const sp = s.southPartition;
+    const thick = Number.isFinite(sp.thickness_m) ? sp.thickness_m : 0.2;
+    const bandH = Number.isFinite(sp.height_m) ? sp.height_m : 2.4;
+    const doorW = Number.isFinite(sp.doorWidth_m) ? sp.doorWidth_m : 1.0;
+    const doorCenters = Array.isArray(sp.doorCenters_x_m)
+      ? [...sp.doorCenters_x_m].map(Number).filter(Number.isFinite).sort((a, b) => a - b)
+      : [];
+
+    // Build x-segments by walking the wall and skipping door gaps —
+    // mirrors the renderer's segment-building code exactly.
+    const segments = [];
+    let xPrev = 0;
+    for (const dc of doorCenters) {
+      const gapStart = dc - doorW / 2;
+      const gapEnd = dc + doorW / 2;
+      if (gapStart > xPrev + 0.01) segments.push({ x1: xPrev, x2: gapStart });
+      xPrev = Math.max(xPrev, gapEnd);
+    }
+    if (xPrev < W - 0.01) segments.push({ x1: xPrev, x2: W });
+
+    const partMatIdx = materialIdxFor(scene, partitionMatId);
+    // Room-facing face at y = thick (the side closer to the prayer hall
+    // interior). Inward normal +y points further into the room.
+    // CCW seen from +y direction (looking at the face from inside):
+    //   bottom-left (x1, y=thick, z=0), bottom-right (x2, y=thick, z=0),
+    //   top-right (x2, y=thick, z=bandH), top-left (x1, y=thick, z=bandH).
+    // pushQuad order (v0,v1,v2,v3) with normal +y means CCW when looking
+    // from +y. Going (BL, BR, TR, TL) from +y side: BL→BR is +x,
+    // BR→TR is +z → CCW. Good.
+    for (const seg of segments) {
+      const segW = seg.x2 - seg.x1;
+      if (segW < 0.05) continue;
+      pushQuad(tris,
+        [seg.x1, thick, 0], [seg.x2, thick, 0],
+        [seg.x2, thick, bandH], [seg.x1, thick, bandH],
+        [0, 1, 0], partMatIdx, TAG_WALL, 'south_partition');
+    }
+    // Lintels — door-head bands above each cutout. Same +y face,
+    // z from (bandH - 0.25) to bandH, x from (dc - doorW/2) to (dc + doorW/2).
+    const lintelH = 0.25;
+    for (const dc of doorCenters) {
+      const x0 = dc - doorW / 2;
+      const x1 = dc + doorW / 2;
+      pushQuad(tris,
+        [x0, thick, bandH - lintelH], [x1, thick, bandH - lintelH],
+        [x1, thick, bandH],            [x0, thick, bandH],
+        [0, 1, 0], partMatIdx, TAG_WALL, 'south_partition');
     }
   }
 }
