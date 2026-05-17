@@ -229,7 +229,13 @@ export function startDrawCustomShape() {
       state.room.surfaces.edges = shifted.map(() => state.room.surfaces.walls || 'gypsum-board');
     },
   };
-  drawVertices = [];
+  // Pre-seed vertex 1 at the world origin (0, 0). Per user request
+  // 2026-05-17: every custom room starts at (0,0) by convention so
+  // saved rooms are positioned consistently — no need for the user
+  // to hunt for the origin crosshair as their first click. They can
+  // still backspace to remove this seed if they want to start
+  // elsewhere.
+  drawVertices = [{ x: 0, y: 0 }];
   drawCursor = null;
   render();
 }
