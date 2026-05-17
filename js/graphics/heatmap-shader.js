@@ -28,8 +28,11 @@
 import * as THREE from 'three';
 import { splColorRGB, stiColorRGB } from './colour-ramps.js';
 
-// SPL palette domain (matches splColorRGB clamp).
-const SPL_MIN_DB = 60;
+// SPL palette domain (matches splColorRGB + splColor in room-2d.js).
+// Domain [30, 110] dB so outside-room SPL with Tier 1a diffraction
+// physics (~58-71 dB behind a wall) shows visible gradient instead
+// of clamping to deep navy. Keep in lock-step with the 3 sites.
+const SPL_MIN_DB = 30;
 const SPL_MAX_DB = 110;
 
 // Build a 256-entry palette LUT as a 256×1 RGBA DataTexture for the

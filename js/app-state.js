@@ -539,7 +539,7 @@ export const state = {
     // segments. Off by default (clutter); user toggles on demand. Cached
     // paths invalidate on scene mutation.
     showRays: false,
-    // Heatmap metric — 'spl' paints SPL dB vertex colors + the 60–110 dB
+    // Heatmap metric — 'spl' paints SPL dB vertex colors + the 30–110 dB
     // legend; 'stipa' paints the IEC 60268-16 speech-intelligibility index
     // (0–1) + a different legend scale. Toggled from the toolbar.
     heatmapMode: 'spl',

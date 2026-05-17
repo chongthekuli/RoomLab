@@ -6,9 +6,18 @@
 // a different colour for "85 dB" than the 2D legend).
 
 // SPL — punchier 4-stop ramp: saturated blue → cyan-green → yellow → red.
-// Domain is 60-110 dB; values outside clamp to the endpoint colours.
+// Domain is 30-110 dB so per-band differences behind walls (where
+// Tier 1a physics reports ~58-71 dB depending on frequency) are
+// visually distinguishable. Prior 60-110 floor was a PA-coverage
+// convention that clamped the entire outside-the-room field to a
+// single deep-navy colour, hiding the band-to-band gradient the
+// frequency selector is built to reveal.
+// Values outside the domain clamp to the endpoint colours.
+export const SPL_DOMAIN_MIN_DB = 30;
+export const SPL_DOMAIN_MAX_DB = 110;
 export function splColorRGB(spl_db) {
-  const t = Math.max(0, Math.min(1, (spl_db - 60) / 50));
+  const span = SPL_DOMAIN_MAX_DB - SPL_DOMAIN_MIN_DB;
+  const t = Math.max(0, Math.min(1, (spl_db - SPL_DOMAIN_MIN_DB) / span));
   if (t < 0.25) return interpRGB([ 20,  40, 180], [  0, 140, 230], t / 0.25);
   if (t < 0.50) return interpRGB([  0, 140, 230], [ 30, 220,  80], (t - 0.25) / 0.25);
   if (t < 0.75) return interpRGB([ 30, 220,  80], [255, 215,   0], (t - 0.50) / 0.25);

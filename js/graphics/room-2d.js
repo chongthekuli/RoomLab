@@ -100,7 +100,12 @@ function colorFor(alpha) {
 }
 
 function splColor(spl_db) {
-  const t = Math.max(0, Math.min(1, (spl_db - 60) / 50));
+  // Domain [30, 110] dB — wider than the legacy [60, 110] so per-band
+  // outside-room SPL (typically 58-71 dB at 1 m behind a wall with
+  // Tier 1a diffraction physics) shows visible gradient instead of
+  // clamping to deep navy. Keep in lock-step with splColorRGB in
+  // colour-ramps.js + SPL_MIN_DB in heatmap-shader.js.
+  const t = Math.max(0, Math.min(1, (spl_db - 30) / 80));
   if (t < 0.25) return interp('#1a1a4a', '#0066cc', t / 0.25);
   if (t < 0.50) return interp('#0066cc', '#00cc66', (t - 0.25) / 0.25);
   if (t < 0.75) return interp('#00cc66', '#ffcc00', (t - 0.50) / 0.25);

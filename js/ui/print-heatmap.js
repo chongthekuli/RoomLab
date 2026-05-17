@@ -423,7 +423,7 @@ export function buildHeatmapStripLegend({ minDb, maxDb, stepDb = 5, header = 'SP
       minorTicks.push({ value: v, pct: ((v - minDb) / span) * 100 });
     }
   }
-  // The cell ramp (splColorRGB) is fixed-domain 60–110 dB. To make the
+  // The cell ramp (splColorRGB) is fixed-domain 30–110 dB. To make the
   // legend bar's colour-at-position MATCH the cell colour for the same
   // dB value, sample splColorRGB across [minDb, maxDb] and emit those
   // stops. Otherwise the strip would be coloured blue→red end-to-end
