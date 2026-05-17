@@ -22,6 +22,8 @@ import { loadCharacterRig } from './character-loader.js';
 import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode, setAuditionMaterials } from '../audio/audition.js';
 import { showWalkTouchHUD, hideWalkTouchHUD } from '../ui/walk-touch-hud.js';
 import { splColorRGB, stiColorRGB } from './colour-ramps.js';
+import { buildHeatmapShaderMaterial } from './heatmap-shader.js';
+import { PHYSICS_P1_5_ENABLED } from '../physics/feature-flags.js';
 import { computeTicks, computeMinorTicks, formatTickLabel } from './legend-ticks.js';
 import {
   makeTreatmentEntry, projectOntoNearestWall, projectOntoWall,
@@ -2199,10 +2201,24 @@ function disposeGroup(g) {
     if (c.children && c.children.length) disposeGroup(c);
     c.geometry?.dispose();
     if (c.material) {
-      if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
-      else c.material.dispose();
+      if (Array.isArray(c.material)) c.material.forEach(disposeMaterialAndTextures);
+      else disposeMaterialAndTextures(c.material);
     }
   }
+}
+
+// Dispose a material AND any textures bound to it. ShaderMaterial
+// instances don't have a .map property, but the heatmap shader stashes
+// its scalar + mask textures on material.userData so they can be
+// reclaimed on rebuild (otherwise each zone toggle leaks 2 textures).
+function disposeMaterialAndTextures(mat) {
+  if (!mat) return;
+  mat.map?.dispose?.();
+  if (mat.userData) {
+    mat.userData._scalarTex?.dispose?.();
+    mat.userData._maskTex?.dispose?.();
+  }
+  mat.dispose();
 }
 
 // Seated-audience crowd — occupancy_percent on a zone drives both acoustic
@@ -5683,14 +5699,21 @@ function rebuildZones() { shadowsNeedRefresh = true;
       });
       if (splInfo && isFinite(splInfo.maxSPL_db)) {
         state.results.zoneGrids.push(splInfo);
-        heatmapTex = zoneHeatmapTexture(splInfo);
+        // Tier 1a commit (f) — when PHYSICS_P1_5_ENABLED, use the
+        // scalar-field shader path (bilinear-blends SPL scalar then
+        // looks up palette in the fragment shader). Otherwise legacy
+        // CanvasTexture path (bilinear-blends colour, produces stair-
+        // step from texel grid + muddy boundary midtones).
+        if (!PHYSICS_P1_5_ENABLED) {
+          heatmapTex = zoneHeatmapTexture(splInfo);
+        }
       }
     }
 
     // Use ShapeGeometry (exactly matches zone polygon) for both heatmap and fallback cases
     const geo = new THREE.ShapeGeometry(shape);
 
-    if (heatmapTex && splInfo) {
+    if (splInfo && isFinite(splInfo.maxSPL_db)) {
       // Manually UV-map so the heatmap texture aligns with the zone's bbox in state coords
       const [minX, maxX] = splInfo.boundsX;
       const [minY, maxY] = splInfo.boundsY;
@@ -5712,18 +5735,42 @@ function rebuildZones() { shadowsNeedRefresh = true;
       // SPL field actually corresponds to splInfo.earZ_m, not the zone floor.
       // Matches EASE/Odeon convention of a separate visualization plane above
       // the structural geometry.
-      const mat = new THREE.MeshBasicMaterial({
-        map: heatmapTex, transparent: true, opacity: 0.95,
-        side: THREE.DoubleSide, depthWrite: false,
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(cx, splInfo.earZ_m, cz);
-      mesh.userData.zone_id = zone.id;
-      mesh.userData.acoustic_material = zone.material_id ?? null;
-      mesh.userData.tag = 'heatmap_layer';
-      heatmapGroup.add(mesh);
-    } else {
+      let mat;
+      if (PHYSICS_P1_5_ENABLED) {
+        // Scalar-field shader: R8 SPL texture + 256-entry palette LUT +
+        // nearest-neighbour validity mask. GPU bilinear-blends the SCALAR,
+        // fragment shader looks up the palette AFTER interpolation.
+        // Eliminates the texel-stair-step + boundary midtone artifacts.
+        const bundle = buildHeatmapShaderMaterial(splInfo);
+        mat = bundle.material;
+        // Stash sub-textures on the material so the rebuild cleanup
+        // path can dispose them (we already dispose .map on the legacy
+        // path; the shader path needs explicit refs).
+        mat.userData = {
+          _scalarTex: bundle.scalarTex,
+          _maskTex: bundle.maskTex,
+        };
+      } else if (heatmapTex) {
+        mat = new THREE.MeshBasicMaterial({
+          map: heatmapTex, transparent: true, opacity: 0.95,
+          side: THREE.DoubleSide, depthWrite: false,
+        });
+      } else {
+        // Defensive — splInfo exists but heatmapTex didn't get built and
+        // flag is off. Fall through to fallback below.
+        mat = null;
+      }
+      if (mat) {
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(cx, splInfo.earZ_m, cz);
+        mesh.userData.zone_id = zone.id;
+        mesh.userData.acoustic_material = zone.material_id ?? null;
+        mesh.userData.tag = 'heatmap_layer';
+        heatmapGroup.add(mesh);
+      }
+    }
+    if (!splInfo || !isFinite(splInfo.maxSPL_db)) {
       // No sources / no SPL yet: fall back to a translucent colored patch at
       // the structural floor so the user can still see zone extents. Lives in
       // zonesGroup (structural overlay) — not toggled by the heatmap switch.
