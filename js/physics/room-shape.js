@@ -414,6 +414,48 @@ export function isInsideRoom(x, y, room) {
   return false;
 }
 
+// Default 2D position guaranteed to be inside the room (for placing
+// new listeners / sources from the "+ Add" buttons). For convex
+// shapes the rectangular/polygon/round centre is always inside; for
+// custom polygons we try the polygon centroid first (works for all
+// convex + most concave shapes), then fall back to the first vertex
+// nudged toward the centroid until isInsideRoom returns true.
+//
+// Was hard-coded to (width_m/2, depth_m/2) in panel-listeners.js +
+// panel-sources.js which placed listeners OUTSIDE custom polygon
+// rooms whenever the polygon didn't span its full bounding box.
+// User reported 2026-05-17.
+export function defaultInsidePosition(room) {
+  if (!room) return { x: 0, y: 0 };
+  const shape = getShape(room);
+  if (shape === 'rectangular' || shape === 'polygon' || shape === 'round') {
+    return { x: (room.width_m ?? 1) / 2, y: (room.depth_m ?? 1) / 2 };
+  }
+  // Custom polygon — try centroid of vertices first.
+  if (shape === 'custom') {
+    const verts = roomPlanVertices(room);
+    if (Array.isArray(verts) && verts.length >= 3) {
+      let cx = 0, cy = 0;
+      for (const v of verts) { cx += v.x; cy += v.y; }
+      cx /= verts.length;
+      cy /= verts.length;
+      if (isInsideRoom(cx, cy, room)) return { x: cx, y: cy };
+      // Concave polygon — centroid outside. Walk a short line from
+      // each vertex toward the centroid; first interior hit wins.
+      for (const v of verts) {
+        for (let t = 0.1; t <= 0.9; t += 0.1) {
+          const tx = v.x + (cx - v.x) * t;
+          const ty = v.y + (cy - v.y) * t;
+          if (isInsideRoom(tx, ty, room)) return { x: tx, y: ty };
+        }
+      }
+      // Last resort — just use first vertex (always on the boundary).
+      return { x: verts[0].x, y: verts[0].y };
+    }
+  }
+  return { x: (room.width_m ?? 1) / 2, y: (room.depth_m ?? 1) / 2 };
+}
+
 export function maxCeilingHeightAt(x, y, room) {
   if (room.ceiling_type !== 'dome' || !((room.ceiling_dome_rise_m ?? 0) > 0)) {
     return room.height_m;

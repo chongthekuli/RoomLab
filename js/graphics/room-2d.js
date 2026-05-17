@@ -1465,7 +1465,6 @@ function renderNormal(vp) {
         <g clip-path="url(#room-clip)">${splSvg}</g>
         ${roomOutline.walls}
         ${roomOutline.labels}
-        ${renderNorthArrowSVG(x0, y0, pxW, pxD)}
         ${zonesSvg}
         ${subSvg}
         ${encSvg}
@@ -1477,6 +1476,17 @@ function renderNormal(vp) {
         ${renderOriginCrosshair(x0, y0, '#5a6677')}
         ${splResult ? '' : `<text x="${x0 + pxW/2}" y="${y0 - pxD/2}" text-anchor="middle" class="vp-lbl vp-lbl-empty">no sources placed</text><text x="${x0 + pxW/2}" y="${y0 - pxD/2 + 18}" text-anchor="middle" class="vp-lbl vp-lbl-empty-hint">add a speaker to compute SPL</text>`}
       </svg>
+      <!-- North arrow as HTML overlay — fixed CSS pixel size at the
+           top-right of the viewport. Doesn't scale with wheel zoom
+           (which mutates the SVG viewBox) and doesn't follow the room
+           around the canvas. The arrow always indicates "north = top
+           of page" regardless of where the room is rendered. -->
+      <div class="vp-north-arrow" aria-hidden="true">
+        <svg width="100%" height="100%" viewBox="0 0 12 18">
+          <polygon points="6,0 9,6 6,5 3,6" fill="#cfd3d9" stroke="#0a0c10" stroke-width="0.4"/>
+        </svg>
+        <span>N</span>
+      </div>
       <!-- Meta text moved OUT of the SVG so wheel-zoom (which adjusts
            the SVG viewBox) doesn't scale it. Lives below the SVG as
            plain HTML; same .vp-lbl-dim styling. -->

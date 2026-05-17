@@ -2497,6 +2497,8 @@ section h3 {
   width: 100%;
   height: 100%;
   padding: 104px 60px 0.6rem;       /* top — clear glass header + mode segment */
+  /* relative so the .vp-north-arrow absolute child anchors here */
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -2521,6 +2523,39 @@ section h3 {
   display: block;
   min-height: 0;
 }
+/* North arrow overlay — absolutely positioned at the top-right of the
+   2D viewport so it doesn't move with the room or scale with wheel
+   zoom. Fixed CSS pixel size for consistent legibility regardless of
+   room dimensions. The arrow points UP (page-top) which corresponds
+   to world +Y (north) after the v=459 Y-axis math-convention flip. */
+.viewport-2d > .vp-north-arrow {
+  position: absolute;
+  top: 116px;            /* clears the glass header (104px) + 12px breathing room */
+  right: 70px;           /* clears the 60px right padding + 10px gutter */
+  width: 28px;
+  height: 38px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  z-index: 10;
+}
+.viewport-2d > .vp-north-arrow svg {
+  width: 100%;
+  height: 70%;
+  display: block;
+}
+.viewport-2d > .vp-north-arrow span {
+  font-size: 10px;
+  font-weight: 600;
+  color: #cfd3d9;
+  text-shadow:
+    -1px -1px 0 #0a0c10, 1px -1px 0 #0a0c10,
+    -1px  1px 0 #0a0c10, 1px  1px 0 #0a0c10;
+  line-height: 1;
+  margin-top: 1px;
+}
+
 .viewport-2d > .vp-legend {
   grid-area: legend;
   align-self: center;

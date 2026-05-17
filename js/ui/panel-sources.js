@@ -1,6 +1,7 @@
 import { state, SPEAKER_GROUPS, groupById, expandSources } from '../app-state.js';
 import { emit, on } from './events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
+import { defaultInsidePosition } from '../physics/room-shape.js';
 
 let catalogRef;
 
@@ -188,11 +189,16 @@ function renderMasterEQ() {
 
 function addSource() {
   const defaultModel = catalogRef[0].url;
+  // Pick a default position guaranteed to be INSIDE the room polygon
+  // (centroid for custom shapes; center for rectangular/polygon/round).
+  // Was hard-coded to (W/2, D/2) which lands outside custom polygons
+  // whose bounding box differs from their shape. Reported 2026-05-17.
+  const def = defaultInsidePosition(state.room);
   state.sources.push({
     modelUrl: defaultModel,
     position: {
-      x: state.room.width_m / 2,
-      y: Math.min(1.5 + state.sources.length * 0.8, state.room.depth_m - 0.5),
+      x: def.x,
+      y: def.y,
       z: Math.min(state.room.height_m - 0.3, 2.5),
     },
     aim: { yaw: 0, pitch: -15, roll: 0 },
@@ -209,13 +215,14 @@ function addSource() {
 function addLineArray() {
   const lineArrayModel = catalogRef.find(c => /line-array/i.test(c.url))?.url ?? catalogRef[0].url;
   const count = 1 + state.sources.filter(s => s.kind === 'line-array').length;
+  const def = defaultInsidePosition(state.room);
   state.sources.push({
     kind: 'line-array',
     id: `LA${count}`,
     modelUrl: lineArrayModel,
     origin: {
-      x: state.room.width_m / 2,
-      y: state.room.depth_m * 0.25,
+      x: def.x,
+      y: def.y,
       z: Math.min(state.room.height_m - 1, 8),
     },
     baseYaw_deg: 0,

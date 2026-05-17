@@ -1,5 +1,6 @@
 import { state, POSTURE_LABELS, earHeightFor } from '../app-state.js';
 import { emit, on } from './events.js';
+import { defaultInsidePosition } from '../physics/room-shape.js';
 
 let nextIdNum = 2;
 
@@ -67,12 +68,17 @@ function patchListenerPosition({ id, x, y }) {
 
 function addListener() {
   const id = `L${nextIdNum++}`;
+  // Pick a default position guaranteed to be INSIDE the room polygon
+  // (centroid for custom shapes; center for rectangular/polygon/round).
+  // Was hard-coded to (W/2, D/2) which lands outside custom polygons
+  // whose bounding box differs from their shape. Reported 2026-05-17.
+  const def = defaultInsidePosition(state.room);
   state.listeners.push({
     id,
     label: `Listener ${state.listeners.length + 1}`,
     position: {
-      x: state.room.width_m / 2,
-      y: state.room.depth_m / 2 + state.listeners.length * 0.6,
+      x: def.x,
+      y: def.y + state.listeners.length * 0.6,
     },
     posture: 'sitting_chair',
     custom_ear_height_m: null,
