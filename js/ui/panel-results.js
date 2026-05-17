@@ -130,6 +130,7 @@ function renderListenerSection() {
     listenerPos: pos,
     freq_hz: freq,
     room: state.room,
+    materials: materialsRef,
     airAbsorption: phys.airAbsorption !== false,
     roomConstantR: phys.reverberantField && materialsRef
       ? computeRoomConstant(state.room, materialsRef, freq, state.zones, { treatments: state.treatments }) : 0,

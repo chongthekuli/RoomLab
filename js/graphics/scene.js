@@ -19,7 +19,7 @@ import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { openPanel } from '../ui/rail-system.js';
 import { loadCharacterRig } from './character-loader.js';
-import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode } from '../audio/audition.js';
+import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode, setAuditionMaterials } from '../audio/audition.js';
 import { showWalkTouchHUD, hideWalkTouchHUD } from '../ui/walk-touch-hud.js';
 import { splColorRGB, stiColorRGB } from './colour-ramps.js';
 import { computeTicks, computeMinorTicks, formatTickLabel } from './legend-ticks.js';
@@ -305,6 +305,11 @@ function invalidateRayViz() {
 
 export async function mount3DViewport({ materials }) {
   materialsRef = materials;
+  // Register the catalogue with the audition module so its walk-mode
+  // SPL trim can apply per-band wall TL. Was previously not threaded,
+  // which made the live SPL overlay read pure free-field attenuation
+  // when the avatar stepped past a wall.
+  setAuditionMaterials(materials);
   container = document.getElementById('view-3d');
   if (!container) return;
 
@@ -1358,7 +1363,7 @@ function drawFrequencyResponse(canvas, sources, listenerPos) {
     const R = Rbands ? interpR(f, Rbands) : 0;
     const spl = computeMultiSourceSPL({
       sources, getSpeakerDef: getDef, listenerPos,
-      freq_hz: f, room: state.room,
+      freq_hz: f, room: state.room, materials: materialsRef,
       airAbsorption: phys.airAbsorption !== false,
       coherent: !!phys.coherent,
       roomConstantR: R,
@@ -5874,6 +5879,12 @@ function currentPhysicsOpts(room) {
     freq_hz: freq,
     airAbsorption: phys.airAbsorption !== false,
     coherent: !!phys.coherent,
+    // Materials catalogue — threaded through every computeMultiSourceSPL
+    // call site that consumes this helper (probe tooltip, heatmap FR
+    // chart, walk-mode overlay, precomputeSPLContext) so per-band
+    // wall TL applies. Was previously omitted; the engine fell back to
+    // the legacy flat 30 dB whenever a path crossed a boundary.
+    materials: materialsRef || null,
     roomConstantR: phys.reverberantField && materialsRef
       ? computeRoomConstant(room, materialsRef, freq, state.zones, { treatments: state.treatments })
       : 0,
@@ -5915,6 +5926,7 @@ function sampleSurfaceColors(geo, anchors, sources, room, splOpts = {}) {
     : null;
   const splAtOpts = {
     room,
+    materials: splOpts.materials ?? materialsRef ?? null,
     coherent: splOpts.coherent,
     temperature_C: splOpts.temperature_C,
     airAbsorption: splOpts.airAbsorption,

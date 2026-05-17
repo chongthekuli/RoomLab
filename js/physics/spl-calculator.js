@@ -5,12 +5,39 @@ import {
   AIR_ABSORPTION_DB_PER_M as AIR_ABS_TABLE,
   airAbsorptionDbPerM, airSabins,
 } from './air-absorption.js';
+import {
+  wallsCrossedByPath, transmissionLossDb, bandIndexForFreq,
+} from './wall-path.js';
 
 // Re-exports for backward compatibility with existing callers (tests, scene.js).
 export const AIR_ABSORPTION_DB_PER_M = AIR_ABS_TABLE;
 export function airAbsorptionAt(freq_hz) { return airAbsorptionDbPerM(freq_hz); }
 
+// Legacy flat transmission loss. Retained ONLY for the back-compat path
+// when a caller passes `room` but not `materials` (older tests, scripts).
+// Real callers now thread `materials` through and get material-aware,
+// per-band, opening-aware TL via wall-path.js. See computeDirectSPL.
 export const WALL_TRANSMISSION_LOSS_DB = 30;
+
+// Per-band material-aware transmission loss for a single direct path.
+// Falls back to the legacy flat WALL_TRANSMISSION_LOSS_DB when no
+// materials catalogue is in scope, so unit tests without a loaded
+// catalogue still see the old behaviour.
+function pathWallLossDb(src, listener, room, materials, freq_hz) {
+  if (!room) return { tl_db: 0, wallsCrossed: [] };
+  const wallsCrossed = wallsCrossedByPath(src, listener, room);
+  if (wallsCrossed.length === 0) return { tl_db: 0, wallsCrossed };
+  if (!materials) {
+    // Legacy back-compat: any wall crossed (regardless of opening
+    // status, regardless of material) → flat 30 dB. Matches the
+    // pre-1.4 isInsideRoom3D membership-flip behaviour for callers
+    // that haven't yet been updated to thread the catalogue.
+    return { tl_db: WALL_TRANSMISSION_LOSS_DB, wallsCrossed };
+  }
+  const bandIdx = bandIndexForFreq(materials, freq_hz);
+  const tl_db = transmissionLossDb(wallsCrossed, materials, bandIdx);
+  return { tl_db, wallsCrossed };
+}
 
 // Defensive cap: a real driver cannot accept more than its rated input
 // power without burning out. The Sources panel clamps user input to the
@@ -65,6 +92,10 @@ export function computeRoomConstant(room, materials, freq_hz, zones = [], { airA
   return A_total / (1 - alpha_eff);
 }
 
+// Retained for back-compat — `through_wall: boolean` is still exposed on
+// computeDirectSPL's return value for the breakdown UI / print report.
+// New code should consume `wallsCrossed` (full per-wall details with
+// material id + opening flag) from the same return shape.
 function pathCrossesBoundary(speakerState, listenerPos, room) {
   if (!room) return false;
   const sIn = isInsideRoom3D(speakerState.position, room);
@@ -144,7 +175,7 @@ export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   };
 }
 
-export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, airAbsorption = true, eqGainDb = 0 }) {
+export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0 }) {
   const { r, azimuth_deg, elevation_deg } = localAngles(
     speakerState.position, speakerState.aim, listenerPos
   );
@@ -161,9 +192,21 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
   if (airAbsorption) {
     spl_db -= airAbsorptionAt(freq_hz) * clampedR;
   }
-  const through_wall = pathCrossesBoundary(speakerState, listenerPos, room);
-  if (through_wall) spl_db -= WALL_TRANSMISSION_LOSS_DB;
-  return { r, azimuth_deg, elevation_deg, attn_db: attn, spl_db, through_wall };
+  // Material-aware wall transmission loss when both `room` AND `materials`
+  // are in scope. Falls back to the legacy flat 30 dB if only `room` is
+  // passed (test fixtures without a loaded catalogue). The `through_wall`
+  // boolean stays on the return shape for the breakdown UI / print report;
+  // `wallsCrossed` exposes the full per-wall details (material id +
+  // opening flag) for any caller that needs them.
+  const tl = pathWallLossDb(speakerState.position, listenerPos, room, materials, freq_hz);
+  spl_db -= tl.tl_db;
+  const through_wall = tl.wallsCrossed.some(w => !w.throughOpening);
+  return {
+    r, azimuth_deg, elevation_deg, attn_db: attn, spl_db,
+    through_wall,
+    wallsCrossed: tl.wallsCrossed,
+    tl_db_applied: tl.tl_db,
+  };
 }
 
 // Sound power level from on-axis sensitivity + input power + directivity.
@@ -226,7 +269,7 @@ export function precomputeSPLContext({
  * context form — regression-tested.
  */
 export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
-  room = null, coherent = false,
+  room = null, materials = null, coherent = false,
   temperature_C = DEFAULT_TEMPERATURE_C,
   airAbsorption = true,
 } = {}) {
@@ -241,7 +284,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     const { src, def, L_w_with_eq } = sourceCtx[i];
     const d = computeDirectSPL({
       speakerDef: def, speakerState: src, listenerPos,
-      freq_hz, room, airAbsorption, eqGainDb,
+      freq_hz, room, materials, airAbsorption, eqGainDb,
     });
     const spl_db = d.spl_db;
     if (!isFinite(spl_db)) continue;
@@ -254,7 +297,14 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
       directPressureSum += Math.pow(10, spl_db / 10);
     }
     if (reverbActive) {
-      const L_w = d.through_wall ? (L_w_with_eq - WALL_TRANSMISSION_LOSS_DB) : L_w_with_eq;
+      // Reverb leak follows the same per-band TL as the direct path —
+      // L_w drops by the total wall TL we just computed for the direct
+      // segment. This is an approximation (it ignores that the reverb
+      // field radiates from many directions, not just the direct line)
+      // but it tracks the band-specific concrete vs. gypsum vs. open-
+      // door behaviour the user paid for. Falls back to the legacy
+      // flat 30 dB via pathWallLossDb when `materials` is missing.
+      const L_w = L_w_with_eq - d.tl_db_applied;
       const L_rev = L_w + revConst_db;
       reverbPowerSum += Math.pow(10, L_rev / 10);
     }
@@ -278,9 +328,12 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
  * @param {number} [opts.temperature_C=20]       Used for speed-of-sound when coherent=true.
  * @param {boolean} [opts.airAbsorption=true]    Toggle ISO 9613-1 air absorption.
  */
+// Top-level keyword args. Adds `materials` (catalogue: `{ frequency_bands_hz, list, byId }`
+// from `loadMaterials`) so per-band wall TL applies; legacy callers that omit it
+// keep the flat 30 dB back-compat path. Otherwise unchanged.
 export function computeMultiSourceSPL({
   sources, getSpeakerDef, listenerPos,
-  freq_hz = 1000, room = null,
+  freq_hz = 1000, room = null, materials = null,
   roomConstantR = 0,
   coherent = false,
   temperature_C = DEFAULT_TEMPERATURE_C,
@@ -295,35 +348,44 @@ export function computeMultiSourceSPL({
     sources, getSpeakerDef, freq_hz, roomConstantR, eqGainDb,
   });
   return computeMultiSourceSPLFromContext(ctx, listenerPos, {
-    room, coherent, temperature_C, airAbsorption,
+    room, materials, coherent, temperature_C, airAbsorption,
   });
 }
 
 export function computeListenerBreakdown({
   sources, getSpeakerDef, listenerPos,
-  freq_hz = 1000, room = null,
+  freq_hz = 1000, room = null, materials = null,
   roomConstantR = 0, airAbsorption = true,
 }) {
   const perSpeaker = sources.map((src, i) => {
     const def = getSpeakerDef(src.modelUrl);
     const outsideRoom = room ? !isInsideRoom3D(src.position, room) : false;
-    if (!def) return { idx: i, spl_db: -Infinity, r: null, azimuth_deg: null, modelUrl: src.modelUrl, outsideRoom, through_wall: false };
-    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room, airAbsorption });
-    return { idx: i, spl_db: d.spl_db, r: d.r, azimuth_deg: d.azimuth_deg, modelUrl: src.modelUrl, outsideRoom, through_wall: d.through_wall };
+    if (!def) return { idx: i, spl_db: -Infinity, r: null, azimuth_deg: null, modelUrl: src.modelUrl, outsideRoom, through_wall: false, tl_db_applied: 0 };
+    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room, materials, airAbsorption });
+    return {
+      idx: i, spl_db: d.spl_db, r: d.r, azimuth_deg: d.azimuth_deg,
+      modelUrl: src.modelUrl, outsideRoom,
+      through_wall: d.through_wall,
+      tl_db_applied: d.tl_db_applied,
+      wallsCrossed: d.wallsCrossed,
+    };
   });
   // Direct pressure² sum.
   let pressureSum = 0;
   for (const p of perSpeaker) if (isFinite(p.spl_db)) pressureSum += Math.pow(10, p.spl_db / 10);
   // Diffuse reverberant contribution per source (added incoherently).
+  // Reverb leak uses the SAME per-band TL the direct path computed,
+  // mirroring the multi-source hot loop. The legacy back-compat
+  // (materials missing → flat 30 dB) flows through pathWallLossDb.
   let reverb_db = -Infinity;
   if (roomConstantR > 0) {
     let reverbSum = 0;
-    for (const src of sources) {
+    for (let i = 0; i < sources.length; i++) {
+      const src = sources[i];
       const def = getSpeakerDef(src.modelUrl);
       if (!def) continue;
-      let L_w = approxSoundPowerLevel(def, src.power_watts);
-      const through_wall = room ? (!isInsideRoom3D(src.position, room)) : false;
-      if (through_wall) L_w -= WALL_TRANSMISSION_LOSS_DB;
+      const tl = pathWallLossDb(src.position, listenerPos, room, materials, freq_hz);
+      const L_w = approxSoundPowerLevel(def, src.power_watts) - tl.tl_db;
       const L_rev = L_w + 10 * Math.log10(4 / roomConstantR);
       reverbSum += Math.pow(10, L_rev / 10);
     }
@@ -355,7 +417,7 @@ function pointInPoly(x, y, verts) {
 // computing SPL while the legend rendered the values as if they were
 // STI — producing the "STI bar shows 83–96" bug.
 export function computeZoneSPLGrid({
-  zone, sources, getSpeakerDef, room,
+  zone, sources, getSpeakerDef, room, materials = null,
   gridSize = 22, freq_hz = 1000, earAbove_m = 1.2,
   roomConstantR = 0, coherent = false, airAbsorption = true,
   metric = 'spl', stipaCtx = null, ambient_per_band = null,
@@ -382,7 +444,7 @@ export function computeZoneSPLGrid({
       const v = useSTI
         ? computeSTIPAAt(stipaCtx, listenerPos, ambient_per_band)
         : computeMultiSourceSPL({
-            sources, getSpeakerDef, listenerPos, freq_hz, room,
+            sources, getSpeakerDef, listenerPos, freq_hz, room, materials,
             roomConstantR, coherent, airAbsorption,
           });
       row.push(v);
@@ -412,7 +474,7 @@ export function computeZoneSPLGrid({
 }
 
 export function computeSPLGrid({
-  sources, getSpeakerDef, room,
+  sources, getSpeakerDef, room, materials = null,
   earHeight_m = 1.2, gridSize = 25, freq_hz = 1000,
   roomConstantR = 0, coherent = false, airAbsorption = true,
   metric = 'spl', stipaCtx = null, ambient_per_band = null,
@@ -450,7 +512,7 @@ export function computeSPLGrid({
       const v = useSTI
         ? computeSTIPAAt(stipaCtx, listenerPos, ambient_per_band)
         : computeMultiSourceSPL({
-            sources, getSpeakerDef, listenerPos, freq_hz, room,
+            sources, getSpeakerDef, listenerPos, freq_hz, room, materials,
             roomConstantR, coherent, airAbsorption,
           });
       row.push(v);

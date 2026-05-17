@@ -1,146 +1,234 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "1.4",
   "frequency_bands_hz": [125, 250, 500, 1000, 2000, 4000, 8000],
-  "_notes": "absorption per ISO 3382-1 / Beranek / Cox & D'Antonio. scattering coefficient per ISO 17497-1 / Cox & D'Antonio (2nd ed.) — reasonable defaults; users can override per zone. Draft engine (Sabine/Hopkins-Stryker/STIPA) ignores scattering; precision ray tracer (Phase B+) uses it for Lambertian vs specular bounce decisions.",
+  "_notes": "absorption per ISO 3382-1 / Beranek / Cox & D'Antonio. scattering coefficient per ISO 17497-1 / Cox & D'Antonio (2nd ed.). transmission_loss_db per Hopkins (Sound Insulation), Sharp (1973), Cavanaugh & Wilkes when measured (tl_estimated: false); mass-law estimate TL = 20·log10(m·f) − 47 dB clamped [5, 60] otherwise (tl_estimated: true). Draft engine (Sabine/Hopkins-Stryker/STIPA) ignores scattering; precision ray tracer (Phase B+) uses it for Lambertian vs specular bounce decisions. Transmission loss is consumed by spl-calculator.js when a direct-path segment crosses a wall, per js/physics/wall-path.js.",
   "materials": [
     {
       "id": "concrete-painted",
       "name": "Painted concrete",
       "absorption": [0.01, 0.01, 0.02, 0.02, 0.02, 0.03, 0.03],
-      "scattering": [0.05, 0.05, 0.05, 0.10, 0.10, 0.15, 0.15]
+      "scattering": [0.05, 0.05, 0.05, 0.10, 0.10, 0.15, 0.15],
+      "transmission_loss_db": [39, 41, 47, 53, 58, 62, 65],
+      "surface_density_kg_m2": 345,
+      "tl_estimated": false,
+      "_tl_source": "Hopkins, Sound Insulation ch.7 + CRC Handbook of Architectural Acoustics table 3.7 — 150 mm dense reinforced concrete (2300 kg/m³). Paint film does not measurably affect TL."
     },
     {
       "id": "carpet-heavy",
       "name": "Heavy carpet on concrete (no underlay)",
       "absorption": [0.02, 0.06, 0.14, 0.37, 0.60, 0.65, 0.65],
       "scattering": [0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.40],
-      "_source": "Beranek, Noise & Vibration Control Engineering 2nd ed. table 8.1 (carpet, heavy, glued direct to slab)"
+      "transmission_loss_db": [7, 13, 19, 25, 31, 37, 43],
+      "surface_density_kg_m2": 4,
+      "tl_estimated": true,
+      "_source": "Beranek, Noise & Vibration Control Engineering 2nd ed. table 8.1 (carpet, heavy, glued direct to slab)",
+      "_tl_note": "Zone-coverage / floor treatment. TL value is a mass-law estimate; only relevant if this material is somehow used as the boundary between two enclosures (rare)."
     },
     {
       "id": "carpet-heavy-underlay",
       "name": "Heavy carpet on foam underlay",
       "absorption": [0.08, 0.24, 0.57, 0.69, 0.71, 0.73, 0.70],
       "scattering": [0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.40],
-      "_source": "Cox & D'Antonio, Acoustic Absorbers and Diffusers 2nd ed. table A.1 (thick pile carpet on foam underlay) — typical residential carpet, much higher absorption above 250 Hz than the bare-glue case"
+      "transmission_loss_db": [9, 15, 21, 27, 33, 39, 45],
+      "surface_density_kg_m2": 5,
+      "tl_estimated": true,
+      "_source": "Cox & D'Antonio, Acoustic Absorbers and Diffusers 2nd ed. table A.1 (thick pile carpet on foam underlay) — typical residential carpet, much higher absorption above 250 Hz than the bare-glue case",
+      "_tl_note": "Zone-coverage / floor treatment. TL value is a mass-law estimate; only relevant if this material is somehow used as the boundary between two enclosures (rare)."
     },
     {
       "id": "bass-trap-broadband-corner",
       "name": "Broadband corner bass trap (200mm rockwool)",
       "absorption": [0.85, 0.95, 0.95, 0.85, 0.75, 0.70, 0.65],
       "scattering": [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.35],
-      "_source": "Cox & D'Antonio 2nd ed. table A.4 (corner-mounted 200mm porous, 50mm gap to wall) + Everest & Pohlmann Master Handbook 5th ed. fig 18.7 — broadband, doesn't need tuning"
+      "transmission_loss_db": [11, 17, 23, 29, 35, 41, 47],
+      "surface_density_kg_m2": 8,
+      "tl_estimated": true,
+      "_source": "Cox & D'Antonio 2nd ed. table A.4 (corner-mounted 200mm porous, 50mm gap to wall) + Everest & Pohlmann Master Handbook 5th ed. fig 18.7 — broadband, doesn't need tuning",
+      "_tl_note": "Surface treatment over a structural substrate; the substrate dominates TL in practice. Estimate retained for schema completeness."
     },
     {
       "id": "bass-trap-membrane-80hz",
       "name": "Membrane absorber tuned 80 Hz",
       "absorption": [0.55, 0.70, 0.30, 0.15, 0.12, 0.10, 0.08],
       "scattering": [0.05, 0.05, 0.10, 0.15, 0.15, 0.20, 0.20],
-      "_source": "Cox & D'Antonio 2nd ed. §8.4.2 + table 8.3 — narrow-band 5kg/m² panel + 100mm damped cavity, peak 80–100 Hz, secondary peak 250 Hz typical"
+      "transmission_loss_db": [9, 15, 21, 27, 33, 39, 45],
+      "surface_density_kg_m2": 5,
+      "tl_estimated": true,
+      "_source": "Cox & D'Antonio 2nd ed. §8.4.2 + table 8.3 — narrow-band 5kg/m² panel + 100mm damped cavity, peak 80–100 Hz, secondary peak 250 Hz typical",
+      "_tl_note": "Surface treatment over a structural substrate; the substrate dominates TL. The 5 kg/m² membrane itself has resonance-tuned behaviour that mass-law does not capture; treat estimate as order-of-magnitude only."
     },
     {
       "id": "bass-trap-helmholtz-125hz",
       "name": "Perforated panel Helmholtz 125 Hz",
       "absorption": [0.80, 0.45, 0.20, 0.12, 0.08, 0.06, 0.05],
       "scattering": [0.10, 0.10, 0.15, 0.20, 0.20, 0.25, 0.25],
-      "_source": "Cox & D'Antonio 2nd ed. §7.3 + ISO 354 archives — 12mm perforated panel 8% open area, 100mm damped cavity, narrow-band 80–160 Hz peak"
+      "transmission_loss_db": [15, 21, 27, 33, 39, 45, 51],
+      "surface_density_kg_m2": 12,
+      "tl_estimated": true,
+      "_source": "Cox & D'Antonio 2nd ed. §7.3 + ISO 354 archives — 12mm perforated panel 8% open area, 100mm damped cavity, narrow-band 80–160 Hz peak",
+      "_tl_note": "Perforations explicitly transmit at the Helmholtz resonance — actual TL is several dB lower than mass-law in the trap's tuned band."
     },
     {
       "id": "ceiling-cloud-200mm",
       "name": "Ceiling cloud 200mm rockwool, 100mm gap",
       "absorption": [0.65, 0.95, 1.00, 1.00, 1.00, 0.95, 0.90],
       "scattering": [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.35],
-      "_source": "Beranek 2nd ed. table 7-3 (200mm porous absorber suspended) — broadband, near-perfect above 250 Hz, useful in bands carpet covers poorly"
+      "transmission_loss_db": [11, 17, 23, 29, 35, 41, 47],
+      "surface_density_kg_m2": 8,
+      "tl_estimated": true,
+      "_source": "Beranek 2nd ed. table 7-3 (200mm porous absorber suspended) — broadband, near-perfect above 250 Hz, useful in bands carpet covers poorly",
+      "_tl_note": "Suspended cloud — typically there is a structural slab above; that slab dominates the floor-to-floor TL. Estimate retained for schema completeness."
     },
     {
       "id": "diffuser-qrd",
       "name": "QRD quadratic-residue diffuser (200mm wells)",
       "absorption": [0.10, 0.15, 0.20, 0.20, 0.18, 0.15, 0.12],
       "scattering": [0.30, 0.50, 0.85, 0.95, 0.90, 0.80, 0.70],
-      "_source": "Cox & D'Antonio 2nd ed. §9.3 + ISO 17497-1 — Schroeder QRD, prime 13, well depth 200mm, Lambertian above f0 = c/(2N·d_max). Low absorption, high scattering — preserves energy but redirects it diffusely"
+      "transmission_loss_db": [21, 27, 33, 39, 45, 51, 57],
+      "surface_density_kg_m2": 25,
+      "tl_estimated": true,
+      "_source": "Cox & D'Antonio 2nd ed. §9.3 + ISO 17497-1 — Schroeder QRD, prime 13, well depth 200mm, Lambertian above f0 = c/(2N·d_max). Low absorption, high scattering — preserves energy but redirects it diffusely",
+      "_tl_note": "Surface treatment over a structural wall; the substrate dominates TL."
     },
     {
       "id": "acoustic-tile",
       "name": "Acoustic ceiling tile 20mm",
       "absorption": [0.20, 0.40, 0.55, 0.65, 0.70, 0.70, 0.70],
-      "scattering": [0.10, 0.10, 0.10, 0.15, 0.15, 0.20, 0.20]
+      "scattering": [0.10, 0.10, 0.10, 0.15, 0.15, 0.20, 0.20],
+      "transmission_loss_db": [9, 15, 21, 27, 33, 39, 45],
+      "surface_density_kg_m2": 5,
+      "tl_estimated": true,
+      "_tl_note": "Suspended ceiling tile — between the tile and the slab is a return-air plenum that adds 5–10 dB; the slab itself dominates. The tile alone is mass-law from 5 kg/m²."
     },
     {
       "id": "gypsum-board",
       "name": "Gypsum board 13mm on studs",
       "absorption": [0.29, 0.10, 0.05, 0.04, 0.07, 0.09, 0.10],
-      "scattering": [0.02, 0.02, 0.02, 0.05, 0.05, 0.05, 0.05]
+      "scattering": [0.02, 0.02, 0.02, 0.05, 0.05, 0.05, 0.05],
+      "transmission_loss_db": [15, 21, 28, 33, 33, 28, 32],
+      "surface_density_kg_m2": 10,
+      "tl_estimated": false,
+      "_tl_source": "Cavanaugh & Wilkes, Architectural Acoustics 2nd ed. table 24-6 — single 13 mm gypsum on 64 mm steel studs at 400 mm o.c., one layer each side (STC ≈ 35). The 4 kHz coincidence dip is real and well-documented."
     },
     {
       "id": "glass-window",
       "name": "Glass window 6mm",
       "absorption": [0.35, 0.25, 0.18, 0.12, 0.07, 0.04, 0.04],
-      "scattering": [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
+      "scattering": [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02],
+      "transmission_loss_db": [22, 25, 28, 32, 28, 35, 40],
+      "surface_density_kg_m2": 15,
+      "tl_estimated": false,
+      "_tl_source": "Sharp 1973 + Cavanaugh & Wilkes table 24-9 — 6 mm float glass (STC ≈ 31). The 2 kHz coincidence dip is the structural plate resonance of the pane."
     },
     {
       "id": "wood-floor",
       "name": "Wood floor on joists",
       "absorption": [0.15, 0.11, 0.10, 0.07, 0.06, 0.07, 0.07],
-      "scattering": [0.10, 0.10, 0.10, 0.15, 0.15, 0.20, 0.20]
+      "scattering": [0.10, 0.10, 0.10, 0.15, 0.15, 0.20, 0.20],
+      "transmission_loss_db": [18, 22, 25, 28, 32, 32, 32],
+      "surface_density_kg_m2": 22,
+      "tl_estimated": false,
+      "_tl_source": "Beranek, Noise & Vibration Control Engineering 2nd ed. table 11.1 — 19 mm T&G hardwood on 50 × 200 joists at 400 mm o.c., no insulation (IIC ≈ 25, STC ≈ 28). Floor-ceiling assembly between storeys."
     },
     {
       "id": "metal-deck-acoustic",
       "name": "Perforated metal deck w/ 50mm mineral wool (arena ceiling)",
       "absorption": [0.35, 0.65, 0.80, 0.70, 0.65, 0.60, 0.55],
-      "scattering": [0.20, 0.30, 0.40, 0.50, 0.50, 0.50, 0.50]
+      "scattering": [0.20, 0.30, 0.40, 0.50, 0.50, 0.50, 0.50],
+      "transmission_loss_db": [15, 21, 27, 33, 39, 45, 51],
+      "surface_density_kg_m2": 12,
+      "tl_estimated": true,
+      "_tl_note": "Perforations transmit directly; estimate is the bonded mineral-wool + sheet metal mass. Actual TL of a perforated deck is several dB lower at speech bands than mass-law suggests."
     },
     {
       "id": "perforated-panel-fabric",
       "name": "Fabric-wrapped fiberglass wall panel 50mm",
       "absorption": [0.17, 0.55, 0.85, 0.95, 0.93, 0.88, 0.85],
-      "scattering": [0.10, 0.15, 0.15, 0.20, 0.20, 0.25, 0.25]
+      "scattering": [0.10, 0.15, 0.15, 0.20, 0.20, 0.25, 0.25],
+      "transmission_loss_db": [9, 15, 21, 27, 33, 39, 45],
+      "surface_density_kg_m2": 6,
+      "tl_estimated": true,
+      "_tl_note": "Surface treatment over a structural wall — substrate dominates TL. Panel mass alone is order-of-magnitude only."
     },
     {
       "id": "arena-wall-mixed",
       "name": "Arena wall — 20% perforated panel / 80% gypsum (typical coverage)",
       "absorption": [0.27, 0.19, 0.21, 0.22, 0.24, 0.25, 0.25],
-      "scattering": [0.10, 0.15, 0.20, 0.25, 0.25, 0.30, 0.30]
+      "scattering": [0.10, 0.15, 0.20, 0.25, 0.25, 0.30, 0.30],
+      "transmission_loss_db": [13, 19, 25, 31, 37, 43, 49],
+      "surface_density_kg_m2": 9,
+      "tl_estimated": true,
+      "_tl_note": "Area-weighted mass-law composite of 20% perforated panel (6 kg/m²) + 80% single-leaf gypsum (10 kg/m²)."
     },
     {
       "id": "upholstered-seat-empty",
       "name": "Upholstered seat — empty (Beranek, per m²)",
       "absorption": [0.35, 0.45, 0.57, 0.61, 0.59, 0.55, 0.50],
-      "scattering": [0.40, 0.55, 0.65, 0.70, 0.75, 0.80, 0.80]
+      "scattering": [0.40, 0.55, 0.65, 0.70, 0.75, 0.80, 0.80],
+      "transmission_loss_db": [5, 9, 14, 20, 26, 32, 38],
+      "surface_density_kg_m2": 3,
+      "tl_estimated": true,
+      "_tl_note": "Zone-coverage material (rows of seats); TL only relevant if somehow used as a structural boundary, which is non-physical."
     },
     {
       "id": "audience-seated",
       "name": "Upholstered seat — occupied (Beranek, per m²)",
       "absorption": [0.60, 0.74, 0.88, 0.96, 0.93, 0.85, 0.80],
-      "scattering": [0.40, 0.60, 0.70, 0.80, 0.85, 0.85, 0.80]
+      "scattering": [0.40, 0.60, 0.70, 0.80, 0.85, 0.85, 0.80],
+      "transmission_loss_db": [33, 39, 45, 51, 57, 60, 60],
+      "surface_density_kg_m2": 100,
+      "tl_estimated": true,
+      "_tl_note": "Zone-coverage material (rows of occupied seats); TL only relevant if somehow used as a structural boundary, which is non-physical. Mass = ~75 kg per person averaged over seat footprint."
     },
     {
       "id": "led-glass",
       "name": "LED video wall panel (flat glass + steel chassis)",
       "absorption": [0.18, 0.06, 0.04, 0.03, 0.02, 0.02, 0.02],
-      "scattering": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+      "scattering": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05],
+      "transmission_loss_db": [24, 30, 36, 42, 48, 54, 60],
+      "surface_density_kg_m2": 35,
+      "tl_estimated": true,
+      "_tl_note": "Mass-law estimate from glass face + steel chassis mass. Actual TL varies with panel mounting (truss vs solid backing) and inter-panel gaskets; treat as ±5 dB."
     },
     {
       "id": "plaster-smooth",
       "name": "Smooth painted plaster on solid backing (premium mall soffit)",
       "absorption": [0.013, 0.015, 0.02, 0.03, 0.04, 0.05, 0.05],
-      "scattering": [0.05, 0.05, 0.05, 0.08, 0.10, 0.12, 0.12]
+      "scattering": [0.05, 0.05, 0.05, 0.08, 0.10, 0.12, 0.12],
+      "transmission_loss_db": [18, 24, 30, 36, 42, 48, 54],
+      "surface_density_kg_m2": 18,
+      "tl_estimated": true,
+      "_tl_note": "Plaster skim over a solid substrate (concrete or block); if used directly as a wall material the value is the plaster alone — the substrate (when present) dominates."
     },
     {
       "id": "open-air",
       "name": "Open wall (no boundary)",
       "absorption": [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00],
-      "scattering": [0.50, 0.50, 0.50, 0.50, 0.50, 0.50, 0.50]
+      "scattering": [0.50, 0.50, 0.50, 0.50, 0.50, 0.50, 0.50],
+      "transmission_loss_db": [0, 0, 0, 0, 0, 0, 0],
+      "surface_density_kg_m2": 0,
+      "tl_estimated": false,
+      "_tl_source": "Explicit free-air transmission — used by wall-path.js when a path geometrically passes through a door/window opening or any wall slot tagged 'open-air'."
     },
     {
       "id": "door-solid-wood",
       "name": "Solid wood door",
       "absorption": [0.14, 0.10, 0.06, 0.08, 0.10, 0.10, 0.10],
-      "scattering": [0.05, 0.05, 0.05, 0.10, 0.10, 0.15, 0.15]
+      "scattering": [0.05, 0.05, 0.05, 0.10, 0.10, 0.15, 0.15],
+      "transmission_loss_db": [17, 21, 25, 25, 28, 32, 36],
+      "surface_density_kg_m2": 32,
+      "tl_estimated": false,
+      "_tl_source": "Sharp 1973 + Beranek table 11-3 — 45 mm solid hardwood door, well-sealed perimeter (STC ≈ 27). The 1 kHz plateau is the diffraction-around-door-edge floor that perimeter leakage cannot beat."
     },
     {
       "id": "door-hollow-core",
       "name": "Hollow core door",
       "absorption": [0.30, 0.20, 0.14, 0.10, 0.08, 0.05, 0.05],
-      "scattering": [0.05, 0.05, 0.05, 0.10, 0.10, 0.15, 0.15]
+      "scattering": [0.05, 0.05, 0.05, 0.10, 0.10, 0.15, 0.15],
+      "transmission_loss_db": [10, 13, 16, 18, 20, 21, 22],
+      "surface_density_kg_m2": 10,
+      "tl_estimated": false,
+      "_tl_source": "Cavanaugh & Wilkes table 24-12 — 35 mm hollow-core door with paper honeycomb core (STC ≈ 19). Mass-law plateaus above 2 kHz because the thin face panels go through coincidence."
     }
   ]
 }

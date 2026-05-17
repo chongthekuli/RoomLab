@@ -1,6 +1,7 @@
 import { airAbsorptionAt, computeRoomConstant, localAngles } from './spl-calculator.js';
 import { computeRT60Band } from './rt60.js';
 import { interpolateAttenuation } from './loudspeaker.js';
+import { wallsCrossedByPath, transmissionLossDb } from './wall-path.js';
 
 // --- STIPA — Speech Transmission Index for Public Address, per IEC
 // 60268-16:2011 Annex C (simplified STIPA version of the full STI).
@@ -100,7 +101,13 @@ export function precomputeSTIPAContext({ sources, getSpeakerDef, room, materials
       L_w: sens + p10 + 11 - DI,   // flat-across-bands approximation
     });
   }
-  return { rt60_per_band, roomR_per_band, sourceCtx };
+  // Attach room + materials to the context so computeSTIPAAt can
+  // resolve per-band wall transmission loss against the actual
+  // (source → listener) geometry on each call. Listener position
+  // varies per call so the path test runs in the hot loop, but
+  // band-index resolution is cheap (1 indexOf into the catalogue's
+  // frequency_bands_hz).
+  return { rt60_per_band, roomR_per_band, sourceCtx, room, materials };
 }
 
 // Sample STIPA at one listener position using the precomputed context.
@@ -125,13 +132,23 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
   // state.physics.ambientNoise?.per_band (which is null when no profile
   // has been picked yet) don't have to special-case it.
   if (ambientNoise_per_band == null) ambientNoise_per_band = NC_35_PER_BAND;
-  const { rt60_per_band, roomR_per_band, sourceCtx } = stipaCtx;
+  const { rt60_per_band, roomR_per_band, sourceCtx, room, materials } = stipaCtx;
+  // Per-source wall crossings, computed ONCE per listener for ALL bands.
+  // Geometry doesn't change between bands; only the TL[bandIdx] lookup
+  // does, so the segment-vs-wall test runs once and the band loop just
+  // dB-sums the relevant materials' TL[k].
+  const perSourceWalls = (room && materials)
+    ? sourceCtx.map(s => wallsCrossedByPath(s.src.position, listenerPos, room))
+    : null;
   let sti = 0;
   let prevTi = 0;
 
   for (let k = 0; k < STIPA_BANDS.length; k++) {
     const fhz = STIPA_BANDS[k];
     const R = roomR_per_band[k];
+    // Materials catalogue bands are [125, 250, 500, 1k, 2k, 4k, 8k] —
+    // identical to STIPA_BANDS so the band index is shared 1:1.
+    const bandIdx = k;
     let directPower = 0;
     let reverbPower = 0;
     for (let i = 0; i < sourceCtx.length; i++) {
@@ -142,10 +159,15 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
       const clampedR = r < 0.1 ? 0.1 : r;
       const attn = interpolateAttenuation(s.def.directivity, azimuth_deg, elevation_deg, fhz);
       const airAbs = airAbsorptionAt(fhz) * clampedR;
-      const direct_db = s.sens + s.p10 - 20 * Math.log10(clampedR) + attn - airAbs;
+      // Per-band wall transmission loss for this source's direct path.
+      // Reverb leak through walls follows the same TL (approximation).
+      const tlBand_db = perSourceWalls
+        ? transmissionLossDb(perSourceWalls[i], materials, bandIdx)
+        : 0;
+      const direct_db = s.sens + s.p10 - 20 * Math.log10(clampedR) + attn - airAbs - tlBand_db;
       if (isFinite(direct_db)) directPower += Math.pow(10, direct_db / 10);
       if (R > 0) {
-        const L_rev = s.L_w + 10 * Math.log10(4 / R);
+        const L_rev = s.L_w + 10 * Math.log10(4 / R) - tlBand_db;
         reverbPower += Math.pow(10, L_rev / 10);
       }
     }
@@ -186,20 +208,29 @@ export function computeSTIPA({
   const roomR_per_band = ctx.roomR_per_band;
   // Split direct and reverb power per band so MTF can apply the reverb-
   // smearing m_rev ONLY to the reverb component (Bradley 1986 / ISO 9921).
+  // Per-source wall crossings are geometry-only — compute once and reuse
+  // across all bands, mirroring computeSTIPAAt.
+  const perSourceWalls = (room && materials)
+    ? ctx.sourceCtx.map(s => wallsCrossedByPath(s.src.position, listenerPos, room))
+    : null;
   const dr_per_band = STIPA_BANDS.map((fhz, k) => {
     let D = 0, R_p = 0;
     const R = roomR_per_band[k];
-    for (const s of ctx.sourceCtx) {
+    for (let i = 0; i < ctx.sourceCtx.length; i++) {
+      const s = ctx.sourceCtx[i];
       const { r, azimuth_deg, elevation_deg } = localAngles(
         s.src.position, s.src.aim, listenerPos
       );
       const clampedR = Math.max(r, 0.1);
       const attn = interpolateAttenuation(s.def.directivity, azimuth_deg, elevation_deg, fhz);
       const airAbs = airAbsorptionAt(fhz) * clampedR;
-      const direct_db = s.sens + s.p10 - 20 * Math.log10(clampedR) + attn - airAbs;
+      const tlBand_db = perSourceWalls
+        ? transmissionLossDb(perSourceWalls[i], materials, k)
+        : 0;
+      const direct_db = s.sens + s.p10 - 20 * Math.log10(clampedR) + attn - airAbs - tlBand_db;
       if (isFinite(direct_db)) D += Math.pow(10, direct_db / 10);
       if (R > 0) {
-        const L_rev = s.L_w + 10 * Math.log10(4 / R);
+        const L_rev = s.L_w + 10 * Math.log10(4 / R) - tlBand_db;
         R_p += Math.pow(10, L_rev / 10);
       }
     }

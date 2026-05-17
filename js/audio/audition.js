@@ -38,6 +38,16 @@ import { state, expandSources } from '../app-state.js';
 import { computeMultiSourceSPL } from '../physics/spl-calculator.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 
+// Materials catalogue, registered once at mount time so the walk-mode
+// SPL trim can apply per-band wall transmission loss. Set via
+// `setAuditionMaterials(materials)` from the scene module's mount
+// step — pulling it via a cross-module getter would create a cycle
+// between audition.js and scene.js.
+let _materialsCatalogue = null;
+export function setAuditionMaterials(materials) {
+  _materialsCatalogue = materials || null;
+}
+
 // Compute the broadband-equivalent SPL the user reads off the 2D / 3D
 // heatmap and the probe tooltip — single-frequency (state.physics.
 // freq_hz, default 1 kHz), direct-field only (roomConstantR=0 because
@@ -54,11 +64,19 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 function computeAuditionSplDb(pos) {
   if (!state?.sources?.length) return -Infinity;
   try {
+    // Pass room + materials so per-band material-aware wall TL applies.
+    // Without these the walk-mode SPL overlay (which is what this trim
+    // value drives) would read pure free-field 1/r² attenuation when
+    // the avatar stepped past a wall — the user's symptom that
+    // motivated the wall-path.js rewrite (90 dB inside → 86 dB just
+    // outside a concrete wall, no TL anywhere in the math).
     return computeMultiSourceSPL({
       sources: expandSources(state.sources),
       getSpeakerDef: url => getCachedLoudspeaker(url),
       listenerPos: pos,
       freq_hz: state.physics?.freq_hz ?? 1000,
+      room: state.room,
+      materials: _materialsCatalogue,
       roomConstantR: 0,
       coherent: !!state.physics?.coherent,
       airAbsorption: state.physics?.airAbsorption !== false,
