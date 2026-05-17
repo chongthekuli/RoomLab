@@ -320,16 +320,11 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
       <text x="${(barX + barLen / 2).toFixed(3)}" y="${(barY - 0.28).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">${barLen} m</text>
     </g>`;
 
-  const naSize = 0.55;
-  const naX = viewW - 0.7;
-  const naY = MARGIN_M * 0.5;
-  const northArrowEl = `
-    <g class="pr-plan-northarrow">
-      <polygon points="${naX.toFixed(3)},${(naY - naSize).toFixed(3)} ${(naX + naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)} ${naX.toFixed(3)},${(naY + naSize * 0.05).toFixed(3)} ${(naX - naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)}" fill="#000" />
-      <text x="${naX.toFixed(3)}" y="${(naY + naSize * 0.75).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">N</text>
-    </g>`;
-
-  const chromeEl = compact ? '' : `${scaleBarEl}${northArrowEl}`;
+  // North arrow REMOVED from SVG content as of 2026-05-17 — was scaling
+  // with the room (large room → tiny arrow; small room → huge arrow).
+  // Render as fixed-CSS-pixel HTML overlay on the .pr-heatmap-stage
+  // container (see print.css .pr-heatmap-stage::after).
+  const chromeEl = compact ? '' : `${scaleBarEl}`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-heatmap-svg">${heatEl}${zonesEl}${outlineEl}${sourcesEl}${listenersEl}${chromeEl}</svg>`;
 }
 

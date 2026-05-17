@@ -1897,17 +1897,11 @@ function buildTreatmentPlanSVG(stateRef) {
       <text x="${(barX + barLen / 2).toFixed(3)}" y="${(barY - 0.28).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">${barLen} m</text>
     </g>`;
 
-  // ---- North arrow --------------------------------------------------
-  const naSize = 0.55;
-  const naX = viewW - 0.7;
-  const naY = MARGIN * 0.5;
-  const northArrow = `
-    <g class="pr-plan-northarrow">
-      <polygon points="${naX.toFixed(3)},${(naY - naSize).toFixed(3)} ${(naX + naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)} ${naX.toFixed(3)},${(naY + naSize * 0.05).toFixed(3)} ${(naX - naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)}" fill="#000" />
-      <text x="${naX.toFixed(3)}" y="${(naY + naSize * 0.75).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">N</text>
-    </g>`;
+  // North arrow REMOVED from SVG content (was scaling with the room).
+  // Print containers render the arrow as a fixed-CSS-pixel HTML overlay
+  // (see print.css for the ::after pseudo-element on the stage wrapper).
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-treatment-plan-svg">${outlineEl}${treatmentEls}${scaleBar}${northArrow}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-treatment-plan-svg">${outlineEl}${treatmentEls}${scaleBar}</svg>`;
 }
 
 function renderPrecisionSection(p) {

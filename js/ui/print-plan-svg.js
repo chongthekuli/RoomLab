@@ -224,16 +224,12 @@ export function buildFloorPlanSVG(state, opts = {}) {
   // at y≈0.78, N text baseline at y≈1.16 — room top is at y=1.5, so
   // ~0.34m clearance. Horizontally placed 0.7m from right SVG edge,
   // which keeps the arrow body fully past the room's right edge.
-  const naSize = 0.55;
-  const naX = viewW - 0.7;
-  const naY = MARGIN_M * 0.5;             // = 0.75 with MARGIN=1.5
-  const northArrowEl = `
-    <g class="pr-plan-northarrow">
-      <polygon points="${naX.toFixed(3)},${(naY - naSize).toFixed(3)} ${(naX + naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)} ${naX.toFixed(3)},${(naY + naSize * 0.05).toFixed(3)} ${(naX - naSize * 0.45).toFixed(3)},${(naY + naSize * 0.25).toFixed(3)}" fill="#000" />
-      <text x="${naX.toFixed(3)}" y="${(naY + naSize * 0.75).toFixed(3)}" font-size="0.42" text-anchor="middle" fill="#000">N</text>
-    </g>`;
+  // North arrow REMOVED from SVG content as of 2026-05-17 — was scaling
+  // with the room (large room → tiny arrow). Print containers render
+  // the arrow as a fixed-CSS-pixel HTML overlay (see print.css for
+  // .pr-cover-hero-plan::after / .pr-heatmap-stage::after).
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg">${roomEl}${zonesEl}${sourcesEl}${listenersEl}${scaleBarEl}${northArrowEl}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg">${roomEl}${zonesEl}${sourcesEl}${listenersEl}${scaleBarEl}</svg>`;
 }
 
 // Build a small legend block (paste-ready HTML) that names the symbol
