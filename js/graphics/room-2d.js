@@ -706,24 +706,39 @@ function renderCustomDraw(vp) {
   svg += `<rect width="${CUSTOM_VB_W}" height="${CUSTOM_VB_H}" fill="url(#gridp-minor)" />`;
   svg += `<rect width="${CUSTOM_VB_W}" height="${CUSTOM_VB_H}" fill="url(#gridp-major)" />`;
 
-  // 5 m tick labels along top + left edges (only on majors that fall
-  // inside the viewport). Skip the label at world-origin — the
-  // crosshair already labels itself.
-  const minXm = -x0 / CUSTOM_SCALE;
-  const maxXm = (CUSTOM_VB_W - x0) / CUSTOM_SCALE;
-  const minYm = -y0 / CUSTOM_SCALE;
-  const maxYm = (CUSTOM_VB_H - y0) / CUSTOM_SCALE;
-  for (let m = Math.ceil(minXm / 5) * 5; m <= maxXm; m += 5) {
-    if (m === 0) continue;
-    svg += `<text x="${x0 + m * CUSTOM_SCALE}" y="14" fill="#5a6677" font-size="9" text-anchor="middle">${m} m</text>`;
+  // 5 m tick labels along top + left edges. Only render AFTER the
+  // first vertex has been placed (which becomes the new world origin
+  // (0, 0) per the v=450 onFinish-shift). Before first click, the
+  // canvas shows a blank grid + a "click to set origin" prompt at
+  // the cursor — no meter axis yet, so the user isn't anchored to a
+  // coord system that hasn't been chosen.
+  if (drawVertices.length >= 1) {
+    const v0 = drawVertices[0];
+    const ox = x0 + v0.x * CUSTOM_SCALE;
+    const oy = y0 + v0.y * CUSTOM_SCALE;
+    // Tick world-x = v0.x + m for each integer m in the visible range.
+    const minXm = -x0 / CUSTOM_SCALE;
+    const maxXm = (CUSTOM_VB_W - x0) / CUSTOM_SCALE;
+    const minYm = -y0 / CUSTOM_SCALE;
+    const maxYm = (CUSTOM_VB_H - y0) / CUSTOM_SCALE;
+    const startMx = Math.ceil((minXm - v0.x) / 5) * 5;
+    const endMx   = Math.floor((maxXm - v0.x) / 5) * 5;
+    for (let m = startMx; m <= endMx; m += 5) {
+      if (m === 0) continue;
+      const worldX = v0.x + m;
+      svg += `<text x="${x0 + worldX * CUSTOM_SCALE}" y="14" fill="#5a6677" font-size="9" text-anchor="middle">${m} m</text>`;
+    }
+    const startMy = Math.ceil((minYm - v0.y) / 5) * 5;
+    const endMy   = Math.floor((maxYm - v0.y) / 5) * 5;
+    for (let m = startMy; m <= endMy; m += 5) {
+      if (m === 0) continue;
+      const worldY = v0.y + m;
+      svg += `<text x="6" y="${y0 + worldY * CUSTOM_SCALE + 3}" fill="#5a6677" font-size="9">${m} m</text>`;
+    }
+    // Origin crosshair sits at the FIRST click — it marks the new (0, 0)
+    // not the canvas centre.
+    svg += renderOriginCrosshair(ox, oy, '#7a89a0');
   }
-  for (let m = Math.ceil(minYm / 5) * 5; m <= maxYm; m += 5) {
-    if (m === 0) continue;
-    svg += `<text x="6" y="${y0 + m * CUSTOM_SCALE + 3}" fill="#5a6677" font-size="9">${m} m</text>`;
-  }
-
-  // Always-visible origin crosshair (Maya §2)
-  svg += renderOriginCrosshair(x0, y0, '#7a89a0');
 
   svg += renderDrawOverlay(x0, y0, CUSTOM_SCALE, '#4a8ff0');
   svg += `</svg>`;
@@ -825,7 +840,23 @@ function renderDrawOverlay(x0, y0, scale, color) {
     const cx = x0 + drawCursor.rx * scale;
     const cy = y0 + drawCursor.ry * scale;
     s += `<circle cx="${cx}" cy="${cy}" r="6" fill="#4a8ff0" fill-opacity="0.5" stroke="#ffffff" stroke-width="1.5"/>`;
-    s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">${drawCursor.rx.toFixed(1)}, ${drawCursor.ry.toFixed(1)} m</text>`;
+    if (drawVertices.length === 0 && drawConfig?.mode === 'room-shape') {
+      // No origin chosen yet — prompt user to place the first dot.
+      // Per user request 2026-05-17: until the first click sets the
+      // origin, the cursor must not display world coords (which are
+      // arbitrary canvas-pan-dependent values that confuse the user
+      // trying to read a meaningful "where I am" number).
+      s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">Click to set origin (0, 0)</text>`;
+    } else if (drawVertices.length >= 1) {
+      // Cursor coords RELATIVE to vertex[0] which is the new origin.
+      const v0 = drawVertices[0];
+      const relX = drawCursor.rx - v0.x;
+      const relY = drawCursor.ry - v0.y;
+      s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">${relX.toFixed(1)}, ${relY.toFixed(1)} m</text>`;
+    } else {
+      // Zone-draw mode etc. — keep the old world-coord readout.
+      s += `<text x="${cx + 10}" y="${cy - 8}" fill="#ffd000" font-size="10">${drawCursor.rx.toFixed(1)}, ${drawCursor.ry.toFixed(1)} m</text>`;
+    }
   }
   return s;
 }
