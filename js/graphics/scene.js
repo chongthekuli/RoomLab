@@ -3550,16 +3550,21 @@ function _cameraPresetTransform(name) {
     case 'top': {
       // Looking straight down. extentX = w, extentY = d. Lift the camera
       // high enough that w AND d fit, then put target at floor centre
-      // with a tiny +z offset so OrbitControls' polar axis doesn't sing
+      // with a tiny offset so OrbitControls' polar axis doesn't sing
       // gimbal lock when the camera is exactly above target.
       const dist = _fitDistance(safe(w), safe(d), 1.20);
       const camY = dist + h;       // above the room ceiling, by dist
-      // Camera looks toward +Z so that state +y (depth) maps to screen
-      // DOWN — matches the 2D plan orientation (front wall at top of
-      // screen, back wall at bottom). Achieved by offsetting the target
-      // very slightly in -z relative to camera xz so up-vector resolves.
+      // Camera looks toward -Z so that state +y (depth, world +z) maps
+      // to screen UP — matches the 2D plan orientation after the
+      // Y-axis math convention flip (positive Y = screen up). Prior
+      // version put target at cz + 0.001, which made state +y appear
+      // at screen BOTTOM — inconsistent with 2D, caused user to
+      // mis-read the surau 3D heatmap (the bright zone at "top" of
+      // 3D screen was actually the south podium with arcade speakers,
+      // but the user expected top = qibla per 2D convention).
+      // 2026-05-18 fix per user UAT on (h).
       return {
-        targetPos: new THREE.Vector3(cx, 0, cz + 0.001),
+        targetPos: new THREE.Vector3(cx, 0, cz - 0.001),
         targetCam: new THREE.Vector3(cx, camY, cz),
       };
     }
