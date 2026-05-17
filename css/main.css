@@ -3971,6 +3971,93 @@ section h3 {
    .draw-canvas inside #view-2d so auto-flip respects the actual
    drawing region, not the surrounding chrome.
    --------------------------------------------------------------- */
+/* Centered modal-style prompt — shown after a custom-room loop closes
+   so the user can set the ceiling height with one keystroke. Lives on
+   #viewport (absolute-positioned) and centers via translate(-50%,-50%). */
+.draw-height-prompt {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  min-width: 220px;
+  background: var(--bg-elev, #1c2028);
+  border: 1px solid var(--accent, #4aa3ff);
+  border-radius: 8px;
+  padding: 14px 16px 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6),
+              0 0 0 4px rgba(74, 163, 255, 0.10);
+  text-align: center;
+  animation: drawHeightPromptIn 160ms ease-out;
+}
+@keyframes drawHeightPromptIn {
+  from { opacity: 0; transform: translate(-50%, -52%) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.draw-height-prompt-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--fg-strong, #e5e7eb);
+  letter-spacing: 0.02em;
+  margin-bottom: 8px;
+}
+.draw-height-prompt-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.draw-height-prompt-row input {
+  width: 6ch;
+  padding: 5px 7px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  color: var(--fg-strong, #e5e7eb);
+  background: #0d1015;
+  border: 1px solid var(--border, #2a2f38);
+  border-radius: 4px;
+  text-align: right;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.draw-height-prompt-row input:focus {
+  outline: none;
+  border-color: var(--accent, #4aa3ff);
+  box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.20);
+}
+.draw-height-prompt-row input.draw-height-prompt-err {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
+  animation: drawHeightPromptShake 360ms ease-in-out;
+}
+@keyframes drawHeightPromptShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-3px); }
+  40%, 80% { transform: translateX(3px); }
+}
+.draw-height-prompt-unit {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--muted, #8a8e99);
+}
+.draw-height-prompt-hint {
+  font-size: 0.68rem;
+  color: var(--muted, #8a8e99);
+  letter-spacing: 0.01em;
+}
+.draw-height-prompt-hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.62rem;
+  color: #cfd3d9;
+}
+.draw-height-prompt-sep { opacity: 0.4; margin: 0 4px; }
+
 .draw-float-coord {
   position: absolute;
   z-index: 40;

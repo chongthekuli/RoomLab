@@ -307,12 +307,75 @@ function finishDraw() {
   removeWindowKeyHandler();
   cfg.onFinish(verts);
   emit('room:changed');
-  // Maya §7: after auto-close, scroll the side panel to the height
-  // input and select-all so the user can replace it with one keystroke.
-  // The panel-room.js listener handles the actual focus/select.
+  // After auto-close, prompt for room height directly on the canvas
+  // (centered modal-style overlay). User types a number + Enter and
+  // the height is set on state.room.height_m without them having to
+  // hunt for the height input in the side panel. Esc skips (keeps
+  // whatever the previous height was).
   if (wasRoomShape) {
     document.dispatchEvent(new CustomEvent('roomshape:closed'));
+    showHeightPrompt();
   }
+}
+
+// ---------------------------------------------------------------------
+// Centered height prompt — shown after a custom room is closed so the
+// user can set the room ceiling height with one keystroke. Lives on
+// #viewport so it survives any subsequent re-render. Esc cancels (keeps
+// the current state.room.height_m), Enter commits.
+// ---------------------------------------------------------------------
+function showHeightPrompt() {
+  const host = document.getElementById('viewport') || document.getElementById('view-2d');
+  if (!host) return;
+  // If a previous prompt is still mounted (user closed two rooms in
+  // quick succession), tear it down before mounting a fresh one.
+  const existing = document.getElementById('draw-height-prompt');
+  if (existing) existing.remove();
+  const current = Number.isFinite(state.room?.height_m) ? state.room.height_m : 3;
+  const el = document.createElement('div');
+  el.id = 'draw-height-prompt';
+  el.className = 'draw-height-prompt';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', 'Room height');
+  el.innerHTML = `
+    <div class="draw-height-prompt-title">Room height</div>
+    <div class="draw-height-prompt-row">
+      <input id="draw-height-input" type="text" inputmode="decimal"
+             autocomplete="off" spellcheck="false" maxlength="6"
+             value="${current.toFixed(2)}" aria-label="Ceiling height in metres" />
+      <span class="draw-height-prompt-unit">m</span>
+    </div>
+    <div class="draw-height-prompt-hint">
+      <kbd>Enter</kbd> set height
+      <span class="draw-height-prompt-sep">·</span>
+      <kbd>Esc</kbd> skip
+    </div>
+  `;
+  host.appendChild(el);
+  const input = el.querySelector('#draw-height-input');
+  const dismiss = () => { el.remove(); };
+  const commit = () => {
+    const raw = (input.value || '').trim();
+    const val = parseFloat(raw);
+    if (!Number.isFinite(val) || val <= 0 || val > 100) {
+      input.classList.add('draw-height-prompt-err');
+      setTimeout(() => input.classList.remove('draw-height-prompt-err'), 400);
+      return;
+    }
+    state.room.height_m = val;
+    emit('room:changed');
+    dismiss();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); dismiss(); }
+    else if (e.key.length === 1 && !/^[0-9.]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+      // Numeric only (digits + decimal). Block letters.
+      e.preventDefault();
+    }
+  });
+  // Select-all on focus so a single keystroke replaces the default.
+  setTimeout(() => { input.focus(); input.select(); }, 0);
 }
 
 function cancelDraw() {
