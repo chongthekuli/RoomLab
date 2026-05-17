@@ -971,8 +971,17 @@ function wireDrawEvents(vp) {
   // Keyboard: focus the SVG so Esc / Backspace / Enter / Space reach us.
   svgEl.addEventListener('keydown', handleDrawKey);
   svgEl.addEventListener('keyup', handleDrawKeyUp);
-  // Auto-focus so keyboard works from the moment draw mode opens.
-  setTimeout(() => svgEl.focus?.(), 0);
+  // Auto-focus so keyboard works from the moment draw mode opens —
+  // BUT only when the floating coord panel ISN'T mounted, otherwise
+  // every mousemove re-render would steal focus from the typing input.
+  // Window-level handleDrawKey still catches Esc/Backspace/Enter/Space/
+  // R/Ctrl+Z when focus lives in the floating x/y inputs (see line 519
+  // where the handler skips key events whose target is an INPUT).
+  const floatPanelMounted = drawConfig?.mode === 'room-shape'
+    && drawVertices.length >= 1;
+  if (!floatPanelMounted) {
+    setTimeout(() => svgEl.focus?.(), 0);
+  }
 
   const recentre = vp.querySelector('#btn-draw-recentre');
   if (recentre) recentre.addEventListener('click', () => {
