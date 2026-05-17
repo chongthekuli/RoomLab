@@ -1398,13 +1398,14 @@ function renderSurfaceMaterials() {
   // Helper bound to the current state — renders ONE wall row with material
   // select + openings sub-section. Floor / ceiling rows skip the openings
   // part (those surfaces don't host doors or windows).
-  const renderWallRow = (parent, surfaceId, label, getSlot, setSlot, withOpenings) => {
+  const renderWallRow = (parent, surfaceId, label, getSlot, setSlot, withOpenings, tooltip) => {
     const wrap = document.createElement('div');
     wrap.className = 'wall-row';
     wrap.dataset.surfaceId = surfaceId;
     const matRow = document.createElement('label');
     matRow.dataset.surfaceId = surfaceId;
     matRow.className = 'wall-mat-row';
+    if (tooltip) matRow.title = tooltip;
     const sel = buildMatSelect(surfaceId, readSlotMatId(getSlot()));
     sel.dataset.surfaceId = surfaceId;
     sel.addEventListener('change', e => {
@@ -1497,6 +1498,61 @@ function renderSurfaceMaterials() {
   // openings (doors, windows) work identically.
   renderEnclosureMaterialSections(root, renderWallRow);
   renderSharedWallSegmentSection(root, renderWallRow);
+  renderSurauMaterialSection(root, renderWallRow);
+}
+
+// Surau preset's six exterior acoustic surfaces — podium top, arcade
+// columns, arcade roof underside, portico walls + roof, and the
+// south-wall partition between doors. Added 2026-05-17 to close the
+// UI gap from v=444 (Viktor added these as triangulated BVH surfaces
+// with proper surface_id + acoustic_material tagging, but the side
+// panel never rendered editable material rows for them — user could
+// click a column in the 3D viewport but the picker popped up with no
+// way to change the material).
+//
+// surface_id strings here MUST match the IDs set in scene.js
+// rebuildSurauStructure() + triangulate-scene.js triangulateSurauStructure()
+// so the surface-picker click handler can find the matching row.
+function renderSurauMaterialSection(root, renderWallRow) {
+  const s = state.room?.surauStructure;
+  if (!s || typeof s !== 'object') return;
+  const mats = s.materials;
+  if (!mats || typeof mats !== 'object') return;
+
+  const headerWrap = document.createElement('div');
+  headerWrap.className = 'enclosure-section-header';
+  const h4 = document.createElement('h4');
+  h4.textContent = 'Surau exterior surfaces';
+  h4.style.display = 'inline-block';
+  h4.title = 'Acoustic materials for the surau podium, arcade columns + roof, portico, and south-wall partition. These are real BVH surfaces — rays bounce off them, RT60 includes their absorption.';
+  headerWrap.appendChild(h4);
+  root.appendChild(headerWrap);
+
+  const group = document.createElement('div');
+  group.className = 'field-group';
+
+  // Tuples: [materials-key, surface_id, label, tooltip].
+  const rows = [
+    ['podium_top',      'surau_podium_top',     'Podium top',        'Raised concrete plinth extending past the building footprint. Walked on by the avatar; rays bounce off it.'],
+    ['arcade_columns',  'surau_arcade_column',  'Arcade columns',    'Square pillars supporting the arcade roof on the south + east + west sides.'],
+    ['arcade_roof',     'surau_arcade_roof',    'Arcade roof (underside)', 'Flat soffit above the arcade walkway. Faces down into the corridor.'],
+    ['portico_walls',   'surau_portico_walls',  'Portico walls',     'Three solid walls of the projecting entrance pavilion (front + two sides).'],
+    ['portico_roof',    'surau_portico_roof',   'Portico roof (underside)', 'Underside of the pyramid cap above the entrance pavilion.'],
+    ['south_partition', 'south_partition',      'South-wall partition', 'Thin interior partition between the three south doors. Wraps the doorways with lintels.'],
+  ];
+  for (const [matKey, surfaceId, label, tooltip] of rows) {
+    renderWallRow(
+      group, surfaceId, label,
+      () => mats[matKey] || 'concrete-painted',
+      v => {
+        const matId = (typeof v === 'string') ? v : (v?.materialId ?? 'concrete-painted');
+        mats[matKey] = matId;
+      },
+      false,   // isWall=false — no openings UI for these material-only rows
+      tooltip,
+    );
+  }
+  root.appendChild(group);
 }
 
 // Render the "Shared walls" group — one row per state.room.wallSegments
@@ -1963,7 +2019,14 @@ on('surface:picked', ({ surface_id } = {}) => {
   // settles before we scroll.
   const delayMs = railWasOpen ? 0 : 400;
   setTimeout(() => {
-    const wrap = root.querySelector(`label[data-surface-id="${cssEscape(surface_id)}"]`);
+    let wrap = root.querySelector(`label[data-surface-id="${cssEscape(surface_id)}"]`);
+    // Surau arcade columns carry per-column unique surface_ids
+    // (surau_arcade_column_S_3 etc.) but the UI exposes ONE material
+    // row covering all columns. Collapse the lookup so clicking any
+    // column highlights the shared row.
+    if (!wrap && surface_id.startsWith('surau_arcade_column_')) {
+      wrap = root.querySelector(`label[data-surface-id="surau_arcade_column"]`);
+    }
     if (!wrap) return;
     wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
     wrap.classList.remove('surface-pulse');
