@@ -177,7 +177,7 @@ export default {
 
     // ---- EXTERIOR ELEMENTS (visual only — no acoustic effect) ----
     // The five elements below turn the box-with-hat into a recognisable
-    // Malaysian surau: slender minaret at the NW corner, pointed-arch
+    // Malaysian surau: slender minaret at the NE corner, pointed-arch
     // arcade wrapping the south + east + west sides, perforated jali
     // screens on the south facade (currently disabled), raised podium
     // foundation, projecting south portico framing the main entrance.
@@ -185,8 +185,10 @@ export default {
     // clerestory. All marked no_acoustic in scene.js so the precision
     // tracer ignores them.
 
-    // Minaret — slender square tower with crescent finial at the NW
-    // corner of the building footprint. ~8.5 m tall.
+    // Minaret — slender square tower with crescent finial at the NE
+    // corner of the building footprint. ~8.5 m tall. (Moved 2026-05-18
+    // from NW per user preference; both are common positions in
+    // Malaysian vernacular.)
     //
     // Note on cap_style: the Malaysian Islamic architecture audit 2026-05-15
     // recommended 'mustaka' (lotus-derived bulb stack) as more vernacular
@@ -197,7 +199,7 @@ export default {
     // cap_style to 'mustaka' below — both paths are implemented in
     // rebuildSurauStructure().
     minaret: {
-      corner: 'NW',
+      corner: 'NE',
       base_size_m: 1.2,
       height_m: 8.5,
       cap_style: 'crescent',

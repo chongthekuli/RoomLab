@@ -49,17 +49,25 @@ const allWalls = minaretTris.every(i => soup.surfaceTag[i] === SURFACE_TAGS.WALL
 ok(allWalls, 'minaret triangles all tagged WALL');
 
 // Compute the AABB of the minaret triangles and verify against the
-// expected footprint + height.
-// Surau preset: NW corner, base_size_m=1.2, height_m=8.5 → shaftH=7.65.
-//   clearance = 0.6 + 0.6 = 1.2
-//   centre at (-1.2, 18.9), footprint x∈[-1.8, -0.6], y∈[18.3, 19.5]
-const W = 18.0, D = 17.7;
-const baseSize = 1.2;
+// expected footprint + height. Corner is whatever the preset configures
+// (NE per current preset; this test reads it dynamically so a future
+// corner flip doesn't silently regress).
+const mn = state.room.surauStructure.minaret;
+const W = state.room.width_m, D = state.room.depth_m;
+const baseSize = mn.base_size_m;
 const clearance = 0.6 + baseSize / 2;
-const cx = -clearance;          // NW: x = -clearance
-const cy = D + clearance;       // NW: y = D + clearance
+const cornerOffsets = {
+  SW: { x: -clearance,    y: -clearance    },
+  SE: { x: W + clearance, y: -clearance    },
+  NW: { x: -clearance,    y: D + clearance },
+  NE: { x: W + clearance, y: D + clearance },
+};
+const co = cornerOffsets[mn.corner];
+const cx = co.x;
+const cy = co.y;
 const half = baseSize / 2;
-const shaftH = 8.5 * 0.90;
+const shaftH = mn.height_m * 0.90;
+console.log(`(testing minaret at corner=${mn.corner}, centre=(${cx}, ${cy}), shaftH=${shaftH})`);
 
 let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity, zMin = Infinity, zMax = -Infinity;
 for (const ti of minaretTris) {
@@ -73,12 +81,12 @@ for (const ti of minaretTris) {
   }
 }
 
-assertClose(xMin, cx - half,   1e-6, 'minaret aabb.min.x = -1.8');
-assertClose(xMax, cx + half,   1e-6, 'minaret aabb.max.x = -0.6');
-assertClose(yMin, cy - half,   1e-6, 'minaret aabb.min.y = 18.3');
-assertClose(yMax, cy + half,   1e-6, 'minaret aabb.max.y = 19.5');
+assertClose(xMin, cx - half,   1e-6, `minaret aabb.min.x = ${(cx - half).toFixed(3)}`);
+assertClose(xMax, cx + half,   1e-6, `minaret aabb.max.x = ${(cx + half).toFixed(3)}`);
+assertClose(yMin, cy - half,   1e-6, `minaret aabb.min.y = ${(cy - half).toFixed(3)}`);
+assertClose(yMax, cy + half,   1e-6, `minaret aabb.max.y = ${(cy + half).toFixed(3)}`);
 assertClose(zMin, 0,           1e-6, 'minaret aabb.min.z = 0');
-assertClose(zMax, shaftH,      1e-6, 'minaret aabb.max.z = 7.65');
+assertClose(zMax, shaftH,      1e-6, `minaret aabb.max.z = ${shaftH.toFixed(3)}`);
 
 // All 4 face normals must point AWAY from the minaret centre (outward).
 // Sum (face_normal · radial_to_centre) — should be strictly negative
