@@ -483,14 +483,15 @@ export async function mount3DViewport({ materials }) {
 
 function initScene() {
   scene = new THREE.Scene();
-  // 2026-05-18 — attempted X-axis-mismatch fix via `scene.scale.x = -1`
-  // (v=497) was reverted because it broke too many things downstream:
-  // camera-fit AABB calculations target world +cx but mirrored scene
-  // lives at world -cx (room off-center on Top/Iso presets); walk-mode
-  // spawn position lands outside the room; raycast/drag handlers convert
-  // mirrored world.x back to state.x with the wrong sign. The 2D-3D
-  // X-axis disagreement remains unresolved — logged as a known gap in
-  // CLAUDE.md §6 to debug properly later with browser-side instrumentation.
+  // 2026-05-18 — KNOWN ISSUE: 3D Top preset shows state +y at screen-bottom
+  // while 2D shows state +y at screen-top. This is a fundamental math
+  // constraint (right-handed camera looking straight down can't have both
+  // axes match the 2D math convention simultaneously). Multiple iterations
+  // attempted to fix via camera position, target offsets, camera.up
+  // overrides, and scene-level scale.x = -1 / scale.z = -1 — all either
+  // didn't help or broke downstream code paths (camera-fit AABB, walk-mode
+  // spawn, raycast / drag handlers). Accepted as a cosmetic limitation;
+  // documented in CLAUDE.md §6.
   // Deep slate background with a subtle vertical gradient look (dark at top
   // fading to near-black at the horizon) via a shader-free approach: solid
   // base color, tone-mapping handles perceptual brightness in the final pass.
@@ -3605,27 +3606,8 @@ function _cameraPresetTransform(name) {
       // high enough that w AND d fit, then put target at floor centre
       // with a tiny offset so OrbitControls' polar axis doesn't sing
       // gimbal lock when the camera is exactly above target.
-      //
-      // camera.up set to (0, 0, -1) so the camera's screen-up axis lands
-      // on state +y direction (= world +Z, after the lookAt-cross-product
-      // resolves). Without this override, default camera.up=(0,1,0) is
-      // parallel to the look direction; OrbitControls breaks gimbal via
-      // the target's tiny -Z offset and screen-up ends up at world -Z =
-      // state -y → 2D/3D plan-view Y axes disagree. Viktor pre-commit
-      // sign-off 2026-05-18 (proper diagnosis after diagnostic dump
-      // showed Y-flip, not X-flip as previously chased).
-      camera.up.set(0, 0, -1);
       const dist = _fitDistance(safe(w), safe(d), 1.20);
-      const camY = dist + h;       // above the room ceiling, by dist
-      // Camera looks toward -Z so that state +y (depth, world +z) maps
-      // to screen UP — matches the 2D plan orientation after the
-      // Y-axis math convention flip (positive Y = screen up). Prior
-      // version put target at cz + 0.001, which made state +y appear
-      // at screen BOTTOM — inconsistent with 2D, caused user to
-      // mis-read the surau 3D heatmap (the bright zone at "top" of
-      // 3D screen was actually the south podium with arcade speakers,
-      // but the user expected top = qibla per 2D convention).
-      // 2026-05-18 fix per user UAT on (h).
+      const camY = dist + h;
       return {
         targetPos: new THREE.Vector3(cx, 0, cz - 0.001),
         targetCam: new THREE.Vector3(cx, camY, cz),
@@ -3634,7 +3616,6 @@ function _cameraPresetTransform(name) {
     case 'front': {
       // Viewed from the FRONT wall (state.y = 0 → world.z = 0). Camera
       // sits outside that wall looking toward +Z. extentX = w, extentY = h.
-      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       const dist = _fitDistance(safe(w), safe(h), 1.20);
       return {
         targetPos: new THREE.Vector3(cx, h * 0.5, cz),
@@ -3643,7 +3624,6 @@ function _cameraPresetTransform(name) {
     }
     case 'back': {
       // Viewed from the BACK wall (state.y = maxY) looking toward -Z.
-      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       const dist = _fitDistance(safe(w), safe(h), 1.20);
       return {
         targetPos: new THREE.Vector3(cx, h * 0.5, cz),
@@ -3653,7 +3633,6 @@ function _cameraPresetTransform(name) {
     case 'left': {
       // Viewed from the LEFT wall (state.x = 0) looking toward +X.
       // extentX (screen-horizontal) = d (room depth), extentY = h.
-      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       const dist = _fitDistance(safe(d), safe(h), 1.20);
       return {
         targetPos: new THREE.Vector3(cx, h * 0.5, cz),
@@ -3662,7 +3641,6 @@ function _cameraPresetTransform(name) {
     }
     case 'right': {
       // Viewed from the RIGHT wall (state.x = maxX) looking toward -X.
-      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       const dist = _fitDistance(safe(d), safe(h), 1.20);
       return {
         targetPos: new THREE.Vector3(cx, h * 0.5, cz),
@@ -3671,7 +3649,6 @@ function _cameraPresetTransform(name) {
     }
     case 'iso':
     default: {
-      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       // Iterative perspective "frame selected" fit. Three prior
       // attempts (fixed multiplier, bounding-sphere, AABB-corner
       // tangent fit) all clipped. Root cause: each one solved for an
@@ -3741,8 +3718,6 @@ function _cameraPresetTransform(name) {
       // read as flat in a square frame; (0.85, 0.6, 0.45) lifts the
       // camera so the floor + room volume both project visibly without
       // losing the 3/4 "lean" of a classic iso.
-      // 2026-05-18: X-axis convention with 2D is enforced at the scene
-      // level via `scale.x = -1` in initScene(), not via camera position.
       const dirToCam  = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
 
       // Silhouette point set. For a CIRCULAR / POLYGON room the Box3
