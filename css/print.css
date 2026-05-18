@@ -291,20 +291,22 @@ body.is-pdf-export .vp-tabs {
     box-sizing: border-box;
   }
   #print-report .pr-cover-hero-image {
-    /* Variable-height reservation. captureViewportImage computes the
-       capture aspect to match the room's iso silhouette so the room
-       always fills the captured PNG — no empty PNG margin. Hero is
-       fixed 165 mm wide; height grows / shrinks with the captured
-       aspect, capped at 165 mm for very-tall narrow rooms and floored
-       implicitly by the 0.6 aspect clamp upstream.
-       Result: chamber / dome / pavilion get short wide heroes that
-       fill the width; classroom / studio get near-square heroes. */
+    /* Fixed-square slot. The cover hero reserves an IDENTICAL footprint
+       on every report regardless of room dimensions — pavilion, surau,
+       chamber all render into the same 165 × 165 mm square. The capture
+       is a 1500×1500 square PNG (print-report.js passes fixedAspect:
+       true to captureViewportImage); the iso fit math frames the room
+       inside that square with ~4 % margin per side. Narrow / wide rooms
+       end up with extra empty space on the short axis — accepted as a
+       deliberate trade-off for predictable page layout (user request
+       2026-05-19). object-fit:contain is a defence-in-depth: if a
+       future caller passes a non-square PNG, the image letterboxes
+       inside the square slot rather than stretching or cropping. */
     width: 165mm;
-    height: auto;
-    max-height: 165mm;
-    max-width: 100%;
+    height: 165mm;
     display: block;
     margin: 0 auto;
+    object-fit: contain;
   }
   #print-report .pr-cover-hero-caption {
     font-size: 7.5pt;

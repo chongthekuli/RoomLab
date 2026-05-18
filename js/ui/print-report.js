@@ -2051,7 +2051,12 @@ export async function triggerPrint() {
   let coverImage = null;
   try {
     const captureFn = await _loadCaptureFn();
-    if (captureFn) coverImage = captureFn({ width: 1500, height: 1500, preset: 'iso' });
+    // fixedAspect:true tells captureViewportImage to keep the requested
+    // 1:1 (1500×1500 square) instead of adaptively reshaping the PNG to
+    // match the room silhouette. The cover page reserves a fixed square
+    // slot — every room, regardless of dimensions, fits inside that slot
+    // with margin (no edge cropped). User request 2026-05-19.
+    if (captureFn) coverImage = captureFn({ width: 1500, height: 1500, preset: 'iso', fixedAspect: true });
   } catch (err) { console.warn('[print-report] capture failed:', err); }
   const model = buildPrintModel({ materials: _printMaterialsRef });
   renderPrintReport(model, { splGrid, coverImage });

@@ -4030,6 +4030,18 @@ export function captureViewportImage(opts = {}) {
   let width  = Math.max(200, Math.floor(opts.width  ?? 1400));
   let height = Math.max(150, Math.floor(opts.height ?? 900));
   const presetName = opts.preset ?? 'iso';
+  // When `fixedAspect: true` is passed, KEEP the requested width/height
+  // exactly (typically a 1:1 square for the print-report cover). The
+  // iso fit math will frame the room into that aspect with NDC=0.96
+  // margin — the binding axis (whichever of room-width vs room-height
+  // is larger in projection) touches the 0.96 edge; the other axis
+  // ends up with extra margin. Trade-off: every room produces the
+  // SAME page footprint (predictable layout) at the cost of some
+  // empty space around narrow / wide rooms. Without this flag, the
+  // adaptive-aspect block below remaps width/height to match the room
+  // silhouette — every room renders at a different aspect and the
+  // print page's hero area shifts size between scenes.
+  const respectAspect = opts.fixedAspect === true;
 
   // ---- Adaptive capture aspect (so the room fills the PNG, no empty margin) ----
   // Project the ROOM POLYGON VERTICES (not AABB corners) onto the iso view
@@ -4039,7 +4051,9 @@ export function captureViewportImage(opts = {}) {
   // produced a too-wide PNG with empty L/R margin.
   // Uses the same roomPlanVertices(room) helper the iterative iso fit
   // uses, so the capture aspect MATCHES the fit's binding axis.
-  if (presetName === 'iso') {
+  // SKIPPED when `respectAspect` is set — print-report cover passes
+  // fixedAspect:true so every room renders into the same 1:1 page slot.
+  if (presetName === 'iso' && !respectAspect) {
     try {
       const room = state.room;
       const aabb = _roomWorldAABB?.();
