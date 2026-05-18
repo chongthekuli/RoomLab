@@ -344,6 +344,37 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false, listenerM
     return base + labelTxt + metricsTxt;
   }).join('');
 
+  // Surau minaret — mirrors print-plan-svg.js so the heatmap page
+  // carries the same plan symbology as the cover plan. Drawn ABOVE the
+  // heat raster but BELOW source/listener markers (the markers must
+  // never be hidden behind the column footprint).
+  const minaretEl = (() => {
+    const mn = state.room?.surauStructure?.minaret;
+    if (!mn) return '';
+    const W = state.room.width_m, D = state.room.depth_m;
+    const baseSize = Number.isFinite(mn.base_size_m) ? mn.base_size_m : 1.2;
+    const clearance = 0.6 + baseSize / 2;
+    const cornerOffsets = {
+      SW: { x: -clearance,    y: -clearance    },
+      SE: { x: W + clearance, y: -clearance    },
+      NW: { x: -clearance,    y: D + clearance },
+      NE: { x: W + clearance, y: D + clearance },
+    };
+    const co = cornerOffsets[mn.corner || 'NW'] || cornerOffsets.NW;
+    const half = baseSize / 2;
+    const pts = [
+      { x: co.x - half, y: co.y - half },
+      { x: co.x + half, y: co.y - half },
+      { x: co.x + half, y: co.y + half },
+      { x: co.x - half, y: co.y + half },
+    ].map(c => { const p = projectXY(c.x, c.y, anchorY, offsetX); return `${p.sx.toFixed(3)},${p.sy.toFixed(3)}`; }).join(' ');
+    const c = projectXY(co.x, co.y, anchorY, offsetX);
+    const cap = mn.cap_style || 'mustaka';
+    const glyph = cap === 'crescent' ? '☪' : (cap === 'dome' || cap === 'mustaka') ? '◯' : '■';
+    return `<polygon points="${pts}" fill="#9a9a9a" stroke="#3a3a3a" stroke-width="0.04" />`
+         + `<text x="${c.sx.toFixed(3)}" y="${(c.sy + 0.18).toFixed(3)}" font-size="0.55" text-anchor="middle" fill="#1a1a1a">${glyph}</text>`;
+  })();
+
   // Scale bar + north arrow — both placed fully inside the SVG margin
   // bands so they never overlap the room outline. Geometry mirrors
   // print-plan-svg.js so the two pages share one visual convention.
@@ -364,7 +395,7 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false, listenerM
   // Render as fixed-CSS-pixel HTML overlay on the .pr-heatmap-stage
   // container (see print.css .pr-heatmap-stage::after).
   const chromeEl = compact ? '' : `${scaleBarEl}`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-heatmap-svg">${heatEl}${zonesEl}${outlineEl}${sourcesEl}${listenersEl}${chromeEl}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-heatmap-svg">${heatEl}${zonesEl}${outlineEl}${minaretEl}${sourcesEl}${listenersEl}${chromeEl}</svg>`;
 }
 
 // Build the vertical legend that sits beside the heatmap. Same
