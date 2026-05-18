@@ -29,8 +29,6 @@
 // with similar power and dispersion — acceptable as a directivity
 // approximation for the broadband simulation.
 
-import { rectVerts } from './shared.js';
-
 const W = 18.0;          // E–W
 const D = 17.7;          // N–S
 const H = 4.5;           // ceiling
@@ -38,11 +36,10 @@ const SPK_CEILING_Z = 4.30;  // ceiling-mount speaker height (just under ceiling
 const SPK_ARCADE_Z  = 4.20;  // arcade ceiling-mount speaker height (under arcade flat roof at 4.4)
 const SPK_MODEL = 'data/loudspeakers/amperes-cs520.json';
 
-// Zone geometry constants. ZONE_INSET keeps the imam + podium polygons
-// off the wall surfaces; IMAM_STRIP is the depth of the imam zone in
-// front of the mihrab. Audience saf zones were removed 2026-05-18 —
-// listeners (L1–L8) remain as the canonical congregation sample points.
-const ZONE_INSET = 0.4;
+// IMAM_STRIP is the depth in front of the mihrab reserved for the imam
+// — used to position the imam ceiling speaker and the L1 listener.
+// Audience zones (saf, imam, podium) were removed 2026-05-18; listeners
+// L1–L8 remain as the canonical congregation sample points.
 const IMAM_STRIP = 1.5;
 
 export default {
@@ -262,89 +259,7 @@ export default {
     wall_east: 'concrete-painted',
     wall_west: 'concrete-painted',
   },
-  zones: [
-    {
-      id: 'Z_imam',
-      label: 'Imam / mihrab strip',
-      vertices: rectVerts(
-        ZONE_INSET, D - IMAM_STRIP,
-        W - ZONE_INSET, D - ZONE_INSET,
-      ),
-      elevation_m: 0,
-      material_id: 'carpet-heavy-underlay',
-      occupancy_percent: 5,
-    },
-    // Outdoor podium / arcade ring — single annular zone wrapping the
-    // prayer-hall walls. Replaces the legacy room-level heatmap path
-    // that double-painted with the per-zone heatmap planes (the
-    // "split-on-rotation" sheet the user reported on v474 after the
-    // scalar-field shader exposed the painter's-order flip).
-    //
-    // History: a first attempt (commit 1c7763e, reverted) tried 4
-    // separate rectangular strips (N + S + E + W). Although they did
-    // not overlap geometrically, each strip had its OWN bilinear-blend
-    // cell grid (gridSize derived from the strip's own bbox) so the
-    // SPL cells did NOT march continuously across the corners — at
-    // every L-shaped corner the cell-grid mismatch between the wide N
-    // strip and the narrow E strip showed up as a visible stair-step
-    // "ladder", and the 4 coplanar transparent meshes added their own
-    // painter-flip seam along every shared edge.
-    //
-    // The fix: ONE polygon that traces the full podium ring as a
-    // simple polygon with a 1 mm "slit" on the west edge connecting
-    // outer (CCW) to inner (CW). Equivalent topology to an annulus.
-    // ONE ShapeGeometry, ONE shader material, ONE continuous bilinear
-    // cell grid — no inter-strip seams possible by construction.
-    //
-    // Validation of slit-polygon compatibility:
-    //   • physics/spl-calculator.js#pointInPoly (even-odd ray-cast)
-    //     correctly returns FALSE for cells inside the building hole
-    //     (parity 2: ray crosses outer + inner once each) — verified
-    //     by sampling all 2500 cells of a 50×50 grid in
-    //     tests/slit-poly.test.mjs equivalent (run inline 2026-05-17).
-    //   • graphics/heatmap-shader.js validity mask (sampled nearest-
-    //     neighbour, NOT bilinear) discards fragments where the cell
-    //     read returns -Infinity → fragments inside the building hole
-    //     simply don't draw. No translucent halo.
-    //   • Three.js Shape→ShapeGeometry feeds earcut, which accepts
-    //     any simple polygon. The 1 mm bridge gap on the west edge is
-    //     a valid (non-degenerate) polygon, well below the 0.5 m cell
-    //     scale so it never affects rendered cells.
-    //   • graphics/room-2d.js SVG <polygon> uses even-odd fill rule,
-    //     same topology guarantee as the ray-cast.
-    //
-    // Label placement: the slit-polygon CENTROID lies INSIDE the
-    // building hole (around (5.9, 6.4)), which would put the label
-    // text in the middle of the prayer hall. Override via the new
-    // label_anchor field consumed by renderZones() in room-2d.js —
-    // place it on the south podium strip where it doesn't collide.
-    {
-      id: 'Z_podium',
-      label: 'Outdoor podium / arcade',
-      vertices: [
-        // Outer rectangle CCW (podium extends 3.5 m past every wall)
-        { x: -3.5,        y: -3.5        },   // SW outer
-        { x:  W + 3.5,    y: -3.5        },   // SE outer
-        { x:  W + 3.5,    y:  D + 3.5    },   // NE outer
-        { x: -3.5,        y:  D + 3.5    },   // NW outer
-        // Slit bridge DOWN on west edge to y = +1 mm
-        { x: -3.5,        y:  0.001      },
-        // Bridge inward to inner SW corner (also at y = +1 mm)
-        { x:  0,          y:  0.001      },
-        // Inner rectangle CW (around the prayer-hall wall, building footprint)
-        { x:  0,          y:  D          },   // NW inner
-        { x:  W,          y:  D          },   // NE inner
-        { x:  W,          y:  0          },   // SE inner
-        { x:  0,          y:  0          },   // SW inner
-        // Bridge back OUT on west edge at y = 0
-        { x: -3.5,        y:  0          },
-      ],
-      elevation_m: 0,
-      material_id: 'concrete-painted',
-      occupancy_percent: 0,
-      label_anchor: { x: W / 2, y: -2.0 },   // south podium strip, centred E–W
-    },
-  ],
+  zones: [],
   sources: [
     // PRAYER HALL ceiling speakers — 2×2 grid at z = 4.30 m (just below
     // the 4.5 m ceiling), all aimed straight down (pitch = -90). Per
