@@ -3821,9 +3821,18 @@ function _cameraPresetTransform(name) {
         const planVerts = roomPlanVertices(state.room);
         const floorY = box.min.y;
         const ceilY  = box.max.y;
+        // X negated — `roomPlanVertices` returns STATE coords; the box
+        // (from expandByObject) is in WORLD coords with scene.scale.x =
+        // -1 applied. The silhouette must be in a consistent frame or
+        // the fit thinks the room spans BOTH sides of the world origin
+        // (polygon at +x, box at -x) and pulls the camera back twice as
+        // far as needed, halving the visible room size in the captured
+        // image. Negating polygon X puts it in the same world frame as
+        // the box. (2026-05-19 — symptom: every room looked tiny in the
+        // print cover with 30-50% blank margin.)
         for (const v of planVerts) {
-          corners.push(new THREE.Vector3(v.x, floorY, v.y));
-          corners.push(new THREE.Vector3(v.x, ceilY,  v.y));
+          corners.push(new THREE.Vector3(-v.x, floorY, v.y));
+          corners.push(new THREE.Vector3(-v.x, ceilY,  v.y));
         }
       } catch (_) { /* no-op — fall through to bbox corners */ }
       // Include Box3 corners only for RECTANGULAR rooms. For polygon /
