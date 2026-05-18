@@ -1100,6 +1100,59 @@ function triangulateSurauStructure(scene, tris) {
         [ox1, oy1, roofZ], [ix1, iy1, roofZ],
         [0, 0, -1], arcadeRoofMatIdx, TAG_CEILING, `surau_arcade_roof_${sideName}`);
     }
+
+    // Corner cantilever support posts (Viktor diagnosis 2026-05-18) —
+    // mirrors the renderer addition in scene.js. Each post is a square
+    // pillar (colT × colT × roofH) at the outer corner of a cantilevered
+    // arcade slab, planted where two wrapped sides meet at a building
+    // corner. Same material as the bay columns so absorption stays
+    // consistent; same surface_id prefix (`surau_arcade_column_corner_*`)
+    // so panel picks route to the arcade-columns row.
+    const cornerPostSpecs = [];
+    const wrapped = new Set(ar.sides);
+    if (wrapped.has('south') && wrapped.has('east')) {
+      cornerPostSpecs.push({ cx: W - depth_m * 0.5, cy: -depth_m,        id: 'SE_S' });
+      cornerPostSpecs.push({ cx: W + depth_m,        cy: depth_m * 0.5,  id: 'SE_E' });
+    }
+    if (wrapped.has('south') && wrapped.has('west')) {
+      cornerPostSpecs.push({ cx: depth_m * 0.5,      cy: -depth_m,       id: 'SW_S' });
+      cornerPostSpecs.push({ cx: -depth_m,           cy: depth_m * 0.5,  id: 'SW_W' });
+    }
+    if (wrapped.has('north') && wrapped.has('east')) {
+      cornerPostSpecs.push({ cx: W - depth_m * 0.5, cy: D + depth_m,     id: 'NE_N' });
+      cornerPostSpecs.push({ cx: W + depth_m,        cy: D - depth_m * 0.5, id: 'NE_E' });
+    }
+    if (wrapped.has('north') && wrapped.has('west')) {
+      cornerPostSpecs.push({ cx: depth_m * 0.5,      cy: D + depth_m,    id: 'NW_N' });
+      cornerPostSpecs.push({ cx: -depth_m,           cy: D - depth_m * 0.5, id: 'NW_W' });
+    }
+    for (const cp of cornerPostSpecs) {
+      // Axis-aligned square pillar — emit 4 wall quads, each with outward
+      // normal along +x / -x / +y / -y. CCW seen from outside the pillar.
+      const x0 = cp.cx - half, x1 = cp.cx + half;
+      const y0 = cp.cy - half, y1 = cp.cy + half;
+      const tag = `surau_arcade_column_corner_${cp.id}`;
+      // Face -x (normal points to -x):
+      pushQuad(tris,
+        [x0, y0, pillarZ0], [x0, y1, pillarZ0],
+        [x0, y1, pillarZ1], [x0, y0, pillarZ1],
+        [-1, 0, 0], arcadeColMatIdx, TAG_WALL, tag);
+      // Face +x (normal points to +x):
+      pushQuad(tris,
+        [x1, y1, pillarZ0], [x1, y0, pillarZ0],
+        [x1, y0, pillarZ1], [x1, y1, pillarZ1],
+        [1, 0, 0], arcadeColMatIdx, TAG_WALL, tag);
+      // Face -y (normal points to -y):
+      pushQuad(tris,
+        [x1, y0, pillarZ0], [x0, y0, pillarZ0],
+        [x0, y0, pillarZ1], [x1, y0, pillarZ1],
+        [0, -1, 0], arcadeColMatIdx, TAG_WALL, tag);
+      // Face +y (normal points to +y):
+      pushQuad(tris,
+        [x0, y1, pillarZ0], [x1, y1, pillarZ0],
+        [x1, y1, pillarZ1], [x0, y1, pillarZ1],
+        [0, 1, 0], arcadeColMatIdx, TAG_WALL, tag);
+    }
   }
 
   // -------- Portico walls + roof --------------------------------------

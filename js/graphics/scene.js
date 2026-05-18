@@ -8530,6 +8530,54 @@ function rebuildSurauStructure(room) {
       // time rebuildRoom() disposes the whole roomGroup.)
       void disposable;
     }
+
+    // Corner cantilever support posts (Viktor diagnosis 2026-05-18).
+    // Each side's arcade slab is inset by `depth * 0.5` at both ends, so
+    // both outer corners of every slab cantilever ~1.5 m past the last
+    // bay-edge column with nothing under them. At each building corner
+    // where TWO arcade sides meet (e.g. south+east), there are TWO
+    // unsupported slab outer corners — one per slab. Plant a square post
+    // under each. Profile + material match the bay columns so the picker
+    // routes corner-post clicks to the same `arcade_columns` panel row
+    // and Dr. Chen's absorption tally stays consistent.
+    const arcadeColMatIdCorner = s.materials?.arcade_columns || 'concrete-painted';
+    const cornerPosts = [];
+    const wrapped = new Set(ar.sides);
+    if (wrapped.has('south') && wrapped.has('east')) {
+      // SE region: south slab outer-SE + east slab outer-S
+      cornerPosts.push({ x: W - depth * 0.5,     y: -depth,             id: 'SE_S' });
+      cornerPosts.push({ x: W + depth,           y: depth * 0.5,        id: 'SE_E' });
+    }
+    if (wrapped.has('south') && wrapped.has('west')) {
+      // SW region: south slab outer-SW + west slab outer-S
+      cornerPosts.push({ x: depth * 0.5,         y: -depth,             id: 'SW_S' });
+      cornerPosts.push({ x: -depth,              y: depth * 0.5,        id: 'SW_W' });
+    }
+    if (wrapped.has('north') && wrapped.has('east')) {
+      cornerPosts.push({ x: W - depth * 0.5,     y: D + depth,          id: 'NE_N' });
+      cornerPosts.push({ x: W + depth,           y: D - depth * 0.5,    id: 'NE_E' });
+    }
+    if (wrapped.has('north') && wrapped.has('west')) {
+      cornerPosts.push({ x: depth * 0.5,         y: D + depth,          id: 'NW_N' });
+      cornerPosts.push({ x: -depth,              y: D - depth * 0.5,    id: 'NW_W' });
+    }
+    const cornerPostGeo = new THREE.BoxGeometry(colT, roofH, colT);
+    for (const cp of cornerPosts) {
+      const post = new THREE.Mesh(cornerPostGeo, stuccoMat);
+      // BoxGeometry is centered at origin — place at (x, roofH/2, y) so
+      // bottom sits on the podium plane and top meets the arcade slab.
+      post.position.set(cp.x, roofH / 2, cp.y);
+      post.userData.tag = 'surau_arcade_corner_post';
+      post.userData.acoustic_material = arcadeColMatIdCorner;
+      // surface_id prefix matches `surau_arcade_column` so panel-row picker
+      // routes corner-post clicks to the arcade_columns row (no new row to
+      // maintain). Suffix names the corner for diagnostic clarity.
+      post.userData.surface_id = `surau_arcade_column_corner_${cp.id}`;
+      // no_walk_collide intentionally NOT set — the walk controller blocks
+      // against these posts via _structuralHits (0.3 × 0.3 box, well inside
+      // the 0.4 m push-off radius so no tunneling).
+      roomGroup.add(post);
+    }
   }
 
   // ------------- 10. Jali screens — perforated geometric panels ----------
