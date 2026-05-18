@@ -3431,6 +3431,14 @@ export function getPlacementBindings() {
 // dragging a width slider should not jump the camera every tick.
 // Also bound to the F shortcut so the user can re-fit after manual
 // dimension edits or a misadventure with the orbit drag.
+//
+// Camera position: SE of the room (state.y<0 side, world -Z side),
+// looking NW-down. Reason: viewing toward +Z makes world +X land
+// camera-RIGHT, so state +x → screen RIGHT, matching room-2d.js's
+// stateToSvgX convention. Do NOT move to the +Z side (e.g. cz + d3*0.4)
+// — that puts the camera looking -Z which mirrors the plan in X
+// (Viktor h.4 regression diagnosis 2026-05-18, user-reported NW/NE
+// minaret oscillation between 2D and 3D).
 export function frameCameraToRoom() {
   if (!camera || !controls) return;
   const room = state.room;
@@ -3440,7 +3448,7 @@ export function frameCameraToRoom() {
   const cx = w / 2;
   const cz = d / 2;
   const d3 = Math.max(w, h, d);
-  camera.position.set(cx + d3 * 0.9, h + d3 * 0.5, d + d3 * 0.4);
+  camera.position.set(cx + d3 * 0.9, h + d3 * 0.5, -d3 * 0.4);
   controls.target.set(cx, h * 0.4, cz);
   controls.update();
 }
@@ -3681,7 +3689,12 @@ function _cameraPresetTransform(name) {
       // read as flat in a square frame; (0.85, 0.6, 0.45) lifts the
       // camera so the floor + room volume both project visibly without
       // losing the 3/4 "lean" of a classic iso.
-      const dirToCam  = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
+      // Z component is NEGATIVE: camera sits on the state.y<0 side
+      // (world -Z) looking +Z, so world +X lands camera-RIGHT and the
+      // plan reads with state +x at screen-right (matches 2D viewport).
+      // Do NOT flip back to +Z — see frameCameraToRoom() comment for
+      // the X-mirror regression that re-emerges.
+      const dirToCam  = new THREE.Vector3(0.85, 0.6, -0.45).normalize();
 
       // Silhouette point set. For a CIRCULAR / POLYGON room the Box3
       // is the inscribed-cylinder's AABB — w × d × h with 4 corners
