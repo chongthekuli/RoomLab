@@ -3605,6 +3605,16 @@ function _cameraPresetTransform(name) {
       // high enough that w AND d fit, then put target at floor centre
       // with a tiny offset so OrbitControls' polar axis doesn't sing
       // gimbal lock when the camera is exactly above target.
+      //
+      // camera.up set to (0, 0, -1) so the camera's screen-up axis lands
+      // on state +y direction (= world +Z, after the lookAt-cross-product
+      // resolves). Without this override, default camera.up=(0,1,0) is
+      // parallel to the look direction; OrbitControls breaks gimbal via
+      // the target's tiny -Z offset and screen-up ends up at world -Z =
+      // state -y → 2D/3D plan-view Y axes disagree. Viktor pre-commit
+      // sign-off 2026-05-18 (proper diagnosis after diagnostic dump
+      // showed Y-flip, not X-flip as previously chased).
+      camera.up.set(0, 0, -1);
       const dist = _fitDistance(safe(w), safe(d), 1.20);
       const camY = dist + h;       // above the room ceiling, by dist
       // Camera looks toward -Z so that state +y (depth, world +z) maps
@@ -3624,6 +3634,7 @@ function _cameraPresetTransform(name) {
     case 'front': {
       // Viewed from the FRONT wall (state.y = 0 → world.z = 0). Camera
       // sits outside that wall looking toward +Z. extentX = w, extentY = h.
+      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       const dist = _fitDistance(safe(w), safe(h), 1.20);
       return {
         targetPos: new THREE.Vector3(cx, h * 0.5, cz),
@@ -3632,6 +3643,7 @@ function _cameraPresetTransform(name) {
     }
     case 'back': {
       // Viewed from the BACK wall (state.y = maxY) looking toward -Z.
+      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       const dist = _fitDistance(safe(w), safe(h), 1.20);
       return {
         targetPos: new THREE.Vector3(cx, h * 0.5, cz),
@@ -3641,6 +3653,7 @@ function _cameraPresetTransform(name) {
     case 'left': {
       // Viewed from the LEFT wall (state.x = 0) looking toward +X.
       // extentX (screen-horizontal) = d (room depth), extentY = h.
+      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       const dist = _fitDistance(safe(d), safe(h), 1.20);
       return {
         targetPos: new THREE.Vector3(cx, h * 0.5, cz),
@@ -3649,6 +3662,7 @@ function _cameraPresetTransform(name) {
     }
     case 'right': {
       // Viewed from the RIGHT wall (state.x = maxX) looking toward -X.
+      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       const dist = _fitDistance(safe(d), safe(h), 1.20);
       return {
         targetPos: new THREE.Vector3(cx, h * 0.5, cz),
@@ -3657,6 +3671,7 @@ function _cameraPresetTransform(name) {
     }
     case 'iso':
     default: {
+      camera.up.set(0, 1, 0);   // reset from any prior 'top' override
       // Iterative perspective "frame selected" fit. Three prior
       // attempts (fixed multiplier, bounding-sphere, AABB-corner
       // tangent fit) all clipped. Root cause: each one solved for an
