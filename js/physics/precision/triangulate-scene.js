@@ -905,9 +905,16 @@ function triangulateZones(scene, tris) {
 //                     +y. materialId = surauStructure.materials.south_partition
 //
 // Out of scope (visual-only, stays tagged no_acoustic):
-//   • minaret shaft / belt / cap / dome / crescent / mustaka — sits
-//     8 m+ above ground at the NW corner, no ray path reaches it
+//   • minaret CAP pieces (belt, lantern, dome, crescent / mustaka /
+//     stepped variants) — small surface area, sits at z >= shaftH
 //   • saf lines on the floor (flush with carpet, no acoustic effect)
+// IN scope (added 2026-05-18 per Dr. Chen sign-off, user report):
+//   • minaret SHAFT — 1.2 × 1.2 × 7.65 m concrete-painted box at the
+//     NW outdoor corner. Was excluded historically on the (wrong)
+//     premise "no ray path reaches it"; actually sits in the direct
+//     path between west-arcade speaker D and outdoor listeners north
+//     of y ≈ 17 m. Top face omitted (P4 simplification — diverges
+//     <0.1 dB at listener plane per Dr. Chen 2026-05-18).
 //   • atap tumpang multi-tier roof — apex >9 m, hipRoof already
 //     in the BVH for tier 0; upper tiers are above the ceiling
 //   • jali screens (currently disabled in the preset)
@@ -1153,6 +1160,64 @@ function triangulateSurauStructure(scene, tris) {
         [x1, y1, pillarZ1], [x0, y1, pillarZ1],
         [0, 1, 0], arcadeColMatIdx, TAG_WALL, tag);
     }
+  }
+
+  // -------- Minaret shaft ---------------------------------------------
+  // Slender concrete-painted box at one outdoor corner (NW for surau).
+  // Was historically excluded from the BVH on the (wrong) premise "8 m+
+  // above ground, no ray reaches it" — actually sits in the direct path
+  // between west-arcade speaker D (z=4.2 m) and outdoor listeners north
+  // of y ≈ 17 m. Emit 4 vertical wall quads (top + bottom omitted, per
+  // arcade-column precedent; P4 simplification — see header comment).
+  //
+  // Geometry mirrors scene.js#rebuildSurauStructure §8:
+  //   clearance = 0.6 + base_size_m / 2
+  //   centre at corner offset:
+  //     NW: (-clearance, D + clearance)
+  //     NE: (W + clearance, D + clearance)
+  //     SW: (-clearance, -clearance)
+  //     SE: (W + clearance, -clearance)
+  //   footprint: square of side base_size_m centred on the above
+  //   height: shaftH = total_height_m × 0.90
+  if (s.minaret) {
+    const mn = s.minaret;
+    const baseSize = Number.isFinite(mn.base_size_m) ? mn.base_size_m : 1.2;
+    const totalH   = Number.isFinite(mn.height_m)    ? mn.height_m    : 8.5;
+    const shaftH   = totalH * 0.90;
+    const clearance = 0.6 + baseSize / 2;
+    const cornerOffsets = {
+      SW: { x: -clearance,    y: -clearance    },
+      SE: { x: W + clearance, y: -clearance    },
+      NW: { x: -clearance,    y: D + clearance },
+      NE: { x: W + clearance, y: D + clearance },
+    };
+    const co = cornerOffsets[mn.corner || 'NW'] || cornerOffsets.NW;
+    const mnHalf = baseSize / 2;
+    const x0 = co.x - mnHalf, x1 = co.x + mnHalf;
+    const y0 = co.y - mnHalf, y1 = co.y + mnHalf;
+    const minaretMatId = mats.minaret || mn.materialId || 'concrete-painted';
+    const minaretMatIdx = materialIdxFor(scene, minaretMatId);
+    const tag = 'surau_minaret';
+    // Face -x (normal points to -x):
+    pushQuad(tris,
+      [x0, y0, 0],     [x0, y1, 0],
+      [x0, y1, shaftH], [x0, y0, shaftH],
+      [-1, 0, 0], minaretMatIdx, TAG_WALL, tag);
+    // Face +x (normal points to +x):
+    pushQuad(tris,
+      [x1, y1, 0],     [x1, y0, 0],
+      [x1, y0, shaftH], [x1, y1, shaftH],
+      [1, 0, 0], minaretMatIdx, TAG_WALL, tag);
+    // Face -y (normal points to -y):
+    pushQuad(tris,
+      [x1, y0, 0],     [x0, y0, 0],
+      [x0, y0, shaftH], [x1, y0, shaftH],
+      [0, -1, 0], minaretMatIdx, TAG_WALL, tag);
+    // Face +y (normal points to +y):
+    pushQuad(tris,
+      [x0, y1, 0],     [x1, y1, 0],
+      [x1, y1, shaftH], [x0, y1, shaftH],
+      [0, 1, 0], minaretMatIdx, TAG_WALL, tag);
   }
 
   // -------- Portico walls + roof --------------------------------------

@@ -3941,6 +3941,7 @@ section h3 {
 }
 
 .vp-lbl-listener { font-size: 9px; fill: #13161c; font-weight: 700; }
+.vp-lbl-minaret  { font-size: 11px; fill: #1a1a1a; font-weight: 600; pointer-events: none; }
 .vp-lbl-listener-metrics {
   font-size: 8.5px;
   font-weight: 600;

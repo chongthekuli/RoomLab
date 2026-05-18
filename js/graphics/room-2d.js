@@ -1452,6 +1452,7 @@ function renderNormal(vp) {
   const subSvg = renderSubStructures(state.room.subStructures, x0, y0, pxW, pxD, state.room);
   const encSvg = renderStandaloneEnclosures(state.room.standaloneEnclosures, x0, y0, pxW, pxD, state.room);
   const wsegSvg = renderSharedWallSegments(state.room.wallSegments, x0, y0, pxW, pxD, state.room);
+  const minaretSvg = renderSurauMinaret(state.room.surauStructure?.minaret, x0, y0, pxW, pxD, state.room);
 
   // Maya v9 audit §3 — collapsed footer, single line of structured
   // metadata pipe-separated. Engineers read `4.5 × 6.0 × 2.7 m`,
@@ -1486,6 +1487,7 @@ function renderNormal(vp) {
         ${subSvg}
         ${encSvg}
         ${wsegSvg}
+        ${minaretSvg}
         ${treatmentSvg}
         ${listenerSvg}
         ${speakerSvg}
@@ -1563,6 +1565,51 @@ function renderZones(zones, selectedId, x0, y0, pxW, pxD, room, isDrawBackdrop) 
 // sub.position.y_m); rotation is around the sub's local origin (0,0).
 // We rotate each footprint vertex around (0,0) then translate to the
 // placement point, then map to SVG pixel coords.
+// Render the surau minaret as a filled mid-grey square at its outdoor
+// corner, with a crescent glyph centred. Plan-view projection is honest
+// (the shaft IS a 1.2 m × 1.2 m solid footprint at ground level); fill
+// distinguishes it from zone outlines, stroke 1 px darker grey for
+// small-zoom legibility. Per Viktor 2026-05-18: scope = minaret only;
+// arcade columns / portico get their own design pass.
+function renderSurauMinaret(mn, x0, y0, pxW, pxD, room) {
+  if (!mn || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
+  const baseSize = Number.isFinite(mn.base_size_m) ? mn.base_size_m : 1.2;
+  const clearance = 0.6 + baseSize / 2;
+  const W = room.width_m, D = room.depth_m;
+  const cornerOffsets = {
+    SW: { x: -clearance,    y: -clearance    },
+    SE: { x: W + clearance, y: -clearance    },
+    NW: { x: -clearance,    y: D + clearance },
+    NE: { x: W + clearance, y: D + clearance },
+  };
+  const co = cornerOffsets[mn.corner || 'NW'] || cornerOffsets.NW;
+  const half = baseSize / 2;
+  const corners = [
+    { x: co.x - half, y: co.y - half },
+    { x: co.x + half, y: co.y - half },
+    { x: co.x + half, y: co.y + half },
+    { x: co.x - half, y: co.y + half },
+  ];
+  const points = corners.map(c => {
+    const sx = x0 + (c.x / W) * pxW;
+    const sy = y0 - (c.y / D) * pxD;
+    return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+  }).join(' ');
+  // Glyph: crescent (☪ U+262A) for cap_style 'crescent', dome circle for
+  // 'dome' / 'mustaka', filled square for 'stepped'. Centred on the
+  // footprint, sized to fit inside the square.
+  const gx = x0 + (co.x / W) * pxW;
+  const gy = y0 - (co.y / D) * pxD;
+  const cap = mn.cap_style || 'mustaka';
+  const glyph = cap === 'crescent' ? '☪'
+              : cap === 'dome' || cap === 'mustaka' ? '◯'
+              : '■';
+  // Stroke 1 px darker grey; fill mid-grey signals "solid structure" vs
+  // zones (translucent colour) and treatments (outline only).
+  return `<polygon class="vp-surau-minaret" points="${points}" fill="#9a9a9a" stroke="#666666" stroke-width="1" />`
+       + `<text x="${gx.toFixed(1)}" y="${(gy + 4).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-minaret">${glyph}</text>`;
+}
+
 function renderSubStructures(subs, x0, y0, pxW, pxD, parentRoom) {
   if (!Array.isArray(subs) || subs.length === 0) return '';
   let out = '';

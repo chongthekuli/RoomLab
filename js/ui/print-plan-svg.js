@@ -218,6 +218,43 @@ export function buildFloorPlanSVG(state, opts = {}) {
     return circle + label + metricsTxt;
   }).join('');
 
+  // Surau minaret — filled mid-grey square + crescent (or dome) glyph
+  // at the outdoor corner specified by surauStructure.minaret.corner.
+  // Mirrors the live 2D viewport rendering so the printed plan stays
+  // consistent. Per Viktor 2026-05-18: scope = minaret only.
+  const minaretEl = (() => {
+    const mn = state.room?.surauStructure?.minaret;
+    if (!mn) return '';
+    const W = state.room.width_m, D = state.room.depth_m;
+    const baseSize = Number.isFinite(mn.base_size_m) ? mn.base_size_m : 1.2;
+    const clearance = 0.6 + baseSize / 2;
+    const cornerOffsets = {
+      SW: { x: -clearance,    y: -clearance    },
+      SE: { x: W + clearance, y: -clearance    },
+      NW: { x: -clearance,    y: D + clearance },
+      NE: { x: W + clearance, y: D + clearance },
+    };
+    const co = cornerOffsets[mn.corner || 'NW'] || cornerOffsets.NW;
+    const half = baseSize / 2;
+    const corners = [
+      { x: co.x - half, y: co.y - half },
+      { x: co.x + half, y: co.y - half },
+      { x: co.x + half, y: co.y + half },
+      { x: co.x - half, y: co.y + half },
+    ];
+    const pts = corners.map(c => {
+      const p = projectXY(c.x, c.y, anchorY, offsetX);
+      return `${p.sx.toFixed(3)},${p.sy.toFixed(3)}`;
+    }).join(' ');
+    const c = projectXY(co.x, co.y, anchorY, offsetX);
+    const cap = mn.cap_style || 'mustaka';
+    const glyph = cap === 'crescent' ? '☪'
+                : cap === 'dome' || cap === 'mustaka' ? '◯'
+                : '■';
+    return `<polygon points="${pts}" fill="#9a9a9a" stroke="#3a3a3a" stroke-width="0.04" />`
+         + `<text x="${c.sx.toFixed(3)}" y="${(c.sy + 0.18).toFixed(3)}" font-size="0.55" text-anchor="middle" fill="#1a1a1a">${glyph}</text>`;
+  })();
+
   // Scale bar — chosen from a "nice" set so the labelled length is
   // legible (1 m / 5 m / 10 m). Lives in the BOTTOM margin band, fully
   // below the room outline — bar + label + ticks all clear the room
@@ -245,7 +282,7 @@ export function buildFloorPlanSVG(state, opts = {}) {
   // the arrow as a fixed-CSS-pixel HTML overlay (see print.css for
   // .pr-cover-hero-plan::after / .pr-heatmap-stage::after).
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg">${roomEl}${zonesEl}${sourcesEl}${listenersEl}${scaleBarEl}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg">${roomEl}${zonesEl}${minaretEl}${sourcesEl}${listenersEl}${scaleBarEl}</svg>`;
 }
 
 // Build a small legend block (paste-ready HTML) that names the symbol
