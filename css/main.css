@@ -3941,6 +3941,17 @@ section h3 {
 }
 
 .vp-lbl-listener { font-size: 9px; fill: #13161c; font-weight: 700; }
+.vp-lbl-listener-metrics {
+  font-size: 8.5px;
+  font-weight: 600;
+  fill: #e8ecf2;
+  paint-order: stroke;
+  stroke: #13161c;
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 
 .listener-results {
   padding: 0.55rem 0.7rem;

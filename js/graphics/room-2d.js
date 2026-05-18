@@ -7,6 +7,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
 import { roomPlanVertices, isInsideRoom3D, roomEffectiveBounds } from '../physics/room-shape.js';
 import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
+import { computePerListenerMetrics, formatListenerMetricsLabel } from '../physics/per-listener-metrics.js';
 
 let materialsRef;
 
@@ -756,6 +757,10 @@ export function mount2DViewport({ materials }) {
   on('treatment:changed', render);
   on('treatment:selected', render);
   on('scene:reset', render);
+  // STI labels next to each listener come out of state.results.precision —
+  // re-render when the precision engine completes so the value appears
+  // immediately instead of waiting for the next scene mutation.
+  on('precision:changed', render);
   window.addEventListener('resize', render);
   // Reset zoom whenever the scene is fully replaced so the new room
   // shows at default scale.
@@ -1426,7 +1431,14 @@ function renderNormal(vp) {
     ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, state.room, selectedSrcIdx, draggingSrcIdx)
     : '';
   const draggingListenerId = (pickableDrag?.kind === 'listener' && pickableDrag?.didMove) ? pickableDrag.listenerId : null;
-  const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room, draggingListenerId) : '';
+  // Per-listener SPL / STI labels — SPL is the same 1-kHz total the
+  // results panel shows; STI shows only after a precision render exists.
+  // Both gracefully read null when not available and the label is just
+  // omitted.
+  const listenerMetrics = state.listeners.length > 0
+    ? computePerListenerMetrics(state, materialsRef)
+    : [];
+  const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room, draggingListenerId, listenerMetrics) : '';
   const draggingTreatId = (pickableDrag?.kind === 'treatment' && pickableDrag?.didMove) ? pickableDrag.treatmentId : null;
   const treatmentSvg = (state.treatments && state.treatments.length > 0)
     ? renderTreatmentsSVG(state.treatments, state.selectedTreatmentId, draggingTreatId, x0, y0, pxW, pxD, state.room)
@@ -2510,9 +2522,9 @@ function escapeXml(s) {
   }[c]));
 }
 
-function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId) {
+function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId, metrics = []) {
   let s = '';
-  listeners.forEach((lst) => {
+  listeners.forEach((lst, idx) => {
     const sx = x0 + (lst.position.x / room.width_m) * pxW;
     const sy = y0 - (lst.position.y / room.depth_m) * pxD;
     const isSel = lst.id === selectedId;
@@ -2532,6 +2544,14 @@ function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, dragg
       const lblMatch = String(lst.label).match(/\d+/);
       const short = lblMatch ? lblMatch[0] : String(lst.label).slice(0, 2);
       s += `<text x="0" y="3" text-anchor="middle" class="vp-lbl vp-lbl-listener">${escapeMenuHtml(short)}</text>`;
+      // SPL / STI line — placed below the dot so it never covers the
+      // short id inside it. Hidden during drag (the dot doubles in size
+      // and would push the text off-grid). Empty when neither metric is
+      // available so there's no orphan visual.
+      const txt = formatListenerMetricsLabel(metrics[idx] ?? {});
+      if (txt) {
+        s += `<text x="0" y="${(radius + 11).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-listener-metrics">${escapeMenuHtml(txt)}</text>`;
+      }
     }
     s += `</g>`;
   });

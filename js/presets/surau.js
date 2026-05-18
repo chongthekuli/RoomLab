@@ -38,11 +38,12 @@ const SPK_CEILING_Z = 4.30;  // ceiling-mount speaker height (just under ceiling
 const SPK_ARCADE_Z  = 4.20;  // arcade ceiling-mount speaker height (under arcade flat roof at 4.4)
 const SPK_MODEL = 'data/loudspeakers/amperes-cs520.json';
 
-// Audience zone — prayer mat covering most of the floor with a small
-// inset from each wall so the audience figures don't clip into them.
-// Excludes a strip in front of the qibla wall reserved for the imam.
+// Zone geometry constants. ZONE_INSET keeps the imam + podium polygons
+// off the wall surfaces; IMAM_STRIP is the depth of the imam zone in
+// front of the mihrab. Audience saf zones were removed 2026-05-18 —
+// listeners (L1–L8) remain as the canonical congregation sample points.
 const ZONE_INSET = 0.4;
-const IMAM_STRIP = 1.5;  // depth of imam zone in front of mihrab
+const IMAM_STRIP = 1.5;
 
 export default {
   label: 'Surau (mosque prayer hall)',
@@ -262,37 +263,6 @@ export default {
     wall_west: 'concrete-painted',
   },
   zones: [
-    // Men's saf (front 70% of usable depth) — closer to the imam at qibla.
-    // JAKIM/JKR convention: men in front, women behind, with a partition or
-    // carpet-stripe demarcation between them. Per audit 2026-05-15 — was
-    // a single combined congregation zone, now split for regulatory
-    // correctness (gender segregation is mandatory in Malaysian surau).
-    {
-      id: 'Z_congregation_men',
-      label: 'Men’s saf (front 70 %)',
-      vertices: rectVerts(
-        ZONE_INSET,            ZONE_INSET + (D - IMAM_STRIP - 2 * ZONE_INSET) * 0.30,
-        W - ZONE_INSET,        D - IMAM_STRIP,
-      ),
-      elevation_m: 0,
-      material_id: 'audience-seated',
-      occupancy_percent: 5,  // default sparse; bumps to 40 mid-week, ~100 at Jumaah
-    },
-    // Women's saf (rear 30 %) — separated from the men's saf by a carpet
-    // stripe / curtain partition (visual demarcation rendered in scene.js
-    // is a TODO follow-up; the zone boundary at y = ~5.14 m is the
-    // canonical position).
-    {
-      id: 'Z_congregation_women',
-      label: 'Women’s saf (rear 30 %)',
-      vertices: rectVerts(
-        ZONE_INSET,            ZONE_INSET,
-        W - ZONE_INSET,        ZONE_INSET + (D - IMAM_STRIP - 2 * ZONE_INSET) * 0.30,
-      ),
-      elevation_m: 0,
-      material_id: 'audience-seated',
-      occupancy_percent: 5,
-    },
     {
       id: 'Z_imam',
       label: 'Imam / mihrab strip',

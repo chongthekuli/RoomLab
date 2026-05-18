@@ -31,6 +31,16 @@ function escapeText(s) {
   }[c]));
 }
 
+// Format the SPL / STI text that sits under a listener marker. Empty
+// string when neither metric is available — caller skips the <text>.
+function formatPrintListenerMetrics(m) {
+  if (!m) return '';
+  const parts = [];
+  if (Number.isFinite(m.spl_db)) parts.push(`${m.spl_db.toFixed(0)} dB`);
+  if (Number.isFinite(m.sti))    parts.push(`STI ${m.sti.toFixed(2)}`);
+  return parts.join(' · ');
+}
+
 function pickScaleBar(roomWidth_m) {
   const target = roomWidth_m / 5;
   let best = NICE_BAR_M[0];
@@ -129,6 +139,7 @@ function aimTrianglePoints(cx, cy, r, yawDeg) {
 //
 // Returns empty string if room is degenerate (no width / depth).
 export function buildFloorPlanSVG(state, opts = {}) {
+  const listenerMetrics = Array.isArray(opts.listenerMetrics) ? opts.listenerMetrics : null;
   const room = state.room;
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
 
@@ -192,14 +203,19 @@ export function buildFloorPlanSVG(state, opts = {}) {
 
   // Listeners — circles. Distinct from source triangles so the plan
   // is readable in monochrome print too.
-  const listenersEl = (state.listeners || []).map(l => {
+  const listenersEl = (state.listeners || []).map((l, idx) => {
     const px = l.position?.x;
     const py = l.position?.y;
     if (px == null || py == null) return '';
     const p = projectXY(px, py, anchorY, offsetX);
     const r = 0.26;
-    return `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="#0a8a4a" stroke="#000" stroke-width="0.04" />`
-      + `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28">${escapeText(l.label || l.id)}</text>`;
+    const circle = `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="#0a8a4a" stroke="#000" stroke-width="0.04" />`;
+    const label = `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28">${escapeText(l.label || l.id)}</text>`;
+    const metricsStr = formatPrintListenerMetrics(listenerMetrics?.[idx]);
+    const metricsTxt = metricsStr
+      ? `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.62).toFixed(3)}" font-size="0.36" fill="#0a4d28">${escapeText(metricsStr)}</text>`
+      : '';
+    return circle + label + metricsTxt;
   }).join('');
 
   // Scale bar — chosen from a "nice" set so the labelled length is

@@ -33,6 +33,7 @@ import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.j
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend, heatmapPageViewBox } from './print-heatmap.js';
 import { buildFloorPlanSVG } from './print-plan-svg.js';
+import { computePerListenerMetrics } from '../physics/per-listener-metrics.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
 import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
 
@@ -214,6 +215,14 @@ export function buildPrintModel({ materials, nameHint } = {}) {
       per_band: state.physics?.ambientNoise?.per_band ?? [],
     },
     precision: extractPrecisionResults(state, materials),
+    // Per-listener SPL (1 kHz total) + STI (precision render, when one
+    // exists). Same numbers the results panel + live 2D viewport show;
+    // attached to the model so the print SVG renderers can label each
+    // dot without re-running the physics.
+    listenerMetrics: (() => {
+      try { return computePerListenerMetrics(state, materials); }
+      catch (err) { console.warn('[print-report] per-listener metrics failed:', err); return null; }
+    })(),
     sourceFlat: {
       total: flatSources.length,
       raw: state.sources?.length ?? 0,
@@ -741,9 +750,11 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // physics, not on the room-detail cover.
   const room = model.room;
   // 2D plan for the inset. buildFloorPlanSVG already exists for the
-  // standalone plan page; reusing it keeps the visual identical.
+  // standalone plan page; reusing it keeps the visual identical. Per-
+  // listener SPL / STI labels (model.listenerMetrics) decorate every
+  // listener dot — same numbers the live 2D viewport + results panel show.
   const planSvg = (() => {
-    try { return buildFloorPlanSVG(state, { compact: true }); }
+    try { return buildFloorPlanSVG(state, { compact: true, listenerMetrics: model.listenerMetrics }); }
     catch (err) { console.warn('[print-report] plan SVG failed:', err); return ''; }
   })();
   // Hero — prefer the 3D render. Fallback chain: 3D PNG → 2D plan SVG
@@ -1204,7 +1215,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // figure. The cover hero is now a 3D render of the room. heatSvg /
   // heatLegend are rebuilt locally here so the heatmap-detail page
   // (and the operating-range strip below) remain unchanged.
-  const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid) : '';
+  const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid, { listenerMetrics: model.listenerMetrics }) : '';
   const heatLegend = (model.heatmap && splGrid) ? buildHeatmapLegend(splGrid) : '';
   // Compute the SVG's viewBox aspect so the stage CSS can size itself
   // to match the room — eliminates the preserveAspectRatio centering

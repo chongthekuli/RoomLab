@@ -35,6 +35,16 @@ function escapeText(s) {
   }[c]));
 }
 
+// Format the SPL / STI text that sits under a listener marker. Empty
+// string when neither metric is available — caller skips the <text>.
+function formatPrintListenerMetrics(m) {
+  if (!m) return '';
+  const parts = [];
+  if (Number.isFinite(m.spl_db)) parts.push(`${m.spl_db.toFixed(0)} dB`);
+  if (Number.isFinite(m.sti))    parts.push(`STI ${m.sti.toFixed(2)}`);
+  return parts.join(' · ');
+}
+
 function pickScaleBar(roomWidth_m) {
   const target = roomWidth_m / 5;
   let best = NICE_BAR_M[0];
@@ -190,7 +200,7 @@ export function heatmapPageViewBox(state, splGrid) {
   return { viewW, viewH };
 }
 
-export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
+export function buildHeatmapPageSVG(state, splGrid, { compact = false, listenerMetrics = null } = {}) {
   const room = state.room;
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
   if (!splGrid) return '';
@@ -313,7 +323,7 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
 
   // Listeners — circles. White halo for legibility against any
   // colour from the heatmap underneath.
-  const listenersEl = (state.listeners || []).map(l => {
+  const listenersEl = (state.listeners || []).map((l, idx) => {
     const px = l.position?.x;
     const py = l.position?.y;
     if (px == null || py == null) return '';
@@ -322,8 +332,16 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false } = {}) {
     const base = `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="#0a8a4a" stroke="#fff" stroke-width="0.08" />`
       + `<circle cx="${p.sx.toFixed(3)}" cy="${p.sy.toFixed(3)}" r="${r}" fill="none" stroke="#000" stroke-width="0.04" />`;
     if (compact) return base;
-    return base
-      + `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28" stroke="#fff" stroke-width="0.06" paint-order="stroke">${escapeText(l.label || l.id)}</text>`;
+    const labelTxt = `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.13).toFixed(3)}" font-size="0.42" fill="#0a4d28" stroke="#fff" stroke-width="0.06" paint-order="stroke">${escapeText(l.label || l.id)}</text>`;
+    // Per-listener SPL / STI directly under the label. Same offset
+    // convention as panel-results (1 kHz total SPL + precision STI),
+    // omitted entirely when neither value is available.
+    const m = Array.isArray(listenerMetrics) ? listenerMetrics[idx] : null;
+    const metricsStr = formatPrintListenerMetrics(m);
+    const metricsTxt = metricsStr
+      ? `<text x="${(p.sx + 0.42).toFixed(3)}" y="${(p.sy + 0.62).toFixed(3)}" font-size="0.36" fill="#0a4d28" stroke="#fff" stroke-width="0.06" paint-order="stroke">${escapeText(metricsStr)}</text>`
+      : '';
+    return base + labelTxt + metricsTxt;
   }).join('');
 
   // Scale bar + north arrow — both placed fully inside the SVG margin
