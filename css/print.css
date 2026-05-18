@@ -291,19 +291,18 @@ body.is-pdf-export .vp-tabs {
     box-sizing: border-box;
   }
   #print-report .pr-cover-hero-image {
-    /* Fixed-square slot. The cover hero reserves an IDENTICAL footprint
-       on every report regardless of room dimensions — pavilion, surau,
-       chamber all render into the same 165 × 165 mm square. The capture
-       is a 1500×1500 square PNG (print-report.js passes fixedAspect:
-       true to captureViewportImage); the iso fit math frames the room
-       inside that square with ~4 % margin per side. Narrow / wide rooms
-       end up with extra empty space on the short axis — accepted as a
-       deliberate trade-off for predictable page layout (user request
-       2026-05-19). object-fit:contain is a defence-in-depth: if a
-       future caller passes a non-square PNG, the image letterboxes
-       inside the square slot rather than stretching or cropping. */
-    width: 165mm;
-    height: 165mm;
+    /* Fixed-square slot, sized to nearly fill the A4 content column
+       (180 × 180 mm; A4 usable width ≈ 180 mm after page-margin set).
+       Every room renders into the same square footprint regardless of
+       its actual dimensions, so report pages line up visually across
+       presets. The capture is a 1500×1500 PNG (print-report.js passes
+       fixedAspect:true) and the iso fit math frames the room inside
+       it at NDC 0.99 (~1 % margin per side, scene.js).
+       object-fit:contain is a defence-in-depth letterbox: if a future
+       caller passes a non-square PNG, the image fits inside the slot
+       rather than stretching or cropping. */
+    width: 180mm;
+    height: 180mm;
     display: block;
     margin: 0 auto;
     object-fit: contain;

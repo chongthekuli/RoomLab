@@ -3871,12 +3871,12 @@ function _cameraPresetTransform(name) {
       const tanHalfH = tanHalfV * aspect;          // h-FOV derived from v-FOV + aspect
       // 5 % visible gap each side ⇒ binding corner sits at 90 % of the
       // frustum half-extent (in NDC units, 0.90 of 1.0).
-      // 0.96 = 4 % visible gap each side — tight enough that the room
-      // fills the captured square without obvious wasted margin, loose
-      // enough that mesh chrome / line strokes never kiss the edge.
-      // Previously 0.90 (10 % gap) left the room looking small in the
-      // printed cover.
-      const TARGET_NDC = 0.96;
+      // 0.99 = ~0.5 % visible gap each side — room nearly fills the
+      // captured PNG. Was 0.96 (4 % per side); user reported (2026-05-19)
+      // the cover still had visible blank margin on every preset. 0.99
+      // hugs the binding corner without quite kissing the edge — mesh
+      // chrome / line strokes still have ~1 px of buffer at 1500×1500.
+      const TARGET_NDC = 0.99;
 
       // Initial guess — bounding-sphere fit. Always overshoots (sphere
       // is larger than the projected silhouette) so iteration can only
