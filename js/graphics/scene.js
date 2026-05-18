@@ -483,23 +483,14 @@ export async function mount3DViewport({ materials }) {
 
 function initScene() {
   scene = new THREE.Scene();
-  // 2026-05-18 — X-axis convention fix.
-  // The 2D viewport (room-2d.js) uses standard math: state +x → screen-right.
-  // The 3D scene was rendering state +x → screen-LEFT despite the lookAt
-  // math saying otherwise (Viktor and Hannes both could not isolate the
-  // discrepancy from analysis alone). After multiple failed iterations on
-  // camera position / target offset, applied a scene-level X mirror so
-  // every projected point comes out the SAME side it does in 2D. Three.js's
-  // WebGLRenderer auto-detects the negative-determinant world matrix and
-  // reverses face-winding internally — meshes render correctly inside-out
-  // for free, no material.side change needed.
-  //
-  // Side effects: text on textured meshes would appear mirrored (no such
-  // text in the surau scene today). Lighting direction vectors mirror with
-  // the geometry, so shadows still land where they should on the mirrored
-  // mesh. Verified by user empirical comparison of S8/S9 positions across
-  // 2D and 3D plan views.
-  scene.scale.x = -1;
+  // 2026-05-18 — attempted X-axis-mismatch fix via `scene.scale.x = -1`
+  // (v=497) was reverted because it broke too many things downstream:
+  // camera-fit AABB calculations target world +cx but mirrored scene
+  // lives at world -cx (room off-center on Top/Iso presets); walk-mode
+  // spawn position lands outside the room; raycast/drag handlers convert
+  // mirrored world.x back to state.x with the wrong sign. The 2D-3D
+  // X-axis disagreement remains unresolved — logged as a known gap in
+  // CLAUDE.md §6 to debug properly later with browser-side instrumentation.
   // Deep slate background with a subtle vertical gradient look (dark at top
   // fading to near-black at the horizon) via a shader-free approach: solid
   // base color, tone-mapping handles perceptual brightness in the final pass.

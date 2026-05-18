@@ -250,6 +250,12 @@ Memories that are **GUARDED** (don't break in a refactor):
 Master ledger of every shipped bug + its guarding test: `docs/REGRESSION_INDEX.md`
 (owned by Theo / regression-curator).
 
+### Open bugs / convention mismatches
+
+- **2D-3D X-axis disagree** (2026-05-18 unresolved): the 2D viewport renders state +x at screen-RIGHT (standard math). The 3D view (every camera preset) renders state +x at screen-LEFT — verified empirically by user via S8 (state x=-1.5 west arcade) appearing at screen-RIGHT in 3D vs screen-LEFT in 2D. Both Viktor (3d-rendering-expert) and Hannes (tech-lead) tried to isolate the cause from math; both ended up saying Three.js's `lookAt` math gives state +x at screen-right for the configured camera, but empirical evidence contradicts. Multiple iterations on camera-position + target-offset (commits v=495, v=496, v=497) failed to fix it. The scene-level `scale.x = -1` (v=497) DID align the views but broke camera-AABB-fit (Top/Iso pre-frame put the room off-screen), walk-mode spawn (avatar drops outside the room), and likely raycast-based drag. Reverted as of 2026-05-18.
+   - **Next debugging step**: instrument scene.js with `console.log` inside the OrbitControls update loop to capture actual `camera.matrixWorld` elements; project a known world point through the matrix manually and compare to where it renders on screen. The discrepancy must be in something unexpected (PMREMGenerator's environment matrix, OrbitControls' azimuth resolution at the pole, or some camera.up modification).
+   - **For now**: minaret at NW renders at top-LEFT in 2D but top-RIGHT in 3D. Document on user-facing pages if it confuses anyone; otherwise leave.
+
 ### Other coverage holes (Hannes 2026-05-18 audit)
 
 These are roles / surfaces with no clear owner, not test gaps:
