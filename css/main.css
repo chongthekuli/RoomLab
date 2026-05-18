@@ -2127,6 +2127,58 @@ section h3 {
   box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.18);
 }
 
+/* Active room name — eyebrow + tinted card. Anchors the panel:
+   answers "which room am I in?" before any picker is touched.
+   Spacing matches .picker-row (0.4rem) so the gap to PRESETS
+   matches the PRESETS→TEMPLATES gap. Maya 2026-05-18. */
+.field-group.room-name-row {
+  position: relative;
+  margin-bottom: 0.4rem;
+  padding: 0.5rem 0.6rem 0.55rem 0.75rem;
+  background: linear-gradient(
+    180deg,
+    rgba(74, 163, 255, 0.10) 0%,
+    rgba(74, 163, 255, 0.04) 100%
+  );
+  border: 1px solid rgba(74, 163, 255, 0.22);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px rgba(74, 163, 255, 0.04) inset;
+}
+.field-group.room-name-row .room-eyebrow {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.field-group.room-name-row label {
+  grid-template-columns: 1fr;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.field-group.room-name-row input {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg-strong, #e5e7eb);
+  background: rgba(12, 16, 22, 0.55);
+  border-color: rgba(74, 163, 255, 0.28);
+}
+.field-group.room-name-row input:focus {
+  background: var(--bg-elev);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.22);
+}
+.field-group.room-name-row input::placeholder {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .preset-row { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .preset-row button,
 .picker-buttons button {

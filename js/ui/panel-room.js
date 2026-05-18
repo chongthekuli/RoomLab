@@ -75,7 +75,8 @@ export function mountRoomPanel({ materials }) {
   root.innerHTML = `
     <h2>Room</h2>
     <div class="field-group room-name-row">
-      <label title="Free-text label for this room — shows on the print-report cover under the project name. Distinct from the project name (one project can hold several rooms).">Room name
+      <span class="room-eyebrow">Active room</span>
+      <label title="Free-text label for this room — shows on the print-report cover under the project name. Distinct from the project name (one project can hold several rooms).">Name
         <input type="text" id="room-name-input" placeholder="e.g. Lobby, Atrium 3F, Main hall" value="${escapeAttr(state.room.name ?? '')}" maxlength="80" />
       </label>
     </div>
