@@ -8353,6 +8353,18 @@ function rebuildSurauStructure(room) {
     const bayGeo = new THREE.ExtrudeGeometry(bayShape, {
       depth: colT, bevelEnabled: false, curveSegments: 12,
     });
+    // Recenter geometry so its local origin sits at the bay's xz-CENTER.
+    // ExtrudeGeometry's shape origin is bottom-left-front (x=0, y=0, z=0);
+    // translate by (-bayW/2, 0, -colT/2) so a `position.set(cxBay, 0, cyBay)`
+    // places the bay's geometric centre at (cxBay, cyBay) regardless of
+    // rotation.y. This kills the rotation-vs-offset asymmetry the bay-
+    // placement formula used to carry (Viktor diagnosis 2026-05-18: south
+    // + east bays were shifted bayW from their intended u-coord because
+    // the local +x axis maps to world −side direction under R_y(π) and
+    // R_y(π/2); west happened to be correct because R_y(−π/2) maps local
+    // +x to world +side). Keep y at [0, roofH] so position.y=0 places the
+    // bay bottom on the podium.
+    bayGeo.translate(-bayW / 2, 0, -colT / 2);
 
     // Place bays along each requested side. Side defines a line segment
     // along the building's outer wall AT the arcade depth. Walk that
@@ -8428,6 +8440,9 @@ function rebuildSurauStructure(room) {
         perSideBayGeo = new THREE.ExtrudeGeometry(shape, {
           depth: colT, bevelEnabled: false, curveSegments: 12,
         });
+        // Match canonical bayGeo: recenter so position.set(cxBay, 0, cyBay)
+        // lands the bay's geometric centre regardless of rotation.
+        perSideBayGeo.translate(-actualBayW / 2, 0, -colT / 2);
         disposable = true;
       }
 
@@ -8456,38 +8471,14 @@ function rebuildSurauStructure(room) {
         // specific row when one is added).
         const arcadeColMatId = s.materials?.arcade_columns || 'concrete-painted';
         const bay = new THREE.Mesh(perSideBayGeo, stuccoMat);
-        // Bay shape's local origin is at the bottom-LEFT corner of the bay
-        // (local x along the side, local y = vertical, local z = extrusion
-        // thickness outward). We need to translate so the centre of the
-        // local-x range and the bottom of local-y line up with the world
-        // placement. Place centre-x at cxBay along the side direction
-        // (rotated), bottom-y at floor (z=0 in world), and extrusion
-        // pointing outward.
-        // Translate the geometry's local origin: shift local x by -bayW/2
-        // so local-x=0 is the bay centre along the side.
-        // We do this via mesh.position + rotation rather than mutating geo.
-        // Rotation: yaw the bay so its local +x maps to side direction +s.
-        // ExtrudeGeometry's local frame: x = shape x, y = shape y (vertical),
-        // z = extrusion direction. We want shape-x to align with side
-        // direction (sx, sy in state coords → world (sx, _, sy) since
-        // world.x = state.x and world.z = state.y).
-        // In a Three.js group: local +z = extrusion, we want +z to point
-        // OUTWARD = perp. So apply rotation.y = atan2(perp_x_world, perp_y_world)
-        // measuring from the +z world axis.
+        // Geometry was recentered above so its local origin sits at the
+        // bay's xz-CENTER (with local y=0 still at the bottom). So place
+        // the bay's centre directly at (cxBay, cyBay) and rotate. The
+        // rotation = atan2(perpX, perpY) aligns local +z with `perp`
+        // (outward from building).
         const yawRad = Math.atan2(spec.perp[0], spec.perp[1]);
         bay.rotation.y = yawRad;
-        // After yaw, the bay's local-x aligns with (cos(yaw), -sin(yaw)) in
-        // (world.x, world.z) — i.e. perpendicular to perp, which IS the
-        // side direction. Good. Now position so the local origin (bottom-
-        // left of the bay shape) sits at the side-centre minus half the
-        // bay along the side direction.
-        // Bay local origin in world = cxBay - (actualBayW/2)·sx, 0,
-        //                              cyBay - (actualBayW/2)·sy
-        bay.position.set(
-          cxBay - (actualBayW / 2) * sx,
-          0,
-          cyBay - (actualBayW / 2) * sy,
-        );
+        bay.position.set(cxBay, 0, cyBay);
         bay.userData.tag = 'surau_arcade_bay';
         // Arcade columns are now in the BVH (triangulateSurauStructure,
         // 2026-05-17). Each bay carries a unique-per-side index so the
