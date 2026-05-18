@@ -541,15 +541,20 @@ body.is-pdf-export .vp-tabs {
   /* North-arrow + "N" overlay on plan / heatmap stages.
      2026-05-19: SUPPRESSED on the cover page (.pr-page-cover) — the
      cover hero is a 3D iso render, where the north convention reads
-     differently than a top-down plan. User-reported the arrow looked
-     out of place at the cover's top-right. The arrow still renders on
-     pages 2+ (heatmap, plan, strip-cell) where it's anchored to a
-     proper top-down view. */
-  #print-report .pr-page-cover .pr-cover-hero-plan::after,
-  #print-report .pr-page-cover .pr-cover-hero-inset::after,
-  #print-report .pr-page-cover .pr-plan-svg-wrap::after,
-  #print-report .pr-page-cover .pr-heatmap-stage::after,
-  #print-report .pr-page-cover .pr-strip-cell-stage::after { content: none !important; background: none !important; }
+     differently than a top-down plan. User-reported the arrow at the
+     cover's top-right doesn't belong on a 3D illustration. Targeted
+     suppression of the 5 known carriers didn't work (user reported
+     the arrow still appeared), so this rule uses a universal-descendant
+     ::before/::after kill-switch on .pr-page-cover. The arrow still
+     renders on pages 2+ (heatmap, plan, strip-cell) where it's anchored
+     to a proper top-down view. The kill-switch only nukes content +
+     background-image; layout pseudo-elements that use neither (rare in
+     this codebase, but a precaution) keep working. */
+  #print-report .pr-page-cover *::before,
+  #print-report .pr-page-cover *::after {
+    content: none !important;
+    background-image: none !important;
+  }
 
   #print-report .pr-heatmap-stage::after,
   #print-report .pr-cover-hero-plan::after,

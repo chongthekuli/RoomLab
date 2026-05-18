@@ -2101,7 +2101,11 @@ export function mountPrintReport({ materials }) {
     // import is still in flight and we fall back to the 2D plan.
     let coverImage = null;
     try {
-      if (_captureFn) coverImage = _captureFn({ width: 1500, height: 1500, preset: 'iso' });
+      // fixedAspect:true — match the in-app printReport() path; without
+      // this, the beforeprint listener captures a variable-aspect PNG
+      // that letterboxes inside the 180×180mm slot, leaving blank
+      // margin around the room.
+      if (_captureFn) coverImage = _captureFn({ width: 1500, height: 1500, preset: 'iso', fixedAspect: true });
     } catch (err) { console.warn('[print-report] capture failed:', err); }
     const model = buildPrintModel({ materials: _printMaterialsRef });
     renderPrintReport(model, { splGrid, coverImage });
