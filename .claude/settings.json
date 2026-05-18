@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/cache-bump-guard.js",
+            "if": "Bash(git commit *)",
+            "timeout": 10,
+            "statusMessage": "cache-bump guard"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/regression-test-reminder.js",
+            "if": "Bash(git commit *)",
+            "timeout": 10,
+            "statusMessage": "regression-test reminder"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/visual-physics-push-guard.js",
+            "if": "Bash(git push *)",
+            "timeout": 10,
+            "statusMessage": "visual-physics push guard"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/deploy-poll.js",
+            "if": "Bash(git push *)",
+            "timeout": 45,
+            "async": true,
+            "statusMessage": "polling GitHub Pages"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/stop-cache-bump-nudge.js",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

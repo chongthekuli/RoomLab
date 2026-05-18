@@ -4,3 +4,8 @@ node_modules/
 *.log
 .env
 .vscode/
+
+# Claude Code runtime artefacts (per-machine, not team-shared)
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+.claude/settings.local.json

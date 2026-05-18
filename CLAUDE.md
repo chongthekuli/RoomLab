@@ -1,0 +1,308 @@
+# CLAUDE.md — RoomLab
+
+This file is loaded into every Claude Code session. It is the canonical
+map of the project: what lives where, the rules that ship/block work,
+and the specialists to call. Memory entries (see `MEMORY.md` in
+`~/.claude/projects/d--OneDrive-CCY-LINKAGE-Projects-RoomLab/memory/`)
+hold the **why** behind each rule and the past incident that earned it.
+This file holds the **what** — read both.
+
+---
+
+## 1. Project identity
+
+- **What**: Web-based acoustic simulator (EASE-inspired). Plain ES6
+  modules, Three.js, no build step, no package.json.
+- **Deploys to**: <https://chongthekuli.github.io/RoomLab/> via GitHub
+  Pages on push to `main`. Repo: `chongthekuli/RoomLab`.
+- **User**: `chongthekuli` (new to GitHub — explain git/Pages steps
+  explicitly, don't assume familiarity).
+- **Embed target**: Google Site iframe.
+
+Cache-bust scheme: every CSS/JS/HTML asset is tagged `?v=NNN` in
+`index.html`. Bump on every visual / behavior change or browsers will
+serve stale modules.
+
+---
+
+## 2. Repo layout (where things live)
+
+```
+index.html              cache-bump strings (?v=NNN)  — bump on every shipped change
+css/{main,theme,print}.css
+
+js/
+  main.js               SPA bootstrap, hash router, header nav
+  app-state.js          state shape + helpers (earHeightFor, expandSources, getSelectedListener)
+  labs/
+    roomlab/main.js     RoomLAB entry — lazy-mounted on #/room
+    speakerlab/         speaker browser/editor
+    surfacelab/         material catalogue
+    devicelab/          rack/amp/PA hardware browser
+  physics/              pure (Node-testable), no DOM
+    rt60.js             Sabine + Eyring, per band
+    spl-calculator.js   computeSPLGrid, computeListenerBreakdown, computeMultiSourceSPL
+    stipa.js            IEC 60268-16 STIPA
+    precision/          ray-traced engine — histograms, derive-metrics
+    diffraction.js, reradiation.js     Tier 1a (ISO 9613-2, Kuttruff)
+    wall-path.js, wall-overlap.js
+    loudspeaker.js, materials.js
+    per-listener-metrics.js     SPL+STI label helper (shared by 2D + print)
+    room-shape.js        geometry — rectangular / polygon / round / custom
+    scene-snapshot.js    immutable snapshot for the precision engine
+    ray-viz.js
+  graphics/             Three.js + 2D SVG renderers
+    scene.js             3D scene, heatmap planes, walk-mode controller wiring
+    room-2d.js           2D SVG viewport (top-down editor + heatmap overlay)
+    heatmap-shader.js    scalar-field shader (replaces canvas-texture per-zone)
+    colour-ramps.js, legend-ticks.js
+    third-person-controller.js, place-room-controller.js
+  ui/                   panels + report — DOM-side, subscribes to events
+    panel-*.js           one per right-rail panel (room, sources, listeners, zones, etc.)
+    print-report.js      full proposal-style PDF report
+    print-plan-svg.js    pure SVG floor plan (Node-testable)
+    print-heatmap.js     pure SVG heatmap page (Node-testable)
+    rail-system.js, glossary.js, welcome-card.js
+  audio/audition.js      walk-mode auralization (in progress — W.1–W.6)
+  io/share-link.js, project-file.js
+  presets/{surau,auditorium,pavilion,index}.js   full scene presets
+  templates/             empty-room starter shells
+  state/                 reducers + event glue
+  shared/                cross-lab utilities
+
+data/                   loudspeaker JSON, material absorption, rack catalogue
+tests/                  ~42 Node test files (no framework — plain assert.*)
+.claude/agents/         13 specialist agent definitions
+```
+
+---
+
+## 3. Core invariants (break these and things go silently wrong)
+
+### State events
+Any function that REPLACES whole state arrays (preset apply, project
+load, template switch) MUST emit `scene:reset`. Every panel subscribes
+to `scene:reset` on mount. Never subscribe a panel to its own granular
+event. See `feedback_state_events.md`.
+
+### Preset plumbing
+When adding a new field to PRESETS, copy it in `applyPresetToState`
+AND assert propagation in `tests/preset.test.mjs`. Otherwise the
+renderer sees `undefined` and bails silently. See
+`feedback_preset_plumbing.md`.
+
+### Y-axis convention
+State coord `+y` = north (toward the front / qibla wall). 2D SVG, 3D
+top-down ortho, print plan SVG, and the heatmap pixel grid all flip Y
+so state `+y` renders UP the page. There is no single fixture
+asserting this across all four surfaces — **track 2 in the regression
+backlog**. Don't add a fifth rendering path without one.
+
+### Cache-bust
+Bump the `?v=NNN` integer in `index.html` on EVERY shipped change to
+CSS/JS/HTML. Verify the deployed file via `curl` before claiming the
+fix is live — push exit code is not enough. See
+`feedback_verify_deploys.md`.
+
+### Pure modules in `js/physics/` and `js/ui/print-*.js`
+These run in Node tests. Never import Three.js or browser-only APIs
+into them. The `per-listener-metrics.js` helper imports physics but is
+itself imported only by browser-side callers — the pure print SVG
+modules accept its OUTPUT (precomputed array), not the helper itself.
+
+### Specialist consultation BEFORE commit
+For any visual-physics work (heatmap, 3D, 2D rendering, audio playback,
+print layout), consult the relevant specialist FIRST:
+- **Graphics / Three.js / camera / shaders** → Viktor (3d-rendering-expert)
+- **Physics correctness / standards** → Dr. Chen (acoustics-engineer)
+- **Panel UX / copy / accessibility** → Maya (ux-designer)
+- **PA system architecture** → Felix (pa-integrator)
+- **Proposal/print design** → Sofia (proposal-designer)
+
+Three regressions shipped in one session (commits f.1/f.2/f.3) when
+this was skipped. See `feedback_visual_physics_workflow.md`.
+
+### Visual-physics is LOCAL-FIRST
+Heatmap, 3D viewport, 2D viewport, walk-mode commits: commit + bump
+cache LOCALLY, **do not push** until the user has hard-refreshed their
+own browser and explicitly said "push it". See
+`feedback_visual_physics_local_first.md`.
+
+### Same-PR regression test
+Every shipped bug fix must land WITH a regression test in the same
+commit. Current compliance is ~12% (Theo audit, May 2026) — actively
+underwater. Hooks proposed in §7 are intended to enforce this.
+
+---
+
+## 4. Specialist routing table
+
+When a task touches one of these, route to the matching agent (see
+`.claude/agents/`):
+
+| Task surface                                       | Agent                       | Persona            |
+|----------------------------------------------------|-----------------------------|--------------------|
+| Cross-system feature, "which agent?", architecture | tech-lead                   | Hannes Brauer      |
+| 3D viewport, Three.js, walk-mode, post-FX, shaders | 3d-rendering-expert         | Viktor Lindqvist   |
+| Acoustics physics correctness, standards (ISO/IEC) | acoustics-engineer          | Dr. Lena Chen      |
+| PA spec, racking, amps, Dante/AES67, compliance    | pa-integrator               | Felix Brandt       |
+| Walk-mode auralization, IR convolution, WebAudio   | audio-engine-specialist     | Sora Akiyama       |
+| Panel UX, copy, accessibility, onboarding          | ux-designer                 | Maya Okafor        |
+| Glossary, README, release notes, user-facing copy  | docs-writer                 | Lin Sato           |
+| Print/PDF proposal art direction                   | proposal-designer           | Sofia Calderón     |
+| Competitor research (EASE/Odeon/Treble/ArrayCalc)  | market-strategist           | Carmen Vasquez     |
+| Test design, fixtures, regression sweeps           | qa-engineer                 | Sam Reyes          |
+| Bug-→-test index, same-PR rule enforcement         | regression-curator          | Theo Halvorsen     |
+| Frame budget, heap growth, long-session leaks      | performance-profiler        | Mehmet Kaya        |
+| GitHub Pages deploy verification, cache-bust       | release-engineer            | Owen Pritchard     |
+| End-to-end code review, leaks, state pitfalls      | fullstack-code-reviewer     | Martina Weiss      |
+| Fresh-eyes UAT, polish gate before "done"          | uat-tester                  | Priya Krishnamurthy|
+
+Known routing ambiguities (now annotated in each agent's `description:`):
+- **Viktor ↔ Maya** on walk-mode → Viktor owns rendering/camera, Maya owns UI feel
+- **Lin ↔ Maya** on tooltips → Lin writes the words, Maya approves brevity
+- **Martina ↔ Viktor** on Three.js bugs → Martina first (state/leak/order), Viktor validates visual outcome
+- **Sora ↔ Dr. Chen** on auralization → Dr. Chen owns the physics that produces the IR; Sora owns everything from the IR onward (WebAudio graph, gain mapping, ConvolverNode lifecycle).
+- **Mehmet ↔ Viktor** on perf → Viktor optimises for ms-per-pretty-pixel; Mehmet optimises for ms-per-frame and bytes-per-hour. Frame-budget regression goes to Viktor; heap-growth or long-session bug goes to Mehmet.
+
+Still-open role gap: dedicated accessibility lead (WCAG / screen-reader / motor-only). Lower priority — Maya covers the basics for now.
+
+### Single-domain vs cross-domain routing
+
+(Added 2026-05-18 per Hannes's self-audit — he was adding latency on single-specialist tasks.)
+
+- **Single-domain (1 subsystem)**: call the specialist DIRECTLY. Don't route through Hannes. Examples: glossary tweak → Lin; shader tone-mapping → Viktor; Sabine equation edit → Dr. Chen; deploy verification → Owen.
+- **Cross-domain (2+ subsystems)**: call Hannes (tech-lead). He decomposes and routes. Examples: walk-mode auralization (graphics + physics + audio + UI); the print report (physics + UI + design); preset/template restructure (state + UI + tests + docs).
+- **Specialist-vs-specialist disagreement** (the 5 ambiguities above): call Hannes for the tiebreak. He synthesizes the trade-off and decides. If the call is subjective (UX feel, aesthetic), he escalates to the user. If it's a physics or safety claim, the standards specialist has the final say — Dr. Chen for acoustics, Owen for deploys.
+
+### Two seats on probation (3-week deliverable due 2026-06-08)
+
+Per Hannes's 2026-05-18 org audit, two seats have not produced load-bearing commits and need a concrete artefact or they fold:
+
+- **pa-integrator (Felix)** — deliverable: a printable BoM + heat-budget page for the surau exterior speaker fitout. If missed, fold into Dr. Chen as a "system specifier" sub-hat.
+- **proposal-designer (Sofia)** — deliverable: `PROPOSAL_DESIGN.md` delta spec on the current `js/ui/print-report.js`, naming typographic hierarchy fixes + one accent colour + cover composition fixes. If missed, fold into Maya as an art-direction sub-hat.
+
+Sora (audio) and Mehmet (perf) are also load-bearing-pending but justified by the walk-mode roadmap — expect zero output from them until W.2 work starts. Not on probation.
+
+---
+
+## 5. Workflow
+
+### Before code
+1. If the task spans 2+ subsystems → call `tech-lead` (Hannes) first.
+2. If the task touches physics / graphics / UX in a non-trivial way →
+   consult that specialist BEFORE editing. State the proposal back to
+   them; only then implement.
+3. Read the relevant memory entries (`feedback_*.md`, `project_*.md`).
+
+### While coding
+- **Pure modules stay pure** — physics + print-SVG never import Three.js.
+- **Hypothesis BEFORE fix** — when two render paths diverge on the same
+  scene, diff scene-level state (`scene.fog`, exposure, camera bounds,
+  background) FIRST. Six wasted iterations on geometry knobs once
+  because nobody checked `scene.fog`. See `feedback_render_path_diff_first.md`.
+- **Style-match work** — audit the rendered DOM + full cascade + structure
+  BEFORE patching one CSS property at a time. The May 2026 prose-tier
+  match burned 7 rounds otherwise. See `feedback_style_match_audit_first.md`.
+
+### Before commit
+1. Run the relevant tests (`node tests/<name>.test.mjs`).
+2. Bump the cache version in `index.html` (`?v=NNN` → `NNN+1`).
+3. Visual-physics work? Get the user to hard-refresh and accept BEFORE
+   pushing. Commit locally, sit on it.
+4. Bug fix? Add a regression test in the SAME commit (`feedback_*` says
+   what to assert). If no test, name it as a tripwire gap.
+
+### After push
+1. Poll `https://chongthekuli.github.io/RoomLab/index.html` until the
+   new `?v=NNN` is served. Don't trust `git push` exit code.
+2. UAT gate — for any user-facing change, walk through the feature
+   yourself (or hand off to Priya). Technical correctness alone is
+   insufficient. See `feedback_uat_gate.md`.
+
+---
+
+## 6. Top known coverage gaps (Theo, May 2026)
+
+Same-PR regression test compliance: **~12%**. Priority backlog:
+
+1. **Custom-draw polygon flow** — 10 iterative fixes (`3d86a6a` →
+   `90248db`), zero tests. Needs a state-machine test of
+   `js/ui/custom-draw.js`.
+2. **2D ↔ 3D ↔ print Y-axis convention** — 4 commits chased the same
+   orientation bug across surfaces. Needs ONE shared fixture asserting
+   all four projections.
+3. **Heatmap rendering pipeline** — N-S row flip, surau split-on-rotation,
+   pipeline-order, single-annulus podium all shipped behavior-untested.
+   Needs synthetic 2-source scene → Float32 SPL buffer monotonicity test.
+4. **Preset/template confirm-dialog silent-loss guard** (`6883d42`) —
+   data-safety feature with no test; refactor would silently lose work.
+5. **Triangulate-scene geometry contract** — wall openings, triangle
+   winding, wall-id tags. Outputs are entirely untested.
+
+Memories that are **GUARDED** (don't break in a refactor):
+`feedback_directivity_aim_flip`, `feedback_sound_power_needs_DI`,
+`feedback_stipa_dr_aware`, `feedback_stipa_impl`,
+`feedback_line_array_rigging_pivot`, `feedback_preset_plumbing`,
+`feedback_state_events` (data swap), `feedback_physics_needs_audit`
+(surau only).
+
+Master ledger of every shipped bug + its guarding test: `docs/REGRESSION_INDEX.md`
+(owned by Theo / regression-curator).
+
+### Other coverage holes (Hannes 2026-05-18 audit)
+
+These are roles / surfaces with no clear owner, not test gaps:
+
+1. **WCAG / accessibility lead** — Maya covers keyboard reachability + contrast basics, but no one owns screen-reader semantics, motor-only nav, or colour-blind palette validation. Heatmap ramps have not been audited for deuteranopia.
+2. **HRTF / DOA pipeline** — between Dr. Chen's physics (produces the IR) and Sora's WebAudio (consumes the IR from convolver onward), the per-DOA energy decomposition has no owner. Becomes load-bearing when walk-mode auralization adds head-tracked binaural.
+3. **CI for test suite** — Sam writes tests, Theo audits coverage, but no GitHub Action invokes `node tests/*.test.mjs` on push. The 12% same-PR regression-test compliance number won't improve without a mechanical signal that the suite ran. Candidate owner: Owen.
+4. **Vendor outreach** for ROADMAP item #11 (open speaker spec evangelism) — Carmen owns strategy, Lin owns documentation; no one owns the actual conversations with Amperes/Bose/Adamson.
+
+---
+
+## 7. Hooks (live — `.claude/settings.json` + `.claude/hooks/`)
+
+Shipped 2026-05-18. Activate via `/hooks` once or restart Claude Code if they aren't firing yet.
+
+- **`cache-bump-guard.js`** — PreToolUse on `git commit *`. Warns (non-blocking) if `js/`, `css/`, or `index.html` are staged but `?v=NNN` integer is unchanged vs `origin/main`.
+- **`regression-test-reminder.js`** — PreToolUse on `git commit *`. Reminds (non-blocking) if commit message contains `fix|regression|revert|broken|hotfix` but no `tests/*` file is staged.
+- **`visual-physics-push-guard.js`** — PreToolUse on `git push *`. Asks for confirmation (`permissionDecision: "ask"`) when HEAD touches `js/graphics/`, `js/physics/precision/`, `js/audio/`, `js/ui/print-heatmap.js`, `js/ui/print-plan-svg.js`, or heatmap-shader code. Enforces `feedback_visual_physics_local_first` mechanically.
+- **`stop-cache-bump-nudge.js`** — Stop event. One-line nudge if uncommitted js/css/html exists with unchanged `?v=`.
+- **`deploy-poll.js`** — PostToolUse on `git push origin main`, async. Polls live URL for 30 s until `?v=NNN` matches local; reports result.
+
+To disable any one, edit `.claude/settings.json` or use `/hooks`.
+
+---
+
+## 8. Quick commands
+
+```bash
+# run a single test
+node tests/<name>.test.mjs
+
+# verify live deploy
+curl -s "https://chongthekuli.github.io/RoomLab/index.html?cb=$RANDOM" | grep "v="
+
+# find references to a symbol
+# (use the Grep tool, not raw rg, in Claude Code)
+
+# the project has no build step, no package.json, no node_modules
+# tests use plain node + built-in assert
+```
+
+---
+
+## 9. Memory pointers (the why behind the rules)
+
+See `MEMORY.md` under
+`C:\Users\chchy\.claude\projects\d--OneDrive-CCY-LINKAGE-Projects-RoomLab\memory\`
+for the curated index. Categories:
+
+- **user_*** — who the user is, how to collaborate
+- **project_*** — initiatives, audits, decisions in flight
+- **reference_*** — external pointers (GitHub repo, deploy URL)
+- **feedback_*** — past failures + the rule that prevents recurrence
+
+Always check the `feedback_*` set before tackling rendering, presets,
+panels, or physics — the past bug catalog is mostly there.
