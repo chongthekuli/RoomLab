@@ -60,49 +60,64 @@ ok(minarets.length === 1, `extractOutdoorObstacles: 1 minaret (got ${minarets.le
 ok(arcadeCols.length === 22, `extractOutdoorObstacles: 22 arcade columns — 6 per side × 3 sides + 4 corner posts (got ${arcadeCols.length})`);
 ok(porticoWalls.length === 2, `extractOutdoorObstacles: 2 portico side walls (got ${porticoWalls.length})`);
 
-// ---- Geometry test: minaret centred at NE corner (19.2, 18.9). ----
+// ---- Geometry test: minaret centred at the preset's configured corner. ----
 const m = minarets[0];
-closeWithin(m.cx, 19.2, 1e-3, 'minaret centre x');
-closeWithin(m.cy, 18.9, 1e-3, 'minaret centre y');
+const mn = state.room.surauStructure.minaret;
+const W = state.room.width_m, D = state.room.depth_m;
+const clearance = 0.6 + mn.base_size_m / 2;
+const cornerOffsets = {
+  SW: { x: -clearance,    y: -clearance    },
+  SE: { x: W + clearance, y: -clearance    },
+  NW: { x: -clearance,    y: D + clearance },
+  NE: { x: W + clearance, y: D + clearance },
+};
+const expectedCo = cornerOffsets[mn.corner];
+closeWithin(m.cx, expectedCo.x, 1e-3, `minaret centre x (corner=${mn.corner})`);
+closeWithin(m.cy, expectedCo.y, 1e-3, `minaret centre y (corner=${mn.corner})`);
 ok(m.type === 'column', 'minaret is type=column');
-closeWithin(m.top_z, 7.65, 1e-3, 'minaret top_z = shaftH');
+closeWithin(m.top_z, mn.height_m * 0.90, 1e-3, 'minaret top_z = shaftH');
 
-// ---- Crossing test: TRUE minaret shadow from S9. ----
-// User's reported probes (20.93, 19.81 right; -2.54, 19.71 left) are
-// NOT actually behind the minaret from S9 — the line from S9 at
-// (19.5, 8.85) to (20.93, 19.81) passes EAST of the minaret footprint
-// (x ∈ [18.6, 19.8]) because the probe is east of the minaret. To test
-// the shadowing physics, use a probe ALONG the S9→minaret-centre line
-// extended past the minaret: ~(19.1, 21.9).
-const S9 = { x: 19.5, y: 8.85, z: 4.20 };
-const trueShadowProbe = { x: 19.1, y: 21.9, z: 1.2 };  // in S9's minaret shadow
-const userRightProbe  = { x: 20.93, y: 19.81, z: 1.2 }; // east of the minaret, NOT in shadow
-const userLeftProbe   = { x: -2.54, y: 19.71, z: 1.2 }; // NW clear air
+// ---- Shadow geometry depends on which corner the minaret is at. Pick
+// the arcade speaker on the same wall as the minaret and a shadow
+// probe extending past the minaret along that source→minaret line.
+// (Sources: S8 west arcade at (-1.5, D/2, 4.2), S9 east arcade at
+// (W+1.5, D/2, 4.2). NW/SW minaret → S8; NE/SE → S9.)
+const usesWestSpeaker = mn.corner === 'NW' || mn.corner === 'SW';
+const speaker = usesWestSpeaker
+  ? { x: -1.5,    y: D / 2, z: 4.20, label: 'S8' }
+  : { x: W + 1.5, y: D / 2, z: 4.20, label: 'S9' };
+// Extend the speaker→minaret-centre line by ~3 m past the minaret.
+const vx = expectedCo.x - speaker.x;
+const vy = expectedCo.y - speaker.y;
+const vlen = Math.hypot(vx, vy);
+const trueShadowProbe = {
+  x: expectedCo.x + (vx / vlen) * 3.0,
+  y: expectedCo.y + (vy / vlen) * 3.0,
+  z: 1.2,
+};
 
-const crossedShadow = obstaclesCrossedByPath(S9, trueShadowProbe, obstacles);
+const crossedShadow = obstaclesCrossedByPath(speaker, trueShadowProbe, obstacles);
 ok(crossedShadow.some(o => o.id === 'surau_minaret'),
-   `S9 → (19.1, 21.9) shadow probe crosses minaret (crossed: ${crossedShadow.map(o => o.id).join(', ') || 'NONE'})`);
+   `${speaker.label} → shadow probe (${trueShadowProbe.x.toFixed(2)}, ${trueShadowProbe.y.toFixed(2)}) crosses minaret (crossed: ${crossedShadow.map(o => o.id).join(', ') || 'NONE'})`);
 
-// And the user's actual right probe should NOT cross — it sits east of the column.
-const crossedUserRight = obstaclesCrossedByPath(S9, userRightProbe, obstacles);
-ok(!crossedUserRight.some(o => o.id === 'surau_minaret'),
-   `S9 → user's right probe at (20.93, 19.81) does NOT cross minaret (it's east of the column, not in shadow)`);
+// Control probe on the OPPOSITE wall (definitely not in this minaret's shadow).
+const oppositeSpeaker = usesWestSpeaker
+  ? { x: W + 1.5, y: D / 2, z: 4.20 }
+  : { x: -1.5,    y: D / 2, z: 4.20 };
+const oppositeShadowZone = { x: -expectedCo.x + (usesWestSpeaker ? 2 * W : 0), y: expectedCo.y, z: 1.2 };
+const crossedOpposite = obstaclesCrossedByPath(oppositeSpeaker, oppositeShadowZone, obstacles);
+ok(!crossedOpposite.some(o => o.id === 'surau_minaret'),
+   `opposite-wall speaker → far-side probe does NOT cross this minaret (clear air control)`);
 
-// Left probe — clear air control.
-const S8 = { x: -1.5, y: 8.85, z: 4.20 };
-const crossedLeft = obstaclesCrossedByPath(S8, userLeftProbe, obstacles);
-ok(!crossedLeft.some(o => o.id === 'surau_minaret'),
-   `S8 → user's left probe does NOT cross the minaret (clear air control)`);
-
-// ---- Maekawa magnitude: 1 kHz IL for S9 → TRUE shadow probe. ----
-const il1k = outdoorObstacleLossDb({ src: S9, listener: trueShadowProbe, freq_hz: 1000, obstacles, materials });
+// ---- Maekawa magnitude: 1 kHz IL at TRUE shadow probe. ----
+const il1k = outdoorObstacleLossDb({ src: speaker, listener: trueShadowProbe, freq_hz: 1000, obstacles, materials });
 // Dr. Chen expected range for a 1.2 m column at this geometry: 3–8 dB at 1 kHz
 // (floor 3 to allow narrow-shadow cases; cap 8 per Pierce cascade).
 withinRange(il1k, 3, 8, 'IL @ 1 kHz at TRUE minaret shadow probe');
 
 // ---- Frequency scaling: 4 kHz should produce MORE shadow than 1 kHz, 250 Hz LESS. ----
-const il4k = outdoorObstacleLossDb({ src: S9, listener: trueShadowProbe, freq_hz: 4000, obstacles, materials });
-const il250 = outdoorObstacleLossDb({ src: S9, listener: trueShadowProbe, freq_hz: 250, obstacles, materials });
+const il4k = outdoorObstacleLossDb({ src: speaker, listener: trueShadowProbe, freq_hz: 4000, obstacles, materials });
+const il250 = outdoorObstacleLossDb({ src: speaker, listener: trueShadowProbe, freq_hz: 250, obstacles, materials });
 ok(il4k > il1k - 0.1, `IL grows with freq: 4 kHz (${il4k.toFixed(1)} dB) ≥ 1 kHz (${il1k.toFixed(1)} dB)`);
 ok(il250 < il1k + 0.1, `IL falls with freq: 250 Hz (${il250.toFixed(1)} dB) ≤ 1 kHz (${il1k.toFixed(1)} dB)`);
 
@@ -138,6 +153,9 @@ const splShadowWithout = computeMultiSourceSPL({
   freq_hz: 1000, room: roomNoObstacles, materials,
   airAbsorption: true, coherent: false, roomConstantR: 0,
 });
+// Suppress unused-variable warning for vars left over from earlier
+// hard-coded probe positions (kept above for documentation).
+void usesWestSpeaker;
 const delta = splShadowWithout - splShadowWith;
 console.log(`(integration: shadow probe with obstacles ${splShadowWith.toFixed(2)} dB, without ${splShadowWithout.toFixed(2)} dB, delta ${delta.toFixed(2)} dB)`);
 withinRange(delta, 1.5, 8, 'minaret IL isolates to 1.5–8 dB at shadow probe (1 kHz)');
