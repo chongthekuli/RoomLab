@@ -3509,7 +3509,35 @@ function _tickCameraFocus(ts) {
   const e = t * t * (3 - 2 * t);  // smoothstep ease
   controls.target.lerpVectors(_focusTween.startPos, _focusTween.targetPos, e);
   camera.position.lerpVectors(_focusTween.startCam, _focusTween.targetCam, e);
-  if (t >= 1) _focusTween = null;
+  if (t >= 1) {
+    _focusTween = null;
+    // [DEBUG 2026-05-18] X-axis mismatch diagnostic. Logs once at the
+    // end of every camera-preset tween. Reads camera.matrixWorld and
+    // projects a known state-coord point (state.x=10, state.y=0, ear=1.2)
+    // to NDC so we can see WHICH SIDE of the screen the +X direction lands.
+    // Remove after the X-axis bug is found. Enable any time without
+    // recompile by setting window.__roomlabDebugCam = true in the console.
+    if (typeof window !== 'undefined' && window.__roomlabDebugCam) {
+      try {
+        camera.updateMatrixWorld(true);
+        const probePlusX = new THREE.Vector3(10, 1.2, state.room?.depth_m / 2 || 5);
+        const ndc = probePlusX.clone().project(camera);
+        console.group('[roomlab cam-debug]');
+        console.log('camera.position', camera.position.toArray().map(v => +v.toFixed(3)));
+        console.log('controls.target', controls.target.toArray().map(v => +v.toFixed(3)));
+        console.log('camera.up      ', camera.up.toArray().map(v => +v.toFixed(3)));
+        console.log('camera.matrixWorld', camera.matrixWorld.elements.map(v => +v.toFixed(3)));
+        console.log('camera-local X axis in world (col 0):',
+          [camera.matrixWorld.elements[0], camera.matrixWorld.elements[1], camera.matrixWorld.elements[2]].map(v => +v.toFixed(3)));
+        console.log('camera-local Y axis in world (col 1):',
+          [camera.matrixWorld.elements[4], camera.matrixWorld.elements[5], camera.matrixWorld.elements[6]].map(v => +v.toFixed(3)));
+        console.log('probe state(x=10) → NDC:', ndc.toArray().map(v => +v.toFixed(3)),
+          ndc.x > 0 ? '→ screen-RIGHT' : '→ screen-LEFT');
+        console.log('(if NDC.x for state x=10 is negative, the X axis is flipped vs 2D)');
+        console.groupEnd();
+      } catch (e) { /* probe should never throw */ }
+    }
+  }
 }
 
 // ----- AutoCAD-style preset views ----------------------------------------
