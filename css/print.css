@@ -538,6 +538,19 @@ body.is-pdf-export .vp-tabs {
      unlike the SVG-embedded version that was here before. Renders as a
      small dark kite + "N" letter at the top-right of every heatmap +
      plan stage. Same arrow appears via the cover-hero variant below. */
+  /* North-arrow + "N" overlay on plan / heatmap stages.
+     2026-05-19: SUPPRESSED on the cover page (.pr-page-cover) — the
+     cover hero is a 3D iso render, where the north convention reads
+     differently than a top-down plan. User-reported the arrow looked
+     out of place at the cover's top-right. The arrow still renders on
+     pages 2+ (heatmap, plan, strip-cell) where it's anchored to a
+     proper top-down view. */
+  #print-report .pr-page-cover .pr-cover-hero-plan::after,
+  #print-report .pr-page-cover .pr-cover-hero-inset::after,
+  #print-report .pr-page-cover .pr-plan-svg-wrap::after,
+  #print-report .pr-page-cover .pr-heatmap-stage::after,
+  #print-report .pr-page-cover .pr-strip-cell-stage::after { content: none !important; background: none !important; }
+
   #print-report .pr-heatmap-stage::after,
   #print-report .pr-cover-hero-plan::after,
   #print-report .pr-cover-hero-inset::after,
