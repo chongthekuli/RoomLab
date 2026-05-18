@@ -133,6 +133,12 @@ export class ThirdPersonController {
   }
 
   setPosition(v) {
+    // Convention: `this.pos` stores the avatar's WORLD-frame position
+    // (post-mirror — i.e. the position where the avatar should VISUALLY
+    // appear). The character mesh lives inside an `avatarMirrorCancel`
+    // group whose scale.x = -1 cancels the scene's scale.x = -1, putting
+    // the avatar in net identity frame. So character.position.x = v.x
+    // directly puts the avatar at world.x = v.x. No negation needed.
     this.pos.copy(v);
     this.character.position.copy(v);
     this.currentOffset.copy(v);
@@ -142,6 +148,8 @@ export class ThirdPersonController {
     this.yaw = y;
     this.targetYaw = y;
     this.cameraYaw = y;               // start with camera looking the same way
+    // Avatar is in identity frame (inside avatarMirrorCancel), so yaw
+    // rotates around world +Y directly. No negation needed.
     this.character.rotation.y = y;
   }
 
@@ -207,6 +215,10 @@ export class ThirdPersonController {
     const dy = e.clientY - this._mouseLastY;
     this._mouseLastX = e.clientX;
     this._mouseLastY = e.clientY;
+    // Original direction restored (v=504 had inverted this to compensate
+    // for the scene mirror, but with the avatarMirrorCancel group the
+    // avatar is in identity frame; the camera math runs in world frame
+    // and the mouse-drag intuition matches the pre-mirror behaviour).
     this.cameraYaw   -= dx * 0.006;
     this.cameraPitch -= dy * 0.0045;
     this.cameraPitch = Math.max(this.pitchMin, Math.min(this.pitchMax, this.cameraPitch));
@@ -240,6 +252,7 @@ export class ThirdPersonController {
     const dy = t.clientY - this._mouseLastY;
     this._mouseLastX = t.clientX;
     this._mouseLastY = t.clientY;
+    // Original direction restored — see _onMouseMove comment.
     this.cameraYaw   -= dx * 0.006;
     this.cameraPitch -= dy * 0.0045;
     this.cameraPitch = Math.max(this.pitchMin, Math.min(this.pitchMax, this.cameraPitch));
@@ -429,6 +442,9 @@ export class ThirdPersonController {
     const yawStep = Math.min(1, dt * this.rotationSlerp);
     this.yaw += yawDelta * yawStep;
 
+    // Avatar lives in `avatarMirrorCancel` group (net identity frame),
+    // so character.position = this.pos directly puts the avatar at world
+    // = this.pos. Y-rotation also direct — no mirror compensation needed.
     this.character.position.copy(this.pos);
     this.character.rotation.y = this.yaw;
 

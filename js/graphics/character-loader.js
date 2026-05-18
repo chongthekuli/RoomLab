@@ -40,10 +40,18 @@ export async function loadCharacterRig(url, { targetHeight = TARGET_HEIGHT_M } =
     if (obj.isMesh || obj.isSkinnedMesh) {
       obj.castShadow = true;
       obj.receiveShadow = true;
-      // Skinned meshes often fail default frustum tests when the skeleton
-      // moves vertices outside the bind-pose AABB (three.js docs
-      // recommendation). Disable so the character never pops out.
-      if (obj.isSkinnedMesh) obj.frustumCulled = false;
+      // Disable frustum culling on ALL avatar meshes (not just
+      // SkinnedMesh). Reasons:
+      //   1) Skinned meshes often fail default frustum tests when the
+      //      skeleton moves vertices outside the bind-pose AABB.
+      //   2) scene.scale.x = -1 (the global X mirror in scene.js
+      //      initScene) gives every rig mesh a negative-determinant
+      //      matrixWorld. Three.js' bounding-sphere math through that
+      //      matrix can place the sphere centre outside the camera
+      //      frustum even when the mesh is in view, silently hiding
+      //      regular Mesh children of the rig.
+      // One character = negligible perf cost for the safety.
+      obj.frustumCulled = false;
     }
   });
 

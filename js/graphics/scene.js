@@ -81,6 +81,24 @@ let probeActive = false;
 let walkCamera, avatar, walkHint, walkSplOverlay;
 let _stipaLast = null, _stipaLastTs = 0;   // cached STIPA result (4 Hz refresh)
 let avatarParts = null;       // { armL, armR, legL, legR, body }
+// Mirror-cancel parent for the walk-mode avatar. scene.scale.x = -1
+// (the global X mirror that makes 3D match 2D's east-right convention)
+// breaks SkinnedMesh skinning because GLTFLoader caches bindMatrix from
+// matrixWorld at GLB load time — when the rig is still detached and
+// un-mirrored — and the vertex shader then mixes a mirrored boneMatrix
+// with an un-mirrored bindMatrixInverse, computing vertices far from
+// where the bounding sphere says they are. v=507 tried to fix this by
+// re-binding after scene.add, but the broken-skinning symptom persisted
+// (vertices stretched into paper-airplane shapes — user-reported).
+//
+// v=508 solution: the avatar lives in this Group, which has scale.x =
+// -1. Combined with scene.scale.x = -1 the avatar's net world scale is
+// (+1, +1, +1) — identity frame. SkinnedMesh skinning works without
+// any bindMatrix gymnastics, and the avatar's anatomical L/R is correct
+// (not visually mirrored). The room stays mirrored (it's still a direct
+// child of scene). Both render into the same world space — avatar walks
+// through the mirrored room correctly.
+let avatarMirrorCancel = null;
 let activeCamera = null;
 let walkMode = false;
 let walkPhase = 0;            // stride phase for leg/arm swing animation
@@ -483,15 +501,23 @@ export async function mount3DViewport({ materials }) {
 
 function initScene() {
   scene = new THREE.Scene();
-  // 2026-05-18 — KNOWN ISSUE: 3D Top preset shows state +y at screen-bottom
-  // while 2D shows state +y at screen-top. This is a fundamental math
-  // constraint (right-handed camera looking straight down can't have both
-  // axes match the 2D math convention simultaneously). Multiple iterations
-  // attempted to fix via camera position, target offsets, camera.up
-  // overrides, and scene-level scale.x = -1 / scale.z = -1 — all either
-  // didn't help or broke downstream code paths (camera-fit AABB, walk-mode
-  // spawn, raycast / drag handlers). Accepted as a cosmetic limitation;
-  // documented in CLAUDE.md §6.
+  // 2026-05-18 — Scene-level X mirror so 3D matches 2D's east-right /
+  // north-up convention across EVERY view (Top, Iso, Front, etc.).
+  // Without this mirror, 3D consistently renders state +x at screen-LEFT
+  // (the user empirically verified: minaret at state -x, +y showed at
+  // top-RIGHT in 3D vs top-LEFT in 2D, even though the math says state
+  // +x should land at screen-right). v=497 attempted this same fix but
+  // shipped without the required downstream coordinate-frame conversions
+  // (camera presets / walk-mode raycasts / click-to-place) and broke
+  // those subsystems; v=504 (this commit) re-applies the mirror together
+  // with every conversion site negated. Every site that converts state.x
+  // → world.x for camera position / target / avatar spawn now writes
+  // `-state.x`, and every site that converts world.x ← raycast hit back
+  // to state.x_m writes `-hit.x`. See CLAUDE.md §6 for the full list.
+  // Three.js' WebGLRenderer auto-detects the negative-determinant world
+  // matrix and reverses face-winding internally — no material.side
+  // change needed.
+  scene.scale.x = -1;
   // Deep slate background with a subtle vertical gradient look (dark at top
   // fading to near-black at the horizon) via a shader-free approach: solid
   // base color, tone-mapping handles perceptual brightness in the final pass.
@@ -1293,14 +1319,18 @@ function onProbeMouseMove(e) {
     probeTooltip.classList.add('hidden');
     return;
   }
-  // Marker at hit point.
-  probeMarker.position.copy(hit.point);
+  // Marker at hit point. probeMarker is a child of scene (inherits the
+  // scale.x = -1 mirror), so setting local.x = -world.x puts the marker
+  // at the SAME visible spot the user clicked.
+  probeMarker.position.set(-hit.point.x, hit.point.y, hit.point.z);
   probeMarker.visible = true;
 
   // Compute SPL at the hit point, using current physics options.
   // state-frame listener position: x→x, y→world-Z, z→world-Y (plus 1.2 m ear offset).
+  // X negated — hit.point.x is world coords from the raycaster; state.x =
+  // -world.x (scene.scale.x = -1). SPL math runs in state-frame.
   const listenerPos = {
-    x: hit.point.x,
+    x: -hit.point.x,
     y: hit.point.z,
     z: hit.point.y + 1.2,
   };
@@ -1477,10 +1507,17 @@ function buildSuitedManAvatar() {
   const SHOE      = 0x050505;
   const HAIR      = 0x120a06;
 
+  // side: DoubleSide is required because scene.scale.x = -1 (initScene
+  // X mirror) gives the avatar's matrixWorld a negative determinant.
+  // Three.js DOES auto-flip frontFace for that case, but the auto-flip
+  // is unreliable across nested mesh hierarchies / SkinnedMesh / shadow
+  // passes — DoubleSide is the robust workaround. Cost: a few extra
+  // pixel writes per frame. Acceptable for a single character.
   const mat = (color, opts = {}) => new THREE.MeshStandardMaterial({
     color,
     roughness: opts.r ?? 0.78,
     metalness: opts.m ?? 0.04,
+    side: THREE.DoubleSide,
   });
   const suitMat = mat(SUIT, { r: 0.62, m: 0.06 });
   const suitHiMat = mat(SUIT_HI, { r: 0.55, m: 0.08 });
@@ -1499,6 +1536,14 @@ function buildSuitedManAvatar() {
     if (rot) x.rotation.set(rot[0] ?? 0, rot[1] ?? 0, rot[2] ?? 0);
     x.castShadow = true;
     x.receiveShadow = true;
+    // Disable frustum culling — scene.scale.x = -1 (initScene X mirror)
+    // gives the avatar parent a negative-determinant matrixWorld. Three.js
+    // computes child mesh bounding-sphere centres via that matrix; the
+    // composite radius scaling can produce a sphere centred OUTSIDE the
+    // camera frustum even when the mesh is in view, silently hiding it.
+    // Disabling frustum culling on this single character (one of many
+    // meshes in the scene) is the safest fix and has negligible perf cost.
+    x.frustumCulled = false;
     return x;
   };
 
@@ -1731,7 +1776,15 @@ function initWalkthrough() {
   walkCamera = new THREE.PerspectiveCamera(55, w / h, 0.05, 300);
 
   avatar = buildSuitedManAvatar();
-  scene.add(avatar);
+  // Lazy-create the mirror-cancel parent group on first walkthrough init.
+  // See top-of-file comment on avatarMirrorCancel for why this exists.
+  if (!avatarMirrorCancel) {
+    avatarMirrorCancel = new THREE.Group();
+    avatarMirrorCancel.scale.x = -1;
+    avatarMirrorCancel.userData.tag = 'avatar_mirror_cancel';
+    scene.add(avatarMirrorCancel);
+  }
+  avatarMirrorCancel.add(avatar);
 
   // Control-hint overlay (hidden until walk mode is active).
   walkHint = document.createElement('div');
@@ -1802,8 +1855,11 @@ function initWalkthrough() {
       // Procedural is hidden during load (when walk mode is active);
       // reveal the rig if walk mode is currently on, leave hidden otherwise.
       rig.root.visible = walkMode;
-      scene.remove(avatar);
-      scene.add(rig.root);
+      // Avatar lives inside the mirror-cancel Group (net identity frame),
+      // NOT directly in scene — so SkinnedMesh skinning works normally.
+      // See avatarMirrorCancel top-of-file comment for why.
+      avatarMirrorCancel.remove(avatar);
+      avatarMirrorCancel.add(rig.root);
       tpController.character = rig.root;
       shadowsNeedRefresh = true;
       riggedAvatarLoading = false;
@@ -1848,7 +1904,12 @@ function placeAvatarAtDefault() {
   const cy = (room.depth_m ?? 20) / 2;
   const gz = terrainHeightAt(cx, cy, room);
   // State frame (x=width, y=depth, z=height) → Three.js (x, z, y).
-  tpController.setPosition(new THREE.Vector3(cx, gz + 0.05, cy));
+  // X negated — scene.scale.x = -1 (initScene). The avatar mesh is a
+  // child of `scene`, so mesh-local position.x = -state.x lands the
+  // avatar at world.x = state.x (visible at room centre). tpController's
+  // raycasts in third-person-controller.js negate this.pos.x back to
+  // world coords for hit-testing against the mirrored geometry.
+  tpController.setPosition(new THREE.Vector3(-cx, gz + 0.05, cy));
   tpController.setYaw(0);
   tpController.vy = 0;
   walkPhase = 0;
@@ -2166,7 +2227,9 @@ function applyAvatarAnimation(ctx) {
 // Samples the current multi-source SPL at the avatar's ear and updates the
 // top-right HTML overlay with the dB value, ear height, pose, and XYZ.
 function updateWalkSplReadout(ctx, eyeHeight) {
-  const px = tpController.pos.x;
+  // X negated — tpController.pos is mesh-local; state.x = -pos.x (see
+  // scene.scale.x = -1 in initScene). SPL math expects state-frame coords.
+  const px = -tpController.pos.x;
   const py = tpController.pos.z;
   const pz = tpController.pos.y + eyeHeight;
   const listenerPos = { x: px, y: py, z: pz };
@@ -3458,8 +3521,11 @@ export function frameCameraToRoom() {
   const cx = w / 2;
   const cz = d / 2;
   const d3 = Math.max(w, h, d);
-  camera.position.set(cx + d3 * 0.9, h + d3 * 0.5, d + d3 * 0.4);
-  controls.target.set(cx, h * 0.4, cz);
+  // X negated — scene.scale.x = -1 mirrors meshes; state.x lands at
+  // world.x = -state.x. Camera position/target are in WORLD coords, so
+  // they target the mirrored room location.
+  camera.position.set(-(cx + d3 * 0.9), h + d3 * 0.5, d + d3 * 0.4);
+  controls.target.set(-cx, h * 0.4, cz);
   controls.update();
 }
 
@@ -3475,8 +3541,10 @@ export function focusCameraOnSelectedListener() {
   const lst = getSelectedListener();
   if (!lst) return;
   // State coords (x=width, y=depth, z=elevation) → Three.js (x, z=elevation+ear, y=depth).
+  // tx negated — scene.scale.x = -1 (initScene); the listener mesh at state.x
+  // renders at world.x = -state.x, so the camera (world coords) targets -state.x.
   const earHeight = 1.2;     // typical seated ear, matches receiver sphere centre
-  const tx = lst.position.x;
+  const tx = -lst.position.x;
   const ty = (lst.elevation_m ?? 0) + earHeight;
   const tz = lst.position.y;
   // Pull the camera toward a sensible orbiting offset. Keep current
@@ -3606,11 +3674,13 @@ function _cameraPresetTransform(name) {
       // high enough that w AND d fit, then put target at floor centre
       // with a tiny offset so OrbitControls' polar axis doesn't sing
       // gimbal lock when the camera is exactly above target.
+      // X negated — scene.scale.x = -1 (initScene). Room renders at
+      // world.x = -state.x; camera target/position are in WORLD coords.
       const dist = _fitDistance(safe(w), safe(d), 1.20);
       const camY = dist + h;
       return {
-        targetPos: new THREE.Vector3(cx, 0, cz - 0.001),
-        targetCam: new THREE.Vector3(cx, camY, cz),
+        targetPos: new THREE.Vector3(-cx, 0, cz - 0.001),
+        targetCam: new THREE.Vector3(-cx, camY, cz),
       };
     }
     case 'front': {
@@ -3618,33 +3688,42 @@ function _cameraPresetTransform(name) {
       // sits outside that wall looking toward +Z. extentX = w, extentY = h.
       const dist = _fitDistance(safe(w), safe(h), 1.20);
       return {
-        targetPos: new THREE.Vector3(cx, h * 0.5, cz),
-        targetCam: new THREE.Vector3(cx, h * 0.5, minZ - dist),
+        targetPos: new THREE.Vector3(-cx, h * 0.5, cz),
+        targetCam: new THREE.Vector3(-cx, h * 0.5, minZ - dist),
       };
     }
     case 'back': {
       // Viewed from the BACK wall (state.y = maxY) looking toward -Z.
       const dist = _fitDistance(safe(w), safe(h), 1.20);
       return {
-        targetPos: new THREE.Vector3(cx, h * 0.5, cz),
-        targetCam: new THREE.Vector3(cx, h * 0.5, maxZ + dist),
+        targetPos: new THREE.Vector3(-cx, h * 0.5, cz),
+        targetCam: new THREE.Vector3(-cx, h * 0.5, maxZ + dist),
       };
     }
     case 'left': {
       // Viewed from the LEFT wall (state.x = 0) looking toward +X.
       // extentX (screen-horizontal) = d (room depth), extentY = h.
+      // With scene.scale.x = -1, the LEFT wall of the room (state.x =
+      // minX) renders at world.x = -minX, and state.x = maxX renders
+      // at world.x = -maxX (now MORE NEGATIVE). To view from the LEFT
+      // (state.x < 0 side, i.e., the WEST side of the room), the camera
+      // sits OUTSIDE that wall in world coords: world.x = -minX + dist
+      // (further in +X than the mirrored left wall).
       const dist = _fitDistance(safe(d), safe(h), 1.20);
       return {
-        targetPos: new THREE.Vector3(cx, h * 0.5, cz),
-        targetCam: new THREE.Vector3(minX - dist, h * 0.5, cz),
+        targetPos: new THREE.Vector3(-cx, h * 0.5, cz),
+        targetCam: new THREE.Vector3(-minX + dist, h * 0.5, cz),
       };
     }
     case 'right': {
       // Viewed from the RIGHT wall (state.x = maxX) looking toward -X.
+      // Same logic as 'left' but the right wall is at world.x = -maxX
+      // (more negative than the mirrored room interior). Camera at
+      // world.x = -maxX - dist (further negative).
       const dist = _fitDistance(safe(d), safe(h), 1.20);
       return {
-        targetPos: new THREE.Vector3(cx, h * 0.5, cz),
-        targetCam: new THREE.Vector3(maxX + dist, h * 0.5, cz),
+        targetPos: new THREE.Vector3(-cx, h * 0.5, cz),
+        targetCam: new THREE.Vector3(-maxX - dist, h * 0.5, cz),
       };
     }
     case 'iso':
@@ -5567,14 +5646,17 @@ function _handlePlacementClick(roomHits) {
   let anchor, position;
   if (surface === 'ceiling') {
     anchor = { surface: 'ceiling' };
+    // X negated — hit.point.x is world coord (raycaster output); state.x_m
+    // = -world.x because scene.scale.x = -1 mirrors meshes (initScene).
     position = {
-      x: hit.point.x,
+      x: -hit.point.x,
       y: hit.point.z,        // Three.js Z → state Y
       z: state.room.height_m ?? hit.point.y,
     };
   } else {
-    // hit.point.x / .z = state X / Y; project onto nearest polygon edge.
-    const worldXY = { x: hit.point.x, y: hit.point.z };
+    // hit.point.x / .z = state X / Y after X-negation (scene.scale.x = -1).
+    // projectOntoNearestWall expects state-frame coords.
+    const worldXY = { x: -hit.point.x, y: hit.point.z };
     const heightAbove = Math.max(0, hit.point.y); // state Z (elevation)
     const proj = projectOntoNearestWall(state.room, polygonVerts, worldXY, heightAbove);
     if (!proj) return false;
@@ -5672,9 +5754,10 @@ function _raycastIntoSurfacePlane(e) {
   const hits = _treatPickRay.intersectObject(roomGroup, true);
   if (_treatDrag.surface === 'ceiling') {
     // Take the ceiling hit (any surface_id === 'ceiling' or similar).
+    // X negated — h.point.x is world; consumer expects state-frame.
     for (const h of hits) {
       if (h.object.userData?.surface_id === 'ceiling') {
-        return { worldXY: { x: h.point.x, y: h.point.z }, z: state.room.height_m ?? h.point.y };
+        return { worldXY: { x: -h.point.x, y: h.point.z }, z: state.room.height_m ?? h.point.y };
       }
     }
     return null;
@@ -5686,7 +5769,8 @@ function _raycastIntoSurfacePlane(e) {
     const surfId = h.object.userData?.surface_id;
     if (!surfId) continue;
     if (!(surfId.startsWith('wall_') || surfId.startsWith('edge_') || surfId === 'walls')) continue;
-    return { worldXY: { x: h.point.x, y: h.point.z }, z: Math.max(0, h.point.y) };
+    // X negated — h.point.x is world; consumer expects state-frame.
+    return { worldXY: { x: -h.point.x, y: h.point.z }, z: Math.max(0, h.point.y) };
   }
   return null;
 }
@@ -9593,8 +9677,12 @@ function animate(ts) {
       _lastAuditionOrientTs = now;
       const tp = tpController.pos;       // Three.js Vector3 (x right, y up, z back-forward)
       const earOffset = (tpController.characterHeight ?? 1.78) * 0.94;     // ~ear-canal height
+      // X negated — scene.scale.x = -1 (initScene). tp.x is mesh-local
+      // (character.position copied from this.pos); the avatar is visible
+      // at world.x = -tp.x = state.x. The audition pipeline expects
+      // state-frame position; recover state.x via -tp.x.
       const posState = {
-        x: tp.x,
+        x: -tp.x,
         y: tp.z,
         z: tp.y + earOffset,
       };

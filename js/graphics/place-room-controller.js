@@ -148,8 +148,11 @@ export class PlaceRoomController {
     // Intersect the y=0 plane (parent floor in three-space).
     const hit = this._raycaster.ray.intersectPlane(this._floorPlane, this._hitPoint);
     if (!hit) return null;
-    // three-space (x, y_up, z_depth) → state-space (x_m, y_m).
-    return { x_m: hit.x, y_m: hit.z };
+    // three-space world (x, y_up, z_depth) → state-space (x_m, y_m).
+    // X negated — scene.scale.x = -1 in scene.js initScene mirrors meshes
+    // so state.x_m = -world.x. (Y axis unaffected — state.y_m → world.z
+    // directly.)
+    return { x_m: -hit.x, y_m: hit.z };
   }
 
   _onMouseMove(e) {
