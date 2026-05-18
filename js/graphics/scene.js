@@ -483,6 +483,23 @@ export async function mount3DViewport({ materials }) {
 
 function initScene() {
   scene = new THREE.Scene();
+  // 2026-05-18 — X-axis convention fix.
+  // The 2D viewport (room-2d.js) uses standard math: state +x → screen-right.
+  // The 3D scene was rendering state +x → screen-LEFT despite the lookAt
+  // math saying otherwise (Viktor and Hannes both could not isolate the
+  // discrepancy from analysis alone). After multiple failed iterations on
+  // camera position / target offset, applied a scene-level X mirror so
+  // every projected point comes out the SAME side it does in 2D. Three.js's
+  // WebGLRenderer auto-detects the negative-determinant world matrix and
+  // reverses face-winding internally — meshes render correctly inside-out
+  // for free, no material.side change needed.
+  //
+  // Side effects: text on textured meshes would appear mirrored (no such
+  // text in the surau scene today). Lighting direction vectors mirror with
+  // the geometry, so shadows still land where they should on the mirrored
+  // mesh. Verified by user empirical comparison of S8/S9 positions across
+  // 2D and 3D plan views.
+  scene.scale.x = -1;
   // Deep slate background with a subtle vertical gradient look (dark at top
   // fading to near-black at the horizon) via a shader-free approach: solid
   // base color, tone-mapping handles perceptual brightness in the final pass.
@@ -3432,13 +3449,14 @@ export function getPlacementBindings() {
 // Also bound to the F shortcut so the user can re-fit after manual
 // dimension edits or a misadventure with the orbit drag.
 //
-// Camera position: SE of the room (state.y<0 side, world -Z side),
-// looking NW-down. Reason: viewing toward +Z makes world +X land
-// camera-RIGHT, so state +x → screen RIGHT, matching room-2d.js's
-// stateToSvgX convention. Do NOT move to the +Z side (e.g. cz + d3*0.4)
-// — that puts the camera looking -Z which mirrors the plan in X
-// (Viktor h.4 regression diagnosis 2026-05-18, user-reported NW/NE
-// minaret oscillation between 2D and 3D).
+// Camera at the NE 3/4-iso position. Convention: state +y at screen-top,
+// state +x at screen-right. The X-axis match with 2D is enforced by the
+// scene-level `scale.x = -1` applied in initScene() (2026-05-18 — user
+// validated the X mismatch empirically after multiple iterations of
+// trying to fix it via camera position/lookAt math; the scene-mirror is
+// the unblocked workaround until the underlying Three.js convention
+// discrepancy is properly traced). Do not "fix" the camera position to
+// the -Z side again — that was the failed v=495 attempt.
 export function frameCameraToRoom() {
   if (!camera || !controls) return;
   const room = state.room;
@@ -3448,7 +3466,7 @@ export function frameCameraToRoom() {
   const cx = w / 2;
   const cz = d / 2;
   const d3 = Math.max(w, h, d);
-  camera.position.set(cx + d3 * 0.9, h + d3 * 0.5, -d3 * 0.4);
+  camera.position.set(cx + d3 * 0.9, h + d3 * 0.5, d + d3 * 0.4);
   controls.target.set(cx, h * 0.4, cz);
   controls.update();
 }
@@ -3689,12 +3707,9 @@ function _cameraPresetTransform(name) {
       // read as flat in a square frame; (0.85, 0.6, 0.45) lifts the
       // camera so the floor + room volume both project visibly without
       // losing the 3/4 "lean" of a classic iso.
-      // Z component is NEGATIVE: camera sits on the state.y<0 side
-      // (world -Z) looking +Z, so world +X lands camera-RIGHT and the
-      // plan reads with state +x at screen-right (matches 2D viewport).
-      // Do NOT flip back to +Z — see frameCameraToRoom() comment for
-      // the X-mirror regression that re-emerges.
-      const dirToCam  = new THREE.Vector3(0.85, 0.6, -0.45).normalize();
+      // 2026-05-18: X-axis convention with 2D is enforced at the scene
+      // level via `scale.x = -1` in initScene(), not via camera position.
+      const dirToCam  = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
 
       // Silhouette point set. For a CIRCULAR / POLYGON room the Box3
       // is the inscribed-cylinder's AABB — w × d × h with 4 corners
