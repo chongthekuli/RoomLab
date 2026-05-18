@@ -12,6 +12,9 @@ import { computeDiffractionContributions } from './diffraction.js';
 import {
   computeReradiationContributions, computeReverberantInsideSPL,
 } from './reradiation.js';
+import {
+  extractOutdoorObstacles, outdoorObstacleLossDb,
+} from './outdoor-obstacles.js';
 import { PHYSICS_P1_5_ENABLED } from './feature-flags.js';
 
 // Re-exports for backward compatibility with existing callers (tests, scene.js).
@@ -180,7 +183,7 @@ export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   };
 }
 
-export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0 }) {
+export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null }) {
   const { r, azimuth_deg, elevation_deg } = localAngles(
     speakerState.position, speakerState.aim, listenerPos
   );
@@ -206,11 +209,29 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
   const tl = pathWallLossDb(speakerState.position, listenerPos, room, materials, freq_hz);
   spl_db -= tl.tl_db;
   const through_wall = tl.wallsCrossed.some(w => !w.throughOpening);
+
+  // Outdoor obstacles (Maekawa diffraction around minaret / arcade
+  // columns; parallel TL+diffraction sum for portico side walls). Applies
+  // ON TOP of the existing wall TL — they're physically in series.
+  // No-op when outdoorObstacles is null/empty (non-surau presets).
+  let outdoor_obstacle_loss_db = 0;
+  if (outdoorObstacles && outdoorObstacles.length > 0) {
+    outdoor_obstacle_loss_db = outdoorObstacleLossDb({
+      src: speakerState.position,
+      listener: listenerPos,
+      freq_hz,
+      obstacles: outdoorObstacles,
+      materials,
+    });
+    spl_db -= outdoor_obstacle_loss_db;
+  }
+
   return {
     r, azimuth_deg, elevation_deg, attn_db: attn, spl_db,
     through_wall,
     wallsCrossed: tl.wallsCrossed,
     tl_db_applied: tl.tl_db,
+    outdoor_obstacle_loss_db,
   };
 }
 
@@ -305,8 +326,13 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   room = null, materials = null, coherent = false,
   temperature_C = DEFAULT_TEMPERATURE_C,
   airAbsorption = true,
+  outdoorObstacles = null,    // optional; auto-extracted from room.surauStructure when null
 } = {}) {
   const { sourceCtx, freq_hz, reverbActive, revConst_db, eqGainDb, L_p_rev_inside_per_band } = ctx;
+  // Lazily extract outdoor obstacles ONCE per call. Non-surau presets
+  // (and rooms without a surauStructure block) return an empty array so
+  // the per-source check below short-circuits with a single length test.
+  const obstacles = outdoorObstacles ?? (room ? extractOutdoorObstacles(room) : []);
   let directPressureSum = 0;
   let Re = 0, Im = 0;
   const c = coherent ? speedOfSound(temperature_C) : 0;
@@ -329,6 +355,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     const d = computeDirectSPL({
       speakerDef: def, speakerState: src, listenerPos,
       freq_hz, room, materials, airAbsorption, eqGainDb,
+      outdoorObstacles: obstacles,
     });
     const spl_db = d.spl_db;
     if (!isFinite(spl_db)) continue;
@@ -442,11 +469,14 @@ export function computeListenerBreakdown({
   freq_hz = 1000, room = null, materials = null,
   roomConstantR = 0, airAbsorption = true,
 }) {
+  // Extract outdoor obstacles once for the whole breakdown (cheap; only
+  // a few dozen entries even for surau). Per-source calls reuse this list.
+  const obstacles = room ? extractOutdoorObstacles(room) : [];
   const perSpeaker = sources.map((src, i) => {
     const def = getSpeakerDef(src.modelUrl);
     const outsideRoom = room ? !isInsideRoom3D(src.position, room) : false;
     if (!def) return { idx: i, spl_db: -Infinity, r: null, azimuth_deg: null, modelUrl: src.modelUrl, outsideRoom, through_wall: false, tl_db_applied: 0 };
-    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room, materials, airAbsorption });
+    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room, materials, airAbsorption, outdoorObstacles: obstacles });
     return {
       idx: i, spl_db: d.spl_db, r: d.r, azimuth_deg: d.azimuth_deg,
       modelUrl: src.modelUrl, outsideRoom,
