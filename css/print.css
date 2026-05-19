@@ -305,6 +305,12 @@ body.is-pdf-export .vp-tabs {
     margin-right: 48mm;
   }
   #print-report .pr-cover-titleblock .pr-eyebrow {
+    /* v=549: eyebrow moved BELOW the line (was above h1). Display as
+       block so it sits on its own line; small top margin for breathing
+       room from the border-bottom above it. margin-bottom retained for
+       spacing toward whatever follows the titleblock (the hero wrap). */
+    display: block;
+    margin-top: 3mm;
     margin-bottom: 4pt;
   }
   /* Room name — Sofia v3: sits directly under the project h1 so the
@@ -319,13 +325,12 @@ body.is-pdf-export .vp-tabs {
     line-height: 1.2;
   }
   #print-report .pr-cover-titleblock-right {
-    /* v=547: taken OUT of grid flow via position: absolute so the
+    /* Taken OUT of grid flow via position: absolute (v=547) so the
        titleblock row height is determined ONLY by the title text.
-       Result: border-bottom line hugs h2 (was previously stretched
-       down to the logo bottom). Logo overlays at top-right of the
-       titleblock and extends past the line into the hero area —
-       intended "spill" effect; the line cuts visually across the
-       lower portion of the logo. */
+       z-index lifts the logo above the .pr-cover-hero-wrap painted
+       later in the DOM — v=549 fix for the cropped logo bottom (the
+       hero image was painting over the lower edge of the logo when
+       it spilled into the hero area). */
     position: absolute;
     top: 0;
     right: 0;
@@ -333,6 +338,7 @@ body.is-pdf-export .vp-tabs {
     flex-direction: column;
     align-items: flex-end;
     gap: 4mm;
+    z-index: 10;
   }
   /* Cover hero logo — significantly larger than the per-page running
      header (21mm). The cover gets a styled brand mark; non-cover pages

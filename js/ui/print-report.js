@@ -813,10 +813,10 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     <div class="pr-page pr-page-cover">
       <div class="pr-cover-titleblock">
         <div>
-          <span class="pr-eyebrow">RoomLAB · Acoustic simulation</span>
           <h1>${escapeHtml(model.project.name)}</h1>
           <h2 class="pr-cover-room-name">${escapeHtml(roomNameDisplay)}</h2>
         </div>
+        <span class="pr-eyebrow">RoomLAB · Acoustic simulation</span>
         <div class="pr-cover-titleblock-right">
           <img class="pr-cover-logo" src="assets/logo/RoomLAB-logo-1024.png" alt="RoomLAB" />
         </div>
