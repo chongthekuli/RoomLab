@@ -846,7 +846,6 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </section>
       ${room.authorComments && room.authorComments.length > 0 ? `
       <section class="pr-cover-author-note" aria-label="Author's note">
-        <div class="pr-cover-author-note-rule" role="presentation"></div>
         <span class="pr-eyebrow pr-cover-author-note-eyebrow">Author's note</span>
         <p class="pr-cover-author-note-body">${escapeHtml(room.authorComments)}</p>
       </section>` : ''}

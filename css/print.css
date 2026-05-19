@@ -534,20 +534,17 @@ body.is-pdf-export .vp-tabs {
     text-wrap: pretty;
   }
 
-  /* Author's note — engineer's per-room commentary, sits below the
-     proposal paragraph. Tight rule + small-caps eyebrow + italic body
-     so it reads as the authoring acoustician's voice, distinct from
-     the proposal opener above. Body capped at 240 chars by the panel
-     input (~3 justified lines at this measure) — the cover stays one
-     page on the densest preset (surau) and the longest room name
-     (pavilion). */
+  /* Author's note — engineer's per-room commentary, sits directly
+     below the proposal paragraph. Body type MATCHES the proposal
+     paragraph above it (10.5pt / 1.6 / justified / hyphenated)
+     so the two reads as continuous prose; only the small-caps
+     eyebrow signals the voice change. No separator rule above
+     (v=551 user request: removed the hairline + matched the font).
+     Body capped at 240 chars by the panel input so the cover
+     stays one page on the densest preset (surau) and the longest
+     room name (pavilion). */
   #print-report .pr-cover-author-note {
     margin-top: 4mm;
-  }
-  #print-report .pr-cover-author-note-rule {
-    height: 0;
-    border-top: 0.5pt solid var(--rule);
-    margin-bottom: 2.5mm;
   }
   #print-report .pr-cover-author-note-eyebrow {
     display: block;
@@ -555,11 +552,13 @@ body.is-pdf-export .vp-tabs {
     color: var(--muted);
   }
   #print-report .pr-cover-author-note-body {
-    font-size: 9.5pt;
-    line-height: 1.5;
+    font-size: 10.5pt;
+    line-height: 1.6;
     color: var(--ink);
     margin: 0;
-    font-style: italic;
+    text-align: justify;
+    hyphens: auto;
+    -webkit-hyphens: auto;
     text-wrap: pretty;
   }
 
