@@ -1497,6 +1497,13 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </table>
     </div>`;
 
+  // 2026-05-19 debug: user-reported cover-page north arrow that I cannot
+  // reproduce from code reading. Dump the cover HTML to console so the
+  // user can copy/paste it back (the rendered DOM is briefly inserted
+  // into document.body just before the print dialog grabs it; F12
+  // inspection inside the print preview is blocked by Chrome).
+  try { if (typeof console !== 'undefined') console.log('[print-report] cover HTML →\n' + cover); } catch (_) {}
+
   root.innerHTML = `
     ${cover}
     ${heatmapPage}
