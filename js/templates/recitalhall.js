@@ -4,6 +4,7 @@ import { SPK12, rectVerts } from '../presets/shared.js';
 
 export default {
   label: 'Recital hall',
+  authorComments: 'Classical recital balance — RT60 in the 1.4–1.8 s range at 1 kHz gives bloom without smearing fast passagework. The slight domed ceiling needs diffusion, not absorption, to avoid stripping the upper mids that carry string presence.',
   shape: 'rectangular',
   defaultDims: { width_m: 12, depth_m: 18, height_m: 5, ceiling_dome_rise_m: 0.8 },
   generate({ width_m, depth_m, height_m, ceiling_dome_rise_m }) {

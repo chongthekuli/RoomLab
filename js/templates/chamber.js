@@ -4,6 +4,7 @@ import { SPK12, rectVerts, hexagonVerts } from '../presets/shared.js';
 
 export default {
   label: 'Chamber (small arena)',
+  authorComments: 'Centre stage with audience on every side — the cardinal-symmetry favours a delay-aligned distributed PA over flown line arrays. Watch the slight dome: even at 1.5 m rise it can pull energy back to the centre seats.',
   shape: 'polygon',
   defaultDims: { polygon_sides: 16, polygon_radius_m: 10, height_m: 7, ceiling_dome_rise_m: 1.5 },
   generate({ polygon_sides, polygon_radius_m, height_m, ceiling_dome_rise_m }) {

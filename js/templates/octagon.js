@@ -4,6 +4,7 @@ import { SPK12 } from '../presets/shared.js';
 
 export default {
   label: 'Octagonal hall',
+  authorComments: 'An eight-sided plan with parallel facet pairs still flutters — verify the impulse response at the geometric centre. Cardinal-aimed wall speakers cover well; treat the alternate facets to break the symmetry before tuning.',
   shape: 'polygon',
   defaultDims: { polygon_sides: 8, polygon_radius_m: 5, height_m: 4 },
   generate({ polygon_sides, polygon_radius_m, height_m }) {

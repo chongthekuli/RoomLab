@@ -303,6 +303,7 @@ const listeners = [
 
 export default {
   label: 'Pavilion 2 Bukit Jalil (4-level mall)',
+  authorComments: 'Concourses on Amperes CS610B ceiling speakers at ~10 m spacing meet MS IEC 60849 voice-alarm intelligibility — STI ≥ 0.50 across every level. The central atrium void is the dominant reverb path; verify coverage at the void edges.',
   shape: 'custom',
   ceiling_type: 'flat',
   custom_vertices: footprint,

@@ -22,6 +22,18 @@ let activeCustomRoomId = null;
 let pendingProjectName = null;
 let pendingRoomName = null;
 
+// Author's note hard cap. 240 chars ≈ 3 justified lines at 9.5pt italic
+// on the cover column — keeps the cover one page on the densest preset
+// (surau, packed measurements card + 6-line proposal paragraph) and the
+// longest room name (pavilion). Enforced by:
+//   1. <textarea maxlength=AUTHOR_NOTE_MAX> — keystroke-level cap
+//   2. JS trim guard on input — paste from localised keyboard / IME
+//      modes can defeat maxlength in some browsers
+//   3. Defensive .slice(0, 240) in buildPrintModel — guards against a
+//      future schema bump shipping a longer string
+export const AUTHOR_NOTE_MAX = 240;
+const AUTHOR_NOTE_WARN_AT   = AUTHOR_NOTE_MAX - 20;   // amber when within 20 of limit
+
 const RECT_SURFACE_LABELS = [
   ['floor',      'Floor'],
   ['ceiling',    'Ceiling'],
@@ -134,6 +146,21 @@ export function mountRoomPanel({ materials }) {
     <h3>Surface materials</h3>
     <div id="treatment-preset-row" class="treatment-preset-row"></div>
     <div id="surface-materials"></div>
+    <h3>Author's note</h3>
+    <div class="field-group author-note-row">
+      <label class="author-note-label" for="author-note-textarea" title="Free-form 1–2 sentence remark by the project's acoustician — appears on the print-report cover after the proposal paragraph. 240-character cap keeps the cover one page.">Cover commentary
+        <textarea id="author-note-textarea"
+          class="author-note-textarea"
+          maxlength="${AUTHOR_NOTE_MAX}"
+          rows="3"
+          placeholder="Add a per-room note from the acoustician — appears on the report cover."
+          aria-describedby="author-note-counter">${escapeHtml(state.room.authorComments ?? '')}</textarea>
+      </label>
+      <div class="author-note-meta">
+        <span class="author-note-hint">Prints on the report cover.</span>
+        <span id="author-note-counter" class="author-note-counter" aria-live="polite">0 / ${AUTHOR_NOTE_MAX}</span>
+      </div>
+    </div>
   `;
 
   // Presets dropdown — signature scenes (Arena, Pavilion, Surau) load
@@ -318,6 +345,49 @@ export function mountRoomPanel({ materials }) {
         e.target.value = trimmed;
         state.room.name = trimmed;
       }
+    });
+  }
+
+  // Author's note — free-form 1-2 sentence engineer commentary that
+  // appears on the print-report cover. Debounced 250ms write to
+  // state.room.authorComments + live "X / 240" counter that turns
+  // amber within 20 of the cap. Trim guard re-clips on every input
+  // event so a paste from IME / localised keyboard mode can't sneak
+  // past the textarea's maxlength.
+  const noteTa     = root.querySelector('#author-note-textarea');
+  const noteCount  = root.querySelector('#author-note-counter');
+  if (noteTa && noteCount) {
+    let noteDebounce = null;
+    const updateCounter = (len) => {
+      noteCount.textContent = `${len} / ${AUTHOR_NOTE_MAX}`;
+      noteCount.classList.toggle('is-warn', len >= AUTHOR_NOTE_WARN_AT && len < AUTHOR_NOTE_MAX);
+      noteCount.classList.toggle('is-over', len >= AUTHOR_NOTE_MAX);
+    };
+    updateCounter((state.room.authorComments ?? '').length);
+    noteTa.addEventListener('input', (e) => {
+      // Defensive trim — maxlength is bypassable on some paste paths.
+      let v = e.target.value;
+      if (v.length > AUTHOR_NOTE_MAX) {
+        v = v.slice(0, AUTHOR_NOTE_MAX);
+        e.target.value = v;
+      }
+      updateCounter(v.length);
+      // Debounce the state write so very fast typing doesn't churn
+      // listeners (cheap field but keeps the pattern consistent).
+      if (noteDebounce) clearTimeout(noteDebounce);
+      noteDebounce = setTimeout(() => {
+        state.room.authorComments = v;
+        noteDebounce = null;
+      }, 250);
+    });
+    noteTa.addEventListener('blur', (e) => {
+      // Commit the trimmed value immediately on blur so a Print right
+      // after typing doesn't race the 250ms debounce.
+      if (noteDebounce) { clearTimeout(noteDebounce); noteDebounce = null; }
+      const trimmed = e.target.value.trim().slice(0, AUTHOR_NOTE_MAX);
+      e.target.value = trimmed;
+      state.room.authorComments = trimmed;
+      updateCounter(trimmed.length);
     });
   }
 
@@ -619,6 +689,20 @@ function render() {
   // load just updated it. The input is uncontrolled between renders.
   const nameIn = root.querySelector('#room-name-input');
   if (nameIn) nameIn.value = state.room.name ?? '';
+  // Author's note — re-sync from state after preset/template/load swaps.
+  // Textarea is uncontrolled between renders (like room-name); we push
+  // the new value in and refresh the counter.
+  const noteTaSync = root.querySelector('#author-note-textarea');
+  const noteCountSync = root.querySelector('#author-note-counter');
+  if (noteTaSync) {
+    const v = (state.room.authorComments ?? '').slice(0, AUTHOR_NOTE_MAX);
+    noteTaSync.value = v;
+    if (noteCountSync) {
+      noteCountSync.textContent = `${v.length} / ${AUTHOR_NOTE_MAX}`;
+      noteCountSync.classList.toggle('is-warn', v.length >= AUTHOR_NOTE_WARN_AT && v.length < AUTHOR_NOTE_MAX);
+      noteCountSync.classList.toggle('is-over', v.length >= AUTHOR_NOTE_MAX);
+    }
+  }
   root.querySelector('[data-f="shape"]').value = state.room.shape;
   root.querySelector('[data-f="ceiling_type"]').value = state.room.ceiling_type;
   root.querySelector('[data-f="enclosure"]').value = state.room.enclosure ?? 'indoor';

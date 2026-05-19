@@ -44,6 +44,7 @@ const IMAM_STRIP = 1.5;
 
 export default {
   label: 'Surau (mosque prayer hall)',
+  authorComments: 'Hard parallel walls and the flat hipped ceiling drive long mid-band reverb; prayer-rug absorption only helps the floor. Treat the qibla wall and rear arcade to land RT60 near 1.0 s at 1 kHz — clear sermon and recitation.',
   shape: 'rectangular',
   ceiling_type: 'flat',  // flat is overridden by surauStructure.hipRoof below
   width_m: W,

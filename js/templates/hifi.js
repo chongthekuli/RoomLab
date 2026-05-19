@@ -6,6 +6,7 @@ import { SPK12 } from '../presets/shared.js';
 
 export default {
   label: 'Hi-fi room',
+  authorComments: 'Critical-listening shoebox — bass modes below 200 Hz dominate, sidewall first reflections smear the centre image. Treat first-reflection points with broadband absorbers and add a corner trap; aim for RT60 ≈ 0.30 s flat across bands.',
   shape: 'rectangular',
   defaultDims: { width_m: 4.5, depth_m: 6, height_m: 2.7 },
   generate({ width_m, depth_m, height_m }) {

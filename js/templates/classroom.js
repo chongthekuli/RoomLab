@@ -4,6 +4,7 @@ import { SPK6 } from '../presets/shared.js';
 
 export default {
   label: 'Classroom',
+  authorComments: 'Teaching-space target is STI ≥ 0.60 at every seat with HVAC running — children parse less context than adults, so the intelligibility budget is tight. RT60 ≈ 0.6 s and an acoustic-tile ceiling do most of the work.',
   shape: 'rectangular',
   defaultDims: { width_m: 8, depth_m: 10, height_m: 3 },
   generate({ width_m, depth_m, height_m }) {

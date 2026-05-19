@@ -4,6 +4,7 @@ import { SPK6 } from '../presets/shared.js';
 
 export default {
   label: 'Rotunda (round + dome)',
+  authorComments: 'A round room under a dome is the textbook focusing geometry — expect a hot spot near the centre and dead pockets at the wall. Diffuse the dome, do not just absorb; keep speakers off the central axis to avoid stacking the focus.',
   shape: 'round',
   defaultDims: { round_radius_m: 4, height_m: 3.5, ceiling_dome_rise_m: 1.5 },
   generate({ round_radius_m, height_m, ceiling_dome_rise_m }) {

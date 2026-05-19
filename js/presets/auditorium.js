@@ -24,6 +24,7 @@ const concourse = { r_in: 24, r_out: 26, elevation_m: 3.25 };
 
 export default {
   label: 'Sports arena (dome)',
+  authorComments: 'A domed bowl is a focusing surface: untreated, late energy collapses onto centre court and crushes mid-band intelligibility. Distributed line arrays plus a diffusing dome lining are non-negotiable to keep STI ≥ 0.50 across all tiers.',
   shape: 'polygon',
   ceiling_type: 'dome',
   polygon_sides: 36,

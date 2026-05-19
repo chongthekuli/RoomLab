@@ -122,5 +122,41 @@ applyPresetToState('auditorium');
 assert(state.room.multiLevelStructure === null, 'Auditorium (after Pavilion): multiLevelStructure cleared');
 assert(state.room.stadiumStructure != null, 'Auditorium (after Pavilion): stadiumStructure restored');
 
+// Per-room author commentary plumbing (added 2026-05-20).
+// CLAUDE.md §3 "Preset plumbing" invariant: any new field added to a
+// preset/template must (a) be copied in applyPresetToState /
+// applyTemplateToState, AND (b) assert propagation here. The renderer
+// (print-report cover) sees `state.room.authorComments` and bails
+// silently when undefined — exactly the failure mode this test guards.
+const AUTHOR_NOTE_MAX = 240;
+for (const [key, p] of Object.entries(PRESETS)) {
+  assert(typeof p.authorComments === 'string' && p.authorComments.length > 0,
+    `Preset "${key}" exports an authorComments default`);
+  assert(p.authorComments.length <= AUTHOR_NOTE_MAX,
+    `Preset "${key}" authorComments default fits within ${AUTHOR_NOTE_MAX}-char cap (got ${p.authorComments.length})`);
+  applyPresetToState(key);
+  assert(state.room.authorComments === p.authorComments,
+    `Preset "${key}": state.room.authorComments matches preset default after apply`);
+}
+for (const [key, t] of Object.entries(TEMPLATES)) {
+  assert(typeof t.authorComments === 'string' && t.authorComments.length > 0,
+    `Template "${key}" exports an authorComments default`);
+  assert(t.authorComments.length <= AUTHOR_NOTE_MAX,
+    `Template "${key}" authorComments default fits within ${AUTHOR_NOTE_MAX}-char cap (got ${t.authorComments.length})`);
+  applyTemplateToState(key);
+  assert(state.room.authorComments === t.authorComments,
+    `Template "${key}": state.room.authorComments matches template default after apply`);
+}
+// Swap path: preset → template must REPLACE the author note (not leak
+// the previous preset's value). The same class of bug as the historical
+// auditorium → pavilion crossover, applied to the new field.
+applyPresetToState('surau');
+const surauNote = state.room.authorComments;
+applyTemplateToState('hifi');
+assert(state.room.authorComments === TEMPLATES.hifi.authorComments,
+  `Swap surau→hifi replaces authorComments (no surau note leak)`);
+assert(state.room.authorComments !== surauNote,
+  `Swap surau→hifi: authorComments actually CHANGED (sanity check)`);
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll preset/template tests passed.');

@@ -4,6 +4,7 @@ import { SPK6 } from '../presets/shared.js';
 
 export default {
   label: 'Studio (dead)',
+  authorComments: 'Heavily absorbed control room — mix decisions live or die on the early reflection field. Verify RT60 stays below 0.25 s flat across bands and that LF decay matches; watch for over-deadening above 4 kHz turning the room dull.',
   shape: 'rectangular',
   defaultDims: { width_m: 5, depth_m: 6, height_m: 2.7 },
   generate({ width_m, depth_m, height_m }) {

@@ -152,6 +152,14 @@ export function buildPrintModel({ materials, nameHint } = {}) {
       name: (typeof state.room.name === 'string' && state.room.name.trim().length > 0)
         ? state.room.name.trim()
         : '',
+      // Author's note — free-form 1-2 sentence commentary by the engineer
+      // about THIS room. Renders on the cover after the proposal paragraph.
+      // Hard-capped to AUTHOR_NOTE_MAX (240 chars) by the panel input; we
+      // re-clip defensively here in case a project file from a future schema
+      // ships a longer string.
+      authorComments: (typeof state.room.authorComments === 'string')
+        ? state.room.authorComments.trim().slice(0, 240)
+        : '',
       shape: state.room.shape,
       polygon_sides: state.room.polygon_sides ?? null,
       custom_vertices: Array.isArray(state.room.custom_vertices) ? state.room.custom_vertices.slice() : null,
@@ -836,6 +844,12 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <section class="pr-cover-proposal">
         <p class="pr-cover-proposal-para">${escapeHtml(proposalParagraph)}</p>
       </section>
+      ${room.authorComments && room.authorComments.length > 0 ? `
+      <section class="pr-cover-author-note" aria-label="Author's note">
+        <div class="pr-cover-author-note-rule" role="presentation"></div>
+        <span class="pr-eyebrow pr-cover-author-note-eyebrow">Author's note</span>
+        <p class="pr-cover-author-note-body">${escapeHtml(room.authorComments)}</p>
+      </section>` : ''}
     </div>`;
 
   // The standalone B&W floor-plan page used to live here. Killed in

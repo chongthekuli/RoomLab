@@ -2179,6 +2179,68 @@ section h3 {
   font-weight: 400;
 }
 
+/* Author's note — per-room engineer commentary that prints on the
+   report cover. Sits at the bottom of the Room panel after Surface
+   materials. Textarea + live char counter, 240-char hard cap.
+   Maya 2026-05-20. */
+.field-group.author-note-row {
+  gap: 0.3rem;
+}
+.field-group.author-note-row .author-note-label {
+  grid-template-columns: 1fr;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.author-note-textarea {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  background: var(--bg-elev);
+  color: var(--fg);
+  resize: vertical;
+  min-height: 4.2rem;
+  max-height: 9rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.author-note-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.18);
+}
+.author-note-textarea::placeholder {
+  color: var(--muted);
+}
+.author-note-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+.author-note-hint {
+  font-style: italic;
+}
+.author-note-counter {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.author-note-counter.is-warn {
+  color: #d98a26;          /* amber — within 20 of cap */
+  font-weight: 600;
+}
+.author-note-counter.is-over {
+  color: #d44a3a;          /* red — at cap */
+  font-weight: 600;
+}
+
 .preset-row { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .preset-row button,
 .picker-buttons button {

@@ -654,6 +654,14 @@ const DEFAULT_ROOM_STATE = {
   // preset/template/blank-custom apply starts with no shared segments.
   // resetSceneState picks this up via the Object.assign() defaults pass.
   wallSegments: [],
+  // Per-room author commentary that renders on the print-report cover
+  // after the proposal paragraph. Empty string when the user has not
+  // typed one — preset/template `authorComments` static field overrides
+  // this on apply (handled in applyPresetToState / applyTemplateToState
+  // below). User-edited value survives serialize/load via the existing
+  // state.room round-trip. Hard cap 240 chars enforced by panel-room.js
+  // and defensively re-clipped in the print model.
+  authorComments: '',
   surfaces: {
     floor: 'wood-floor',
     ceiling: 'gypsum-board',
@@ -682,6 +690,10 @@ export function applyPresetToState(key) {
   // cover has a sensible room title without forcing the user to type one.
   // (User can overwrite via the room panel.)
   if (typeof p.label === 'string' && p.label.length > 0) state.room.name = p.label;
+  // Per-room author commentary — preset's static field overrides the
+  // default empty string. Threading is the preset-plumbing pattern
+  // CLAUDE.md §3 mandates; matching tests/preset.test.mjs assertion below.
+  if (typeof p.authorComments === 'string') state.room.authorComments = p.authorComments;
   if (p.shape !== undefined)              state.room.shape = p.shape;
   if (p.ceiling_type !== undefined)       state.room.ceiling_type = p.ceiling_type;
   if (p.width_m !== undefined)            state.room.width_m = p.width_m;
@@ -773,6 +785,10 @@ export function applyTemplateToState(key, dimsOverride) {
   // — same rationale as applyPresetToState. Template metadata lives on `t`,
   // not on the generator output, because the label is a static descriptor.
   if (typeof t.label === 'string' && t.label.length > 0) state.room.name = t.label;
+  // Per-room author commentary — template's static field (read off `t`,
+  // not `generated`, parallel to label). Same preset-plumbing pattern
+  // applyPresetToState uses above.
+  if (typeof t.authorComments === 'string') state.room.authorComments = t.authorComments;
   if (generated.shape !== undefined)               state.room.shape = generated.shape;
   if (generated.ceiling_type !== undefined)        state.room.ceiling_type = generated.ceiling_type;
   if (generated.width_m !== undefined)             state.room.width_m = generated.width_m;
@@ -872,6 +888,9 @@ export function deserializeProject(obj) {
     // can't pollute room state with a foreign property.
     const r = obj.room;
     if (typeof r.name === 'string')              state.room.name = r.name;
+    // Per-room author commentary. Defensive clip at 240 chars in case a
+    // hand-edited project file exceeds the cap that the panel enforces.
+    if (typeof r.authorComments === 'string')    state.room.authorComments = r.authorComments.slice(0, 240);
     if (typeof r.shape === 'string')             state.room.shape = r.shape;
     if (typeof r.ceiling_type === 'string')      state.room.ceiling_type = r.ceiling_type;
     if (Number.isFinite(r.width_m))              state.room.width_m = r.width_m;

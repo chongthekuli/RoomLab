@@ -4,6 +4,7 @@ import { SPK12, SPKLA, rectVerts } from '../presets/shared.js';
 
 export default {
   label: 'Live venue',
+  authorComments: 'Flown line-array mains plus a centre-fill cover the floor; verify front-of-house SPL ≥ 100 dBA without the rear wall slap masking lyrics. The rear wall and side balconies are the two failure modes — diffuse, do not just absorb.',
   shape: 'rectangular',
   defaultDims: { width_m: 15, depth_m: 20, height_m: 6 },
   generate({ width_m, depth_m, height_m }) {
