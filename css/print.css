@@ -286,21 +286,23 @@ body.is-pdf-export .vp-tabs {
     gap: 6mm;
   }
   #print-report .pr-cover-titleblock {
-    /* v=547: row height is now driven by the TITLE TEXT (left side)
-       only. The right cell (logo) is taken out of grid flow via
-       position: absolute (see .pr-cover-titleblock-right below) so
-       the titleblock border-bottom hugs h2 tightly (h2 + 4mm padding
-       + 1pt border). User wanted the line moved up — closer to the
-       logo — without moving the title. Now the line sits where the
-       title naturally ends, and the absolute logo overlays/extends
-       past the line into the cover hero area below.
-
-       Single-column grid (1fr) since the right cell is out of flow. */
-    display: grid;
-    grid-template-columns: 1fr;
+    /* v=548: line moved off the titleblock itself and onto the inner
+       title-text container (see selector below). Reason: in v=547 the
+       absolute-positioned logo extended past the line, and the line
+       visually cut across the logo. By putting the line on the inner
+       container with a right margin = logo width + gap, the line now
+       ENDS before reaching the logo. Clean separation. */
     position: relative;
+    display: block;
+  }
+  /* Title-text column inside the titleblock (the unclassed direct
+     child div containing eyebrow + h1 + h2). The line lives here so
+     it can stop before the logo. 48mm margin-right = 45mm logo + 3mm
+     visual gap. */
+  #print-report .pr-cover-titleblock > div:not(.pr-cover-titleblock-right) {
     padding-bottom: 4mm;
     border-bottom: 1pt solid var(--ink);
+    margin-right: 48mm;
   }
   #print-report .pr-cover-titleblock .pr-eyebrow {
     margin-bottom: 4pt;
