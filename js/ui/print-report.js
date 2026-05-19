@@ -818,8 +818,11 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
           <h2 class="pr-cover-room-name">${escapeHtml(roomNameDisplay)}</h2>
         </div>
         <div class="pr-cover-titleblock-right">
-          ${escapeHtml(model.project.date)}<br>
-          <span class="pr-mute">${model.precision ? 'precision engine' : 'draft engine'}</span>
+          <img class="pr-cover-logo" src="assets/logo/RoomLAB-logo-1024.png" alt="RoomLAB" />
+          <div class="pr-cover-titleblock-right-meta">
+            ${escapeHtml(model.project.date)}<br>
+            <span class="pr-mute">${model.precision ? 'precision engine' : 'draft engine'}</span>
+          </div>
         </div>
       </div>
       <div class="pr-cover-hero-wrap">
@@ -1493,13 +1496,13 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </table>
     </div>`;
 
-  // Per-page brand mark — injected as <img> via regex postprocess so it
-  // prints reliably across all browsers. background-image / pseudo-
-  // element approaches fail when the user prints without the "Background
-  // graphics" option enabled (Chrome/Edge default-off, Firefox/Safari
-  // similar). An <img> tag is unambiguously printable content. One
-  // pass over the assembled HTML hits every .pr-page in all 8 page
-  // templates without touching their individual builders. (v=535)
+  // Per-page brand mark — injected as <img> via regex postprocess into
+  // every .pr-page div EXCEPT the cover. Cover has its own hero-styled
+  // logo (38mm) inside .pr-cover-titleblock-right above date+engine
+  // (Maya's original v1 design); injecting the running-header overlay
+  // on top of that produces visible stacking. Negative lookahead on
+  // `pr-page-cover` keeps the regex single-pass without per-template
+  // edits. (v=537)
   const PAGE_LOGO_IMG =
     '<img class="pr-page-logo" src="assets/logo/RoomLAB-logo-1024.png" '
     + 'alt="" aria-hidden="true">';
@@ -1519,7 +1522,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
 
   `;
   root.innerHTML = reportHtml.replace(
-    /(<div\s+class="pr-page[^"]*">)/g,
+    /(<div\s+class="pr-page(?![^"]*\bpr-page-cover\b)[^"]*">)/g,
     `$1${PAGE_LOGO_IMG}`,
   );
   document.body.appendChild(root);
