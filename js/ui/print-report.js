@@ -31,7 +31,7 @@ import { roomVolume, baseArea } from '../physics/room-shape.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
-import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend, heatmapPageViewBox } from './print-heatmap.js';
+import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend } from './print-heatmap.js';
 import { buildFloorPlanSVG } from './print-plan-svg.js';
 import { computePerListenerMetrics } from '../physics/per-listener-metrics.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
@@ -1217,15 +1217,11 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // (and the operating-range strip below) remain unchanged.
   const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid, { listenerMetrics: model.listenerMetrics }) : '';
   const heatLegend = (model.heatmap && splGrid) ? buildHeatmapLegend(splGrid) : '';
-  // Compute the SVG's viewBox aspect so the stage CSS can size itself
-  // to match the room — eliminates the preserveAspectRatio centering
-  // empty space the user reported (tall room → no empty top/bottom;
-  // wide room → no empty left/right). Falls back to no aspect-ratio
-  // style when grid is unavailable.
-  const heatViewBox = (model.heatmap && splGrid) ? heatmapPageViewBox(state, splGrid) : null;
-  const heatStageStyle = heatViewBox
-    ? ` style="aspect-ratio: ${heatViewBox.viewW.toFixed(3)} / ${heatViewBox.viewH.toFixed(3)}"`
-    : '';
+  // 2026-05-19: stage is now a fixed-square slot in print.css so wide /
+  // landscape rooms (pavilion) don't render a very wide, very short
+  // heatmap that crowds the SPL legend label underneath. The SVG inside
+  // the square uses preserveAspectRatio="xMidYMid meet" to letterbox.
+  const heatStageStyle = '';
   const rt60_1k = model.rt60[3];
   let heatmapPage = '';
   if (heatSvg) {

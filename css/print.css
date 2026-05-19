@@ -527,11 +527,18 @@ body.is-pdf-export .vp-tabs {
     /* 2026-05-19: was 2-column (heatmap | legend). User requested the
        heatmap take the full available width with a narrow horizontal
        legend underneath. Single-column flow now; legend follows the
-       stage in document order. */
+       stage in document order.
+       2026-05-19 (later): fixed 15cm slot centred on the page so wide /
+       landscape rooms (pavilion) don't render a very wide, very short
+       heatmap that crowds the SPL legend label underneath. The legend
+       bar matches the heatmap's width since the grid sets the column
+       width. */
     display: flex;
     flex-direction: column;
     gap: 8pt;
-    margin: 4pt 0 8pt 0;
+    margin: 4pt auto 8pt auto;
+    width: 15cm;
+    max-width: 100%;
   }
   #print-report .pr-heatmap-stage {
     border: 1pt solid var(--rule);
@@ -539,6 +546,10 @@ body.is-pdf-export .vp-tabs {
     background: var(--paper);
     /* position: relative so the north-arrow ::after overlay anchors here. */
     position: relative;
+    /* Fixed square slot so room aspect ratio doesn't change the page
+       layout. SVG inside uses preserveAspectRatio="xMidYMid meet" so
+       wide / tall rooms letterbox cleanly inside this square. */
+    aspect-ratio: 1 / 1;
     /* overflow: hidden — clip the north-arrow ::after to the stage's
        printed box. WHY: Chrome's print-paginator can render a
        `position: absolute` ::after on EVERY printable page that the
@@ -599,11 +610,12 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pr-heatmap-svg {
     width: 100%;
-    max-height: 22cm;
-    height: auto;
+    height: 100%;
     display: block;
   }
-  #print-report .pr-heatmap-stage svg { width: 100%; height: auto; }
+  /* Fill the fixed-square stage; preserveAspectRatio="xMidYMid meet"
+     letterboxes wide/tall rooms inside the square. */
+  #print-report .pr-heatmap-stage svg { width: 100%; height: 100%; display: block; }
   /* Horizontal legend below the heatmap (2026-05-19 redesign).
      Width: stretches across the heatmap's printed width.
      Height: compact — ~22pt for the bar + ~14pt for the labels. */
