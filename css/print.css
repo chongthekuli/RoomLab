@@ -141,25 +141,22 @@ body.is-pdf-export .vp-tabs {
     break-after: auto;
   }
 
-  /* Per-page brand mark — top-right of every page. Injected as an
-     <img class="pr-page-logo"> by print-report.js (regex postprocess
-     into every .pr-page div). Positioned at the .pr-page corner
-     (top: 0, right: 0); the visible gap to the physical page edge
-     equals the @page top/right margin (18mm). Earlier attempt
-     (v=534) used negative offsets to push into the @page margin
-     area for a tighter look, but Chromium's print engine CLIPS
-     content beyond the .pr-page boundary (anything in the @page
-     margin gets cropped), so only the left half of the logo was
-     visible. top:0/right:0 is reliable.
-
-     To tighten further you'd reduce the @page top + right margins
-     (line ~44) — at the cost of body content also moving closer
-     to the page edge. Current 18mm is professional-report spacing. */
+  /* Per-page running-header brand mark — top-right of every NON-COVER
+     page. Injected as an <img class="pr-page-logo"> by print-report.js
+     via regex postprocess. Cover gets its own larger .pr-cover-logo
+     inside .pr-cover-titleblock-right; the regex's negative lookahead
+     skips .pr-page-cover so we don't double up.
+     Sized 25% down from v=537 (28mm → 21mm) per user feedback. Sits
+     at the .pr-page corner (top:0 right:0); the visible gap to the
+     physical page edge equals the @page top/right margin (10mm per
+     v=537). Earlier attempts at negative offsets (v=534) were clipped
+     by Chromium's print engine at the .pr-page boundary, so top:0
+     right:0 is the reliable position. */
   #print-report .pr-page-logo {
     position: absolute;
     top: 0;
     right: 0;
-    width: 28mm;
+    width: 21mm;
     height: auto;
     display: block;
     pointer-events: none;
@@ -314,12 +311,13 @@ body.is-pdf-export .vp-tabs {
     font-size: 9pt;
     line-height: 1.5;
   }
-  /* Cover hero logo — bigger than the per-page running header (28mm).
+  /* Cover hero logo — bigger than the per-page running header (21mm).
      The cover gets a styled brand mark; non-cover pages get the running
      header overlay (.pr-page-logo, see below) that the regex postprocess
-     in print-report.js injects. */
+     in print-report.js injects. Sized down 25 % from v=537 (38mm → 28mm)
+     per user feedback that the logos were too large. */
   #print-report .pr-cover-logo {
-    width: 38mm;
+    width: 28mm;
     height: auto;
     display: block;
     image-rendering: -webkit-optimize-contrast;
@@ -343,18 +341,19 @@ body.is-pdf-export .vp-tabs {
     box-sizing: border-box;
   }
   #print-report .pr-cover-hero-image {
-    /* Fixed-square slot, sized to nearly fill the A4 content column
-       (180 × 180 mm; A4 usable width ≈ 180 mm after page-margin set).
-       Every room renders into the same square footprint regardless of
-       its actual dimensions, so report pages line up visually across
-       presets. The capture is a 1500×1500 PNG (print-report.js passes
-       fixedAspect:true) and the iso fit math frames the room inside
-       it at NDC 0.99 (~1 % margin per side, scene.js).
-       object-fit:contain is a defence-in-depth letterbox: if a future
-       caller passes a non-square PNG, the image fits inside the slot
-       rather than stretching or cropping. */
-    width: 180mm;
-    height: 180mm;
+    /* Fixed 4:3 landscape slot, sized to nearly fill the A4 content
+       column (185 × 138.75 mm; A4 usable width ≈ 185 mm after the
+       v=537 margin set 10mm/15mm). Every room renders into the same
+       footprint regardless of its actual dimensions, so report pages
+       line up visually across presets. Capture is a 1500×1125 PNG
+       (print-report.js passes width:1500, height:1125, fixedAspect:true)
+       and the iso fit math frames the room inside it at NDC 0.99
+       (~1 % margin per side, scene.js). object-fit:contain is a
+       defence-in-depth letterbox: if a future caller passes a
+       different aspect, the image fits inside the slot rather than
+       stretching or cropping. */
+    width: 185mm;
+    height: 138.75mm;
     display: block;
     margin: 0 auto;
     object-fit: contain;

@@ -2065,11 +2065,13 @@ export async function triggerPrint() {
   try {
     const captureFn = await _loadCaptureFn();
     // fixedAspect:true tells captureViewportImage to keep the requested
-    // 1:1 (1500×1500 square) instead of adaptively reshaping the PNG to
-    // match the room silhouette. The cover page reserves a fixed square
+    // 4:3 landscape (1500×1125) instead of adaptively reshaping the PNG
+    // to match the room silhouette. The cover page reserves a fixed 4:3
     // slot — every room, regardless of dimensions, fits inside that slot
-    // with margin (no edge cropped). User request 2026-05-19.
-    if (captureFn) coverImage = captureFn({ width: 1500, height: 1500, preset: 'iso', fixedAspect: true });
+    // with margin (no edge cropped). Aspect changed from 1:1 to 4:3 per
+    // user request (2026-05-19, v=538) so the hero reads as a landscape
+    // proposal cover rather than a square thumbnail.
+    if (captureFn) coverImage = captureFn({ width: 1500, height: 1125, preset: 'iso', fixedAspect: true });
   } catch (err) { console.warn('[print-report] capture failed:', err); }
   const model = buildPrintModel({ materials: _printMaterialsRef });
   renderPrintReport(model, { splGrid, coverImage });
@@ -2159,9 +2161,9 @@ export function mountPrintReport({ materials }) {
     try {
       // fixedAspect:true — match the in-app printReport() path; without
       // this, the beforeprint listener captures a variable-aspect PNG
-      // that letterboxes inside the 180×180mm slot, leaving blank
-      // margin around the room.
-      if (_captureFn) coverImage = _captureFn({ width: 1500, height: 1500, preset: 'iso', fixedAspect: true });
+      // that letterboxes inside the 185×138.75mm slot, leaving blank
+      // margin around the room. Aspect 4:3 (1500×1125) per v=538.
+      if (_captureFn) coverImage = _captureFn({ width: 1500, height: 1125, preset: 'iso', fixedAspect: true });
     } catch (err) { console.warn('[print-report] capture failed:', err); }
     const model = buildPrintModel({ materials: _printMaterialsRef });
     renderPrintReport(model, { splGrid, coverImage });
