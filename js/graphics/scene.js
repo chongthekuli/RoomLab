@@ -1020,10 +1020,21 @@ const _selectionEdgeLines = [];
 
 function _ensureSelectionEdgeGroup() {
   if (_selectionEdgeGroup || !scene) return;
+  // Mirror-cancel parent (scale.x = -1) so the selection edges, which
+  // bake mesh.matrixWorld (already-mirrored) into their geometry via
+  // `line.applyMatrix4(m.matrixWorld)`, don't get the scene's
+  // scale.x = -1 applied a SECOND time. Without the cancel, vertices
+  // end up at state.x (un-mirrored) while the mesh visually sits at
+  // world.x = -state.x — the outline draws on the opposite side of
+  // the building. Same pattern as avatarMirrorCancel (see top-of-file).
+  const cancel = new THREE.Group();
+  cancel.scale.x = -1;
+  cancel.name = 'surfaceSelectionEdgesMirrorCancel';
+  scene.add(cancel);
   _selectionEdgeGroup = new THREE.Group();
   _selectionEdgeGroup.name = 'surfaceSelectionEdges';
   _selectionEdgeGroup.renderOrder = 999;
-  scene.add(_selectionEdgeGroup);
+  cancel.add(_selectionEdgeGroup);
 }
 
 function _disposeSelectionEdges() {
