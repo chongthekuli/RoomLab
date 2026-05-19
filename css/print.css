@@ -524,10 +524,13 @@ body.is-pdf-export .vp-tabs {
      vertical legend column with numeric ticks shared with the 2D
      and 3D viewports via computeTicks(). */
   #print-report .pr-heatmap-grid {
-    display: grid;
-    grid-template-columns: 1fr 110pt;
-    gap: 12pt;
-    align-items: stretch;
+    /* 2026-05-19: was 2-column (heatmap | legend). User requested the
+       heatmap take the full available width with a narrow horizontal
+       legend underneath. Single-column flow now; legend follows the
+       stage in document order. */
+    display: flex;
+    flex-direction: column;
+    gap: 8pt;
     margin: 4pt 0 8pt 0;
   }
   #print-report .pr-heatmap-stage {
@@ -601,13 +604,14 @@ body.is-pdf-export .vp-tabs {
     display: block;
   }
   #print-report .pr-heatmap-stage svg { width: 100%; height: auto; }
+  /* Horizontal legend below the heatmap (2026-05-19 redesign).
+     Width: stretches across the heatmap's printed width.
+     Height: compact — ~22pt for the bar + ~14pt for the labels. */
   #print-report .pr-heatmap-legend {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 6pt;
-    border-left: 0.5pt solid var(--rule);
-    padding-left: 8pt;
+    align-items: stretch;
+    gap: 3pt;
     font-size: 8.5pt;
     color: var(--ink);
   }
@@ -621,47 +625,45 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-heatmap-legend-stage {
     position: relative;
     display: flex;
+    flex-direction: column;
     align-items: stretch;
-    height: 16cm;
+    width: 100%;
   }
   #print-report .pr-heatmap-legend-bar {
-    width: 14pt;
-    height: 100%;
+    width: 100%;
+    height: 9pt;
     border-radius: 1pt;
     border: 0.4pt solid var(--rule);
   }
   #print-report .pr-heatmap-legend-ticks {
     position: relative;
-    width: 32pt;
-    margin-left: 5pt;
-    height: 100%;
+    width: 100%;
+    height: 14pt;
+    margin-top: 2pt;
   }
   #print-report .pr-heatmap-legend-tick {
     position: absolute;
-    left: 0;
-    right: 0;
-    transform: translateY(-50%);
+    top: 0;
+    bottom: 0;
+    transform: translateX(-50%);
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 4pt;
+    gap: 2pt;
     white-space: nowrap;
   }
   #print-report .pr-heatmap-legend-tick-line {
-    width: 4pt;
-    height: 0.4pt;
+    width: 0.4pt;
+    height: 4pt;
     background: var(--ink);
   }
-  /* Minor (unlabeled) graduation — shorter line, fainter ink; renders
-     as ruler-style sub-ticks between the labelled majors. Bumped to
-     2.5pt / 0.65 opacity from the original 2pt / 0.45 — at print scale
-     the originals fell below the PDF's perceptible threshold and read
-     as if no minor ticks existed at all. */
+  /* Minor (unlabeled) graduation — shorter line, fainter ink. */
   #print-report .pr-heatmap-legend-tick.minor .pr-heatmap-legend-tick-line {
-    width: 2.5pt;
+    height: 2.5pt;
     opacity: 0.65;
   }
   #print-report .pr-heatmap-legend-tick-label {
-    font-size: 7.5pt;
+    font-size: 7pt;
     color: var(--ink);
     line-height: 1;
     font-variant-numeric: tabular-nums;

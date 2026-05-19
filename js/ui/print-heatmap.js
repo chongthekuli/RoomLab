@@ -398,9 +398,12 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false, listenerM
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-heatmap-svg">${heatEl}${zonesEl}${outlineEl}${minaretEl}${sourcesEl}${listenersEl}${chromeEl}</svg>`;
 }
 
-// Build the vertical legend that sits beside the heatmap. Same
+// Build the horizontal legend that sits below the heatmap. Same
 // computeTicks() helper that drives the 2D and 3D legends so the
 // printed scale matches the on-screen scale exactly.
+// 2026-05-19: was vertical (right-of-heatmap); user requested the
+// heatmap take full width, with a narrow horizontal legend underneath.
+// The gradient now runs left→right (low→high) and ticks use `left:X%`.
 export function buildHeatmapLegend(splGrid) {
   if (!splGrid) return '';
   const metric = splGrid.metric ?? 'spl';
@@ -411,21 +414,21 @@ export function buildHeatmapLegend(splGrid) {
   const ticks = computeTicks(min, max, tickMode);
   const minorTicks = computeMinorTicks(min, max, tickMode, ticks);
   const minorRows = minorTicks.map(t => {
-    const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
-    return `<div class="pr-heatmap-legend-tick minor" style="top:${pct}%">
+    const pct = Math.max(0, Math.min(100, t.position01 * 100)).toFixed(2);
+    return `<div class="pr-heatmap-legend-tick minor" style="left:${pct}%">
       <span class="pr-heatmap-legend-tick-line"></span>
     </div>`;
   }).join('');
   const tickRows = ticks.map(t => {
-    const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
-    return `<div class="pr-heatmap-legend-tick" style="top:${pct}%">
+    const pct = Math.max(0, Math.min(100, t.position01 * 100)).toFixed(2);
+    return `<div class="pr-heatmap-legend-tick" style="left:${pct}%">
       <span class="pr-heatmap-legend-tick-line"></span>
       <span class="pr-heatmap-legend-tick-label">${formatTickLabel(t.value, tickMode)}</span>
     </div>`;
   }).join('');
   const gradient = metric === 'sti'
-    ? 'linear-gradient(to top, #d21414 0%, #ff8214 30%, #ffd700 45%, #3cd23c 60%, #00c896 75%, #00aadc 100%)'
-    : 'linear-gradient(to top, #1428b4 0%, #008ce6 25%, #1edc50 50%, #ffd700 75%, #f01e1e 100%)';
+    ? 'linear-gradient(to right, #d21414 0%, #ff8214 30%, #ffd700 45%, #3cd23c 60%, #00c896 75%, #00aadc 100%)'
+    : 'linear-gradient(to right, #1428b4 0%, #008ce6 25%, #1edc50 50%, #ffd700 75%, #f01e1e 100%)';
   return `
     <div class="pr-heatmap-legend">
       <div class="pr-heatmap-legend-header">${legendHeader(tickMode)}</div>
