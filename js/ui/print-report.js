@@ -1551,6 +1551,22 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         }
       });
       console.log('[debug] suspect-search complete');
+      // Suspect-search found nothing in DOM → arrow must be in the
+      // captured PNG. Auto-download the IMG src so the user can attach
+      // the actual PNG file and we inspect at pixel level.
+      const img = c.querySelector('.pr-cover-hero-image');
+      if (img && img.src && img.src.startsWith('data:image/png')) {
+        try {
+          const a = document.createElement('a');
+          a.href = img.src;
+          a.download = `cover-debug-${Date.now()}.png`;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => document.body.removeChild(a), 500);
+          console.log('[debug] cover PNG auto-downloaded — attach the file');
+        } catch (err) { console.warn('[debug] PNG download failed:', err); }
+      }
     }
   } catch (e) { console.warn('[debug] suspect-search failed:', e); }
   return root;
