@@ -274,6 +274,10 @@ body.is-pdf-export .vp-tabs {
     color: var(--muted);
     font-size: 9pt;
     line-height: 1.5;
+    /* 2026-05-19 DEBUG: temporarily set distinctive background so we
+       can SEE the boundaries of this element on the printed page. */
+    background: #ffff00 !important;
+    border: 2px solid #ff0000 !important;
   }
 
   /* Hero band — 3D perspective render dominates the cover. The
