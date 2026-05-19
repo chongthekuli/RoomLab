@@ -327,19 +327,28 @@ body.is-pdf-export .vp-tabs {
        floating below the header. v=540 user-targeted fix. */
     align-self: start;
   }
-  /* Cover hero logo — bigger than the per-page running header (21mm).
-     The cover gets a styled brand mark; non-cover pages get the running
-     header overlay (.pr-page-logo, see below) that the regex postprocess
-     in print-report.js injects. Sized down 25 % from v=537 (38mm → 28mm)
-     per user feedback that the logos were too large. */
+  /* Cover hero logo — significantly larger than the per-page running
+     header (21mm). The cover gets a styled brand mark; non-cover pages
+     get the running header overlay (.pr-page-logo, see below) that the
+     regex postprocess in print-report.js injects. v=541: bumped from
+     28mm → 50mm now that the date + engine moved to the left column
+     under the room name, freeing the right cell to be a logo-only
+     hero. The wider logo reads as a proper cover brand mark. */
   #print-report .pr-cover-logo {
-    width: 28mm;
+    width: 50mm;
     height: auto;
     display: block;
     image-rendering: -webkit-optimize-contrast;
   }
-  #print-report .pr-cover-titleblock-right-meta {
-    text-align: right;
+  /* Date + engine row, moved from the right titleblock cell to LEFT
+     column below the room name (v=541, user request). Reads as
+     metadata after the project + room titles, before the cover hero. */
+  #print-report .pr-cover-meta {
+    text-align: left;
+    color: var(--muted);
+    font-size: 9pt;
+    line-height: 1.5;
+    margin-top: 6mm;
   }
 
   /* Hero band — 3D perspective render dominates the cover. The

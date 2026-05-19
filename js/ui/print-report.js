@@ -816,13 +816,13 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
           <span class="pr-eyebrow">RoomLAB · Acoustic simulation</span>
           <h1>${escapeHtml(model.project.name)}</h1>
           <h2 class="pr-cover-room-name">${escapeHtml(roomNameDisplay)}</h2>
-        </div>
-        <div class="pr-cover-titleblock-right">
-          <img class="pr-cover-logo" src="assets/logo/RoomLAB-logo-1024.png" alt="RoomLAB" />
-          <div class="pr-cover-titleblock-right-meta">
+          <div class="pr-cover-meta">
             ${escapeHtml(model.project.date)}<br>
             <span class="pr-mute">${model.precision ? 'precision engine' : 'draft engine'}</span>
           </div>
+        </div>
+        <div class="pr-cover-titleblock-right">
+          <img class="pr-cover-logo" src="assets/logo/RoomLAB-logo-1024.png" alt="RoomLAB" />
         </div>
       </div>
       <div class="pr-cover-hero-wrap">
