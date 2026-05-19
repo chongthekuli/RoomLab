@@ -135,28 +135,20 @@ body.is-pdf-export .vp-tabs {
   }
 
   /* Per-page brand mark — top-right of every page, hugging the physical
-     page corner (~4mm from edge). Negative offsets push the logo INTO
-     the @page margin area so the page-content margin (18mm) stays
-     intact for body text but the logo reads tight to the corner. A4
-     paper is the documented target (CLAUDE.md confirms @page is A4
-     portrait); 28mm × 18mm is the box-logo aspect at a running-header
-     scale that doesn't compete with the page eyebrow/h2 chrome.
-
-     Cover-page note: the descendant `*::before` kill-switch at
-     `.pr-page-cover *::before` (near L591) only nukes pseudos on
-     DESCENDANTS of the cover, NOT the cover's own ::before. This
-     rule fires on every page including the cover, by design. */
-  #print-report .pr-page::before {
-    content: "";
+     page corner (~4mm from edge). Injected as an <img class="pr-page-logo">
+     by print-report.js (regex postprocess into every .pr-page div) so
+     it prints reliably without the user enabling "Background graphics"
+     in the print dialog. Negative offsets push the logo INTO the @page
+     margin area so the page-content margin (18mm) stays intact for
+     body text but the logo reads tight to the corner. A4 paper is the
+     documented target (CLAUDE.md confirms @page is A4 portrait). */
+  #print-report .pr-page-logo {
     position: absolute;
     top: -14mm;
     right: -14mm;
     width: 28mm;
-    height: 18mm;
-    background-image: url('../assets/logo/RoomLAB-logo-1024.png');
-    background-size: contain;
-    background-position: top right;
-    background-repeat: no-repeat;
+    height: auto;
+    display: block;
     pointer-events: none;
     z-index: 5;
     /* Sharper raster when the browser prints at 2x DPI. */

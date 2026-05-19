@@ -1493,7 +1493,17 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </table>
     </div>`;
 
-  root.innerHTML = `
+  // Per-page brand mark — injected as <img> via regex postprocess so it
+  // prints reliably across all browsers. background-image / pseudo-
+  // element approaches fail when the user prints without the "Background
+  // graphics" option enabled (Chrome/Edge default-off, Firefox/Safari
+  // similar). An <img> tag is unambiguously printable content. One
+  // pass over the assembled HTML hits every .pr-page in all 8 page
+  // templates without touching their individual builders. (v=535)
+  const PAGE_LOGO_IMG =
+    '<img class="pr-page-logo" src="assets/logo/RoomLAB-logo-1024.png" '
+    + 'alt="" aria-hidden="true">';
+  const reportHtml = `
     ${cover}
     ${heatmapPage}
     ${operatingRangePage}
@@ -1508,6 +1518,10 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
          (css/print.css ~line 52) still appear on every page. -->
 
   `;
+  root.innerHTML = reportHtml.replace(
+    /(<div\s+class="pr-page[^"]*">)/g,
+    `$1${PAGE_LOGO_IMG}`,
+  );
   document.body.appendChild(root);
   return root;
 }
