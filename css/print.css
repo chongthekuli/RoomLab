@@ -335,7 +335,7 @@ body.is-pdf-export .vp-tabs {
      under the room name, freeing the right cell to be a logo-only
      hero. The wider logo reads as a proper cover brand mark. */
   #print-report .pr-cover-logo {
-    width: 50mm;
+    width: 45mm;
     height: auto;
     display: block;
     image-rendering: -webkit-optimize-contrast;
