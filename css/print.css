@@ -126,10 +126,41 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-page {
     page-break-after: always;
     break-after: page;
+    /* Anchor for the per-page logo ::before pseudo-element below. */
+    position: relative;
   }
   #print-report .pr-page:last-of-type {
     page-break-after: auto;
     break-after: auto;
+  }
+
+  /* Per-page brand mark — top-right of every page, hugging the physical
+     page corner (~4mm from edge). Negative offsets push the logo INTO
+     the @page margin area so the page-content margin (18mm) stays
+     intact for body text but the logo reads tight to the corner. A4
+     paper is the documented target (CLAUDE.md confirms @page is A4
+     portrait); 28mm × 18mm is the box-logo aspect at a running-header
+     scale that doesn't compete with the page eyebrow/h2 chrome.
+
+     Cover-page note: the descendant `*::before` kill-switch at
+     `.pr-page-cover *::before` (near L591) only nukes pseudos on
+     DESCENDANTS of the cover, NOT the cover's own ::before. This
+     rule fires on every page including the cover, by design. */
+  #print-report .pr-page::before {
+    content: "";
+    position: absolute;
+    top: -14mm;
+    right: -14mm;
+    width: 28mm;
+    height: 18mm;
+    background-image: url('../assets/logo/RoomLAB-logo-1024.png');
+    background-size: contain;
+    background-position: top right;
+    background-repeat: no-repeat;
+    pointer-events: none;
+    z-index: 5;
+    /* Sharper raster when the browser prints at 2x DPI. */
+    image-rendering: -webkit-optimize-contrast;
   }
 
   /* User-flagged: methodology + disclaimers must NEVER continue from a
@@ -270,23 +301,10 @@ body.is-pdf-export .vp-tabs {
     line-height: 1.2;
   }
   #print-report .pr-cover-titleblock-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4mm;
+    text-align: right;
     color: var(--muted);
     font-size: 9pt;
     line-height: 1.5;
-  }
-  #print-report .pr-cover-logo {
-    width: 38mm;
-    height: auto;
-    display: block;
-    /* Preserve sharp pixel rendering when html2canvas rasterises at 2x. */
-    image-rendering: -webkit-optimize-contrast;
-  }
-  #print-report .pr-cover-titleblock-right-meta {
-    text-align: right;
   }
 
   /* Hero band — 3D perspective render dominates the cover. The
