@@ -101,11 +101,20 @@ function makeShoebox({ withZone = false, withScoreboard = false } = {}) {
   const bvhPlain = buildBVH(soupPlain);
   ok(bvhPlain.nodeCount > 0, 'BVH built with ≥ 1 node');
 
+  // Wall naming convention: wall_north sits at state-y=0,
+  // wall_south sits at state-y=d (per triangulate-scene.js:468-489).
+  // So a ray heading in +y direction lands on wall_south, and -y on
+  // wall_north — opposite to compass intuition but consistent with
+  // scene.js's wall placement that the BVH must mirror exactly.
+  //
+  // Source keys may carry a `_p0` suffix when a wall is split into
+  // per-opening sub-quads (the triangulator emits `wall_X_p0`,
+  // `wall_X_p1`, …) — accept either form here.
   const rays = [
     { o: [5,5,1.5], d: [ 1,0,0], expectedT: 5,   expectedKey: 'wall_east'  },
     { o: [5,5,1.5], d: [-1,0,0], expectedT: 5,   expectedKey: 'wall_west'  },
-    { o: [5,5,1.5], d: [0, 1,0], expectedT: 5,   expectedKey: 'wall_north' },
-    { o: [5,5,1.5], d: [0,-1,0], expectedT: 5,   expectedKey: 'wall_south' },
+    { o: [5,5,1.5], d: [0, 1,0], expectedT: 5,   expectedKey: 'wall_south' },
+    { o: [5,5,1.5], d: [0,-1,0], expectedT: 5,   expectedKey: 'wall_north' },
     { o: [5,5,1.5], d: [0,0,-1], expectedT: 1.5, expectedKey: 'floor'      },
     { o: [5,5,1.5], d: [0,0, 1], expectedT: 1.5, expectedKey: 'ceiling'    },
   ];
@@ -114,7 +123,8 @@ function makeShoebox({ withZone = false, withScoreboard = false } = {}) {
     ok(hit !== null, `ray (${o}) (${d}) hits something`);
     if (hit) {
       assertClose(hit.t, expectedT, 1e-5, `ray (${o}) (${d}) t = ${expectedT}`);
-      ok(hit.sourceKey === expectedKey, `ray (${o}) (${d}) hits ${expectedKey} (got ${hit.sourceKey})`);
+      const keyMatches = hit.sourceKey === expectedKey || hit.sourceKey === expectedKey + '_p0';
+      ok(keyMatches, `ray (${o}) (${d}) hits ${expectedKey} (got ${hit.sourceKey})`);
     }
   }
 

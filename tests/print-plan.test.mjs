@@ -47,13 +47,17 @@ applyTemplateToState('hifi');
   assert(Math.abs(h - 9.0) < 0.01, `hifi viewBox height (got ${h.toFixed(2)}, expected 9.0)`);
 }
 
-// 3. Sources render as circles in the SVG.
+// 3. Sources render as aim-direction triangles (polygons) in the SVG.
+//    Switched from <circle> 2026-05 — see print-plan-svg.js:197 (sources
+//    now use aimTrianglePoints to mirror the live 2D viewport convention
+//    "sources radiate, listeners receive"). Listeners still render as
+//    <circle>, so the polygon count is the source-shape signal.
 applyTemplateToState('hifi');
 {
   const svg = buildFloorPlanSVG(state);
-  // hifi has 2 sources, each rendered as one circle.
-  const circleCount = (svg.match(/<circle /g) || []).length;
-  assert(circleCount >= 2, `hifi: ≥ 2 circles in SVG (got ${circleCount}; sources expected to render as circles)`);
+  // hifi has 2 sources, each rendered as one <polygon> triangle.
+  const polyCount = (svg.match(/<polygon points="/g) || []).length;
+  assert(polyCount >= 2, `hifi: ≥ 2 source polygons in SVG (got ${polyCount}; sources render as triangles per print-plan-svg.js:197)`);
 }
 
 // 4. Listeners render as triangles (polygons with 3 points + green fill).
@@ -72,22 +76,31 @@ applyTemplateToState('chamber');
   assert(zoneFills === 5, `chamber: 5 zone polygons (got ${zoneFills})`);
 }
 
-// 6. Y-axis is flipped — depth = 6 m means a source at y=0.8 should
-//    render at SVG-y ≈ depth - 0.8 + margin = 6.7 (with 1.5m margin).
+// 6. Y-axis is flipped — depth = 6 m means a listener at y=2.802 should
+//    render at SVG-y = anchorY - 2.802 = (1.5 + 6) - 2.802 = 4.698 with
+//    the standard 1.5m margin.
+//
+//    Switched from asserting the source position (sources are now
+//    <polygon> triangles whose first vertex is the aim apex, not the
+//    centroid — see print-plan-svg.js:197 + aimTrianglePoints). The
+//    listener stays as <circle>, so its cy is the stable Y-flip signal.
 applyTemplateToState('hifi');
-state.sources = [
-  { modelUrl: 'data/loudspeakers/generic-12inch.json', position: { x: 1, y: 0.8, z: 1 }, aim: { yaw: 0, pitch: 0, roll: 0 }, power_watts: 50, groupId: 'A' },
+// Pin the listener at a known fraction so the math doesn't drift if
+// the hifi template later changes its listener position.
+state.listeners = [
+  { id: 'L1', label: 'Listener 1', position: { x: 2.25, y: 6 * 0.467 }, posture: 'sitting_chair', custom_ear_height_m: null },
 ];
 {
   const svg = buildFloorPlanSVG(state);
-  // hifi default depth = 6, margin = 1.5 → expected SVG-y = 6 - 0.8 + 1.5 = 6.7
-  // First circle should have cy near 6.7.
-  const m = svg.match(/<circle cx="([^"]+)" cy="([^"]+)"/);
-  assert(m, 'circle present');
+  // hifi default depth = 6, margin = 1.5 → anchorY = 7.5
+  // Listener at y=2.802 → expected SVG-y = 7.5 - 2.802 = 4.698
+  const m = svg.match(/<circle cx="([^"]+)" cy="([^"]+)" r="[^"]+" fill="#0a8a4a"/);
+  assert(m, 'listener circle present (green fill marker)');
   if (m) {
     const cy = parseFloat(m[2]);
-    assert(Math.abs(cy - 6.7) < 0.01,
-      `Y-flip: source at state-y=0.8 → SVG-y=6.7 (got ${cy.toFixed(3)})`);
+    const expected = 7.5 - 6 * 0.467;
+    assert(Math.abs(cy - expected) < 0.01,
+      `Y-flip: listener at state-y=${(6 * 0.467).toFixed(3)} → SVG-y=${expected.toFixed(3)} (got ${cy.toFixed(3)})`);
   }
 }
 
@@ -125,12 +138,16 @@ applyPresetToState('auditorium');
   }
 }
 
-// 10. North arrow + 'N' label present.
-applyTemplateToState('hifi');
-{
-  const svg = buildFloorPlanSVG(state);
-  assert(svg.includes('>N<'), 'north arrow has the N label');
-}
+// 10. North arrow coverage — REMOVED 2026-05.
+//
+//    The N arrow used to live inside the SVG but scaled with the room
+//    (large room -> tiny arrow). It now lives as a fixed-CSS-pixel HTML
+//    overlay rendered by print containers (see print-plan-svg.js:280-283
+//    + .pr-cover-hero-plan::after / .pr-heatmap-stage::after in
+//    print.css). The pure-SVG generator no longer emits an 'N' glyph.
+//
+//    TODO: re-add a north-arrow assertion when print smoke tests exist
+//    that exercise the full HTML container (DOM-driven, not pure-SVG).
 
 // 11. Legend renders with the three symbol rows.
 {
