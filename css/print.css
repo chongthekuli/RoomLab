@@ -284,7 +284,16 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-cover-titleblock {
     display: grid;
     grid-template-columns: 1fr auto;
-    align-items: end;
+    /* align-items: start — both columns top-align so the logo sits on
+       the SAME LINE as the eyebrow header ("ROOMLAB · ACOUSTIC
+       SIMULATION"), not below it. Previously this was `end` (Maya's
+       v1 design) which floated the shorter right column down to the
+       titleblock border; user request 2026-05-19 (v=539) is to lift
+       the logo to the header line. The h2 / engine bottoms no longer
+       align — there's a small visual gap under the right column —
+       but the brand mark reads as a header peer, not a footer to
+       the title block. */
+    align-items: start;
     padding-bottom: 4mm;
     border-bottom: 1pt solid var(--ink);
   }
