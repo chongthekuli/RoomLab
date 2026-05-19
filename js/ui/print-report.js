@@ -2174,6 +2174,44 @@ export async function triggerPrint() {
 
 export function mountPrintReport({ materials }) {
   _printMaterialsRef = materials;
+  // 2026-05-19 DEBUG: expose a global helper so user can build the
+  // print report and SEE it on the normal screen page (without
+  // triggering the print dialog). They can then F12 → inspect the
+  // arrow + N element directly. Call from the browser console:
+  //     __rlDebugShowPrint()
+  // After done, run __rlDebugHidePrint() to clean up.
+  if (typeof window !== 'undefined') {
+    window.__rlDebugShowPrint = async () => {
+      if (!_printMaterialsRef) { console.warn('print materials not loaded'); return; }
+      try {
+        const old = document.getElementById('print-report');
+        if (old) old.remove();
+        const { computeAllBands } = await import('../physics/rt60.js');
+        const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments });
+        const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
+        const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
+        let coverImage = null;
+        try { if (_captureFn) coverImage = _captureFn({ width: 1500, height: 1500, preset: 'iso', fixedAspect: true }); }
+        catch (err) { console.warn('capture failed', err); }
+        const model = buildPrintModel({ materials: _printMaterialsRef });
+        renderPrintReport(model, { splGrid, coverImage });
+        document.body.classList.add('is-pdf-export');
+        document.getElementById('print-report').style.background = '#fff';
+        document.getElementById('print-report').style.position = 'fixed';
+        document.getElementById('print-report').style.left = '0';
+        document.getElementById('print-report').style.top = '0';
+        document.getElementById('print-report').style.zIndex = '99999';
+        document.getElementById('print-report').style.maxHeight = '100vh';
+        document.getElementById('print-report').style.overflow = 'auto';
+        console.log('[debug] print-report visible. Inspect arrow now. Call __rlDebugHidePrint() to clean up.');
+      } catch (err) { console.warn('debug show failed:', err); }
+    };
+    window.__rlDebugHidePrint = () => {
+      document.getElementById('print-report')?.remove();
+      document.body.classList.remove('is-pdf-export');
+      console.log('[debug] cleaned up');
+    };
+  }
 
   // Warm-load the scene.js capture path so the synchronous beforeprint
   // handler below can call it without waiting on a dynamic import. By
