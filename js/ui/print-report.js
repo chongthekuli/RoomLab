@@ -1584,6 +1584,23 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
           }
         }
         console.log('[debug] === Scan complete ===');
+      // Find every element in the FULL #print-report that has one of the
+      // arrow-trigger classes. If the arrow on the cover is actually
+      // page-2's .pr-heatmap-stage leaking through, that's what we'll see.
+      const arrowClasses = ['.pr-heatmap-stage', '.pr-cover-hero-plan', '.pr-cover-hero-inset', '.pr-plan-svg-wrap', '.pr-strip-cell-stage'];
+      arrowClasses.forEach(cls => {
+        const hits = root.querySelectorAll(cls);
+        if (hits.length > 0) {
+          hits.forEach(el => {
+            const page = el.closest('.pr-page');
+            const pageClass = page ? page.className : '(no .pr-page parent)';
+            const r = el.getBoundingClientRect();
+            console.warn(`[debug] arrow-trigger found: ${cls} | inside: ${pageClass} | bbox: (${r.left.toFixed(0)},${r.top.toFixed(0)}) size: ${r.width.toFixed(0)}x${r.height.toFixed(0)}`);
+          });
+        } else {
+          console.log(`[debug] no element matches ${cls}`);
+        }
+      });
       } catch (err) { console.warn('[debug] sheet-scan failed:', err); }
     }
   } catch (e) { console.warn('[debug] suspect-search failed:', e); }
