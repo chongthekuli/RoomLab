@@ -284,16 +284,15 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-cover-titleblock {
     display: grid;
     grid-template-columns: 1fr auto;
-    /* align-items: start — both columns top-align so the logo sits on
-       the SAME LINE as the eyebrow header ("ROOMLAB · ACOUSTIC
-       SIMULATION"), not below it. Previously this was `end` (Maya's
-       v1 design) which floated the shorter right column down to the
-       titleblock border; user request 2026-05-19 (v=539) is to lift
-       the logo to the header line. The h2 / engine bottoms no longer
-       align — there's a small visual gap under the right column —
-       but the brand mark reads as a header peer, not a footer to
-       the title block. */
-    align-items: start;
+    /* align-items: end — left column (eyebrow + h1 + h2) bottom-aligns
+       to the titleblock border, preserving Maya's v1 design. The RIGHT
+       column overrides this with align-self: start (see
+       .pr-cover-titleblock-right below) so the logo lifts to the header
+       line WITHOUT pulling the left column up with it. (v=540 fix:
+       v=539 used align-items: start which moved both columns and the
+       user reported the project name + room name had shifted — they
+       wanted ONLY the logo to move.) */
+    align-items: end;
     padding-bottom: 4mm;
     border-bottom: 1pt solid var(--ink);
   }
@@ -319,6 +318,14 @@ body.is-pdf-export .vp-tabs {
     color: var(--muted);
     font-size: 9pt;
     line-height: 1.5;
+    /* Override the grid's align-items: end on a per-cell basis. The
+       grid still bottom-aligns the LEFT column to the titleblock
+       border (preserving the project + room name vertical position
+       Maya's v1 spec set), but this right cell top-aligns to the
+       grid-row top — putting the logo's top edge on the same line
+       as the eyebrow ("ROOMLAB · ACOUSTIC SIMULATION") instead of
+       floating below the header. v=540 user-targeted fix. */
+    align-self: start;
   }
   /* Cover hero logo — bigger than the per-page running header (21mm).
      The cover gets a styled brand mark; non-cover pages get the running
