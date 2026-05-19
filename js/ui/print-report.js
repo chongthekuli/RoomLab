@@ -2088,7 +2088,39 @@ export async function triggerPrint() {
   // header entirely, the user must uncheck "Headers and footers" in
   // their print dialog — no programmatic alternative.)
 
+  // Wait for the per-page logo <img>s to finish loading before printing.
+  // Symptom this fixes: in-app "print" button printed without the logo
+  // on first invocation (image still fetching when window.print() fired);
+  // Ctrl+P worked because the user's delay gave the image time to load.
+  // The Image() preload in mountPrintReport() makes this near-instant on
+  // second+ prints — first prints get a ~150 ms wait at most.
+  await _waitForLogoImages();
+
   requestAnimationFrame(() => { window.print(); });
+}
+
+/**
+ * Resolve once every .pr-page-logo <img> in the currently mounted
+ * print-report has loaded (success OR error). 1500 ms ceiling so a
+ * missing-asset 404 doesn't block print forever.
+ */
+function _waitForLogoImages() {
+  const imgs = document.querySelectorAll('#print-report .pr-page-logo');
+  if (!imgs.length) return Promise.resolve();
+  const promises = Array.from(imgs).map((img) => {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        img.removeEventListener('load', done);
+        img.removeEventListener('error', done);
+        resolve();
+      };
+      img.addEventListener('load', done);
+      img.addEventListener('error', done);
+      setTimeout(done, 1500);
+    });
+  });
+  return Promise.all(promises);
 }
 
 export function mountPrintReport({ materials }) {
@@ -2099,6 +2131,17 @@ export function mountPrintReport({ materials }) {
   // the time the user opens the print dialog (seconds later at the
   // earliest), the module is cached.
   _loadCaptureFn();
+
+  // Preload the per-page logo PNG so it's in the browser cache by the
+  // time triggerPrint() injects it into the per-page <img> tags. Fixes
+  // the flaky in-app "print" button (logo sometimes missing on first
+  // click because the image hadn't fetched yet). Image() with src is
+  // enough to start the fetch; the result lands in the HTTP cache and
+  // any <img src> referencing it later resolves from cache instantly.
+  try {
+    const preload = new Image();
+    preload.src = 'assets/logo/RoomLAB-logo-1024.png';
+  } catch (_) { /* SSR or sandbox without Image — harmless */ }
 
   window.addEventListener('beforeprint', () => {
     if (!_printMaterialsRef) return;

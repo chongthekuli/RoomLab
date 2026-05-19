@@ -134,18 +134,24 @@ body.is-pdf-export .vp-tabs {
     break-after: auto;
   }
 
-  /* Per-page brand mark — top-right of every page, hugging the physical
-     page corner (~4mm from edge). Injected as an <img class="pr-page-logo">
-     by print-report.js (regex postprocess into every .pr-page div) so
-     it prints reliably without the user enabling "Background graphics"
-     in the print dialog. Negative offsets push the logo INTO the @page
-     margin area so the page-content margin (18mm) stays intact for
-     body text but the logo reads tight to the corner. A4 paper is the
-     documented target (CLAUDE.md confirms @page is A4 portrait). */
+  /* Per-page brand mark — top-right of every page. Injected as an
+     <img class="pr-page-logo"> by print-report.js (regex postprocess
+     into every .pr-page div). Positioned at the .pr-page corner
+     (top: 0, right: 0); the visible gap to the physical page edge
+     equals the @page top/right margin (18mm). Earlier attempt
+     (v=534) used negative offsets to push into the @page margin
+     area for a tighter look, but Chromium's print engine CLIPS
+     content beyond the .pr-page boundary (anything in the @page
+     margin gets cropped), so only the left half of the logo was
+     visible. top:0/right:0 is reliable.
+
+     To tighten further you'd reduce the @page top + right margins
+     (line ~44) — at the cost of body content also moving closer
+     to the page edge. Current 18mm is professional-report spacing. */
   #print-report .pr-page-logo {
     position: absolute;
-    top: -14mm;
-    right: -14mm;
+    top: 0;
+    right: 0;
     width: 28mm;
     height: auto;
     display: block;
