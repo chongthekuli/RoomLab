@@ -333,7 +333,7 @@ These are roles / surfaces with no clear owner, not test gaps:
 
 1. **WCAG / accessibility lead** — Maya covers keyboard reachability + contrast basics, but no one owns screen-reader semantics, motor-only nav, or colour-blind palette validation. Heatmap ramps have not been audited for deuteranopia.
 2. **HRTF / DOA pipeline** — between Dr. Chen's physics (produces the IR) and Sora's WebAudio (consumes the IR from convolver onward), the per-DOA energy decomposition has no owner. Becomes load-bearing when walk-mode auralization adds head-tracked binaural.
-3. **CI for test suite** — Sam writes tests, Theo audits coverage, but no GitHub Action invokes `node tests/*.test.mjs` on push. The 12% same-PR regression-test compliance number won't improve without a mechanical signal that the suite ran. Candidate owner: Owen.
+3. **CI for test suite** — **RESOLVED 2026-05-19** by `.github/workflows/tests.yml` (owned by Owen, release-engineer). The workflow runs `node tests/*.test.mjs` on push to `main` and on PRs targeting `main`, pinned to Node 22 LTS, no install step (project has no package.json). Per-file pass/fail with both signals checked (non-zero exit code AND `FAIL ` line on stdout — some legacy tests print + exit 0). A single failure fails the build and shows up in the PR check list as `tests`. The 12% same-PR regression-test compliance number now has a mechanical signal behind it.
 4. **Vendor outreach** for ROADMAP item #11 (open speaker spec evangelism) — Carmen owns strategy, Lin owns documentation; no one owns the actual conversations with Amperes/Bose/Adamson.
 
 ---
@@ -343,7 +343,7 @@ These are roles / surfaces with no clear owner, not test gaps:
 Shipped 2026-05-18. Activate via `/hooks` once or restart Claude Code if they aren't firing yet.
 
 - **`cache-bump-guard.js`** — PreToolUse on `git commit *`. Warns (non-blocking) if `js/`, `css/`, or `index.html` are staged but `?v=NNN` integer is unchanged vs `origin/main`.
-- **`regression-test-reminder.js`** — PreToolUse on `git commit *`. Reminds (non-blocking) if commit message contains `fix|regression|revert|broken|hotfix` but no `tests/*` file is staged.
+- **`regression-test-reminder.js`** — PreToolUse on `git commit *`. Asks (`permissionDecision: "ask"`, blocking) if commit message contains `fix|regression|revert|broken|hotfix` but no `tests/*` file is staged.
 - **`visual-physics-push-guard.js`** — PreToolUse on `git push *`. Asks for confirmation (`permissionDecision: "ask"`) when HEAD touches `js/graphics/`, `js/physics/precision/`, `js/audio/`, `js/ui/print-heatmap.js`, `js/ui/print-plan-svg.js`, or heatmap-shader code. Enforces `feedback_visual_physics_local_first` mechanically.
 - **`stop-cache-bump-nudge.js`** — Stop event. One-line nudge if uncommitted js/css/html exists with unchanged `?v=`.
 - **`deploy-poll.js`** — PostToolUse on `git push origin main`, async. Polls live URL for 30 s until `?v=NNN` matches local; reports result.

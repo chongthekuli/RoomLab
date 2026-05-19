@@ -1,0 +1,98 @@
+# RoomLab Node test suite — runs every tests/*.test.mjs on push to main
+# and on PRs targeting main. No build step, no install (the project has
+# no package.json / node_modules) — just plain Node ESM + built-in
+# `assert`. Each test file is invoked directly; failure is signalled by
+# EITHER a non-zero exit code OR the literal "FAIL " token on stdout
+# (some legacy tests print pass/fail and exit 0). Both signals = build red.
+#
+# Owner: Owen Pritchard (release-engineer). Closes CLAUDE.md §6
+# "Other coverage holes" item #3 (CI for test suite).
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs of this workflow on the same ref when a new
+# push arrives — keeps the PR check list tidy and the queue free.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Print Node version
+        run: node --version
+
+      - name: Run tests/*.test.mjs
+        shell: bash
+        run: |
+          set -u
+          shopt -s nullglob
+          files=( tests/*.test.mjs )
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No tests/*.test.mjs files found"
+            exit 1
+          fi
+
+          total=${#files[@]}
+          passed=0
+          failed=0
+          failed_names=()
+
+          echo "Running ${total} test file(s)..."
+          echo
+
+          for f in "${files[@]}"; do
+            echo "::group::${f}"
+            # Capture stdout+stderr so we can grep for "FAIL " regardless
+            # of whether the test exits non-zero or just prints and exits 0.
+            output="$(node "${f}" 2>&1)"
+            rc=$?
+            echo "${output}"
+            echo "::endgroup::"
+
+            # Two failure signals — either trips the file as failed.
+            # Match "FAIL " at line-start with a trailing space so we
+            # don't false-positive on words like "FAILURE" or quoted
+            # "FAIL" inside a passing diagnostic.
+            if [[ ${rc} -ne 0 ]] || echo "${output}" | grep -qE '^FAIL '; then
+              echo "::error file=${f}::Test FAILED (exit ${rc})"
+              failed=$((failed + 1))
+              failed_names+=( "${f}" )
+            else
+              passed=$((passed + 1))
+            fi
+          done
+
+          echo
+          echo "──────────────────────────────────────────"
+          echo "  Total : ${total}"
+          echo "  Passed: ${passed}"
+          echo "  Failed: ${failed}"
+          echo "──────────────────────────────────────────"
+
+          if (( failed > 0 )); then
+            echo
+            echo "Failed files:"
+            for n in "${failed_names[@]}"; do
+              echo "  - ${n}"
+            done
+            exit 1
+          fi
