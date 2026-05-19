@@ -195,7 +195,12 @@ state.listeners = [];
 {
   const out = recordRayPaths({ state, materials, getLoudspeakerDef, totalPaths: 30, bias: 'listeners' });
   assert(out.stats.bias === 'listeners', 'forced listeners mode honoured');
-  assert(out.stats.listenerHits === 0, 'no listeners: zero listener hits');
+  // SEMANTIC WIDENING (ray-viz.js:316): hitListener no longer means
+  // "ray crossed a listener sphere" — at bounce 0 every ray is force-
+  // committed to preserve the speaker's radial radiation pattern, so
+  // it now means "commit-worthy". With no listeners, stats.receivers
+  // is the clean assertion for the "empty listeners" condition.
+  assert(out.stats.receivers === 0, 'no listeners: stats.receivers === 0');
   assert(out.stats.totalPaths > 0, `last-resort fallback kept ≥ 1 path per source (${out.stats.totalPaths})`);
 }
 

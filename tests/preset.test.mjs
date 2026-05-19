@@ -9,11 +9,13 @@ function assert(cond, label) {
   if (!cond) failed++;
 }
 
-// PRESETS = signature pre-built scenes (auditorium + pavilion). TEMPLATES =
-// parametric shape generators. The split was introduced when the eight
-// smaller rooms (hi-fi, studio, classroom, etc.) became user-scalable.
-assert(Object.keys(PRESETS).length === 2, 'PRESETS has exactly 2 entries (auditorium, pavilion)');
+// PRESETS = signature pre-built scenes (auditorium + pavilion + surau).
+// TEMPLATES = parametric shape generators. The split was introduced when
+// the eight smaller rooms (hi-fi, studio, classroom, etc.) became
+// user-scalable.
+assert(Object.keys(PRESETS).length === 3, 'PRESETS has exactly 3 entries (auditorium, pavilion, surau)');
 assert('auditorium' in PRESETS && 'pavilion' in PRESETS, 'PRESETS contains auditorium + pavilion');
+assert('surau' in PRESETS, 'PRESETS contains surau');
 assert(Object.keys(TEMPLATES).length === 8, 'TEMPLATES has exactly 8 entries');
 for (const k of ['hifi','studio','classroom','livevenue','recitalhall','chamber','octagon','rotunda']) {
   assert(k in TEMPLATES, `TEMPLATES contains ${k}`);
