@@ -40,7 +40,6 @@ export function mountAuthorNotePanel() {
 
   root.innerHTML = `
     <h2>Author's note</h2>
-    <p class="panel-intro">Free-form 1–2 sentence remark from the project's acoustician. Prints on the report cover after the proposal paragraph.</p>
     <div class="field-group author-note-row">
       <label class="author-note-label" for="author-note-textarea">Cover commentary
         <textarea id="author-note-textarea"
