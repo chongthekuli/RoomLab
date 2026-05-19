@@ -1520,21 +1520,39 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
 
   `;
   document.body.appendChild(root);
-  // 2026-05-19 debug: after insertion, dump the live cover's outerHTML so
-  // we see what's ACTUALLY in the DOM (vs the template string). Also list
-  // every element in the title block in case something is added after
-  // insertion by another module.
+  // 2026-05-19 debug — run the suspect-element search inline (instead of
+  // via setTimeout, which races the print-preview takeover and cleared
+  // DOM before the user's paste). All warnings here go straight to the
+  // console synchronously, before the print dialog opens, so the user's
+  // console still has them after the preview takeover.
   try {
-    setTimeout(() => {
-      const c = root.querySelector('.pr-page-cover');
-      if (!c) return;
-      const t = c.querySelector('.pr-cover-titleblock');
-      if (!t) return;
-      console.log('[print-report] LIVE titleblock outerHTML →\n' + t.outerHTML);
-      console.log('[print-report] LIVE titleblock children count:', t.children.length);
-      [...t.querySelectorAll('*')].forEach(el => console.log('   ↳', el.tagName, el.className || '(no class)', '|', (el.textContent || '').trim().slice(0, 60)));
-    }, 50);
-  } catch (_) {}
+    const c = root.querySelector('.pr-page-cover');
+    if (c) {
+      const all = [...c.querySelectorAll('*')];
+      console.log(`[debug] cover descendant count: ${all.length}`);
+      console.log(`[debug] cover.outerHTML.length: ${c.outerHTML.length}`);
+      console.log(`[debug] titleblock outerHTML:`, c.querySelector('.pr-cover-titleblock')?.outerHTML);
+      all.forEach(el => {
+        const t = (el.textContent || '').trim();
+        if (t === 'N' || t === '▲' || t === '▲N' || t === '▲ N' || /^▲?\s*N\s*$/.test(t)) {
+          console.warn('[debug] SUSPECT element text:', el.tagName, el.className, '| text:', JSON.stringify(t));
+        }
+        const bg = getComputedStyle(el).backgroundImage;
+        if (bg && bg !== 'none' && bg.includes('polygon')) {
+          console.warn('[debug] SUSPECT background:', el.tagName, el.className, '| bg:', bg);
+        }
+        for (const pseudo of ['::before', '::after']) {
+          const cs = getComputedStyle(el, pseudo);
+          const ct = cs.content;
+          const pbg = cs.backgroundImage;
+          if ((pbg && pbg.includes('polygon')) || (ct && ct !== 'none' && ct !== 'normal' && ct !== '""' && ct !== "''")) {
+            console.warn('[debug] SUSPECT pseudo:', el.tagName, el.className, pseudo, '| content:', ct, '| bg:', pbg);
+          }
+        }
+      });
+      console.log('[debug] suspect-search complete');
+    }
+  } catch (e) { console.warn('[debug] suspect-search failed:', e); }
   return root;
 }
 
