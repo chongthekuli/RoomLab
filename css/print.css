@@ -41,14 +41,20 @@ body.is-pdf-export #print-report { display: block !important; }
 
   @page {
     size: A4 portrait;
-    /* Tight A4 margins — user reported (2026-05-19) the printed paper
-       showed a lot of blank perimeter. Reduced from 18mm/18mm/14mm/22mm
-       to 10mm/10mm/10mm/15mm: still leaves 5-8mm clearance above any
-       physical printer's hard margin (most consumer printers can't go
-       below 4-6mm), keeps a slightly wider left gutter for binding,
-       and lets body content + per-page logo overlay sit closer to the
-       physical page edge. */
-    margin: 10mm 10mm 10mm 15mm;       /* top / right / bottom (footer) / left gutter */
+    /* Tight A4 margins. User asked (2026-05-19, v=544) to push the
+       per-page logo further right without clipping. The CSS Paged
+       Media model clips content beyond the .pr-page boundary (the
+       @page margin area is reserved for @page margin boxes only),
+       so the only way to move the logo right is to shrink the @page
+       right margin itself. Right margin: 10mm → 5mm. Body content
+       also moves 5mm closer to the page edge as a side effect; 5mm
+       still leaves ~1mm clearance above the typical consumer printer
+       hard margin (~4mm) but it's TIGHT — back off to 7-8mm if
+       printers crop content.
+
+       Left margin stays at 15mm for binding gutter. Top + bottom
+       stay at 10mm. */
+    margin: 10mm 5mm 10mm 15mm;        /* top / right / bottom / left gutter */
 
     /* Page number rendered INSIDE the printable area (not in the
        browser chrome). Survives the user unchecking "Headers and
