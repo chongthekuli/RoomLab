@@ -72,7 +72,7 @@ js/
 
 data/                   loudspeaker JSON, material absorption, rack catalogue
 tests/                  ~42 Node test files (no framework — plain assert.*)
-.claude/agents/         13 specialist agent definitions
+.claude/agents/         14 specialist agent definitions
 ```
 
 ---
@@ -104,6 +104,15 @@ CSS/JS/HTML. Verify the deployed file via `curl` before claiming the
 fix is live — push exit code is not enough. See
 `feedback_verify_deploys.md`.
 
+### Cross-surface conventions
+Any concept that renders on ≥ 2 of {2D viewport, 3D viewport, print
+plan SVG, print heatmap SVG} (axis sign, north arrow, scale bar, units,
+label sizing) must be registered in
+`tests/cross-surface-conventions.test.mjs` before merge. Sam
+(qa-engineer) owns this fixture as **cross-surface convention owner**.
+The north-arrow leak chase (v=515 → v=525, 9 Debug commits) is the
+recurring failure mode this invariant prevents.
+
 ### Pure modules in `js/physics/` and `js/ui/print-*.js`
 These run in Node tests. Never import Three.js or browser-only APIs
 into them. The `per-listener-metrics.js` helper imports physics but is
@@ -115,12 +124,15 @@ For any visual-physics work (heatmap, 3D, 2D rendering, audio playback,
 print layout), consult the relevant specialist FIRST:
 - **Graphics / Three.js / camera / shaders** → Viktor (3d-rendering-expert)
 - **Physics correctness / standards** → Dr. Chen (acoustics-engineer)
-- **Panel UX / copy / accessibility** → Maya (ux-designer)
+- **Panel UX / copy / accessibility / print art direction** → Maya (ux-designer)
 - **PA system architecture** → Felix (pa-integrator)
-- **Proposal/print design** → Sofia (proposal-designer)
+- **Cross-surface convention parity** → Sam (qa-engineer)
 
 Three regressions shipped in one session (commits f.1/f.2/f.3) when
 this was skipped. See `feedback_visual_physics_workflow.md`.
+
+Single-file, ≤ 30 LOC, non-guarded fixes do NOT need pre-consult —
+they take the fast lane in §5.
 
 ### Visual-physics is LOCAL-FIRST
 Heatmap, 3D viewport, 2D viewport, walk-mode commits: commit + bump
@@ -149,9 +161,8 @@ When a task touches one of these, route to the matching agent (see
 | Walk-mode auralization, IR convolution, WebAudio   | audio-engine-specialist     | Sora Akiyama       |
 | Panel UX, copy, accessibility, onboarding          | ux-designer                 | Maya Okafor        |
 | Glossary, README, release notes, user-facing copy  | docs-writer                 | Lin Sato           |
-| Print/PDF proposal art direction                   | proposal-designer           | Sofia Calderón     |
 | Competitor research (EASE/Odeon/Treble/ArrayCalc)  | market-strategist           | Carmen Vasquez     |
-| Test design, fixtures, regression sweeps           | qa-engineer                 | Sam Reyes          |
+| Test design, fixtures, regression sweeps; cross-surface convention owner (axis, north arrow, scale bar, units, label sizing across 2D viewport / 3D viewport / print plan SVG / print heatmap SVG) | qa-engineer | Sam Reyes |
 | Bug-→-test index, same-PR rule enforcement         | regression-curator          | Theo Halvorsen     |
 | Frame budget, heap growth, long-session leaks      | performance-profiler        | Mehmet Kaya        |
 | GitHub Pages deploy verification, cache-bust       | release-engineer            | Owen Pritchard     |
@@ -165,6 +176,20 @@ Known routing ambiguities (now annotated in each agent's `description:`):
 - **Sora ↔ Dr. Chen** on auralization → Dr. Chen owns the physics that produces the IR; Sora owns everything from the IR onward (WebAudio graph, gain mapping, ConvolverNode lifecycle).
 - **Mehmet ↔ Viktor** on perf → Viktor optimises for ms-per-pretty-pixel; Mehmet optimises for ms-per-frame and bytes-per-hour. Frame-budget regression goes to Viktor; heap-growth or long-session bug goes to Mehmet.
 
+Sam is the **cross-surface convention owner**. Any concept that
+renders on ≥ 2 of {2D viewport, 3D viewport, print plan SVG, print
+heatmap SVG} routes through him before edit — he decides whether it
+lives in a shared helper or stays per-surface, and he owns the parity
+fixture `tests/cross-surface-conventions.test.mjs`. North arrow, axis
+sign, scale bar, units, label sizing currently qualify; add more as
+they arise.
+
+Maya also covers **print/proposal art direction** as a sub-hat
+(typographic hierarchy, accent colour, cover composition for
+`js/ui/print-report.js`). Inherited from the retired proposal-designer
+seat 2026-05-19 — the work proved to need an implementer-owner inside
+the engineering flow, not an outside spec.
+
 Still-open role gap: dedicated accessibility lead (WCAG / screen-reader / motor-only). Lower priority — Maya covers the basics for now.
 
 ### Single-domain vs cross-domain routing
@@ -175,14 +200,12 @@ Still-open role gap: dedicated accessibility lead (WCAG / screen-reader / motor-
 - **Cross-domain (2+ subsystems)**: call Hannes (tech-lead). He decomposes and routes. Examples: walk-mode auralization (graphics + physics + audio + UI); the print report (physics + UI + design); preset/template restructure (state + UI + tests + docs).
 - **Specialist-vs-specialist disagreement** (the 5 ambiguities above): call Hannes for the tiebreak. He synthesizes the trade-off and decides. If the call is subjective (UX feel, aesthetic), he escalates to the user. If it's a physics or safety claim, the standards specialist has the final say — Dr. Chen for acoustics, Owen for deploys.
 
-### Two seats on probation (3-week deliverable due 2026-06-08)
+### Probation status (Hannes audit, updated 2026-05-19)
 
-Per Hannes's 2026-05-18 org audit, two seats have not produced load-bearing commits and need a concrete artefact or they fold:
+- **pa-integrator (Felix)** — still on probation. Deadline extended to **2026-06-22**. Deliverable: a printable BoM + heat-budget page for the surau exterior speaker fitout (single-file print page, one subsystem — fast-lane-friendly). If missed, fold into Dr. Chen as a "system specifier" sub-hat.
+- **proposal-designer (Sofia)** — **FOLDED 2026-05-19.** Print/proposal art direction is now a Maya sub-hat. The last 15 commits showed the print report needs an implementer-owner embedded in the engineering flow, not an outside design spec. Sofia's agent file has been retired; `PROPOSAL_DESIGN.md`, if it exists, is no longer load-bearing.
 
-- **pa-integrator (Felix)** — deliverable: a printable BoM + heat-budget page for the surau exterior speaker fitout. If missed, fold into Dr. Chen as a "system specifier" sub-hat.
-- **proposal-designer (Sofia)** — deliverable: `PROPOSAL_DESIGN.md` delta spec on the current `js/ui/print-report.js`, naming typographic hierarchy fixes + one accent colour + cover composition fixes. If missed, fold into Maya as an art-direction sub-hat.
-
-Sora (audio) and Mehmet (perf) are also load-bearing-pending but justified by the walk-mode roadmap — expect zero output from them until W.2 work starts. Not on probation.
+Sora (audio) and Mehmet (perf) are load-bearing-pending but justified by the walk-mode roadmap — expect zero output from them until W.2 work starts. Not on probation.
 
 ---
 
@@ -213,12 +236,48 @@ Sora (audio) and Mehmet (perf) are also load-bearing-pending but justified by th
 4. Bug fix? Add a regression test in the SAME commit (`feedback_*` says
    what to assert). If no test, name it as a tripwire gap.
 
+### Fast-lane workflow (added 2026-05-19)
+
+A change is a **fast-lane fix** if ALL of these are true:
+
+- Single file, ≤ 30 LOC net diff.
+- One subsystem (matches single-domain rule in §4).
+- Does **not** touch: `js/physics/`, `js/graphics/scene.js`,
+  `js/graphics/heatmap-shader.js`, `js/audio/`, `js/state/`,
+  `js/app-state.js`, `data/materials.json`, `data/loudspeakers/*.json`,
+  or any GUARDED memory surface (see §6).
+- Is one of: a CSS rule change, a copy-string edit, a typo, an
+  `overflow:` / `z-index:` / `display:` fix, a tooltip wording change,
+  a one-line numeric clamp.
+
+**Fast-lane SKIPS:** specialist pre-consult; LOCAL-FIRST holdback;
+Priya UAT gate; hypothesis-before-fix paragraph in the commit message.
+
+**Fast-lane STILL REQUIRES:** cache-bump `?v=NNN`; regression test in
+the same commit IF the change is a bug-fix; Owen's post-push live-URL
+poll; revert-first if the user reports a regression within 24 h.
+
+**Examples:**
+- v=525 `overflow:hidden` on cover titleblock stages → fast lane.
+- v=523 outline-every-titleblock-child Debug commit → would have been
+  fast-lane, but shouldn't have been a LOCAL commit at all (use a
+  worktree probe).
+- v=504 `scene.scale.x = -1` X-mirror saga → **NOT** fast lane. Multi-file,
+  scene.js + controllers, 12 conversion sites. Full ceremony correct.
+- W.x walk-mode auralization → **NOT** fast lane (cross-subsystem).
+- Heatmap colour-ramp tweak → **NOT** fast lane (heatmap-shader is guarded).
+
+The cost of one specialist round-trip on a 3-LOC CSS fix exceeds the
+regression risk of the fix itself. The north-arrow chase (v=515→v=525,
+9 Debug commits) is the canonical waste this rule prevents.
+
 ### After push
 1. Poll `https://chongthekuli.github.io/RoomLab/index.html` until the
    new `?v=NNN` is served. Don't trust `git push` exit code.
 2. UAT gate — for any user-facing change, walk through the feature
    yourself (or hand off to Priya). Technical correctness alone is
-   insufficient. See `feedback_uat_gate.md`.
+   insufficient. See `feedback_uat_gate.md`. (Skipped for fast-lane
+   fixes per the rule above.)
 
 ---
 
@@ -230,8 +289,11 @@ Same-PR regression test compliance: **~12%**. Priority backlog:
    `90248db`), zero tests. Needs a state-machine test of
    `js/ui/custom-draw.js`.
 2. **2D ↔ 3D ↔ print Y-axis convention** — 4 commits chased the same
-   orientation bug across surfaces. Needs ONE shared fixture asserting
-   all four projections.
+   orientation bug across surfaces. **Resolved-on-paper 2026-05-19** by
+   `tests/cross-surface-conventions.test.mjs` (spec'd by Hannes, owned
+   by Sam — see §3 "Cross-surface conventions"). Remove from backlog
+   when the fixture lands. The X-mirror saga (v=494→v=504) gets
+   subsumed by the same fixture.
 3. **Heatmap rendering pipeline** — N-S row flip, surau split-on-rotation,
    pipeline-order, single-annulus podium all shipped behavior-untested.
    Needs synthetic 2-source scene → Float32 SPL buffer monotonicity test.
