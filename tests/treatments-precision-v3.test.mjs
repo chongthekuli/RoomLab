@@ -132,7 +132,7 @@ const getDef = () => stubSpeaker;
     zones: [], sources: [], listeners: [],
     treatments: [
       makeTreatmentEntry(QRD,
-        { surface: 'wall', wallIndex: 0 },   // north (y=4)
+        { surface: 'wall', wallIndex: 0 },   // south (y=4 in current convention; see triangulate-scene.js:468-489)
         { x: 2, y: 4, z: 1.5 },
         0),
     ],
@@ -209,31 +209,38 @@ const getDef = () => stubSpeaker;
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
 
+  // Helper: a `wall_X_p0` suffix may decorate the source key when the
+  // wall has been split into per-opening sub-quads. Accept either.
+  const wallKeyMatches = (k, expected) =>
+    k === expected || (typeof k === 'string' && k.startsWith(expected + '_'));
+
   // (b) Reflected ray AT THE TREATMENT FACE. The hit point is on the
   // treatment quad (y = 4 - 1e-3); the reflected direction for a ray
   // that came in along +y is -y. Origin nudged +EPS along reflected
   // direction matches the tracer's own self-intersection avoidance.
-  // The next BVH hit MUST NOT be the wall behind (y=4); it must be
-  // either the floor, ceiling, opposite wall, or escape.
+  // The wall behind the panel sits AT state-y=4, which is wall_south
+  // under the current triangulate-scene.js convention (wall_south at
+  // y=d). The reflected ray heads -y → toward y=0 → wall_north.
   const refOrigin = [2, 4 - 1e-3 - 1e-6, 1.5];
   const refDir = [0, -1, 0];
   const refHit = intersectRay(bvh,
     refOrigin[0], refOrigin[1], refOrigin[2],
     refDir[0], refDir[1], refDir[2], Infinity);
-  ok(refHit && refHit.sourceKey !== 'wall_north',
-    `No double-count: reflected ray from treatment face does NOT hit wall_north behind (got '${refHit?.sourceKey}', t=${refHit?.t.toFixed(3)})`);
-  // (b.cont) The reflected ray should hit wall_south at t = 4 - 1e-3 ≈ 4 m.
-  ok(refHit && refHit.sourceKey === 'wall_south' && Math.abs(refHit.t - 4) < 0.01,
-    `No double-count: reflected ray hits wall_south at t≈4 m (got '${refHit?.sourceKey}', t=${refHit?.t.toFixed(3)})`);
+  ok(refHit && !wallKeyMatches(refHit.sourceKey, 'wall_south'),
+    `No double-count: reflected ray from treatment face does NOT hit wall_south behind (got '${refHit?.sourceKey}', t=${refHit?.t.toFixed(3)})`);
+  // (b.cont) The reflected ray should hit wall_north (y=0) at t ≈ 4 m.
+  ok(refHit && wallKeyMatches(refHit.sourceKey, 'wall_north') && Math.abs(refHit.t - 4) < 0.01,
+    `No double-count: reflected ray hits wall_north at t≈4 m (got '${refHit?.sourceKey}', t=${refHit?.t.toFixed(3)})`);
 
   // (c) Bypass ray going AROUND the panel. Ray from (3.7, 0, 1.5)
   // toward +y at x=3.7 misses the 1×1 panel (panel x range
-  // [1.5, 2.5]) and SHOULD hit wall_north at y=4 directly. This
-  // proves the wall behind still contributes to rays the panel
-  // doesn't shadow — the proportional-coverage invariant.
+  // [1.5, 2.5]) and SHOULD hit the wall at y=4 directly — under the
+  // current convention that wall is wall_south. This proves the wall
+  // behind still contributes to rays the panel doesn't shadow —
+  // the proportional-coverage invariant.
   const bypassHit = intersectRay(bvh, 3.7, 0, 1.5, 0, 1, 0, Infinity);
-  ok(bypassHit && bypassHit.sourceKey === 'wall_north',
-    `Wall-behind contributes for rays around the panel: bypass ray hits wall_north (got '${bypassHit?.sourceKey}', t=${bypassHit?.t.toFixed(3)})`);
+  ok(bypassHit && wallKeyMatches(bypassHit.sourceKey, 'wall_south'),
+    `Wall-behind contributes for rays around the panel: bypass ray hits wall_south (got '${bypassHit?.sourceKey}', t=${bypassHit?.t.toFixed(3)})`);
   ok(bypassHit && Math.abs(bypassHit.t - 4) < 0.01,
     `Bypass ray hits wall at t≈4 m, no panel shadowing (got t=${bypassHit?.t.toFixed(3)})`);
 }
