@@ -254,7 +254,15 @@ body.is-pdf-export .vp-tabs {
     align-items: end;
     padding-bottom: 4mm;
     border-bottom: 1pt solid var(--ink);
+    /* 2026-05-19 DEBUG: outline every immediate child of the title
+       block in different colors so we can SEE which one contains the
+       arrow + N. */
   }
+  #print-report .pr-cover-titleblock > * { outline: 2px solid #00aa00 !important; }
+  #print-report .pr-cover-titleblock > div > * { outline: 1px dashed #0080ff !important; }
+  #print-report .pr-cover-titleblock-right > * { outline: 1px dashed #ff8000 !important; }
+  #print-report .pr-cover-titleblock::before { outline: 3px solid #ff00ff !important; }
+  #print-report .pr-cover-titleblock::after { outline: 3px solid #ff00ff !important; }
   #print-report .pr-cover-titleblock .pr-eyebrow {
     margin-bottom: 4pt;
   }
