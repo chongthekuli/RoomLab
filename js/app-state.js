@@ -659,8 +659,9 @@ const DEFAULT_ROOM_STATE = {
   // typed one — preset/template `authorComments` static field overrides
   // this on apply (handled in applyPresetToState / applyTemplateToState
   // below). User-edited value survives serialize/load via the existing
-  // state.room round-trip. Hard cap 240 chars enforced by panel-room.js
-  // and defensively re-clipped in the print model.
+  // state.room round-trip. Hard cap 480 chars (v=555, raised from 240)
+  // enforced by panel-author-note.js and defensively re-clipped in the
+  // print model + deserializeProject below.
   authorComments: '',
   surfaces: {
     floor: 'wood-floor',
@@ -888,9 +889,10 @@ export function deserializeProject(obj) {
     // can't pollute room state with a foreign property.
     const r = obj.room;
     if (typeof r.name === 'string')              state.room.name = r.name;
-    // Per-room author commentary. Defensive clip at 240 chars in case a
-    // hand-edited project file exceeds the cap that the panel enforces.
-    if (typeof r.authorComments === 'string')    state.room.authorComments = r.authorComments.slice(0, 240);
+    // Per-room author commentary. Defensive clip at 480 chars (v=555)
+    // in case a hand-edited project file exceeds the cap the panel
+    // enforces.
+    if (typeof r.authorComments === 'string')    state.room.authorComments = r.authorComments.slice(0, 480);
     if (typeof r.shape === 'string')             state.room.shape = r.shape;
     if (typeof r.ceiling_type === 'string')      state.room.ceiling_type = r.ceiling_type;
     if (Number.isFinite(r.width_m))              state.room.width_m = r.width_m;

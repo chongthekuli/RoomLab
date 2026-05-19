@@ -14,16 +14,25 @@
 import { state } from '../app-state.js';
 import { on } from './events.js';
 
-// Hard cap. 240 chars ≈ 3 justified lines of the proposal-paragraph
-// type on the cover column — keeps the cover one page on the densest
-// preset (surau) and the longest room name (pavilion). Enforced by:
+// Hard cap. v=555: raised 240 → 480 per user request. 480 chars ≈
+// 6 justified lines of the proposal-paragraph type on the cover
+// column — DOUBLE the previous cap. Trade-off: if the user fills
+// the full 480 chars on the densest preset (surau / pavilion) the
+// cover MAY spill to page 2. Existing preset/template defaults are
+// all under 240 chars so they stay within the safe range; this
+// only changes the ceiling for user-typed content.
+//
+// Enforced by:
 //   1. <textarea maxlength=AUTHOR_NOTE_MAX> — keystroke-level cap
 //   2. JS trim guard on input — paste from localised keyboard / IME
 //      modes can defeat maxlength in some browsers
-//   3. Defensive .slice(0, 240) in buildPrintModel — schema-bump guard
-//   4. tests/preset.test.mjs asserts every preset/template default fits
-export const AUTHOR_NOTE_MAX = 240;
-const AUTHOR_NOTE_WARN_AT = AUTHOR_NOTE_MAX - 20;
+//   3. Defensive .slice(0, AUTHOR_NOTE_MAX) in buildPrintModel
+//      (print-report.js) — schema-bump guard
+//   4. .slice(0, 480) in deserializeProject (app-state.js) — clip
+//      hand-edited project files that exceed the cap
+//   5. tests/preset.test.mjs asserts every preset/template default fits
+export const AUTHOR_NOTE_MAX = 480;
+const AUTHOR_NOTE_WARN_AT = AUTHOR_NOTE_MAX - 30;
 
 function escapeHtml(s) {
   return String(s ?? '')

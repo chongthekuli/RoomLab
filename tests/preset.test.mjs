@@ -128,7 +128,7 @@ assert(state.room.stadiumStructure != null, 'Auditorium (after Pavilion): stadiu
 // applyTemplateToState, AND (b) assert propagation here. The renderer
 // (print-report cover) sees `state.room.authorComments` and bails
 // silently when undefined — exactly the failure mode this test guards.
-const AUTHOR_NOTE_MAX = 240;
+const AUTHOR_NOTE_MAX = 480;
 for (const [key, p] of Object.entries(PRESETS)) {
   assert(typeof p.authorComments === 'string' && p.authorComments.length > 0,
     `Preset "${key}" exports an authorComments default`);

@@ -152,13 +152,13 @@ export function buildPrintModel({ materials, nameHint } = {}) {
       name: (typeof state.room.name === 'string' && state.room.name.trim().length > 0)
         ? state.room.name.trim()
         : '',
-      // Author's note — free-form 1-2 sentence commentary by the engineer
-      // about THIS room. Renders on the cover after the proposal paragraph.
-      // Hard-capped to AUTHOR_NOTE_MAX (240 chars) by the panel input; we
-      // re-clip defensively here in case a project file from a future schema
-      // ships a longer string.
+      // Author's note — free-form commentary by the engineer about THIS
+      // room. Renders on the cover after the proposal paragraph. Hard-
+      // capped to AUTHOR_NOTE_MAX (480 chars per v=555) by the panel
+      // input; we re-clip defensively here in case a project file from
+      // a future schema ships a longer string.
       authorComments: (typeof state.room.authorComments === 'string')
-        ? state.room.authorComments.trim().slice(0, 240)
+        ? state.room.authorComments.trim().slice(0, 480)
         : '',
       shape: state.room.shape,
       polygon_sides: state.room.polygon_sides ?? null,
