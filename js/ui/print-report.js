@@ -1497,13 +1497,6 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </table>
     </div>`;
 
-  // 2026-05-19 debug: user-reported cover-page north arrow that I cannot
-  // reproduce from code reading. Dump the cover HTML to console so the
-  // user can copy/paste it back (the rendered DOM is briefly inserted
-  // into document.body just before the print dialog grabs it; F12
-  // inspection inside the print preview is blocked by Chrome).
-  try { if (typeof console !== 'undefined') console.log('[print-report] cover HTML →\n' + cover); } catch (_) {}
-
   root.innerHTML = `
     ${cover}
     ${heatmapPage}
@@ -1520,90 +1513,6 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
 
   `;
   document.body.appendChild(root);
-  // 2026-05-19 debug — run the suspect-element search inline (instead of
-  // via setTimeout, which races the print-preview takeover and cleared
-  // DOM before the user's paste). All warnings here go straight to the
-  // console synchronously, before the print dialog opens, so the user's
-  // console still has them after the preview takeover.
-  try {
-    const c = root.querySelector('.pr-page-cover');
-    if (c) {
-      const all = [...c.querySelectorAll('*')];
-      console.log(`[debug] cover descendant count: ${all.length}`);
-      console.log(`[debug] cover.outerHTML.length: ${c.outerHTML.length}`);
-      console.log(`[debug] titleblock outerHTML:`, c.querySelector('.pr-cover-titleblock')?.outerHTML);
-      all.forEach(el => {
-        const t = (el.textContent || '').trim();
-        if (t === 'N' || t === '▲' || t === '▲N' || t === '▲ N' || /^▲?\s*N\s*$/.test(t)) {
-          console.warn('[debug] SUSPECT element text:', el.tagName, el.className, '| text:', JSON.stringify(t));
-        }
-        const bg = getComputedStyle(el).backgroundImage;
-        if (bg && bg !== 'none' && bg.includes('polygon')) {
-          console.warn('[debug] SUSPECT background:', el.tagName, el.className, '| bg:', bg);
-        }
-        for (const pseudo of ['::before', '::after']) {
-          const cs = getComputedStyle(el, pseudo);
-          const ct = cs.content;
-          const pbg = cs.backgroundImage;
-          if ((pbg && pbg.includes('polygon')) || (ct && ct !== 'none' && ct !== 'normal' && ct !== '""' && ct !== "''")) {
-            console.warn('[debug] SUSPECT pseudo:', el.tagName, el.className, pseudo, '| content:', ct, '| bg:', pbg);
-          }
-        }
-      });
-      console.log('[debug] suspect-search complete');
-      // PNG is clean, DOM is clean — the arrow must come from a CSS rule
-      // inside @media print that getComputedStyle() (screen context)
-      // doesn't see. Walk every stylesheet's rules and dump any @media
-      // print rule that defines `content` or a polygon-background.
-      console.log('[debug] === Scanning @media print rules ===');
-      try {
-        for (const sheet of document.styleSheets) {
-          let sheetRules = null;
-          try { sheetRules = sheet.cssRules || sheet.rules; } catch (_) { continue; }
-          if (!sheetRules) continue;
-          for (const rule of sheetRules) {
-            // @media print { ... } block
-            if (rule.type === CSSRule.MEDIA_RULE && /print/i.test(rule.conditionText || rule.media?.mediaText || '')) {
-              for (const inner of rule.cssRules) {
-                if (inner.type !== CSSRule.STYLE_RULE) continue;
-                const sel = inner.selectorText || '';
-                const txt = inner.style.cssText || '';
-                if (/::after|::before/i.test(sel) && (/content\s*:/i.test(txt) || /polygon/i.test(txt))) {
-                  console.warn('[debug] PRINT pseudo rule:', sel, '|', txt);
-                }
-              }
-            }
-            // Top-level rules (not in @media)
-            else if (rule.type === CSSRule.STYLE_RULE) {
-              const sel = rule.selectorText || '';
-              const txt = rule.style.cssText || '';
-              if (/::after|::before/i.test(sel) && (/content/i.test(txt) || /polygon/i.test(txt))) {
-                console.warn('[debug] GLOBAL pseudo rule:', sel, '|', txt);
-              }
-            }
-          }
-        }
-        console.log('[debug] === Scan complete ===');
-      // Find every element in the FULL #print-report that has one of the
-      // arrow-trigger classes. If the arrow on the cover is actually
-      // page-2's .pr-heatmap-stage leaking through, that's what we'll see.
-      const arrowClasses = ['.pr-heatmap-stage', '.pr-cover-hero-plan', '.pr-cover-hero-inset', '.pr-plan-svg-wrap', '.pr-strip-cell-stage'];
-      arrowClasses.forEach(cls => {
-        const hits = root.querySelectorAll(cls);
-        if (hits.length > 0) {
-          hits.forEach(el => {
-            const page = el.closest('.pr-page');
-            const pageClass = page ? page.className : '(no .pr-page parent)';
-            const r = el.getBoundingClientRect();
-            console.warn(`[debug] arrow-trigger found: ${cls} | inside: ${pageClass} | bbox: (${r.left.toFixed(0)},${r.top.toFixed(0)}) size: ${r.width.toFixed(0)}x${r.height.toFixed(0)}`);
-          });
-        } else {
-          console.log(`[debug] no element matches ${cls}`);
-        }
-      });
-      } catch (err) { console.warn('[debug] sheet-scan failed:', err); }
-    }
-  } catch (e) { console.warn('[debug] suspect-search failed:', e); }
   return root;
 }
 
@@ -2174,44 +2083,6 @@ export async function triggerPrint() {
 
 export function mountPrintReport({ materials }) {
   _printMaterialsRef = materials;
-  // 2026-05-19 DEBUG: expose a global helper so user can build the
-  // print report and SEE it on the normal screen page (without
-  // triggering the print dialog). They can then F12 → inspect the
-  // arrow + N element directly. Call from the browser console:
-  //     __rlDebugShowPrint()
-  // After done, run __rlDebugHidePrint() to clean up.
-  if (typeof window !== 'undefined') {
-    window.__rlDebugShowPrint = async () => {
-      if (!_printMaterialsRef) { console.warn('print materials not loaded'); return; }
-      try {
-        const old = document.getElementById('print-report');
-        if (old) old.remove();
-        const { computeAllBands } = await import('../physics/rt60.js');
-        const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments });
-        const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
-        const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
-        let coverImage = null;
-        try { if (_captureFn) coverImage = _captureFn({ width: 1500, height: 1500, preset: 'iso', fixedAspect: true }); }
-        catch (err) { console.warn('capture failed', err); }
-        const model = buildPrintModel({ materials: _printMaterialsRef });
-        renderPrintReport(model, { splGrid, coverImage });
-        document.body.classList.add('is-pdf-export');
-        document.getElementById('print-report').style.background = '#fff';
-        document.getElementById('print-report').style.position = 'fixed';
-        document.getElementById('print-report').style.left = '0';
-        document.getElementById('print-report').style.top = '0';
-        document.getElementById('print-report').style.zIndex = '99999';
-        document.getElementById('print-report').style.maxHeight = '100vh';
-        document.getElementById('print-report').style.overflow = 'auto';
-        console.log('[debug] print-report visible. Inspect arrow now. Call __rlDebugHidePrint() to clean up.');
-      } catch (err) { console.warn('debug show failed:', err); }
-    };
-    window.__rlDebugHidePrint = () => {
-      document.getElementById('print-report')?.remove();
-      document.body.classList.remove('is-pdf-export');
-      console.log('[debug] cleaned up');
-    };
-  }
 
   // Warm-load the scene.js capture path so the synchronous beforeprint
   // handler below can call it without waiting on a dynamic import. By

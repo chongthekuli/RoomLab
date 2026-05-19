@@ -255,10 +255,6 @@ body.is-pdf-export .vp-tabs {
     padding-bottom: 4mm;
     border-bottom: 1pt solid var(--ink);
   }
-  /* 2026-05-19 DEBUG: show the entire #print-report inline on the
-     normal screen page so the user can hit F12 and inspect the
-     arrow + N element directly. The print-report would normally be
-     display:none on screen — body.is-pdf-export turns it on. */
   #print-report .pr-cover-titleblock .pr-eyebrow {
     margin-bottom: 4pt;
   }
@@ -484,6 +480,9 @@ body.is-pdf-export .vp-tabs {
     border: 1pt solid var(--rule);
     padding: 4mm;
     background: var(--paper);
+    /* Same Chrome paginator workaround as .pr-heatmap-stage — see comment there. */
+    position: relative;
+    overflow: hidden;
   }
   #print-report .pr-plan-svg {
     width: 100%;
@@ -537,6 +536,14 @@ body.is-pdf-export .vp-tabs {
     background: var(--paper);
     /* position: relative so the north-arrow ::after overlay anchors here. */
     position: relative;
+    /* overflow: hidden — clip the north-arrow ::after to the stage's
+       printed box. WHY: Chrome's print-paginator can render a
+       `position: absolute` ::after on EVERY printable page that the
+       relatively-positioned parent intersects (visible at top-right of
+       the cover page 1 even though the stage lives on page 2). User-
+       reported and confirmed by removing position:absolute in DevTools
+       on the actual page-2 arrow — both arrows disappear together. */
+    overflow: hidden;
   }
   /* Fixed-pixel north arrow overlay — does NOT scale with the room size
      unlike the SVG-embedded version that was here before. Renders as a
@@ -719,6 +726,9 @@ body.is-pdf-export .vp-tabs {
     border: 0.5pt solid var(--rule);
     padding: 2mm;
     background: var(--paper);
+    /* Same Chrome paginator workaround as .pr-heatmap-stage — see comment there. */
+    position: relative;
+    overflow: hidden;
   }
   #print-report .pr-strip-cell-stage svg {
     width: 100%;
