@@ -26,6 +26,7 @@ import { mountZonesPanel } from '../../ui/panel-zones.js';
 import { mountTreatmentsPanel } from '../../ui/panel-treatments.js';
 import { mountAmbientPanel } from '../../ui/panel-ambient.js';
 import { mountResultsPanel } from '../../ui/panel-results.js';
+import { mountAuthorNotePanel } from '../../ui/panel-author-note.js';
 import { mountPrecisionPanel } from '../../ui/panel-precision.js';
 // mountWelcomeCard import removed — terms-of-use modal is now
 // mounted from js/main.js at page load.
@@ -457,6 +458,7 @@ export async function mountRoomLab() {
     console.warn('[roomlab] treatments panel mount failed:', err));
   mountAmbientPanel();
   mountResultsPanel({ materials });
+  mountAuthorNotePanel();
   mountPrecisionPanel({ materials });
 
   installCollapsibles();
