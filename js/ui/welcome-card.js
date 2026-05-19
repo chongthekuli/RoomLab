@@ -25,9 +25,13 @@ const OPERATOR_NAME_KEY    = 'roomlab.terms.operatorName';  // localStorage — 
 const COUNTDOWN_SECONDS = 4;
 const ACCEPT_ANIMATION_MS = 1800;
 // Hero brand-mark tail — how long the swirl stays on a transparent overlay
-// AFTER the ack card + scrim are dismissed, before fading out. Lets the user
-// see the swirl's full animation loop while the workbench reveals behind it.
-const HERO_TAIL_MS = 1800;
+// AFTER the ack card + scrim are dismissed, before fading out. Sized so the
+// SVG completes its full ~5.55s internal animation (wrapper-life 5s + late
+// subtitle reveal at 5.0s+0.55s) PLUS a 2s static hold on the finished
+// frame before fading. Hero spawned at t≈280ms; Phase 3 starts at t≈1800ms
+// (1520ms into the SVG's animation). 6000ms remaining hero life =
+// ~4000ms to finish the animation + 2000ms static hold per user spec.
+const HERO_TAIL_MS = 6000;
 const HERO_FADE_MS = 400;
 const IP_FETCH_TIMEOUT_MS = 4000;
 const IP_FETCH_URL = 'https://api.ipify.org?format=json';
