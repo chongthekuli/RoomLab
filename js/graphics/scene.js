@@ -3687,11 +3687,19 @@ function _cameraPresetTransform(name) {
       // gimbal lock when the camera is exactly above target.
       // X negated — scene.scale.x = -1 (initScene). Room renders at
       // world.x = -state.x; camera target/position are in WORLD coords.
+      // up = world +Z (state +y = north): with default up=(0,1,0) the
+      // lookAt's degenerate straight-down case yields camera-up = world
+      // -Z, flipping BOTH axes vs the 2D viewport (visible as a 180°
+      // rotation in the Top view, fixed 2026-05-19). Setting up = +Z
+      // re-derives camera-right = world -X which combines with scene.
+      // scale.x = -1 to put state +x at screen-RIGHT and state +y at
+      // screen-UP.
       const dist = _fitDistance(safe(w), safe(d), 1.20);
       const camY = dist + h;
       return {
         targetPos: new THREE.Vector3(-cx, 0, cz - 0.001),
         targetCam: new THREE.Vector3(-cx, camY, cz),
+        up: new THREE.Vector3(0, 0, 1),
       };
     }
     case 'front': {
@@ -3701,6 +3709,7 @@ function _cameraPresetTransform(name) {
       return {
         targetPos: new THREE.Vector3(-cx, h * 0.5, cz),
         targetCam: new THREE.Vector3(-cx, h * 0.5, minZ - dist),
+        up: new THREE.Vector3(0, 1, 0),
       };
     }
     case 'back': {
@@ -3709,6 +3718,7 @@ function _cameraPresetTransform(name) {
       return {
         targetPos: new THREE.Vector3(-cx, h * 0.5, cz),
         targetCam: new THREE.Vector3(-cx, h * 0.5, maxZ + dist),
+        up: new THREE.Vector3(0, 1, 0),
       };
     }
     case 'left': {
@@ -3724,6 +3734,7 @@ function _cameraPresetTransform(name) {
       return {
         targetPos: new THREE.Vector3(-cx, h * 0.5, cz),
         targetCam: new THREE.Vector3(-minX + dist, h * 0.5, cz),
+        up: new THREE.Vector3(0, 1, 0),
       };
     }
     case 'right': {
@@ -3735,6 +3746,7 @@ function _cameraPresetTransform(name) {
       return {
         targetPos: new THREE.Vector3(-cx, h * 0.5, cz),
         targetCam: new THREE.Vector3(-maxX - dist, h * 0.5, cz),
+        up: new THREE.Vector3(0, 1, 0),
       };
     }
     case 'iso':
@@ -3987,6 +3999,7 @@ function _cameraPresetTransform(name) {
       return {
         targetPos,
         targetCam: targetPos.clone().add(dirToCam.multiplyScalar(dist)),
+        up: new THREE.Vector3(0, 1, 0),
       };
     }
   }
@@ -4138,6 +4151,7 @@ export function captureViewportImage(opts = {}) {
   // --- Stash live camera + scene state we'll mutate -------------------
   const prevAspect = camera.aspect;
   const prevCamPos = camera.position.clone();
+  const prevCamUp = camera.up.clone();
   const prevTarget = controls ? controls.target.clone() : null;
   const prevTween = _focusTween;
   const prevBackground = scene.background;        // swap to white for print, restore after
@@ -4261,6 +4275,10 @@ export function captureViewportImage(opts = {}) {
     camera.updateProjectionMatrix();
     const t = _cameraPresetTransform(presetName);
     if (t) {
+      // Apply camera.up BEFORE lookAt so the basis is correct for this
+      // preset (top preset uses +Z, others +Y). Without this, a Top
+      // capture would render rotated 180° from the live Top view.
+      if (t.up) camera.up.copy(t.up);
       camera.position.copy(t.targetCam);
       if (controls) controls.target.copy(t.targetPos);
       // The iso preset now uses AABB-corner projection fit with a 1.05
@@ -4326,6 +4344,7 @@ export function captureViewportImage(opts = {}) {
       camera.aspect = prevAspect;
       camera.updateProjectionMatrix();
       camera.position.copy(prevCamPos);
+      camera.up.copy(prevCamUp);
       if (controls && prevTarget) controls.target.copy(prevTarget);
       _focusTween = prevTween;
       scene.background = prevBackground;
@@ -4428,6 +4447,14 @@ export function applyCameraPreset(name) {
   if (walkMode || !camera || !controls) return;
   const t = _cameraPresetTransform(name);
   if (!t) return;
+  // Pop camera.up at tween-start (NOT interpolated — interpolating up
+  // would barrel-roll the camera mid-tween). OrbitControls caches a
+  // spherical basis derived from .up; controls.update() flushes it so
+  // the very next user-drag honours the new basis.
+  if (t.up) {
+    camera.up.copy(t.up);
+    controls.update();
+  }
   _focusTween = {
     targetPos: t.targetPos,
     targetCam: t.targetCam,
