@@ -1520,6 +1520,21 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
 
   `;
   document.body.appendChild(root);
+  // 2026-05-19 debug: after insertion, dump the live cover's outerHTML so
+  // we see what's ACTUALLY in the DOM (vs the template string). Also list
+  // every element in the title block in case something is added after
+  // insertion by another module.
+  try {
+    setTimeout(() => {
+      const c = root.querySelector('.pr-page-cover');
+      if (!c) return;
+      const t = c.querySelector('.pr-cover-titleblock');
+      if (!t) return;
+      console.log('[print-report] LIVE titleblock outerHTML →\n' + t.outerHTML);
+      console.log('[print-report] LIVE titleblock children count:', t.children.length);
+      [...t.querySelectorAll('*')].forEach(el => console.log('   ↳', el.tagName, el.className || '(no class)', '|', (el.textContent || '').trim().slice(0, 60)));
+    }, 50);
+  } catch (_) {}
   return root;
 }
 
