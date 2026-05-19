@@ -465,6 +465,13 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     // SurfaceLAB catalogue hasn't loaded yet.
     treatments: Object.freeze(treatments),
 
+    // Physics toggles + master EQ — built above at L419-434. Production
+    // callers (tracer-core.js:230) used `scene.physics?.airAbsorption !==
+    // false` and got the default-true branch for free when these were
+    // dropped from the return literal — masking the silent miss.
+    physics,
+    eq,
+
     // Phase B additions — triangle list + BVH — land with the
     // precision engine. Present here as null placeholders so worker
     // messages can be statically typed against the final shape.
