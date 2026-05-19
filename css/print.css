@@ -340,16 +340,10 @@ body.is-pdf-export .vp-tabs {
     display: block;
     image-rendering: -webkit-optimize-contrast;
   }
-  /* Date + engine row, moved from the right titleblock cell to LEFT
-     column below the room name (v=541, user request). Reads as
-     metadata after the project + room titles, before the cover hero. */
-  #print-report .pr-cover-meta {
-    text-align: left;
-    color: var(--muted);
-    font-size: 9pt;
-    line-height: 1.5;
-    margin-top: 6mm;
-  }
+  /* (.pr-cover-meta rule removed in v=542 — date + engine no longer
+     rendered on the cover per user request. The fields are still
+     available on model.project.date / model.precision if needed for
+     a future re-add or for a non-cover page.) */
 
   /* Hero band — 3D perspective render dominates the cover. The
      wrapper is positioned so the 2D plan inset can absolute-pin to
