@@ -5782,6 +5782,24 @@ section h3 {
 .terms-ack-block {
   padding: 8px 0 4px;
 }
+/* Brand mark — centred above the attestation. Same slot for both the
+   animated SVG (motion-OK) and the static fallback (prefers-reduced-
+   motion), so there's no layout shift between modes. */
+.terms-ack-mark {
+  display: block;
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 14px;
+}
+.terms-ack-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+@media (max-width: 480px) {
+  .terms-ack-mark { width: 72px; height: 72px; margin-bottom: 10px; }
+}
 .terms-ack-row {
   display: flex;
   align-items: flex-start;

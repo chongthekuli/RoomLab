@@ -270,10 +270,23 @@ body.is-pdf-export .vp-tabs {
     line-height: 1.2;
   }
   #print-report .pr-cover-titleblock-right {
-    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4mm;
     color: var(--muted);
     font-size: 9pt;
     line-height: 1.5;
+  }
+  #print-report .pr-cover-logo {
+    width: 38mm;
+    height: auto;
+    display: block;
+    /* Preserve sharp pixel rendering when html2canvas rasterises at 2x. */
+    image-rendering: -webkit-optimize-contrast;
+  }
+  #print-report .pr-cover-titleblock-right-meta {
+    text-align: right;
   }
 
   /* Hero band — 3D perspective render dominates the cover. The

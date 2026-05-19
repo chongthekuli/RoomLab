@@ -316,7 +316,7 @@ function buildScrim() {
 
 function runAcceptanceAnimation(card, scrim, record, reducedMotion, done) {
   if (reducedMotion) {
-    card.innerHTML = renderAckHtml(record, /* staggered = */ false);
+    card.innerHTML = renderAckHtml(record, /* staggered = */ false, reducedMotion);
     setTimeout(() => {
       scrim.classList.add('terms-modal-exit');
       setTimeout(done, 200);
@@ -329,7 +329,7 @@ function runAcceptanceAnimation(card, scrim, record, reducedMotion, done) {
   setTimeout(() => {
     card.classList.remove('terms-card-fade-out');
     card.classList.add('terms-card-relax');
-    card.innerHTML = renderAckHtml(record, /* staggered = */ true);
+    card.innerHTML = renderAckHtml(record, /* staggered = */ true, reducedMotion);
     setTimeout(() => {
       scrim.classList.add('terms-modal-exit');
       setTimeout(done, 300);
@@ -337,7 +337,13 @@ function runAcceptanceAnimation(card, scrim, record, reducedMotion, done) {
   }, 280);
 }
 
-function renderAckHtml(record, staggered) {
+function renderAckHtml(record, staggered, reducedMotion) {
+  // Brand mark above the attestation. Animated swirl when motion is OK,
+  // static swirl SVG when prefers-reduced-motion is set — same 88×88
+  // slot, no layout shift between modes.
+  const markSrc = reducedMotion
+    ? 'assets/logo/RoomLAB-logo.svg'
+    : 'assets/logo/RoomLAB-animated.svg';
   const cls = staggered ? 'terms-ack-line terms-ack-stagger' : 'terms-ack-line';
   const rows = [
     { label: 'Author',    value: record.operatorName },
@@ -359,6 +365,9 @@ function renderAckHtml(record, staggered) {
   const tailDelay = startDelay + rows.length * step + 60;
   return `
     <div class="terms-ack-block">
+      <div class="terms-ack-mark" aria-hidden="true">
+        <img src="${markSrc}" alt="" width="88" height="88" />
+      </div>
       <div class="terms-ack-row">
         <span class="terms-ack-dot" aria-hidden="true" style="--terms-ack-delay: ${dotDelay}ms;"></span>
         <span class="${cls}" style="--terms-ack-delay: ${dotDelay}ms;">
