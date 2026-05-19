@@ -426,9 +426,20 @@ export function buildHeatmapLegend(splGrid) {
       <span class="pr-heatmap-legend-tick-label">${formatTickLabel(t.value, tickMode)}</span>
     </div>`;
   }).join('');
-  const gradient = metric === 'sti'
-    ? 'linear-gradient(to right, #d21414 0%, #ff8214 30%, #ffd700 45%, #3cd23c 60%, #00c896 75%, #00aadc 100%)'
-    : 'linear-gradient(to right, #1428b4 0%, #008ce6 25%, #1edc50 50%, #ffd700 75%, #f01e1e 100%)';
+  // Sample the actual cell ramp across the visible [min,max] so the bar
+  // colour at any position matches the cell colour for that value. The
+  // ramp is fixed-domain (SPL 30–110 dB, STI 0–1), so a 2-stop gradient
+  // would only be correct if min/max happened to equal the ramp endpoints.
+  const NSTOPS = 11;
+  const span = max - min;
+  const stops = [];
+  for (let i = 0; i < NSTOPS; i++) {
+    const t = i / (NSTOPS - 1);
+    const value = min + t * span;
+    const [r, g, b] = colorForMetric(value, metric);
+    stops.push(`rgb(${r},${g},${b}) ${(t * 100).toFixed(2)}%`);
+  }
+  const gradient = `linear-gradient(to right, ${stops.join(', ')})`;
   return `
     <div class="pr-heatmap-legend">
       <div class="pr-heatmap-legend-header">${legendHeader(tickMode)}</div>
