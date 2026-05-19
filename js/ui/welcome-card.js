@@ -24,6 +24,11 @@ const ACCEPT_RECORD_KEY    = 'roomlab.terms.record';        // full JSON bundle
 const OPERATOR_NAME_KEY    = 'roomlab.terms.operatorName';  // localStorage — survives sessions
 const COUNTDOWN_SECONDS = 4;
 const ACCEPT_ANIMATION_MS = 1800;
+// Hero brand-mark tail — how long the swirl stays on a transparent overlay
+// AFTER the ack card + scrim are dismissed, before fading out. Lets the user
+// see the swirl's full animation loop while the workbench reveals behind it.
+const HERO_TAIL_MS = 1800;
+const HERO_FADE_MS = 400;
 const IP_FETCH_TIMEOUT_MS = 4000;
 const IP_FETCH_URL = 'https://api.ipify.org?format=json';
 
@@ -316,6 +321,8 @@ function buildScrim() {
 
 function runAcceptanceAnimation(card, scrim, record, reducedMotion, done) {
   if (reducedMotion) {
+    // Reduced motion: static swirl stays inside the card; no hero overlay.
+    // Card + scrim dismiss together at ~900 ms. Shortest path home.
     card.innerHTML = renderAckHtml(record, /* staggered = */ false, reducedMotion);
     setTimeout(() => {
       scrim.classList.add('terms-modal-exit');
@@ -324,26 +331,78 @@ function runAcceptanceAnimation(card, scrim, record, reducedMotion, done) {
     return;
   }
 
-  // t=0: fade content out + translate -6px (280 ms)
+  // Normal motion: animated swirl lives in a body-level "hero" layer
+  // INDEPENDENT of the scrim, so it survives the card + scrim dismissal
+  // and continues to play on a transparent background while the workbench
+  // reveals behind it. User asked for "elegant" — the hero is the brand
+  // transition between legal-acceptance and the working app.
+
+  // t=0: fade card content out + translate -6 px (280 ms)
   card.classList.add('terms-card-fade-out');
   setTimeout(() => {
     card.classList.remove('terms-card-fade-out');
     card.classList.add('terms-card-relax');
+    // Render ack content WITHOUT the brand mark — hero is now a separate
+    // layer above the card. Reduced motion still renders the mark inline
+    // (handled in renderAckHtml).
     card.innerHTML = renderAckHtml(record, /* staggered = */ true, reducedMotion);
+    // Spawn the hero NOW so it's playing alongside the card during the
+    // ack-display window. Animation has time to build before card exits.
+    const hero = spawnHeroMark();
+    // At end of ack-display window: dismiss card + scrim; hero remains.
     setTimeout(() => {
       scrim.classList.add('terms-modal-exit');
-      setTimeout(done, 300);
+      setTimeout(() => {
+        scrim.remove();
+        // Card + scrim gone. Hero now alone on a transparent overlay.
+        // Promote to centre + larger size. Resolve done() so the
+        // workbench mounts and is visible BEHIND the hero.
+        hero.classList.add('terms-hero-mark-centred');
+        done();
+        // After HERO_TAIL_MS more, fade the hero out and remove.
+        setTimeout(() => {
+          hero.classList.add('terms-hero-mark-exit');
+          setTimeout(() => hero.remove(), HERO_FADE_MS);
+        }, HERO_TAIL_MS);
+      }, 300);
     }, ACCEPT_ANIMATION_MS - 280 - 20);
   }, 280);
 }
 
+/**
+ * Mount the body-level hero brand mark. Fixed positioned, positioned ABOVE
+ * the card during the ack-display window (offset translateY), then promoted
+ * to screen-centred via `.terms-hero-mark-centred` once the card exits.
+ * Pointer-events: none so clicks pass through to the workbench underneath.
+ */
+function spawnHeroMark() {
+  // Defensive — don't stack two heroes if mountTermsModal somehow re-fires.
+  const existing = document.getElementById('terms-hero-mark');
+  if (existing) existing.remove();
+  const hero = document.createElement('div');
+  hero.id = 'terms-hero-mark';
+  hero.className = 'terms-hero-mark';
+  hero.setAttribute('aria-hidden', 'true');
+  hero.innerHTML = '<img src="assets/logo/RoomLAB-animated.svg" alt="" />';
+  document.body.appendChild(hero);
+  // Force a reflow then add the visible class so the fade-in transition fires.
+  void hero.offsetHeight;
+  hero.classList.add('terms-hero-mark-visible');
+  return hero;
+}
+
 function renderAckHtml(record, staggered, reducedMotion) {
-  // Brand mark above the attestation. Animated swirl when motion is OK,
-  // static swirl SVG when prefers-reduced-motion is set — same 88×88
-  // slot, no layout shift between modes.
-  const markSrc = reducedMotion
-    ? 'assets/logo/RoomLAB-logo.svg'
-    : 'assets/logo/RoomLAB-animated.svg';
+  // Brand mark above the attestation.
+  // - Normal motion: NO inline mark — the animated swirl lives in a
+  //   body-level hero layer (spawnHeroMark) that survives the card+scrim
+  //   dismissal, so the animation can play to completion on a transparent
+  //   overlay above the workbench.
+  // - Reduced motion: inline static swirl SVG, 88×88, dismissed with the
+  //   card. No hero overlay, no extended timing.
+  const inlineMarkHtml = reducedMotion
+    ? '<div class="terms-ack-mark" aria-hidden="true">' +
+      '<img src="assets/logo/RoomLAB-logo.svg" alt="" width="88" height="88" /></div>'
+    : '';
   const cls = staggered ? 'terms-ack-line terms-ack-stagger' : 'terms-ack-line';
   const rows = [
     { label: 'Author',    value: record.operatorName },
@@ -365,9 +424,7 @@ function renderAckHtml(record, staggered, reducedMotion) {
   const tailDelay = startDelay + rows.length * step + 60;
   return `
     <div class="terms-ack-block">
-      <div class="terms-ack-mark" aria-hidden="true">
-        <img src="${markSrc}" alt="" width="88" height="88" />
-      </div>
+      ${inlineMarkHtml}
       <div class="terms-ack-row">
         <span class="terms-ack-dot" aria-hidden="true" style="--terms-ack-delay: ${dotDelay}ms;"></span>
         <span class="${cls}" style="--terms-ack-delay: ${dotDelay}ms;">
