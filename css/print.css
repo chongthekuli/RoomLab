@@ -286,20 +286,19 @@ body.is-pdf-export .vp-tabs {
     gap: 6mm;
   }
   #print-report .pr-cover-titleblock {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    /* align-items: start — both columns top-align so the title text
-       (eyebrow + h1 + h2) sits at the row top alongside the logo.
-       v=546 user request: move the title further up "before touching
-       the logo". Side effect: the titleblock border-bottom now floats
-       further below h2 because the row height is driven by the taller
-       right column (logo); accept the larger gap between h2 and the
-       border line for the title-at-top reading.
+    /* v=547: row height is now driven by the TITLE TEXT (left side)
+       only. The right cell (logo) is taken out of grid flow via
+       position: absolute (see .pr-cover-titleblock-right below) so
+       the titleblock border-bottom hugs h2 tightly (h2 + 4mm padding
+       + 1pt border). User wanted the line moved up — closer to the
+       logo — without moving the title. Now the line sits where the
+       title naturally ends, and the absolute logo overlays/extends
+       past the line into the cover hero area below.
 
-       History: v=539 used start, v=540 reverted to end + align-self:
-       start on right cell because user said it had moved both columns.
-       Now (v=546) the user explicitly wants both columns top-aligned. */
-    align-items: start;
+       Single-column grid (1fr) since the right cell is out of flow. */
+    display: grid;
+    grid-template-columns: 1fr;
+    position: relative;
     padding-bottom: 4mm;
     border-bottom: 1pt solid var(--ink);
   }
@@ -318,21 +317,20 @@ body.is-pdf-export .vp-tabs {
     line-height: 1.2;
   }
   #print-report .pr-cover-titleblock-right {
+    /* v=547: taken OUT of grid flow via position: absolute so the
+       titleblock row height is determined ONLY by the title text.
+       Result: border-bottom line hugs h2 (was previously stretched
+       down to the logo bottom). Logo overlays at top-right of the
+       titleblock and extends past the line into the hero area —
+       intended "spill" effect; the line cuts visually across the
+       lower portion of the logo. */
+    position: absolute;
+    top: 0;
+    right: 0;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
     gap: 4mm;
-    color: var(--muted);
-    font-size: 9pt;
-    line-height: 1.5;
-    /* Override the grid's align-items: end on a per-cell basis. The
-       grid still bottom-aligns the LEFT column to the titleblock
-       border (preserving the project + room name vertical position
-       Maya's v1 spec set), but this right cell top-aligns to the
-       grid-row top — putting the logo's top edge on the same line
-       as the eyebrow ("ROOMLAB · ACOUSTIC SIMULATION") instead of
-       floating below the header. v=540 user-targeted fix. */
-    align-self: start;
   }
   /* Cover hero logo — significantly larger than the per-page running
      header (21mm). The cover gets a styled brand mark; non-cover pages
