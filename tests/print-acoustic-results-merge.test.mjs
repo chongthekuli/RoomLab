@@ -81,6 +81,21 @@ presentCss('pr-precision-sti-metric',
   'STI metric-tag CSS rule (uppercase, bold, white on accent)');
 presentCss('font-size: 54pt',
   'STI number enlarged 40 pt → 54 pt (v=560, user: "enlarge the STI number")');
+
+// v=561 print-bug guard: the STI cell carries an --accent background
+// with WHITE text. Chromium strips background fills on print by default
+// ("save ink") — so .pr-sti-cell MUST be in the print-color-adjust:exact
+// opt-in list, or the white text reverses to white-on-white and the STI
+// number vanishes (exactly the v=560 → v=561 regression the user hit).
+// This assert pins the cell INTO that list.
+{
+  // Find the selector list immediately ABOVE the first exact-render block.
+  const idx = css.indexOf('print-color-adjust: exact');
+  const preceding = idx > 0 ? css.slice(Math.max(0, idx - 900), idx) : '';
+  assert(/\.pr-sti-cell\s*[,{]/.test(preceding),
+    'pr-sti-cell is in the print-color-adjust:exact opt-in list '
+    + '(else its --accent background is stripped on print → white STI text on white = invisible)');
+}
 present('< 0.45 fail',     'STI tier strip — BS 5839-8 floor band');
 present('0.45 – 0.50 marginal', 'STI tier strip — marginal band');
 present('≥ 0.50 pass',     'STI tier strip — IEC 60849 emergency-PA threshold');

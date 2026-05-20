@@ -216,6 +216,7 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-strip-cell-stage,
   #print-report .pr-tierstrip-cell.pr-tierstrip-active,
   #print-report .pr-precision-headline,
+  #print-report .pr-acoustic-results .pr-sti-cell,
   #print-report .pr-empty-state,
   #print-report .pr-table th,
   #print-report .pr-zebra tbody tr:nth-child(even) td,
