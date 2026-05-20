@@ -197,6 +197,57 @@ let edgePanSampler = null;            // { svg, clientX, clientY }
 // ---------------------------------------------------------------------
 const SOURCE_SNAP_M = 0.5;             // 0.5 m grid for drag-to-position
 const DRAG_THRESHOLD_PX = 3;           // clicks within this radius = select-only
+// Halo (m) added around the drag-start position when it sits OUTSIDE
+// the room's natural clamp bounds. Without this, an item placed at a
+// negative coordinate (via panel input, preset import, or a previous
+// drag while the room was a different shape) gets snapped to the room
+// edge on the very first click — the user can never drag it further
+// out, only back in. The halo lets the drag extend outward from start.
+// Re-applied on every move tick: dragging from (-2, 0) to (-1, 0)
+// re-anchors start at -1; next drag floor is min(0, -1-5) = -6, etc.
+// 5 m matches the surau podium extension that the legacy fix used.
+const DRAG_OUTSIDE_HALO_M = 5;
+
+// Pure clamp helper for 2D drag of point pickables (sources, listeners,
+// treatments). Bidirectional — clamps both floor and ceiling. When the
+// drag-start position sits outside the room's effective bounds, the
+// clamp expands to include start ± DRAG_OUTSIDE_HALO_M so the user can
+// reposition items that were previously placed in negative-quadrant or
+// far-positive space without the first click teleporting them inside.
+//
+// Pure on its inputs. Exported for tests/room-2d-negative-drag.test.mjs.
+export function clampDragTargetToBounds({ targetX, targetY, startX, startY, bounds, margin = 0, halo = DRAG_OUTSIDE_HALO_M }) {
+  const normalMinX = bounds.minX + margin;
+  const normalMaxX = bounds.maxX - margin;
+  const normalMinY = bounds.minY + margin;
+  const normalMaxY = bounds.maxY - margin;
+  // Only expand when start is outside the normal clamp — preserves
+  // in-room margin behaviour for items that were never outside.
+  const minX = (startX < normalMinX) ? Math.min(normalMinX, startX - halo) : normalMinX;
+  const maxX = (startX > normalMaxX) ? Math.max(normalMaxX, startX + halo) : normalMaxX;
+  const minY = (startY < normalMinY) ? Math.min(normalMinY, startY - halo) : normalMinY;
+  const maxY = (startY > normalMaxY) ? Math.max(normalMaxY, startY + halo) : normalMaxY;
+  return {
+    x: Math.max(minX, Math.min(maxX, targetX)),
+    y: Math.max(minY, Math.min(maxY, targetY)),
+  };
+}
+
+// Pure clamp helper for 2D drag of room vertices. Floor at 0 (the
+// heatmap grid and SVG coord mapping only cover the positive quadrant —
+// vertices in negative space leave heatmap rows uncovered), no ceiling.
+// Same start-position expansion as clampDragTargetToBounds so a vertex
+// already at negative coords (legacy / programmatic state mutation)
+// can be dragged without snapping to 0 on first nudge. Exported for
+// tests/room-2d-negative-drag.test.mjs.
+export function clampVertexDragTarget({ targetX, targetY, startX, startY, halo = DRAG_OUTSIDE_HALO_M }) {
+  const floorX = (startX < 0) ? Math.min(0, startX - halo) : 0;
+  const floorY = (startY < 0) ? Math.min(0, startY - halo) : 0;
+  return {
+    x: Math.max(floorX, targetX),
+    y: Math.max(floorY, targetY),
+  };
+}
 // Unified drag state for BOTH speakers and listeners. The `kind` field
 // is 'source' or 'listener'; for sources we keep sourceIdx + posKey
 // (point speakers use 'position', line-arrays use 'origin'); for
@@ -2228,18 +2279,30 @@ function onPickablePointerMove(e) {
   const targetY = pickableDrag.startSrcWorldY + (liveWorld.y - startWorld.y);
 
   const margin = SOURCE_SNAP_M;
-  let nx = snapToGrid(targetX);
-  let ny = snapToGrid(targetY);
   // Clamp to the EFFECTIVE bounds (room footprint UNIONED with surau
-  // podium extension + broken-out enclosures). Was clamped to just
-  // [0, width_m] × [0, depth_m] which prevented the user from
-  // dragging arcade listeners (L6/L7/L8 at y<0 or x<0 / x>W) once
-  // they were placed by the preset — they could TYPE the negative Y
-  // in the side panel but the drag would snap them back into the
-  // room boundary. Reported 2026-05-17.
+  // podium extension + broken-out enclosures), with start-position
+  // expansion so items already placed OUTSIDE the room footprint can
+  // still be repositioned. Two prior fixes lived here:
+  //   2026-05-17 — Was clamped to just [0, width_m] × [0, depth_m]
+  //                which prevented dragging arcade listeners (L6/L7/L8
+  //                at y<0) on surau presets. Switched to
+  //                roomEffectiveBounds which folds in podium extension.
+  //   2026-05-20 — User reported negative-coord room nodes / audience
+  //                / speakers jumping to 0 on first click in non-surau
+  //                rooms (where bounds.minX = 0). Now the clamp
+  //                EXPANDS to include the drag-start position with a
+  //                halo when start sits outside normal bounds — see
+  //                clampDragTargetToBounds() above.
   const bounds = roomEffectiveBounds(state.room);
-  nx = Math.max(bounds.minX + margin, Math.min(bounds.maxX - margin, nx));
-  ny = Math.max(bounds.minY + margin, Math.min(bounds.maxY - margin, ny));
+  const clamped = clampDragTargetToBounds({
+    targetX: snapToGrid(targetX),
+    targetY: snapToGrid(targetY),
+    startX: pickableDrag.startSrcWorldX,
+    startY: pickableDrag.startSrcWorldY,
+    bounds, margin,
+  });
+  const nx = clamped.x;
+  const ny = clamped.y;
 
   if (pickableDrag.kind === 'source') {
     const src = state.sources[pickableDrag.sourceIdx];
@@ -2297,8 +2360,22 @@ function onPickablePointerMove(e) {
     // and the heatmap grid / SVG coord mapping only cover the
     // positive quadrant. Letting verts drift past 0 would leave
     // a region of the polygon uncovered by the heatmap.
-    const targetSnapX = Math.max(0, snapToGrid(targetX));
-    const targetSnapY = Math.max(0, snapToGrid(targetY));
+    //
+    // 2026-05-20: when a vertex already SITS at negative coords (from
+    // a previous reshape, programmatic state mutation, or an imported
+    // scene), the strict floor-at-0 clamp snapped it to 0 on the first
+    // click — the user could never edit it back into place. The vertex
+    // clamp now expands its floor to include the drag-start position
+    // (with DRAG_OUTSIDE_HALO_M halo) when start is already negative.
+    // See clampVertexDragTarget() above.
+    const vertexClamped = clampVertexDragTarget({
+      targetX: snapToGrid(targetX),
+      targetY: snapToGrid(targetY),
+      startX: pickableDrag.startSrcWorldX,
+      startY: pickableDrag.startSrcWorldY,
+    });
+    const targetSnapX = vertexClamped.x;
+    const targetSnapY = vertexClamped.y;
     const verts = state.room.custom_vertices;
     if (!Array.isArray(verts) || pickableDrag.vertexIdx >= verts.length) return;
     const v = verts[pickableDrag.vertexIdx];

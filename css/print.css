@@ -1246,14 +1246,17 @@ body.is-pdf-export .vp-tabs {
     padding: 4pt 0 4pt 0;
     margin-bottom: 6mm;
   }
-  /* Inside the frame, kill the headline's own border + background
-     (defined for the old standalone Precision page). The frame's
-     hairline rules now do the visual work, cleaner. */
+  /* Inside the frame, keep the headline's --paper-2 background bar (user
+     called this out as a regression in v=557 — "we used to have it, but
+     i think u suddenly removed the background color with no reason").
+     The frame's hairline rules above/below stack with the filled bar:
+     the bar reads as the answer, the rules read as the section break. */
   #print-report .pr-acoustic-results .pr-sti-frame .pr-precision-headline {
     border: none;
-    background: transparent;
-    padding: 0;
     margin: 0;
+    /* background + padding inherited from the base .pr-precision-headline
+       rule (background var(--paper-2), padding 8pt 10pt) — do not
+       override them here. */
   }
 
   /* RT60 chart hero — full row, chart left, caption gutter right.
