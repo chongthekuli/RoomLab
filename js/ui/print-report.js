@@ -856,18 +856,12 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // lives on the heatmap detail page (built further down, alongside
   // the larger coverage map + numeric legend).
 
-  // ------ Page 3: RT60 — chapter opener with ghost number + sparkline --
-  // Per Sofia: chapter eyebrow + 60 pt ghost "02" + h2; sparkline above
-  // the table gives visual texture without being a real chart. Re-style
-  // .pr-kv as left-rag with dotted leader (no boxed form look).
-  const rt60Rows = model.rt60.map(r => `
-    <tr>
-      <td>${fmtBand(r.freq_hz)}</td>
-      <td>${fmt(r.sabine_s, 2)} s</td>
-      <td>${fmt(r.eyring_s, 2)} s</td>
-      <td>${fmt(r.meanAbsorption, 3)}</td>
-    </tr>`).join('');
-
+  // ------ Chapter 02 inputs: RT60 chart + chart-derived targetLabel/
+  //        schroederNote, all consumed by the merged-page template below.
+  //        (The standalone rt60Rows builder was retired with the v=557
+  //        band-table collapse — bandRows below now folds the same
+  //        Sabine/Eyring/Mean α columns into a 5-col consolidated table
+  //        that also carries ray-traced T30 mean (min–max) per band.)
   const rt60Chart = renderRT60Chart(model.rt60, {
     volume_m3: room.volume_m3,
     schroederHz: model.derived.schroederCutoff_hz,
@@ -936,14 +930,48 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </tr>`;
   }).join('');
 
-  // Per-band T30 from the precision render. Same finite-guard as the
-  // joined table — undefined values surface as "—", never 0 or blank.
-  const perBandT30Rows = precision ? precision.receivers.map(r => `
-    <tr>
-      <td class="pr-mono">${escapeHtml(r.label)}</td>
-      ${(r.perBand ?? []).map(b => `<td>${Number.isFinite(b.t30_s) ? `${fmt(b.t30_s, 2)} s` : '—'}</td>`).join('')}
-    </tr>`).join('') : '';
-  const hzCols = precision ? (precision.bands_hz ?? []).map(hz => `<th>${fmtBand(hz)}</th>`).join('') : '';
+  // Consolidated band table — Maya 2026-05-20 (v=557): the previous
+  // paired-side-by-side layout (room-avg Sabine/Eyring on the left,
+  // per-listener × per-band T30 on the right) duplicated the broadband
+  // T30 column that already lives in the joined listener table. Collapse
+  // to a single 5-col row-per-band table with Sabine + Eyring as
+  // theoretical bounds bracketing the ray-traced ground truth
+  // (mean across listeners, min–max in parentheses to surface spread).
+  //
+  // Dr. Chen's earlier concern (the two tables answer different
+  // questions, room-avg vs per-listener) is honoured by keeping the
+  // RANGE in parens — the user sees both central tendency AND spread
+  // across listeners at each band, without the 8-col receiver matrix
+  // that overwhelms a proposal reader.
+  //
+  // Empty-cell semantics: em-dash "—" never 0. If <2 listeners produced
+  // finite T30 at a band, range collapses to a single value (no parens).
+  const bandRows = model.rt60.map((r, bandIdx) => {
+    let raytracedCell = '—';
+    if (precision) {
+      const perBandValues = precision.receivers
+        .map(rec => rec.perBand?.[bandIdx]?.t30_s)
+        .filter(v => Number.isFinite(v));
+      if (perBandValues.length > 0) {
+        const mean = perBandValues.reduce((a, b) => a + b, 0) / perBandValues.length;
+        if (perBandValues.length === 1) {
+          raytracedCell = `${fmt(mean, 2)} s`;
+        } else {
+          const min = Math.min(...perBandValues);
+          const max = Math.max(...perBandValues);
+          raytracedCell = `${fmt(mean, 2)} s <span class="pr-band-range">(${fmt(min, 2)}–${fmt(max, 2)})</span>`;
+        }
+      }
+    }
+    return `
+      <tr>
+        <td class="pr-band-cell-band">${fmtBand(r.freq_hz)}</td>
+        <td>${fmt(r.meanAbsorption, 3)}</td>
+        <td>${fmt(r.sabine_s, 2)} s</td>
+        <td>${fmt(r.eyring_s, 2)} s</td>
+        <td>${raytracedCell}</td>
+      </tr>`;
+  }).join('');
 
   // STI headline — limiting (minimum) listener per IEC 60268-16. Same
   // logic the standalone Precision page used; lifted intact per Maya
@@ -1010,26 +1038,13 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         <h2>Acoustic results</h2>
       </div>
 
-      ${stiHeadline}
+      <section class="pr-section pr-sti-frame">
+        ${stiHeadline}
+      </section>
 
-      <section class="pr-section pr-rt60-grid">
-        <div class="pr-rt60-chart-wrap">
-          ${rt60Chart}
-          <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Eyring solid, Sabine dotted. ${schroederNote ? schroederNote.replace(/—.*$/, '— statistical-acoustics figures lose meaning below this band.') : ''} n = 7 bands, 125 Hz – 8 kHz.</p>
-        </div>
-        <div class="pr-rt60-kv-wrap">
-          <table class="pr-table pr-kv">
-            <tr><th>Shape</th><td>${escapeHtml(room.shape)}</td></tr>
-            <tr><th>W × D × H</th><td>${fmt(room.width_m, 2)} × ${fmt(room.depth_m, 2)} × ${fmt(room.height_m, 2)} m</td></tr>
-            <tr><th>Floor area</th><td>${fmt(room.baseArea_m2, 1)} m²</td></tr>
-            <tr><th>Volume</th><td>${fmt(room.volume_m3, 0)} m³</td></tr>
-            <tr><th>Total surface</th><td>${fmt(room.totalArea_m2, 0)} m²</td></tr>
-            <tr><th>Mean α (1 kHz)</th><td>${fmt(room.meanAbsorption_1k, 3)}</td></tr>
-            <tr><th>Ceiling</th><td>${escapeHtml(room.ceiling_type)}</td></tr>
-            <tr><th>r_c (critical)</th><td>${model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—'}</td></tr>
-            <tr><th>f_s (Schroeder)</th><td>${model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—'}</td></tr>
-          </table>
-        </div>
+      <section class="pr-section pr-rt60-hero">
+        ${rt60Chart}
+        <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Eyring solid, Sabine dotted. ${schroederNote ? schroederNote.replace(/—.*$/, '— statistical-acoustics figures lose meaning below this band.') : ''} n = 7 bands, 125 Hz – 8 kHz. Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01.</p>
       </section>
 
       <section class="pr-section">
@@ -1040,29 +1055,16 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
               <thead><tr><th>Listener</th><th>X</th><th>Y</th><th>Elev</th><th>T30</th><th>C50</th><th>C80</th><th>D/R</th><th>STI</th></tr></thead>
               <tbody>${joinedRows}</tbody>
             </table>`}
-        <p class="pr-note">Posture shown in parentheses on the listener label. Ear height = elev + 1.60 m standing / 1.15 m sitting in chair / 0.85 m sitting on floor (custom override allowed). EDT and T20 in the per-band table below; broadband per-receiver values from Schroeder backward integration of the ray-traced energy histogram (ISO 3382-1 §A.2.2). Em-dash "—" indicates the precision render did not cover this listener — distinct from STI = 0, which is undefined.</p>
+        <p class="pr-note">Posture shown in parentheses on the listener label. Ear height = elev + 1.60 m standing / 1.15 m sitting in chair / 0.85 m sitting on floor (custom override allowed). Broadband per-receiver values from Schroeder backward integration of the ray-traced energy histogram (ISO 3382-1 §A.2.2). Em-dash "—" indicates the precision render did not cover this listener — distinct from STI = 0, which is undefined.</p>
       </section>
 
-      <section class="pr-section pr-band-pair-grid">
-        <div class="pr-band-pair-cell">
-          <h3 class="pr-block-h3">RT60 per band — diffuse-field draft</h3>
-          <table class="pr-table pr-zebra">
-            <thead><tr><th>Band</th><th>Sabine</th><th>Eyring</th><th>Mean α</th></tr></thead>
-            <tbody>${rt60Rows}</tbody>
-          </table>
-          <p class="pr-note">Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2). S = ${fmt(room.totalArea_m2, 0)} m² in Σαᵢ Sᵢ denominator; air absorption per ISO 9613-1.</p>
-        </div>
-        <div class="pr-band-pair-cell">
-          <h3 class="pr-block-h3">T30 per band — ray-traced</h3>
-          ${precision
-            ? `<table class="pr-table pr-zebra">
-                <thead><tr><th>Receiver</th>${hzCols}</tr></thead>
-                <tbody>${perBandT30Rows}</tbody>
-              </table>
-              <p class="pr-note">Ray-traced T30 per receiver; supersedes the diffuse-field draft for sign-off.</p>`
-            : '<p class="pr-empty-state">Precision render not yet computed. Re-run with the Render button before submission. Sabine / Eyring values on the left remain valid for first-pass design.</p>'
-          }
-        </div>
+      <section class="pr-section">
+        <h3 class="pr-block-h3">Per-band reverberation — diffuse-field bounds versus ray-traced ground truth</h3>
+        <table class="pr-table pr-zebra pr-band-consolidated">
+          <thead><tr><th>Band</th><th>Mean α</th><th>Sabine RT60</th><th>Eyring RT60</th><th>Ray-traced T30 — mean (min–max)</th></tr></thead>
+          <tbody>${bandRows}</tbody>
+        </table>
+        <p class="pr-note">Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2). Air absorption per ISO 9613-1 included in Σαᵢ Sᵢ denominator. The ray-traced T30 column gives the mean and (min–max) range across the ${model.listeners.length} listener position${model.listeners.length === 1 ? '' : 's'} above; supersedes Sabine/Eyring for sign-off when present.${precision ? '' : ' Precision render not yet computed — re-run with the Render button before submission.'}</p>
       </section>
 
       <section class="pr-section pr-footer-grid">

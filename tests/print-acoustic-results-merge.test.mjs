@@ -10,6 +10,16 @@
 // table demands em-dash for missing precision cells (NOT 0; STI = 0 is
 // undefined per IEC 60268-16, ambiguous with "ray missed receiver").
 //
+// 2026-05-20 v=557 revision (Maya): user flagged the room-geometry KV
+// table on this page (Shape · W×D×H · Floor area · Volume · Total
+// surface · Mean α @ 1 kHz · Ceiling · r_c · f_s) as fully redundant
+// with the cover measurements card and Drawing 01 tile grid. KV
+// dropped; chart promoted to full-row hero; STI headline bumped 28pt
+// → 40pt with hairline rules above/below; two paired band tables
+// collapsed into one 5-col consolidated table (Band · Mean α · Sabine
+// · Eyring · Ray-traced T30 mean (min–max)). Asserts updated below to
+// match — the OLD KV-row + paired-table strings are now blacklisted.
+//
 // This test text-greps print-report.js to assert every label that
 // must appear in the merged page survives a future refactor. Style
 // matches tests/scene-x-mirror.test.mjs (also a text-grep regression
@@ -25,6 +35,7 @@
 import { readFileSync } from 'node:fs';
 
 const src = readFileSync('js/ui/print-report.js', 'utf8');
+const css = readFileSync('css/print.css', 'utf8');
 
 let failed = 0;
 function assert(cond, label) {
@@ -34,6 +45,9 @@ function assert(cond, label) {
 
 function present(needle, why) {
   assert(src.includes(needle), `merged-page preserves "${needle}" (${why})`);
+}
+function presentCss(needle, why) {
+  assert(css.includes(needle), `print.css carries "${needle}" (${why})`);
 }
 
 // ---- Block 1: chapter opener (replaces 2 of the old 3 openers) -----
@@ -68,8 +82,18 @@ present('IEC 60849 emergency-PA threshold',
   'standards-citation advisory (regulatory, not opinion)');
 present('BS 5839-8 floor (0.45)',
   'BS 5839-8 advisory wording for marginal tier');
+present('pr-sti-frame',
+  'STI headline frame class (v=557 — hairline rules above/below, no box)');
+presentCss('font-size: 40pt',
+  'STI accent number promoted to 40 pt (v=557, was 28 pt) — page-opening statement');
+presentCss('pr-sti-frame',
+  'STI frame CSS rule (hairline rules above/below)');
+presentCss('pr-rt60-hero',
+  'RT60 full-row hero CSS rule (replaces old pr-rt60-grid 2-col)');
+presentCss('pr-band-consolidated',
+  'consolidated 5-col band-table CSS rule');
 
-// ---- Block 3: RT60 chart + room KV (verbatim from old Reverberation) ----
+// ---- Block 3: RT60 chart full-row hero (v=557 — KV column dropped) ----
 present('Fig. 02.1 — Octave-band reverberation time per ISO 3382-1',
   'RT60 chart caption — ISO 3382-1 standard cited');
 present('ISO 9613-1 air absorption',
@@ -78,18 +102,40 @@ present('Beranek volume heuristic',
   'Beranek target-band citation in chart caption');
 present('Eyring solid, Sabine dotted',
   'chart legend cue (which series is which)');
-present('<tr><th>Volume</th>',
-  'KV row: Volume (load-bearing for Sabine + Eyring denominators)');
-present('<tr><th>Total surface</th>',
-  'KV row: Total surface S (load-bearing for Σαᵢ Sᵢ)');
-present('<tr><th>Mean α (1 kHz)</th>',
-  'KV row: mean α at 1 kHz (triggers Sabine-vs-Eyring divergence above 0.2)');
-present('<tr><th>r_c (critical)</th>',
-  'KV row: critical distance r_c (Dr. Chen top-3 must-stay-prominent)');
-present('<tr><th>f_s (Schroeder)</th>',
-  'KV row: Schroeder cutoff f_s (modal-region boundary)');
-present('<tr><th>Ceiling</th>',
-  'KV row: ceiling type (informs absorption assumptions)');
+present('Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01',
+  'caption signposts where the dropped KV-table figures live now');
+present('pr-rt60-hero',
+  'full-row RT60 hero block class (replaces pr-rt60-grid 2-col with KV)');
+
+// KV-table redundancy guard (v=557): these rows MUST NOT come back on
+// the merged page — they already live on the cover + Drawing 01 tile
+// grid, and the user flagged them as duplication. If a future refactor
+// re-introduces the .pr-kv table inside the merged page, these asserts
+// fail and force the reviewer to think about it.
+function absent(needle, why) {
+  assert(!new RegExp(
+    `acousticResultsPage[\\s\\S]*?${needle.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}[\\s\\S]*?<\\/div>\\\`;`
+  ).test(src), `merged page does NOT carry "${needle}" (${why})`);
+}
+absent('<tr><th>Shape</th>',
+  'KV row "Shape" duplicates cover measurements card');
+absent('<tr><th>W × D × H</th>',
+  'KV row "W × D × H" duplicates cover measurements card');
+absent('<tr><th>Volume</th>',
+  'KV row "Volume" duplicates cover + Drawing 01 tile grid');
+absent('<tr><th>Total surface</th>',
+  'KV row "Total surface" duplicates cover + Drawing 01 tile grid');
+absent('<tr><th>Floor area</th>',
+  'KV row "Floor area" duplicates cover + Drawing 01 tile grid');
+absent('<tr><th>Mean α (1 kHz)</th>',
+  'KV row "Mean α (1 kHz)" duplicates Drawing 01 tile grid');
+absent('<tr><th>r_c (critical)</th>',
+  'KV row "r_c (critical)" duplicates Drawing 01 tile grid');
+absent('<tr><th>f_s (Schroeder)</th>',
+  'KV row "f_s (Schroeder)" duplicates Drawing 01 tile grid');
+absent('<tr><th>Ceiling</th>',
+  'KV row "Ceiling" not load-bearing on this page (ceiling absorption '
+  + 'lives in the methodology α matrix)');
 
 // ---- Block 4: joined listener × precision table -----------------------
 present('Listener positions × ray-traced results',
@@ -112,21 +158,36 @@ present(`'—'`, 'em-dash literal present for missing-data sentinel');
 present('No listeners placed. Listener positions drive the per-receiver STI calculation.',
   'empty-listener guidance copy preserved');
 
-// ---- Block 5: paired band tables -----------------------------------
-present('RT60 per band — diffuse-field draft',
-  'left paired-table heading (Sabine/Eyring draft)');
-present('T30 per band — ray-traced',
-  'right paired-table heading (precision ground truth)');
-present('<th>Band</th><th>Sabine</th><th>Eyring</th><th>Mean α</th>',
-  'RT60-per-band 4-col header (unchanged)');
-present('pr-band-pair-grid',
-  'paired-table grid container — Maya: visual rhyme between Eyring & ray-traced T30');
+// ---- Block 5: consolidated band table (v=557) ------------------------
+// Collapsed from the two paired side-by-side tables (per Maya: the
+// per-receiver × per-band T30 matrix was power-user detail that the
+// broadband T30 column in the joined table already covers for 90% of
+// reading). Now ONE row per band with Sabine + Eyring as theoretical
+// bounds bracketing the ray-traced ground truth (mean (min–max)).
+present('Per-band reverberation — diffuse-field bounds versus ray-traced ground truth',
+  'consolidated band-table h3 (replaces "RT60 per band" + "T30 per band" pair)');
+present('<th>Band</th><th>Mean α</th><th>Sabine RT60</th><th>Eyring RT60</th><th>Ray-traced T30 — mean (min–max)</th>',
+  'consolidated band-table 5-col header');
+present('pr-band-consolidated',
+  'consolidated band-table class hook');
+present('pr-band-range',
+  '(min–max) span class — muted secondary read, surfaces per-listener spread');
 present('Sabine assumes a diffuse field; Eyring corrects for high mean absorption',
   'Sabine/Eyring caveat paragraph preserved');
 present('Σαᵢ Sᵢ',
-  'Σαᵢ Sᵢ notation in S-caption (Dr. Chen: S is the intermediate, methodology trace)');
-present('supersedes the diffuse-field draft for sign-off',
-  'precision-supersedes-draft note (provenance per Dr. Chen)');
+  'Σαᵢ Sᵢ notation preserved in S-caption (Dr. Chen: S is the methodology trace)');
+present('supersedes Sabine/Eyring for sign-off when present',
+  'precision-supersedes-draft note preserved (provenance per Dr. Chen)');
+
+// v=557 retired classes — must NOT come back without reviewer thought.
+assert(!src.includes('pr-band-pair-grid'),
+  'old paired-band-tables grid class removed (collapsed to one consolidated table)');
+assert(!src.includes('pr-band-pair-cell'),
+  'old paired-band cell class removed');
+assert(!src.includes('pr-rt60-grid'),
+  'old RT60-chart+KV 2-col grid class removed (chart is full-row hero now)');
+assert(!src.includes('pr-rt60-kv-wrap'),
+  'old RT60-chart KV wrapper class removed');
 
 // ---- Block 6: footer (zones + ambient strip) -----------------------
 present('Audience zones (', 'zones footer eyebrow (n count interpolated)');

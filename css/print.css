@@ -999,31 +999,14 @@ body.is-pdf-export .vp-tabs {
     height: 70mm;
     margin: 0;
   }
-  /* Two-column layout for the geometry block: chart left, kv-table
-     right. Stack on narrow viewports just-in-case (this is a print
-     stylesheet so really just a guard). */
-  #print-report .pr-rt60-grid {
-    display: grid;
-    grid-template-columns: 100mm 1fr;
-    gap: 6mm;
-    align-items: start;
-    margin-bottom: 8pt;
-  }
-  #print-report .pr-rt60-chart-wrap { min-width: 0; }
-  #print-report .pr-rt60-kv-wrap {
-    min-width: 0;
-    /* Make the kv table sit a hair below the chart's top edge so the
-       baselines align visually. */
-    padding-top: 2mm;
-  }
-  /* When .pr-kv lives inside the rt60 layout, tighten the row height
-     so all 9 rows fit alongside the 70mm-tall chart without
-     overflowing the chart's bottom. */
-  #print-report .pr-rt60-kv-wrap .pr-table.pr-kv th,
-  #print-report .pr-rt60-kv-wrap .pr-table.pr-kv td {
-    padding: 2pt 0;
-    font-size: 8pt;
-  }
+  /* The .pr-rt60-grid 2-col chart+KV layout and .pr-rt60-kv-wrap
+     companion rules were retired in v=557. The KV table duplicated
+     room geometry already carried on the cover (Shape · W×D×H · Floor
+     area · Volume · Surface area) and Drawing 01 tile grid (Volume +
+     Floor area + Surface area + Mean α + RT60 1k Sabine/Eyring + r_c +
+     f_s + ambient). The chart now sits full-row inside .pr-rt60-hero
+     below — see also the Chapter 02 block-budget comment in the
+     ACOUSTIC RESULTS section further down. */
 
   /* ----------- SECTIONS ----------- */
   #print-report .pr-section {
@@ -1169,7 +1152,12 @@ body.is-pdf-export .vp-tabs {
     background: var(--paper-2);
   }
   #print-report .pr-precision-sti {
-    font-size: 28pt;
+    /* Bumped from 28 pt → 40 pt (v=557, Maya). Now unambiguously the
+       page-opening statement on Chapter 02 Acoustic results — the user
+       kept calling this "the answer" and the visual hierarchy now
+       matches that framing. Inside .pr-sti-frame, hairline rules
+       above/below do the framing without a box. */
+    font-size: 40pt;
     font-weight: 300;
     color: var(--accent);
     line-height: 1;
@@ -1205,17 +1193,27 @@ body.is-pdf-export .vp-tabs {
   }
 
   /* ===========================================================
-     CHAPTER 02 · ACOUSTIC RESULTS (merged page)
+     CHAPTER 02 · ACOUSTIC RESULTS (merged page) — v=557 redesign
      -----------------------------------------------------------
      Single A4 portrait. Block budget (mm of 277 usable):
        1. Chapter opener .................... 22
-       2. STI headline + tier strip ......... 24  (when precision avail)
-       3. RT60 chart + room KV side-by-side . 78
+       2. STI headline + tier strip ......... 32  (40 pt accent num,
+                                                   hairline rules above/below)
+       3. RT60 chart full-row + caption ..... 80  (KV column retired —
+                                                   was redundant with cover
+                                                   + Drawing 01 tile grid)
        4. Joined listener × precision table . ~60 (scales w/ listeners)
-       5. Paired band tables (RT60 + T30) ... 52
+       5. Consolidated band table (5 cols) .. 32  (Band · Mean α · Sabine
+                                                   · Eyring · Ray-traced T30
+                                                   mean (min–max) — was 2
+                                                   stacked tables, collapsed)
        6. Footer (zones + ambient strip) .... 28
-       7. (combined note inside section 6) .. n/a
-     Layout spec: Maya 2026-05-20. Physics floor: Dr. Chen.
+       Total ............................... ~254  (room to breathe; the
+                                                   page no longer touches
+                                                   the 277-mm ceiling)
+     Layout spec: Maya 2026-05-20 → 2026-05-20-2 (v=557 revision after
+     user flagged KV-table redundancy with Drawing 01).
+     Physics floor: Dr. Chen.
      ----------------------------------------------------------- */
 
   /* Page container — no special positioning; the constituent blocks
@@ -1236,6 +1234,49 @@ body.is-pdf-export .vp-tabs {
     color: var(--ink);
     margin: 4pt 0 4pt 0;
     letter-spacing: 0;
+  }
+
+  /* STI headline frame — hairline rules above and below, no box (per
+     Maya: "a box would feel like a callout banner, which is consumer-
+     product voice"). The frame elevates the 40 pt accent number to
+     unambiguously the page-opening statement. */
+  #print-report .pr-acoustic-results .pr-sti-frame {
+    border-top: 0.5pt solid var(--rule);
+    border-bottom: 0.5pt solid var(--rule);
+    padding: 4pt 0 4pt 0;
+    margin-bottom: 6mm;
+  }
+  /* Inside the frame, kill the headline's own border + background
+     (defined for the old standalone Precision page). The frame's
+     hairline rules now do the visual work, cleaner. */
+  #print-report .pr-acoustic-results .pr-sti-frame .pr-precision-headline {
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* RT60 chart hero — full row, chart left, caption gutter right.
+     Replaces the old .pr-rt60-grid 2-col chart+KV layout. The KV table
+     it used to pair with duplicated geometry already on the cover and
+     Drawing 01; dropping it freed ~95 mm of horizontal room for the
+     chart caption + an honest 6 mm gutter to the next block. */
+  #print-report .pr-acoustic-results .pr-rt60-hero {
+    display: grid;
+    grid-template-columns: 110mm 1fr;
+    gap: 6mm;
+    align-items: start;
+    margin-bottom: 6mm;
+  }
+  #print-report .pr-acoustic-results .pr-rt60-hero .pr-rt60-chart {
+    width: 110mm;
+    height: 70mm;
+  }
+  #print-report .pr-acoustic-results .pr-rt60-hero .pr-caption {
+    margin-top: 0;
+    font-size: 7.5pt;
+    line-height: 1.45;
+    color: var(--muted);
   }
 
   /* Joined listener × precision table — the user's key insight: one row
@@ -1275,21 +1316,33 @@ body.is-pdf-export .vp-tabs {
     font-size: 6.5pt;
   }
 
-  /* Paired band tables (block 5) — RT60 Sabine/Eyring on the left,
-     ray-traced T30-per-band on the right, sharing the same vertical
-     band axis. The reader's eye rakes across to compare diffuse-field
-     draft against the ray-traced ground truth at the same octave band. */
-  #print-report .pr-band-pair-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6mm;
-    align-items: start;
+  /* Consolidated 5-col band table (v=557) — replaces the old paired
+     side-by-side tables (room-avg Sabine/Eyring left, per-listener
+     ×per-band T30 matrix right). One row per octave band, columns:
+       Band | Mean α | Sabine RT60 | Eyring RT60 | Ray-traced T30 mean (min–max)
+     Sabine + Eyring bracket the ray-traced ground truth as theoretical
+     bounds; the (min–max) parens surface per-listener spread without
+     the 8-col receiver matrix that overwhelmed a proposal reader. */
+  #print-report .pr-band-consolidated th,
+  #print-report .pr-band-consolidated td {
+    font-size: 8pt;
+    padding: 2.5pt 5pt;
   }
-  #print-report .pr-band-pair-cell { min-width: 0; }
-  #print-report .pr-band-pair-cell .pr-table th,
-  #print-report .pr-band-pair-cell .pr-table td {
-    font-size: 7.5pt;
-    padding: 2pt 3pt;
+  #print-report .pr-band-consolidated th:first-child,
+  #print-report .pr-band-consolidated td:first-child {
+    text-align: left;
+    font-weight: 500;
+  }
+  #print-report .pr-band-cell-band {
+    color: var(--ink);
+    letter-spacing: 0.02em;
+  }
+  /* (min–max) range in the ray-traced T30 column — muted secondary
+     read, sits visually behind the mean without being illegible. */
+  #print-report .pr-band-range {
+    color: var(--muted);
+    font-size: 7pt;
+    margin-left: 2pt;
   }
 
   /* Footer strip (block 6) — zones table left, ambient noise band-strip
