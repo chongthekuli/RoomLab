@@ -82,16 +82,38 @@ present('IEC 60849 emergency-PA threshold',
   'standards-citation advisory (regulatory, not opinion)');
 present('BS 5839-8 floor (0.45)',
   'BS 5839-8 advisory wording for marginal tier');
-present('pr-sti-frame',
-  'STI headline frame class (v=557 — hairline rules above/below, no box)');
+present('pr-sti-rt60-row',
+  'STI + RT60 side-by-side row container (v=559 compression — '
+  + 'replaced the v=557 pr-sti-frame stacked-with-pr-rt60-hero pair)');
+present('pr-sti-cell',
+  'STI cell (~30% / 60 mm wide) — vertical stack inside the narrow column');
+present('pr-rt60-cell',
+  'RT60 chart cell (~70% / ~134 mm wide) — chart on top, caption below');
 presentCss('font-size: 40pt',
   'STI accent number promoted to 40 pt (v=557, was 28 pt) — page-opening statement');
-presentCss('pr-sti-frame',
-  'STI frame CSS rule (hairline rules above/below)');
-presentCss('pr-rt60-hero',
-  'RT60 full-row hero CSS rule (replaces old pr-rt60-grid 2-col)');
+presentCss('pr-sti-rt60-row',
+  'STI+RT60 row CSS rule (v=559 — replaces pr-sti-frame + pr-rt60-hero)');
+presentCss('pr-sti-cell',
+  'STI cell CSS rule (carries --paper-2 bar background)');
+presentCss('pr-rt60-cell',
+  'RT60 cell CSS rule (chart + caption stacked)');
 presentCss('pr-band-consolidated',
   'consolidated 5-col band-table CSS rule');
+
+// v=559 retired classes — must NOT come back in a refactor without
+// reviewer thought. pr-sti-frame stacked over pr-rt60-hero was the
+// v=557 layout; user explicitly asked to compress them into one row.
+assert(!src.includes('pr-sti-frame'),
+  'v=557 stand-alone STI frame class removed (now inside pr-sti-rt60-row)');
+assert(!src.includes('pr-rt60-hero'),
+  'v=557 stand-alone RT60 hero class removed (now inside pr-sti-rt60-row)');
+// Match the SELECTOR (class followed by space + `{` or `,`), not the
+// prose mentions of the name inside header comments — the change log
+// references both classes by name and that's allowed.
+assert(!/\.pr-sti-frame\s*[,{]/.test(css),
+  'pr-sti-frame CSS selector removed (rule body gone)');
+assert(!/\.pr-rt60-hero\s*[,{]/.test(css),
+  'pr-rt60-hero CSS selector removed (rule body gone)');
 
 // ---- Block 3: RT60 chart full-row hero (v=557 — KV column dropped) ----
 present('Fig. 02.1 — Octave-band reverberation time per ISO 3382-1',
@@ -104,8 +126,10 @@ present('Eyring solid, Sabine dotted',
   'chart legend cue (which series is which)');
 present('Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01',
   'caption signposts where the dropped KV-table figures live now');
-present('pr-rt60-hero',
-  'full-row RT60 hero block class (replaces pr-rt60-grid 2-col with KV)');
+// (Note: pr-rt60-hero was the v=557 class for the full-row chart block;
+//  in v=559 it was absorbed into pr-sti-rt60-row alongside the STI cell.
+//  The pr-rt60-cell + pr-sti-cell presence asserts above cover the new
+//  class graph.)
 
 // KV-table redundancy guard (v=557): these rows MUST NOT come back on
 // the merged page — they already live on the cover + Drawing 01 tile

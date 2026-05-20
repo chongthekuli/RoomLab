@@ -1155,8 +1155,8 @@ body.is-pdf-export .vp-tabs {
     /* Bumped from 28 pt → 40 pt (v=557, Maya). Now unambiguously the
        page-opening statement on Chapter 02 Acoustic results — the user
        kept calling this "the answer" and the visual hierarchy now
-       matches that framing. Inside .pr-sti-frame, hairline rules
-       above/below do the framing without a box. */
+       matches that framing. Hairline rules above/below the surrounding
+       pr-sti-rt60-row do the framing without a box. */
     font-size: 40pt;
     font-weight: 300;
     color: var(--accent);
@@ -1193,26 +1193,31 @@ body.is-pdf-export .vp-tabs {
   }
 
   /* ===========================================================
-     CHAPTER 02 · ACOUSTIC RESULTS (merged page) — v=557 redesign
+     CHAPTER 02 · ACOUSTIC RESULTS (merged page) — v=558 layout
      -----------------------------------------------------------
      Single A4 portrait. Block budget (mm of 277 usable):
        1. Chapter opener .................... 22
-       2. STI headline + tier strip ......... 32  (40 pt accent num,
-                                                   hairline rules above/below)
-       3. RT60 chart full-row + caption ..... 80  (KV column retired —
-                                                   was redundant with cover
-                                                   + Drawing 01 tile grid)
-       4. Joined listener × precision table . ~60 (scales w/ listeners)
-       5. Consolidated band table (5 cols) .. 32  (Band · Mean α · Sabine
+       2. STI cell (60 mm) | RT60 chart cell (~134 mm)
+          — SIDE-BY-SIDE in one row, framed by hairlines ... 70
+                                                  (was two stacked
+                                                   sections at 32 + 80 mm,
+                                                   compressed per user ask
+                                                   "STI we put a 30% is
+                                                   more than enough, and
+                                                   reverb results on the
+                                                   right")
+       3. Joined listener × precision table . ~60 (scales w/ listeners)
+       4. Consolidated band table (5 cols) .. 32  (Band · Mean α · Sabine
                                                    · Eyring · Ray-traced T30
-                                                   mean (min–max) — was 2
-                                                   stacked tables, collapsed)
-       6. Footer (zones + ambient strip) .... 28
-       Total ............................... ~254  (room to breathe; the
-                                                   page no longer touches
-                                                   the 277-mm ceiling)
-     Layout spec: Maya 2026-05-20 → 2026-05-20-2 (v=557 revision after
-     user flagged KV-table redundancy with Drawing 01).
+                                                   mean (min–max))
+       5. Footer (zones + ambient strip) .... 28
+       Total ............................... ~212  (~38 mm freed vs v=557
+                                                   by the side-by-side row)
+     Layout history:
+       Maya 2026-05-20    — initial merge of 3 pages into 1
+       v=557 (2026-05-20-2) — KV-table redundancy with cover + Drawing 01
+                              removed; band tables collapsed
+       v=558 (2026-05-20-3) — STI + RT60 chart compressed into one row
      Physics floor: Dr. Chen.
      ----------------------------------------------------------- */
 
@@ -1236,49 +1241,94 @@ body.is-pdf-export .vp-tabs {
     letter-spacing: 0;
   }
 
-  /* STI headline frame — hairline rules above and below, no box (per
-     Maya: "a box would feel like a callout banner, which is consumer-
-     product voice"). The frame elevates the 40 pt accent number to
-     unambiguously the page-opening statement. */
-  #print-report .pr-acoustic-results .pr-sti-frame {
+  /* STI + RT60 side-by-side row (v=558, user-flagged compression).
+     -----------------------------------------------------------
+     Previously two stacked sections: STI bar full-width (32 mm tall)
+     above RT60 chart full-width (70 mm tall), with hairlines around the
+     STI bar. User: "STI we put a 30% is more than enough, and reverb
+     results on the right ... trim it, so we can have better visual and
+     space saving."
+     New layout: ONE row, 60 mm STI cell on the left, ~134 mm chart cell
+     on the right. STI block stacks vertically inside the narrow cell.
+     Vertical budget collapses from ~108 mm → ~70 mm; ~38 mm freed.
+     Hairlines retained around the row (not just the STI), so the row
+     still reads as a distinct page-opening block. */
+  #print-report .pr-acoustic-results .pr-sti-rt60-row {
+    display: grid;
+    grid-template-columns: 60mm 1fr;     /* ~30% / ~70% of 200 mm usable */
+    gap: 6mm;
+    align-items: stretch;
     border-top: 0.5pt solid var(--rule);
     border-bottom: 0.5pt solid var(--rule);
-    padding: 4pt 0 4pt 0;
+    padding: 6pt 0;
     margin-bottom: 6mm;
-  }
-  /* Inside the frame, keep the headline's --paper-2 background bar (user
-     called this out as a regression in v=557 — "we used to have it, but
-     i think u suddenly removed the background color with no reason").
-     The frame's hairline rules above/below stack with the filled bar:
-     the bar reads as the answer, the rules read as the section break. */
-  #print-report .pr-acoustic-results .pr-sti-frame .pr-precision-headline {
-    border: none;
-    margin: 0;
-    /* background + padding inherited from the base .pr-precision-headline
-       rule (background var(--paper-2), padding 8pt 10pt) — do not
-       override them here. */
   }
 
-  /* RT60 chart hero — full row, chart left, caption gutter right.
-     Replaces the old .pr-rt60-grid 2-col chart+KV layout. The KV table
-     it used to pair with duplicated geometry already on the cover and
-     Drawing 01; dropping it freed ~95 mm of horizontal room for the
-     chart caption + an honest 6 mm gutter to the next block. */
-  #print-report .pr-acoustic-results .pr-rt60-hero {
-    display: grid;
-    grid-template-columns: 110mm 1fr;
-    gap: 6mm;
-    align-items: start;
-    margin-bottom: 6mm;
+  /* STI cell — keeps the --paper-2 background bar that the user flagged
+     as a v=557 regression. Inside, the .pr-precision-headline switches
+     from its default 2-col grid (number left, tier strip right) to a
+     vertical stack so the narrow 60 mm column reads top-to-bottom:
+     label · 40 pt number · 3-cell tier strip · advisory sentence. */
+  #print-report .pr-acoustic-results .pr-sti-cell {
+    background: var(--paper-2);
+    padding: 8pt 10pt;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
-  #print-report .pr-acoustic-results .pr-rt60-hero .pr-rt60-chart {
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-precision-headline {
+    display: block;          /* override the default 2-col grid */
+    grid-template-columns: none;
+    gap: 0;
+    border: none;
+    background: transparent; /* cell carries the bar bg, headline is transparent */
+    padding: 0;
+    margin: 0;
+  }
+  /* Vertical rhythm between the two inner blocks of the headline:
+     the number-block (label + 40 pt number) and the tier-block
+     (3-cell strip + advisory paragraph). 6 pt gap separates them. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-precision-headline > div {
+    margin-bottom: 6pt;
+  }
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-precision-headline > div:last-child {
+    margin-bottom: 0;
+  }
+  /* Tier strip shrinks for the narrow column — was 8 pt across full
+     row, now 6.5 pt across 60 mm. Three cells (~17 mm each) fit the
+     labels without truncation. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-tierstrip {
+    margin: 4pt 0 6pt 0;
+  }
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-tierstrip-cell {
+    padding: 3pt 2pt;
+    font-size: 6.5pt;
+  }
+  /* Empty-precision fallback — pending dash + the existing pr-note
+     advisory copy. Keeps the cell from collapsing visually when no
+     render has been run. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-sti-pending {
+    color: var(--muted);
+    font-weight: 300;
+  }
+
+  /* RT60 chart cell — chart on top, caption below. Chart keeps its
+     v=557 width (110 mm) since that's the size the inline SVG axis
+     labels were tuned at; growing it scales the labels proportionally
+     and they start to dominate. Cell is ~134 mm wide so a slim 24 mm
+     of breathing room sits to the chart's right. */
+  #print-report .pr-acoustic-results .pr-rt60-cell {
+    display: flex;
+    flex-direction: column;
+  }
+  #print-report .pr-acoustic-results .pr-rt60-cell .pr-rt60-chart {
     width: 110mm;
     height: 70mm;
   }
-  #print-report .pr-acoustic-results .pr-rt60-hero .pr-caption {
-    margin-top: 0;
-    font-size: 7.5pt;
-    line-height: 1.45;
+  #print-report .pr-acoustic-results .pr-rt60-cell .pr-caption {
+    margin-top: 4pt;
+    font-size: 7pt;
+    line-height: 1.4;
     color: var(--muted);
   }
 

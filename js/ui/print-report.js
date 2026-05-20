@@ -1038,13 +1038,19 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         <h2>Acoustic results</h2>
       </div>
 
-      <section class="pr-section pr-sti-frame">
-        ${stiHeadline}
-      </section>
-
-      <section class="pr-section pr-rt60-hero">
-        ${rt60Chart}
-        <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Eyring solid, Sabine dotted. ${schroederNote ? schroederNote.replace(/—.*$/, '— statistical-acoustics figures lose meaning below this band.') : ''} n = 7 bands, 125 Hz – 8 kHz. Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01.</p>
+      <section class="pr-section pr-sti-rt60-row">
+        <div class="pr-sti-cell">
+          ${stiHeadline || `
+            <div class="pr-precision-headline pr-sti-empty">
+              <div class="pr-precision-sti-label">Limiting listener — STI · IEC 60268-16</div>
+              <div class="pr-precision-sti pr-sti-pending">—</div>
+              <p class="pr-note">Precision render not yet computed. Re-run with the Render button before submission.</p>
+            </div>`}
+        </div>
+        <div class="pr-rt60-cell">
+          ${rt60Chart}
+          <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Eyring solid, Sabine dotted. ${schroederNote ? schroederNote.replace(/—.*$/, '— statistical-acoustics figures lose meaning below this band.') : ''} n = 7 bands, 125 Hz – 8 kHz. Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01.</p>
+        </div>
       </section>
 
       <section class="pr-section">
