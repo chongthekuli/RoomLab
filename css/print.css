@@ -1205,6 +1205,142 @@ body.is-pdf-export .vp-tabs {
   }
 
   /* ===========================================================
+     CHAPTER 02 · ACOUSTIC RESULTS (merged page)
+     -----------------------------------------------------------
+     Single A4 portrait. Block budget (mm of 277 usable):
+       1. Chapter opener .................... 22
+       2. STI headline + tier strip ......... 24  (when precision avail)
+       3. RT60 chart + room KV side-by-side . 78
+       4. Joined listener × precision table . ~60 (scales w/ listeners)
+       5. Paired band tables (RT60 + T30) ... 52
+       6. Footer (zones + ambient strip) .... 28
+       7. (combined note inside section 6) .. n/a
+     Layout spec: Maya 2026-05-20. Physics floor: Dr. Chen.
+     ----------------------------------------------------------- */
+
+  /* Page container — no special positioning; the constituent blocks
+     do the work. Reserved for future page-level tweaks (page-break-
+     inside avoid, etc.) without polluting .pr-page globally. */
+  #print-report .pr-acoustic-results {
+    /* nothing yet; class is a hook for future targeted rules */
+  }
+
+  /* Section h3s INSIDE the merged page use a quieter style than the
+     chapter-opener h2. Same visual weight as a Sofia "block heading"
+     in the appendix system: 9.5 pt, medium weight, hairline underline,
+     no border-rule (the surrounding table borders provide separation). */
+  #print-report .pr-acoustic-results .pr-block-h3 {
+    font-size: 9.5pt;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--ink);
+    margin: 4pt 0 4pt 0;
+    letter-spacing: 0;
+  }
+
+  /* Joined listener × precision table — the user's key insight: one row
+     per listener, position columns left, ray-traced acoustic metrics
+     right. Drop ID column (debug handle, not load-bearing); fold posture
+     into the label cell as a muted parenthetical; ear-height moves to
+     the table footnote (derived from posture + elevation, not measured).
+     Em-dash for missing precision cells per Dr. Chen — distinguishes
+     "not rendered" from STI = 0 (undefined per IEC 60268-16). */
+  #print-report .pr-listener-precision {
+    font-size: 7.5pt;
+    table-layout: fixed;
+  }
+  #print-report .pr-listener-precision th,
+  #print-report .pr-listener-precision td {
+    padding: 2pt 4pt;
+    font-size: 7.5pt;
+  }
+  #print-report .pr-listener-precision th:first-child,
+  #print-report .pr-listener-precision td:first-child {
+    text-align: left;
+    width: 28%;
+  }
+  /* The remaining 9 columns share the 72% balance evenly. */
+  #print-report .pr-listener-precision th:not(:first-child),
+  #print-report .pr-listener-precision td:not(:first-child) {
+    width: 8%;
+  }
+  /* Label cell: name in ink, posture parenthetical in muted span. */
+  #print-report .pr-listener-label {
+    font-weight: 500;
+    color: var(--ink);
+  }
+  #print-report .pr-listener-posture {
+    font-weight: 400;
+    color: var(--muted);
+    font-size: 6.5pt;
+  }
+
+  /* Paired band tables (block 5) — RT60 Sabine/Eyring on the left,
+     ray-traced T30-per-band on the right, sharing the same vertical
+     band axis. The reader's eye rakes across to compare diffuse-field
+     draft against the ray-traced ground truth at the same octave band. */
+  #print-report .pr-band-pair-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6mm;
+    align-items: start;
+  }
+  #print-report .pr-band-pair-cell { min-width: 0; }
+  #print-report .pr-band-pair-cell .pr-table th,
+  #print-report .pr-band-pair-cell .pr-table td {
+    font-size: 7.5pt;
+    padding: 2pt 3pt;
+  }
+
+  /* Footer strip (block 6) — zones table left, ambient noise band-strip
+     right. Both demoted from their old Appendix B treatment: inline
+     eyebrow instead of h2, dense cells, no breathing room above. */
+  #print-report .pr-footer-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6mm;
+    align-items: start;
+    margin-top: 4pt;
+  }
+  #print-report .pr-footer-cell { min-width: 0; }
+  #print-report .pr-footer-cell > .pr-eyebrow {
+    display: block;
+    margin-bottom: 3pt;
+    font-size: 7pt;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  #print-report .pr-zones-footer {
+    font-size: 7.5pt;
+  }
+  #print-report .pr-zones-footer th,
+  #print-report .pr-zones-footer td {
+    font-size: 7.5pt;
+    padding: 2pt 4pt;
+  }
+  /* Inside the footer, the ambient band-strip shrinks slightly so it
+     sits visually balanced beside the zone table (the standalone
+     Appendix-B strip was full-page-wide). */
+  #print-report .pr-footer-cell .pr-bandstrip {
+    grid-template-columns: 50pt repeat(7, 1fr);
+    margin: 0;
+  }
+  #print-report .pr-footer-cell .pr-bandstrip-label {
+    padding: 3pt 4pt;
+    font-size: 6.5pt;
+  }
+  #print-report .pr-footer-cell .pr-bandstrip-cell {
+    padding: 3pt 2pt;
+  }
+  #print-report .pr-footer-cell .pr-bandstrip-cell-value {
+    font-size: 11pt;
+  }
+  #print-report .pr-footer-cell .pr-bandstrip-cell-band {
+    font-size: 6pt;
+  }
+
+  /* ===========================================================
      METHODOLOGY + DISCLAIMERS + SIGNATURE PAGE (last A4 page)
      -----------------------------------------------------------
      CLEAN-SLATE REWRITE Edition 2026-05-14 (9th iteration).

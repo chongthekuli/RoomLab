@@ -880,17 +880,142 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     ? `Schroeder cutoff f<sub>s</sub> = ${fmt(model.derived.schroederCutoff_hz, 0)} Hz — modal region below 125 Hz band.`
     : '';
 
-  const roomPage = `
-    <div class="pr-page">
+  // ------ Chapter 02: Acoustic results (merged) -----------------------
+  // Single-page consolidation of the former 02 Reverberation +
+  // 03 Precision results + Appendix B Listener / zone schedule, per
+  // Maya's 2026-05-20 layout spec. Block budget (mm of A4 portrait
+  // usable height, ceiling 277 mm):
+  //
+  //   1. Chapter opener "02 · Acoustic results"          ........  22 mm
+  //   2. STI headline + tier strip (when precision avail)........  24 mm
+  //   3. RT60 chart (110×70 mm) + room KV side-by-side ..........  78 mm
+  //   4. Joined listener × precision table (9 cols) .............  60 mm
+  //   5. Paired band tables (RT60 Sabine/Eyring + Precision T30).  52 mm
+  //   6. Footer: zones table + ambient band-strip ..............   28 mm
+  //   7. Combined note paragraph ...............................    8 mm
+  //                                                           total 272 mm
+  //
+  // Dr. Chen's physics floor preserved: every figure from the three
+  // source pages survives, demoted (f_s → chart caption, S → table
+  // caption, ceiling → KV row, ear-height → table footnote) only where
+  // it does not lose methodological traceability. Empty precision cells
+  // render as em-dash "—" never 0 — distinguishes "not rendered" from
+  // a real zero (per ISO 60268-16, STI is undefined when D + R = 0).
+  //
+  // Treatment chapter renumbered 04 → 03 (search for "Chapter 03" below).
+  const precision = model.precision;
+  const zoneRows = model.zones.map(z => `
+    <tr>
+      <td class="pr-mono">${escapeHtml(z.id)}</td>
+      <td>${escapeHtml(z.label ?? '')}</td>
+      <td>${z.vertices_n}</td>
+      <td>${fmt(z.elevation_m, 2)} m</td>
+      <td>${escapeHtml(z.material_id ?? '')}</td>
+      <td>${fmt(z.occupancy_percent, 0)} %</td>
+    </tr>`).join('');
+  const joinedRows = model.listeners.map((l, i) => {
+    const p = precision?.receivers?.[i] ?? null;
+    const labelText = (l.label && l.label.length > 0) ? l.label : '—';
+    const postureText = l.posture ? ` (${l.posture.toLowerCase()})` : '';
+    const t30 = p?.broadband?.t30_s;
+    const c50 = p?.broadband?.c50_db;
+    const c80 = p?.broadband?.c80_db;
+    const dr  = p?.broadband?.dr_db;
+    const sti = p?.sti;
+    return `
+      <tr>
+        <td class="pr-listener-label">${escapeHtml(labelText)}<span class="pr-listener-posture">${escapeHtml(postureText)}</span></td>
+        <td>${fmt(l.x, 2)} m</td>
+        <td>${fmt(l.y, 2)} m</td>
+        <td>${fmt(l.elevation_m, 2)} m</td>
+        <td>${Number.isFinite(t30) ? `${fmt(t30, 2)} s` : '—'}</td>
+        <td>${Number.isFinite(c50) ? `${fmt(c50, 1)} dB` : '—'}</td>
+        <td>${Number.isFinite(c80) ? `${fmt(c80, 1)} dB` : '—'}</td>
+        <td>${Number.isFinite(dr)  ? `${fmt(dr,  1)} dB` : '—'}</td>
+        <td>${Number.isFinite(sti) ? fmt(sti, 2)         : '—'}</td>
+      </tr>`;
+  }).join('');
+
+  // Per-band T30 from the precision render. Same finite-guard as the
+  // joined table — undefined values surface as "—", never 0 or blank.
+  const perBandT30Rows = precision ? precision.receivers.map(r => `
+    <tr>
+      <td class="pr-mono">${escapeHtml(r.label)}</td>
+      ${(r.perBand ?? []).map(b => `<td>${Number.isFinite(b.t30_s) ? `${fmt(b.t30_s, 2)} s` : '—'}</td>`).join('')}
+    </tr>`).join('') : '';
+  const hzCols = precision ? (precision.bands_hz ?? []).map(hz => `<th>${fmtBand(hz)}</th>`).join('') : '';
+
+  // STI headline — limiting (minimum) listener per IEC 60268-16. Same
+  // logic the standalone Precision page used; lifted intact per Maya
+  // ("the single best-composed element in the entire report ... do not
+  // refactor in the merge"). Finite-guard at filter step matches the
+  // previous renderPrecisionSection so no listener with no coverage
+  // contaminates the limiting-STI calculation.
+  const stiHeadline = (() => {
+    if (!precision) return '';
+    const stiValues = precision.receivers.map(r => r.sti).filter(v => Number.isFinite(v));
+    if (stiValues.length === 0) return '';
+    const stiMin = Math.min(...stiValues);
+    let stiTier;
+    if      (stiMin < 0.45) stiTier = 0;
+    else if (stiMin < 0.50) stiTier = 1;
+    else                    stiTier = 2;
+    const tierLabels = ['< 0.45 fail', '0.45 – 0.50 marginal', '≥ 0.50 pass'];
+    const advisory =
+      stiTier === 2 ? 'Above the IEC 60849 emergency-PA threshold (0.50). Verify with in-situ commissioning.'
+      : stiTier === 1 ? 'Marginal — between the BS 5839-8 floor (0.45) and the IEC 60849 threshold (0.50). Treatment recommended.'
+      : 'Below the BS 5839-8 floor (0.45). Treatment required before submission.';
+    return `
+      <div class="pr-precision-headline">
+        <div>
+          <div class="pr-precision-sti-label">Limiting listener — STI · IEC 60268-16</div>
+          <div class="pr-precision-sti">${fmt(stiMin, 2)}</div>
+        </div>
+        <div>
+          <div class="pr-tierstrip" aria-label="STI tier">
+            ${tierLabels.map((label, i) => `
+              <div class="pr-tierstrip-cell ${i === stiTier ? 'pr-tierstrip-active' : ''}">${escapeHtml(label)}</div>
+            `).join('')}
+          </div>
+          <p class="pr-note" style="margin-top:4pt">${advisory}</p>
+        </div>
+      </div>`;
+  })();
+
+  // Zones + ambient — footer-strip layout. Both blocks demoted from
+  // their previous "appendix B with h2 / pr-section h2" treatment to
+  // inline eyebrow + table, per Maya. Same data, less visual weight.
+  const zoneFooter = model.zones.length === 0
+    ? '<p class="pr-empty-state">No audience zones defined. Add a zone via the Zones panel to receive a STIPA reading.</p>'
+    : `<table class="pr-table pr-zebra pr-zones-footer">
+        <thead><tr><th>ID</th><th>Label</th><th>Vertices</th><th>Elev</th><th>Material</th><th>Occupancy</th></tr></thead>
+        <tbody>${zoneRows}</tbody>
+      </table>`;
+  const ambientFooter = (model.ambient.per_band?.length ?? 0) > 0
+    ? `<div class="pr-bandstrip">
+        <div class="pr-bandstrip-label">${escapeHtml(model.ambient.preset)}</div>
+        ${model.ambient.per_band.map((v, i) => `
+          <div class="pr-bandstrip-cell">
+            <div class="pr-bandstrip-cell-band">${fmtBand(model.rt60[i]?.freq_hz ?? 0)}</div>
+            <div class="pr-bandstrip-cell-value">${fmt(v, 0)}</div>
+          </div>`).join('')}
+      </div>`
+    : '<p class="pr-empty-state">No ambient noise profile loaded.</p>';
+
+  const acousticResultsPage = `
+    <div class="pr-page pr-acoustic-results">
       <div class="pr-chapter-opener">
         <span class="pr-chapter-number-ghost">02</span>
         <span class="pr-eyebrow">Chapter 02</span>
-        <h2>Reverberation</h2>
+        <h2>Acoustic results</h2>
       </div>
+
+      ${stiHeadline}
+
       <section class="pr-section pr-rt60-grid">
         <div class="pr-rt60-chart-wrap">
           ${rt60Chart}
-          <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Values on Eyring curve; Sabine shown for reference. n = 7 bands, 125 Hz – 8 kHz.</p>
+          <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Eyring solid, Sabine dotted. ${schroederNote ? schroederNote.replace(/—.*$/, '— statistical-acoustics figures lose meaning below this band.') : ''} n = 7 bands, 125 Hz – 8 kHz.</p>
         </div>
         <div class="pr-rt60-kv-wrap">
           <table class="pr-table pr-kv">
@@ -906,12 +1031,49 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
           </table>
         </div>
       </section>
+
       <section class="pr-section">
-        <table class="pr-table pr-zebra">
-          <thead><tr><th>Band</th><th>Sabine</th><th>Eyring</th><th>Mean α</th></tr></thead>
-          <tbody>${rt60Rows}</tbody>
-        </table>
-        <p class="pr-note">Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2). Air absorption per ISO 9613-1 included in both denominators. ${schroederNote}</p>
+        <h3 class="pr-block-h3">Listener positions × ray-traced results</h3>
+        ${model.listeners.length === 0
+          ? '<p class="pr-empty-state">No listeners placed. Listener positions drive the per-receiver STI calculation.</p>'
+          : `<table class="pr-table pr-zebra pr-listener-precision">
+              <thead><tr><th>Listener</th><th>X</th><th>Y</th><th>Elev</th><th>T30</th><th>C50</th><th>C80</th><th>D/R</th><th>STI</th></tr></thead>
+              <tbody>${joinedRows}</tbody>
+            </table>`}
+        <p class="pr-note">Posture shown in parentheses on the listener label. Ear height = elev + 1.60 m standing / 1.15 m sitting in chair / 0.85 m sitting on floor (custom override allowed). EDT and T20 in the per-band table below; broadband per-receiver values from Schroeder backward integration of the ray-traced energy histogram (ISO 3382-1 §A.2.2). Em-dash "—" indicates the precision render did not cover this listener — distinct from STI = 0, which is undefined.</p>
+      </section>
+
+      <section class="pr-section pr-band-pair-grid">
+        <div class="pr-band-pair-cell">
+          <h3 class="pr-block-h3">RT60 per band — diffuse-field draft</h3>
+          <table class="pr-table pr-zebra">
+            <thead><tr><th>Band</th><th>Sabine</th><th>Eyring</th><th>Mean α</th></tr></thead>
+            <tbody>${rt60Rows}</tbody>
+          </table>
+          <p class="pr-note">Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2). S = ${fmt(room.totalArea_m2, 0)} m² in Σαᵢ Sᵢ denominator; air absorption per ISO 9613-1.</p>
+        </div>
+        <div class="pr-band-pair-cell">
+          <h3 class="pr-block-h3">T30 per band — ray-traced</h3>
+          ${precision
+            ? `<table class="pr-table pr-zebra">
+                <thead><tr><th>Receiver</th>${hzCols}</tr></thead>
+                <tbody>${perBandT30Rows}</tbody>
+              </table>
+              <p class="pr-note">Ray-traced T30 per receiver; supersedes the diffuse-field draft for sign-off.</p>`
+            : '<p class="pr-empty-state">Precision render not yet computed. Re-run with the Render button before submission. Sabine / Eyring values on the left remain valid for first-pass design.</p>'
+          }
+        </div>
+      </section>
+
+      <section class="pr-section pr-footer-grid">
+        <div class="pr-footer-cell">
+          <span class="pr-eyebrow">Audience zones (${model.zones.length})</span>
+          ${zoneFooter}
+        </div>
+        <div class="pr-footer-cell">
+          <span class="pr-eyebrow">Ambient noise · ${escapeHtml(model.ambient.preset)}</span>
+          ${ambientFooter}
+        </div>
       </section>
     </div>`;
 
@@ -963,67 +1125,14 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       `)}
     </div>`;
 
-  // ------ Page 4: listeners + zones + ambient -------------------------
-  const listenerRows = model.listeners.map(l => `
-    <tr>
-      <td class="pr-mono">${escapeHtml(l.id)}</td>
-      <td>${escapeHtml(l.label ?? '')}</td>
-      <td>${fmt(l.x, 2)} m</td>
-      <td>${fmt(l.y, 2)} m</td>
-      <td>${fmt(l.elevation_m, 2)} m</td>
-      <td>${escapeHtml(l.posture ?? '')}</td>
-      <td>${fmt(l.earHeight_m, 2)} m</td>
-    </tr>`).join('');
+  // (Former page 4 — Appendix B Listener + zone schedule — and former
+  // page 5 — Chapter 03 Precision results — merged into the Chapter 02
+  // Acoustic results page above. Listener positions joined into the
+  // ray-traced broadband table; zones + ambient strip live in the
+  // footer-grid block. See the long block-budget comment above
+  // acousticResultsPage for the layout spec.)
 
-  const zoneRows = model.zones.map(z => `
-    <tr>
-      <td class="pr-mono">${escapeHtml(z.id)}</td>
-      <td>${escapeHtml(z.label ?? '')}</td>
-      <td>${z.vertices_n}</td>
-      <td>${fmt(z.elevation_m, 2)} m</td>
-      <td>${escapeHtml(z.material_id ?? '')}</td>
-      <td>${fmt(z.occupancy_percent, 0)} %</td>
-    </tr>`).join('');
-
-  // Per Sofia: ambient noise as a horizontal band-strip "fingerprint",
-  // not a table. Reads as a single visual element rather than tabular
-  // data the user has to scan numerically.
-  const ambientStrip = (model.ambient.per_band?.length ?? 0) > 0 ? `
-    <div class="pr-bandstrip">
-      <div class="pr-bandstrip-label">${escapeHtml(model.ambient.preset)}</div>
-      ${model.ambient.per_band.map((v, i) => `
-        <div class="pr-bandstrip-cell">
-          <div class="pr-bandstrip-cell-band">${fmtBand(model.rt60[i]?.freq_hz ?? 0)}</div>
-          <div class="pr-bandstrip-cell-value">${fmt(v, 0)}</div>
-        </div>`).join('')}
-    </div>
-    <p class="pr-note">Per-band noise floor (dB SPL) used as the N term in STIPA (IEC 60268-16) and the ambient subtraction in the heatmap.</p>
-  ` : '';
-
-  // Per Sofia: appendix treatment — same demoted styling as page 4.
-  const listenerPage = `
-    <div class="pr-page pr-page-appendix">
-      <span class="pr-eyebrow">Appendix B · Listener and zone schedule</span>
-      ${sec('', 'Listener positions', `
-        ${model.listeners.length === 0 ? '<p class="pr-empty-state">No listeners placed. Listener positions drive the zone-by-zone STI calculation.</p>' : `
-          <table class="pr-table pr-zebra">
-            <thead><tr><th>ID</th><th>Label</th><th>X</th><th>Y</th><th>Elevation</th><th>Posture</th><th>Ear height</th></tr></thead>
-            <tbody>${listenerRows}</tbody>
-          </table>
-        `}
-      `)}
-      ${sec('', `Audience zones (${model.zones.length})`, `
-        ${model.zones.length === 0 ? '<p class="pr-empty-state">No audience zones defined. Add a zone via the Zones panel to receive a STIPA reading.</p>' : `
-          <table class="pr-table pr-zebra">
-            <thead><tr><th>ID</th><th>Label</th><th>Vertices</th><th>Elevation</th><th>Material</th><th>Occupancy</th></tr></thead>
-            <tbody>${zoneRows}</tbody>
-          </table>
-        `}
-      `)}
-      ${ambientStrip ? sec('', 'Ambient noise floor', ambientStrip) : ''}
-    </div>`;
-
-  // ------ Chapter 04: Acoustic treatment ------------------------------
+  // ------ Chapter 03: Acoustic treatment ------------------------------
   // Two pages, only when treatments are placed:
   //   4a — Chapter opener + paired-bar comparison chart + KPI table
   //   4b — Drawing 03 (treatment plan) + per-panel schedule + α matrix
@@ -1073,13 +1182,13 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     // understands WHY this section exists before reading any numbers.
     const chenFrame = `Speech intelligibility and reverberation control are programme-level safety items in this venue; the treatment package below is a quantified intervention against the bare-room baseline — not a marketing description.`;
 
-    const compareCaption = `Fig. 04.1 — Octave-band RT60 (Eyring per ISO 3382-1) for the bare room (grey) versus the proposed treatment package (red). ${compare.panels_n} panel${compare.panels_n === 1 ? '' : 's'} folded in via the per-wall overlap-clamped Sabine budget (RoomLAB v2). The Sabine reference row in the KPI table is bounded by the ᾱ<0.2 assumption; once ᾱ exceeds 0.2 the Eyring values are the physical answer.`;
+    const compareCaption = `Fig. 03.1 — Octave-band RT60 (Eyring per ISO 3382-1) for the bare room (grey) versus the proposed treatment package (red). ${compare.panels_n} panel${compare.panels_n === 1 ? '' : 's'} folded in via the per-wall overlap-clamped Sabine budget (RoomLAB v2). The Sabine reference row in the KPI table is bounded by the ᾱ<0.2 assumption; once ᾱ exceeds 0.2 the Eyring values are the physical answer.`;
 
     const ch04a = `
       <div class="pr-page pr-page-treatment-hero">
         <div class="pr-chapter-opener">
-          <span class="pr-chapter-number-ghost">04</span>
-          <span class="pr-eyebrow">Chapter 04</span>
+          <span class="pr-chapter-number-ghost">03</span>
+          <span class="pr-eyebrow">Chapter 03</span>
           <h2>Acoustic treatment</h2>
         </div>
         <p class="pr-lead pr-lead-chen">${escapeHtml(chenFrame)}</p>
@@ -1334,23 +1443,10 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </div>`;
   }
 
-  // ------ Page 6: PRECISION — chapter opener + STI tier strip ---------
-  // Per Sofia: this is "the second answer" — promote it. STI broadband
-  // pulled out as a 28 pt accent-coloured displayed number with a
-  // 3-cell pass/marginal/fail tier indicator. IEC 60268-16: STI < 0.45
-  // is fail, 0.45–0.50 marginal, ≥ 0.50 pass for emergency-PA.
-  const precisionPage = `
-    <div class="pr-page">
-      <div class="pr-chapter-opener">
-        <span class="pr-chapter-number-ghost">03</span>
-        <span class="pr-eyebrow">Chapter 03</span>
-        <h2>Precision results</h2>
-      </div>
-      ${model.precision
-        ? renderPrecisionSection(model.precision)
-        : `<p class="pr-empty-state">Precision render not yet computed. Re-run with the Render button before submission. Draft RT60 figures on page 3 remain valid for first-pass design.</p>`
-      }
-    </div>`;
+  // (Former Page 6 — Chapter 03 Precision results — merged into the
+  // Chapter 02 Acoustic results page above. STI tier headline lives at
+  // the top of that page; per-receiver broadband joins the listener
+  // table; per-band T30 sits in the paired band-tables grid.)
 
   // ------ Page 8: methodology + disclaimers + signature ----------------
   // CLEAN-SLATE REWRITE (Edition 2026-05-14, 9th iteration).
@@ -1519,10 +1615,8 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     ${cover}
     ${heatmapPage}
     ${operatingRangePage}
-    ${roomPage}
+    ${acousticResultsPage}
     ${sourcePage}
-    ${listenerPage}
-    ${precisionPage}
     ${treatmentPages}
     ${combinedPage}
     <!-- Footer band removed per user request (Edition 2026-05-14). The
@@ -1946,76 +2040,11 @@ function buildTreatmentPlanSVG(stateRef) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-treatment-plan-svg">${outlineEl}${treatmentEls}${scaleBar}</svg>`;
 }
 
-function renderPrecisionSection(p) {
-  const hzCols = (p.bands_hz ?? []).map(hz => `<th>${fmtBand(hz)}</th>`).join('');
-
-  const broadbandRows = p.receivers.map(r => `
-    <tr>
-      <td class="pr-mono">${escapeHtml(r.label)}</td>
-      <td>${fmt(r.broadband.edt_s, 2)} s</td>
-      <td>${fmt(r.broadband.t20_s, 2)} s</td>
-      <td>${fmt(r.broadband.t30_s, 2)} s</td>
-      <td>${fmt(r.broadband.c50_db, 1)} dB</td>
-      <td>${fmt(r.broadband.c80_db, 1)} dB</td>
-      <td>${fmt(r.broadband.dr_db, 1)} dB</td>
-      <td>${fmt(r.sti, 3)}</td>
-    </tr>`).join('');
-
-  const perBandT30 = p.receivers.map(r => `
-    <tr>
-      <td class="pr-mono">${escapeHtml(r.label)}</td>
-      ${(r.perBand ?? []).map(b => `<td>${fmt(b.t30_s, 2)} s</td>`).join('')}
-    </tr>`).join('');
-
-  // Per Sofia: STI broadband as a displayed number, with a 3-cell tier
-  // strip showing fail / marginal / pass. Use the receiver with the
-  // LOWEST STI as the headline figure — that's the LIMITING listener,
-  // the binding sign-off constraint a BOMBA reviewer cares about.
-  // (Renamed from 'worst-zone' for client-facing reading; the metric
-  // is unchanged.)
-  const stiValues = p.receivers.map(r => r.sti).filter(v => Number.isFinite(v));
-  const stiMin = stiValues.length > 0 ? Math.min(...stiValues) : null;
-  let stiTier = null;
-  if (stiMin !== null) {
-    if (stiMin < 0.45) stiTier = 0;
-    else if (stiMin < 0.50) stiTier = 1;
-    else stiTier = 2;
-  }
-  const tierLabels = ['< 0.45 fail', '0.45 – 0.50 marginal', '≥ 0.50 pass'];
-  const tierStrip = stiTier === null ? '' : `
-    <div class="pr-tierstrip" aria-label="STI tier">
-      ${tierLabels.map((label, i) => `
-        <div class="pr-tierstrip-cell ${i === stiTier ? 'pr-tierstrip-active' : ''}">${escapeHtml(label)}</div>
-      `).join('')}
-    </div>`;
-  const stiHeadline = stiMin === null ? '' : `
-    <div class="pr-precision-headline">
-      <div>
-        <div class="pr-precision-sti-label">Limiting listener — STI · IEC 60268-16</div>
-        <div class="pr-precision-sti">${fmt(stiMin, 2)}</div>
-      </div>
-      <div>
-        ${tierStrip}
-        <p class="pr-note" style="margin-top:4pt">${stiTier === 2 ? 'Above the IEC 60849 emergency-PA threshold (0.50). Verify with in-situ commissioning.' : stiTier === 1 ? 'Marginal — between the BS 5839-8 floor (0.45) and the IEC 60849 threshold (0.50). Treatment recommended.' : 'Below the BS 5839-8 floor (0.45). Treatment required before submission.'}</p>
-      </div>
-    </div>`;
-
-  return `
-    ${stiHeadline}
-    <section class="pr-section">
-      <h3>Broadband per receiver</h3>
-      <table class="pr-table pr-zebra">
-        <thead><tr><th>Receiver</th><th>EDT</th><th>T20</th><th>T30</th><th>C50</th><th>C80</th><th>D/R</th><th>STI</th></tr></thead>
-        <tbody>${broadbandRows}</tbody>
-      </table>
-      <h3>T30 per band</h3>
-      <table class="pr-table pr-zebra">
-        <thead><tr><th>Receiver</th>${hzCols}</tr></thead>
-        <tbody>${perBandT30}</tbody>
-      </table>
-      <p class="pr-note">Values computed by ray-traced energy histograms (Schroeder backward integration). Supersedes draft RT60 for this scene.</p>
-    </section>`;
-}
+// renderPrecisionSection used to live here — emitted the standalone
+// Chapter 03 "Precision results" page. Removed 2026-05-20 when the
+// page was merged into Chapter 02 "Acoustic results"; the STI headline,
+// per-receiver broadband, and per-band T30 are now inlined into
+// acousticResultsPage above (joined-table + paired-band-grid + footer).
 
 let _printMaterialsRef = null;
 
