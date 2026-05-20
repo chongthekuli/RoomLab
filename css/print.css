@@ -1218,6 +1218,9 @@ body.is-pdf-export .vp-tabs {
        v=557 (2026-05-20-2) — KV-table redundancy with cover + Drawing 01
                               removed; band tables collapsed
        v=558 (2026-05-20-3) — STI + RT60 chart compressed into one row
+       v=560 (2026-05-20-4) — STI cell filled with brand accent (white
+                              reverse), "STI" metric tag + 54 pt number,
+                              "Reverberation · RT60" chart title added
      Physics floor: Dr. Chen.
      ----------------------------------------------------------- */
 
@@ -1264,14 +1267,18 @@ body.is-pdf-export .vp-tabs {
     margin-bottom: 6mm;
   }
 
-  /* STI cell — keeps the --paper-2 background bar that the user flagged
-     as a v=557 regression. Inside, the .pr-precision-headline switches
-     from its default 2-col grid (number left, tier strip right) to a
-     vertical stack so the narrow 60 mm column reads top-to-bottom:
-     label · 40 pt number · 3-cell tier strip · advisory sentence. */
+  /* STI cell — v=560: filled with the brand accent (--accent #8C2A2A)
+     as the "answer" panel, per user "do the template color background
+     for STI to make it more elegant". The cell reads as a solid red
+     card; STI metric tag + 54 pt number reverse out to white. The
+     .pr-precision-headline switches from its default 2-col grid (number
+     left, tier strip right) to a vertical stack so the narrow 60 mm
+     column reads top-to-bottom: eyebrow · STI tag · 54 pt number ·
+     tier strip · advisory sentence. */
   #print-report .pr-acoustic-results .pr-sti-cell {
-    background: var(--paper-2);
-    padding: 8pt 10pt;
+    background: var(--accent);
+    color: var(--paper);
+    padding: 9pt 10pt;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -1281,45 +1288,92 @@ body.is-pdf-export .vp-tabs {
     grid-template-columns: none;
     gap: 0;
     border: none;
-    background: transparent; /* cell carries the bar bg, headline is transparent */
+    background: transparent; /* cell carries the accent bg */
     padding: 0;
     margin: 0;
   }
   /* Vertical rhythm between the two inner blocks of the headline:
-     the number-block (label + 40 pt number) and the tier-block
-     (3-cell strip + advisory paragraph). 6 pt gap separates them. */
+     the number-block (eyebrow + STI tag + number) and the tier-block
+     (3-cell strip + advisory paragraph). 8 pt gap separates them. */
   #print-report .pr-acoustic-results .pr-sti-cell .pr-precision-headline > div {
-    margin-bottom: 6pt;
+    margin-bottom: 8pt;
   }
   #print-report .pr-acoustic-results .pr-sti-cell .pr-precision-headline > div:last-child {
     margin-bottom: 0;
   }
-  /* Tier strip shrinks for the narrow column — was 8 pt across full
-     row, now 6.5 pt across 60 mm. Three cells (~17 mm each) fit the
-     labels without truncation. */
+  /* Eyebrow label — reversed to a translucent white so it reads as a
+     caption above the metric without competing with the number. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-precision-sti-label {
+    color: rgba(255, 255, 255, 0.78);
+    margin-bottom: 5pt;
+  }
+  /* "STI" metric tag (v=560) — names the number so a reader knows the
+     54 pt figure is the Speech Transmission Index, not some other
+     dimensionless score. Bold, uppercase, spaced. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-precision-sti-metric {
+    font-size: 11pt;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--paper);
+    line-height: 1;
+    margin-bottom: 2pt;
+  }
+  /* The headline number — enlarged 40 pt → 54 pt (user: "enlarge the
+     STI number") and reversed to white on the accent card. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-precision-sti {
+    font-size: 54pt;
+    color: var(--paper);
+    line-height: 0.95;
+  }
+  /* Tier strip on the accent card — inactive cells are faint white
+     outlines; the ACTIVE cell inverts to a white fill with accent text
+     so the live tier still reads as the highlighted state against the
+     red background. */
   #print-report .pr-acoustic-results .pr-sti-cell .pr-tierstrip {
     margin: 4pt 0 6pt 0;
+    border-color: rgba(255, 255, 255, 0.45);
   }
   #print-report .pr-acoustic-results .pr-sti-cell .pr-tierstrip-cell {
     padding: 3pt 2pt;
     font-size: 6.5pt;
+    color: rgba(255, 255, 255, 0.7);
+    border-right-color: rgba(255, 255, 255, 0.45);
   }
-  /* Empty-precision fallback — pending dash + the existing pr-note
-     advisory copy. Keeps the cell from collapsing visually when no
-     render has been run. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-tierstrip-cell.pr-tierstrip-active {
+    background: var(--paper);
+    color: var(--accent);
+    font-weight: 700;
+  }
+  /* Advisory note reversed to near-white italic. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-note {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  /* Empty-precision fallback — pending dash keeps the white-on-accent
+     treatment but at reduced opacity so it reads as "awaiting data". */
   #print-report .pr-acoustic-results .pr-sti-cell .pr-sti-pending {
-    color: var(--muted);
+    color: rgba(255, 255, 255, 0.6);
     font-weight: 300;
   }
 
-  /* RT60 chart cell — chart on top, caption below. Chart keeps its
-     v=557 width (110 mm) since that's the size the inline SVG axis
+  /* RT60 chart cell — title on top, chart, then caption. Chart keeps
+     its v=557 width (110 mm) since that's the size the inline SVG axis
      labels were tuned at; growing it scales the labels proportionally
      and they start to dominate. Cell is ~134 mm wide so a slim 24 mm
      of breathing room sits to the chart's right. */
   #print-report .pr-acoustic-results .pr-rt60-cell {
     display: flex;
     flex-direction: column;
+  }
+  /* "Reverberation · RT60" title (v=560) — names the chart so a reader
+     knows the curves are reverberation time, matching the STI tag on
+     the left cell. Same weight as a block h3. */
+  #print-report .pr-acoustic-results .pr-rt60-title {
+    font-size: 9.5pt;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 4pt 0;
+    letter-spacing: 0;
   }
   #print-report .pr-acoustic-results .pr-rt60-cell .pr-rt60-chart {
     width: 110mm;

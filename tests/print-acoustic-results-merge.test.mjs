@@ -73,8 +73,14 @@ assert(!src.includes('Appendix B · Listener and zone schedule'),
   'old "Appendix B · Listener and zone schedule" eyebrow deleted');
 
 // ---- Block 2: STI headline + tier strip (lifted from Precision page) ----
-present('Limiting listener — STI · IEC 60268-16',
-  'STI headline label (the sign-off number a reviewer scans for first)');
+present('Limiting listener · IEC 60268-16',
+  'STI headline eyebrow (the sign-off number a reviewer scans for first)');
+present('<div class="pr-precision-sti-metric">STI</div>',
+  'v=560 "STI" metric tag — names the 54 pt number so a reader knows it is the Speech Transmission Index');
+presentCss('pr-precision-sti-metric',
+  'STI metric-tag CSS rule (uppercase, bold, white on accent)');
+presentCss('font-size: 54pt',
+  'STI number enlarged 40 pt → 54 pt (v=560, user: "enlarge the STI number")');
 present('< 0.45 fail',     'STI tier strip — BS 5839-8 floor band');
 present('0.45 – 0.50 marginal', 'STI tier strip — marginal band');
 present('≥ 0.50 pass',     'STI tier strip — IEC 60849 emergency-PA threshold');
@@ -88,15 +94,17 @@ present('pr-sti-rt60-row',
 present('pr-sti-cell',
   'STI cell (~30% / 60 mm wide) — vertical stack inside the narrow column');
 present('pr-rt60-cell',
-  'RT60 chart cell (~70% / ~134 mm wide) — chart on top, caption below');
-presentCss('font-size: 40pt',
-  'STI accent number promoted to 40 pt (v=557, was 28 pt) — page-opening statement');
+  'RT60 chart cell (~70% / ~134 mm wide) — title + chart + caption');
+present('Reverberation · RT60 per octave band',
+  'v=560 chart title — names the curves so a reader knows they are RT60');
+presentCss('pr-rt60-title',
+  'RT60 chart-title CSS rule (v=560)');
 presentCss('pr-sti-rt60-row',
   'STI+RT60 row CSS rule (v=559 — replaces pr-sti-frame + pr-rt60-hero)');
 presentCss('pr-sti-cell',
-  'STI cell CSS rule (carries --paper-2 bar background)');
+  'STI cell CSS rule (v=560 — brand accent background, white reverse)');
 presentCss('pr-rt60-cell',
-  'RT60 cell CSS rule (chart + caption stacked)');
+  'RT60 cell CSS rule (title + chart + caption stacked)');
 presentCss('pr-band-consolidated',
   'consolidated 5-col band-table CSS rule');
 

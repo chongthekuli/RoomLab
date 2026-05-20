@@ -996,7 +996,8 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     return `
       <div class="pr-precision-headline">
         <div>
-          <div class="pr-precision-sti-label">Limiting listener — STI · IEC 60268-16</div>
+          <div class="pr-precision-sti-label">Limiting listener · IEC 60268-16</div>
+          <div class="pr-precision-sti-metric">STI</div>
           <div class="pr-precision-sti">${fmt(stiMin, 2)}</div>
         </div>
         <div>
@@ -1042,12 +1043,14 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         <div class="pr-sti-cell">
           ${stiHeadline || `
             <div class="pr-precision-headline pr-sti-empty">
-              <div class="pr-precision-sti-label">Limiting listener — STI · IEC 60268-16</div>
+              <div class="pr-precision-sti-label">Limiting listener · IEC 60268-16</div>
+              <div class="pr-precision-sti-metric">STI</div>
               <div class="pr-precision-sti pr-sti-pending">—</div>
               <p class="pr-note">Precision render not yet computed. Re-run with the Render button before submission.</p>
             </div>`}
         </div>
         <div class="pr-rt60-cell">
+          <div class="pr-rt60-title">Reverberation · RT60 per octave band</div>
           ${rt60Chart}
           <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Eyring solid, Sabine dotted. ${schroederNote ? schroederNote.replace(/—.*$/, '— statistical-acoustics figures lose meaning below this band.') : ''} n = 7 bands, 125 Hz – 8 kHz. Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01.</p>
         </div>
