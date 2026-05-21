@@ -820,11 +820,9 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   const cover = `
     <div class="pr-page pr-page-cover">
       <div class="pr-cover-titleblock">
-        <div>
-          <h1>${escapeHtml(model.project.name)}</h1>
-          <h2 class="pr-cover-room-name">${escapeHtml(roomNameDisplay)}</h2>
+        <div class="pr-cover-titleblock-rule">
+          <span class="pr-eyebrow">RoomLAB · Acoustic simulation</span>
         </div>
-        <span class="pr-eyebrow">RoomLAB · Acoustic simulation</span>
         <div class="pr-cover-titleblock-right">
           <img class="pr-cover-logo" src="assets/logo/RoomLAB-logo-1024.png" alt="RoomLAB" />
         </div>
@@ -832,6 +830,10 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <div class="pr-cover-hero-wrap">
         <div class="pr-cover-hero">
           ${heroBody}
+        </div>
+        <div class="pr-cover-hero-nameplate${coverImage ? '' : ' pr-cover-hero-nameplate--light'}">
+          <h1>${escapeHtml(model.project.name)}</h1>
+          <h2 class="pr-cover-room-name">${escapeHtml(roomNameDisplay)}</h2>
         </div>
         <aside class="pr-cover-spec-overlay" aria-label="Room specifications">
           <div class="pr-cover-spec-overlay-title">Room specifications</div>
@@ -862,10 +864,29 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   //        band-table collapse — bandRows below now folds the same
   //        Sabine/Eyring/Mean α columns into a 5-col consolidated table
   //        that also carries ray-traced T30 mean (min–max) per band.)
+  // Per-band ray-traced T30, spatial mean across covered listeners
+  // (same source as the consolidated band table's "Ray-traced T30 —
+  // mean" column). null at a band where the precision render covered
+  // zero listeners → the chart breaks the T30 line there (no interp).
+  const rayT30Means = model.rt60.map((_r, bandIdx) => {
+    const recs = model.precision?.receivers;
+    if (!recs) return null;
+    const vals = recs
+      .map(rec => rec.perBand?.[bandIdx]?.t30_s)
+      .filter(v => Number.isFinite(v));
+    if (vals.length === 0) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  });
   const rt60Chart = renderRT60Chart(model.rt60, {
     volume_m3: room.volume_m3,
     schroederHz: model.derived.schroederCutoff_hz,
+    rayT30Means,
   });
+  // Which series carries the plotted numeric labels — T30 when the precision
+  // pass covered any band, else the Eyring fallback. Named in the caption so
+  // the reader is never unsure which curve the numbers belong to (Dr. Chen).
+  const labelledSeries = rayT30Means.some(v => Number.isFinite(v))
+    ? 'the ray-traced T30 curve' : 'the Eyring curve';
   const targetLabel = (() => {
     const t = resolveRT60Target(room.volume_m3);
     return t ? `${t.lo.toFixed(1)}–${t.hi.toFixed(1)} s (${t.label})` : null;
@@ -1020,19 +1041,27 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         <thead><tr><th>ID</th><th>Label</th><th>Vertices</th><th>Elev</th><th>Material</th><th>Occupancy</th></tr></thead>
         <tbody>${zoneRows}</tbody>
       </table>`;
-  const ambientFooter = (model.ambient.per_band?.length ?? 0) > 0
-    ? `<div class="pr-bandstrip">
-        <div class="pr-bandstrip-label">${escapeHtml(model.ambient.preset)}</div>
-        ${model.ambient.per_band.map((v, i) => `
-          <div class="pr-bandstrip-cell">
-            <div class="pr-bandstrip-cell-band">${fmtBand(model.rt60[i]?.freq_hz ?? 0)}</div>
-            <div class="pr-bandstrip-cell-value">${fmt(v, 0)}</div>
-          </div>`).join('')}
+  // Ambient noise band-strip — moved INTO the STI accent card (v=563,
+  // user: "move the NC table to the lowest part of the STI red bar,
+  // match the color"). Pinned to the bottom of the red card via
+  // margin-top:auto; restyled white-on-accent to match the tier strip.
+  // The footer label cell is dropped (no room across 60 mm with a label
+  // column) — the NC preset name rides the one-line eyebrow instead.
+  const ambientStiStrip = (model.ambient.per_band?.length ?? 0) > 0
+    ? `<div class="pr-sti-ambient">
+        <div class="pr-sti-ambient-eyebrow">Ambient · ${escapeHtml(model.ambient.preset)} · dB/oct</div>
+        <div class="pr-bandstrip pr-bandstrip-onaccent">
+          ${model.ambient.per_band.map((v, i) => `
+            <div class="pr-bandstrip-cell">
+              <div class="pr-bandstrip-cell-band">${fmtBand(model.rt60[i]?.freq_hz ?? 0)}</div>
+              <div class="pr-bandstrip-cell-value">${fmt(v, 0)}</div>
+            </div>`).join('')}
+        </div>
       </div>`
-    : '<p class="pr-empty-state">No ambient noise profile loaded.</p>';
+    : '';
 
   const acousticResultsPage = `
-    <div class="pr-page pr-acoustic-results">
+    <div class="pr-page pr-acoustic-results" data-running-title="Acoustic results">
       <div class="pr-chapter-opener">
         <span class="pr-chapter-number-ghost">02</span>
         <span class="pr-eyebrow">Chapter 02</span>
@@ -1048,11 +1077,18 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
               <div class="pr-precision-sti pr-sti-pending">—</div>
               <p class="pr-note">Precision render not yet computed. Re-run with the Render button before submission.</p>
             </div>`}
+          ${ambientStiStrip}
         </div>
         <div class="pr-rt60-cell">
           <div class="pr-rt60-title">Reverberation · RT60 per octave band</div>
+          <div class="pr-rt60-legend">
+            <span><svg width="15" height="4" viewBox="0 0 15 4" aria-hidden="true"><line x1="0" y1="2" x2="15" y2="2" stroke="#8C2A2A" stroke-width="1"/><circle cx="7.5" cy="2" r="1.3" fill="#8C2A2A"/></svg>Eyring</span>
+            <span><svg width="15" height="4" viewBox="0 0 15 4" aria-hidden="true"><line x1="0" y1="2" x2="15" y2="2" stroke="#9A7B3F" stroke-width="0.9"/><rect x="5.8" y="0.3" width="3.4" height="3.4" fill="#fff" stroke="#9A7B3F" stroke-width="0.6"/></svg>Ray-traced T30 (mean)</span>
+            <span><svg width="15" height="4" viewBox="0 0 15 4" aria-hidden="true"><line x1="0" y1="2" x2="15" y2="2" stroke="#1A1F24" stroke-width="0.8" stroke-dasharray="2 2"/></svg>Sabine</span>
+            <span><svg width="15" height="4" viewBox="0 0 15 4" aria-hidden="true"><line x1="0" y1="2" x2="15" y2="2" stroke="#3E6B74" stroke-width="0.8" stroke-dasharray="3 1.6"/><path d="M7.5 0.4 L8.9 2 L7.5 3.6 L6.1 2 Z" fill="#fff" stroke="#3E6B74" stroke-width="0.5"/></svg>Mean α (right axis)</span>
+          </div>
           ${rt60Chart}
-          <p class="pr-caption">Fig. 02.1 — Octave-band reverberation time per ISO 3382-1, computed via Sabine and Eyring formulae with ISO 9613-1 air absorption. ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Eyring solid, Sabine dotted. ${schroederNote ? schroederNote.replace(/—.*$/, '— statistical-acoustics figures lose meaning below this band.') : ''} n = 7 bands, 125 Hz – 8 kHz. Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01.</p>
+          <p class="pr-caption">Fig. 02.1 — Octave-band reverberation per ISO 3382-1: Sabine and Eyring estimates (ISO 9613-1 air absorption) plus the ray-traced T30 spatial mean across listeners (ISO 3382-1 §A.2.2). ${targetLabel ? `Target band ${escapeHtml(targetLabel)} per Beranek volume heuristic.` : ''} Eyring solid, Sabine dotted, T30 ochre; plotted numeric values label ${labelledSeries}. Sabine assumes a diffuse field; Eyring corrects for high mean absorption (α &gt; 0.2); the ray-traced T30 mean supersedes both for sign-off when present. Area-weighted mean absorption α̅ (surface-only — the dominant term in, not sole driver of, the RT estimates) reads against the right axis (0–1). ${schroederNote ? `${schroederNote.replace(/—.*$/, '— statistical-acoustics figures lose meaning below this band; greyed T30 markers there are modal and indicative only.')}` : ''} n = 7 bands, 125 Hz – 8 kHz. Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01.</p>
         </div>
       </section>
 
@@ -1067,7 +1103,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         <p class="pr-note">Posture shown in parentheses on the listener label. Ear height = elev + 1.60 m standing / 1.15 m sitting in chair / 0.85 m sitting on floor (custom override allowed). Broadband per-receiver values from Schroeder backward integration of the ray-traced energy histogram (ISO 3382-1 §A.2.2). Em-dash "—" indicates the precision render did not cover this listener — distinct from STI = 0, which is undefined.</p>
       </section>
 
-      <section class="pr-section">
+      <section class="pr-section pr-band-section">
         <h3 class="pr-block-h3">Per-band reverberation — diffuse-field bounds versus ray-traced ground truth</h3>
         <table class="pr-table pr-zebra pr-band-consolidated">
           <thead><tr><th>Band</th><th>Mean α</th><th>Sabine RT60</th><th>Eyring RT60</th><th>Ray-traced T30 — mean (min–max)</th></tr></thead>
@@ -1080,10 +1116,6 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         <div class="pr-footer-cell">
           <span class="pr-eyebrow">Audience zones (${model.zones.length})</span>
           ${zoneFooter}
-        </div>
-        <div class="pr-footer-cell">
-          <span class="pr-eyebrow">Ambient noise · ${escapeHtml(model.ambient.preset)}</span>
-          ${ambientFooter}
         </div>
       </section>
     </div>`;
@@ -1115,8 +1147,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // Per Sofia: appendix treatment — small h2, 8 pt body, zebra-striped
   // BOM table for scannability of long lists.
   const sourcePage = `
-    <div class="pr-page pr-page-appendix">
-      <span class="pr-eyebrow">Appendix A · Equipment schedule</span>
+    <div class="pr-page pr-page-appendix" data-running-title="Appendix A · Equipment schedule">
       ${sec('', `Bill of materials (${model.sourceFlat.total} radiating element${model.sourceFlat.total === 1 ? '' : 's'} from ${model.sourceFlat.raw} entr${model.sourceFlat.raw === 1 ? 'y' : 'ies'})`, `
         ${model.bom.length === 0 ? '<p class="pr-note">no sources placed.</p>' : `
           <table class="pr-table pr-zebra">
@@ -1196,7 +1227,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     const compareCaption = `Fig. 03.1 — Octave-band RT60 (Eyring per ISO 3382-1) for the bare room (grey) versus the proposed treatment package (red). ${compare.panels_n} panel${compare.panels_n === 1 ? '' : 's'} folded in via the per-wall overlap-clamped Sabine budget (RoomLAB v2). The Sabine reference row in the KPI table is bounded by the ᾱ<0.2 assumption; once ᾱ exceeds 0.2 the Eyring values are the physical answer.`;
 
     const ch04a = `
-      <div class="pr-page pr-page-treatment-hero">
+      <div class="pr-page pr-page-treatment-hero" data-running-title="Acoustic treatment">
         <div class="pr-chapter-opener">
           <span class="pr-chapter-number-ghost">03</span>
           <span class="pr-eyebrow">Chapter 03</span>
@@ -1291,7 +1322,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       : '';
 
     const ch04b = `
-      <div class="pr-page pr-page-treatment-plan">
+      <div class="pr-page pr-page-treatment-plan" data-running-title="Treatment plan">
         <span class="pr-eyebrow">Drawing 03 · Treatment plan, top-down view</span>
         <div class="pr-treatment-plan-grid">
           <div class="pr-treatment-plan-stage">${planSvg}</div>
@@ -1368,8 +1399,9 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       ? `mean ${fmt(model.heatmap.avgSPL_db, 2)}`
       : `mean ${fmt(model.heatmap.avgSPL_db, 0)} dB`;
     heatmapPage = `
-      <div class="pr-page pr-page-heatmap">
-        <span class="pr-eyebrow">Drawing 01 · Coverage map, top-down view</span>
+      <div class="pr-page pr-page-heatmap" data-running-title="Coverage map · top-down view">
+        <!-- Drawing-register eyebrow removed v=562 — the running header
+             carries the page title; the descriptive subtitle was redundant. -->
         <div class="pr-heatmap-grid">
           <div class="pr-heatmap-stage"${heatStageStyle}>${heatSvg}</div>
           ${heatLegend}
@@ -1443,7 +1475,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       header: `SPL @ 1 kHz · shared scale, ${sharedMin}–${sharedMax} dB`,
     });
     operatingRangePage = `
-      <div class="pr-page pr-page-operating-range">
+      <div class="pr-page pr-page-operating-range" data-running-title="Operating range">
         <span class="pr-eyebrow">Drawing 02 · Operating-range coverage, top-down view</span>
         <div class="pr-strip">${stripCells}</div>
         <div class="pr-strip-legend-wrap">${sharedLegend}</div>
@@ -1569,8 +1601,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   //   Reviewer's note (one prose paragraph)
   //   Wet-signature row: 3 cells (Author / Company / Date)
   const combinedPage = `
-    <div class="pr-page pg-methodology">
-      <h2 class="pg-page-title">Methodology, Standards &amp; Disclaimers</h2>
+    <div class="pr-page pg-methodology" data-running-title="Methodology, Standards & Disclaimers">
       <p class="pg-prose pg-intro">${escapeHtml(DISCLAIMER_INTRO)} Each metric below names the standard it follows and the assumption baked in, so a reviewing engineer can trace any number back to its source.</p>
 
       <h3 class="pg-section-label">Methodology — how each figure is computed</h3>
@@ -1612,16 +1643,23 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       </table>
     </div>`;
 
-  // Per-page brand mark — injected as <img> via regex postprocess into
-  // every .pr-page div EXCEPT the cover. Cover has its own hero-styled
-  // logo (38mm) inside .pr-cover-titleblock-right above date+engine
-  // (Maya's original v1 design); injecting the running-header overlay
-  // on top of that produces visible stacking. Negative lookahead on
-  // `pr-page-cover` keeps the regex single-pass without per-template
-  // edits. (v=537)
-  const PAGE_LOGO_IMG =
-    '<img class="pr-page-logo" src="assets/logo/RoomLAB-logo-1024.png" '
-    + 'alt="" aria-hidden="true">';
+  // Running header band — injected as the FIRST child of every .pr-page
+  // div EXCEPT the cover (cover has its own bespoke .pr-cover-titleblock).
+  // Mirrors the cover titleblock geometry (25mm reserved row, rule on the
+  // box bottom edge) so the rule lands at the IDENTICAL y on every page;
+  // differs in that the rule runs full content width and a half-size logo
+  // straddles its right end. `title` is the per-page topic, read from the
+  // page div's data-running-title attribute by the postprocess below.
+  // Negative lookahead on `pr-page-cover` keeps the regex single-pass
+  // without per-template edits. (v=562, was the .pr-page-logo overlay)
+  const runningHeader = (title) => `
+    <div class="pr-running-header">
+      <div class="pr-running-header-rule">
+        <span class="pr-eyebrow">${escapeHtml(title)}</span>
+      </div>
+      <img class="pr-running-logo" src="assets/logo/RoomLAB-logo-1024.png"
+           alt="" aria-hidden="true">
+    </div>`;
   const reportHtml = `
     ${cover}
     ${heatmapPage}
@@ -1636,8 +1674,14 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
 
   `;
   root.innerHTML = reportHtml.replace(
-    /(<div\s+class="pr-page(?![^"]*\bpr-page-cover\b)[^"]*">)/g,
-    `$1${PAGE_LOGO_IMG}`,
+    /(<div\s+class="pr-page(?![^"]*\bpr-page-cover\b)[^"]*"[^>]*>)/g,
+    (openTag) => {
+      // Pull the running-header title from the page's own attribute.
+      // Pages without it fall back to an empty eyebrow (rule + logo
+      // still render — the desired running-header band, just no label).
+      const m = openTag.match(/\bdata-running-title="([^"]*)"/);
+      return openTag + runningHeader(m ? m[1] : '');
+    },
   );
   document.body.appendChild(root);
   return root;
@@ -1675,25 +1719,37 @@ function resolveRT60Target(volumeM3) {
 //
 // Inline stroke/fill (no CSS classes) — keeps the figure self-contained
 // for any rasterisation pipeline (browser print, screenshot tools).
-function renderRT60Chart(rt60Bands, { volume_m3, schroederHz } = {}) {
+function renderRT60Chart(rt60Bands, { volume_m3, schroederHz, rayT30Means = [] } = {}) {
   const eyring = rt60Bands.map(b => Number.isFinite(b.eyring_s) ? b.eyring_s : null);
   const sabine = rt60Bands.map(b => Number.isFinite(b.sabine_s) ? b.sabine_s : null);
+  const t30    = rt60Bands.map((_b, i) => Number.isFinite(rayT30Means[i]) ? rayT30Means[i] : null);
+  const alpha  = rt60Bands.map(b => Number.isFinite(b.meanAbsorption) ? b.meanAbsorption : null);
   const finiteE = eyring.filter(v => v !== null);
   if (finiteE.length === 0) return '';
 
   // ---- Plot geometry (mm) -------------------------------------------
-  const W = 100, H = 70;
-  const padL = 12, padR = 4, padT = 6, padB = 12;
+  // W widened 100→132 (and CSS width to match) so the figure fills its
+  // cell WITHOUT scaling the viewBox-unit fonts — mm-per-unit stays ~1.
+  // padR grown 4→18 to host the secondary right axis (Mean α, 0–1).
+  const W = 132, H = 70;
+  const padL = 12, padR = 18, padT = 6, padB = 12;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const plotX = padL;
   const plotY = padT;
 
+  // Series colours (inline — figure stays self-contained for print).
+  const C_EYRING = '#8C2A2A';   // headline accent
+  const C_SABINE = '#1A1F24';   // ink — diffuse-field reference (unchanged)
+  const C_T30    = '#9A7B3F';   // warm ochre — ray-traced result overlay
+  const C_T30_DIM = '#B9B4A8';  // greyed ochre for below-Schroeder markers
+  const C_ALPHA  = '#3E6B74';   // desaturated teal — secondary α axis
+
   // ---- Y range -------------------------------------------------------
   // Floor at 1.5s so different scenes are visually comparable, lift to
   // include any value over 1.25s. Always rounded up to a 0.5s tick.
   const target = resolveRT60Target(volume_m3);
-  const allValues = [...finiteE, ...sabine.filter(v => v !== null)];
+  const allValues = [...finiteE, ...sabine.filter(v => v !== null), ...t30.filter(v => v !== null)];
   if (target) allValues.push(target.hi);
   const maxRaw = Math.max(...allValues) * 1.2;
   const yMax = Math.max(1.5, Math.ceil(maxRaw * 2) / 2);
@@ -1701,7 +1757,10 @@ function renderRT60Chart(rt60Bands, { volume_m3, schroederHz } = {}) {
   // ---- Coordinate helpers -------------------------------------------
   const N = rt60Bands.length;
   const xOf = (i) => plotX + (N === 1 ? plotW / 2 : (i / (N - 1)) * plotW);
-  const yOf = (v) => plotY + plotH - (v / yMax) * plotH;
+  const yOf = (v) => plotY + plotH - (v / yMax) * plotH;       // left axis (seconds)
+  // Right axis: Mean α, FIXED 0–1 domain (Dr. Chen — no auto-scale, so a
+  // low-α room correctly reads as a flat line near the floor).
+  const yOfA = (a) => plotY + plotH - (a / 1) * plotH;
 
   // ---- Target band rect (drawn first so lines paint over) -----------
   let targetRect = '';
@@ -1710,7 +1769,7 @@ function renderRT60Chart(rt60Bands, { volume_m3, schroederHz } = {}) {
     const yHi = yOf(target.hi);                  // higher RT = lower y
     const yLo = yOf(target.lo);
     targetRect = `<rect x="${plotX.toFixed(2)}" y="${yHi.toFixed(2)}" width="${plotW.toFixed(2)}" height="${(yLo - yHi).toFixed(2)}" fill="#8C2A2A" fill-opacity="0.12" />`;
-    targetLabel = `<text x="${(plotX + plotW - 0.5).toFixed(2)}" y="${(plotY + 3).toFixed(2)}" text-anchor="end" font-size="2.4" font-weight="600" fill="#8C2A2A">Target ${target.lo.toFixed(1)}–${target.hi.toFixed(1)} s · ${target.label}</text>`;
+    targetLabel = `<text x="${(plotX + plotW - 0.5).toFixed(2)}" y="${(plotY - 0.8).toFixed(2)}" text-anchor="end" font-size="2.4" font-weight="600" fill="#8C2A2A">Target ${target.lo.toFixed(1)}–${target.hi.toFixed(1)} s · ${target.label}</text>`;
   }
 
   // ---- Major + minor gridlines --------------------------------------
@@ -1750,45 +1809,103 @@ function renderRT60Chart(rt60Bands, { volume_m3, schroederHz } = {}) {
     <line x1="${plotX.toFixed(2)}" y1="${plotY.toFixed(2)}" x2="${plotX.toFixed(2)}" y2="${(plotY + plotH).toFixed(2)}" stroke="#1A1F24" stroke-width="0.16" />
     <line x1="${plotX.toFixed(2)}" y1="${(plotY + plotH).toFixed(2)}" x2="${(plotX + plotW).toFixed(2)}" y2="${(plotY + plotH).toFixed(2)}" stroke="#1A1F24" stroke-width="0.16" />`;
 
-  // ---- Sabine series (dotted ink reference) -------------------------
+  // ---- Sabine series (dotted ink reference, unchanged) --------------
   const sabinePts = sabine.map((v, i) => v == null ? null : { x: xOf(i), y: yOf(v) }).filter(p => p);
   const sabinePath = sabinePts.length >= 2
-    ? `<path d="${sabinePts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')}" stroke="#1A1F24" stroke-width="0.2" stroke-dasharray="0.8 0.8" fill="none" stroke-linejoin="round" />`
+    ? `<path d="${sabinePts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')}" stroke="${C_SABINE}" stroke-width="0.2" stroke-dasharray="0.8 0.8" fill="none" stroke-linejoin="round" />`
     : '';
 
-  // ---- Eyring series (headline accent) ------------------------------
+  // ---- Ray-traced T30 mean (ochre, left axis) -----------------------
+  // ISO 3382-1 §A.2.2 Schroeder T30, spatial mean across listeners.
+  // Break the line at nulls (no interpolation across uncovered bands).
+  // Markers below the Schroeder cutoff are greyed — T30 is modal/
+  // unreliable there (Dr. Chen). T30 is now the LABELLED series (it is the
+  // ray-traced ground truth; Eyring is the statistical estimate) — see the
+  // value-label block below.
+  const t30Pts = t30.map((v, i) => v == null ? null : {
+    x: xOf(i), y: yOf(v), v,
+    belowFs: schroederHz != null && rt60Bands[i].freq_hz < schroederHz,
+  });
+  const t30Segments = [];
+  let run = [];
+  for (const p of t30Pts) {
+    if (p == null) { if (run.length) { t30Segments.push(run); run = []; } }
+    else run.push(p);
+  }
+  if (run.length) t30Segments.push(run);
+  const t30Path = t30Segments
+    .filter(seg => seg.length >= 2)
+    .map(seg => `<path d="${seg.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')}" stroke="${C_T30}" stroke-width="0.35" fill="none" stroke-linejoin="round" stroke-linecap="round" />`)
+    .join('');
+  const t30Marks = t30Pts.filter(p => p).map(p => {
+    const s = 0.9;   // half-side of the hollow square marker
+    const col = p.belowFs ? C_T30_DIM : C_T30;
+    return `<rect x="${(p.x - s).toFixed(2)}" y="${(p.y - s).toFixed(2)}" width="${(s * 2).toFixed(2)}" height="${(s * 2).toFixed(2)}" fill="#FFFFFF" stroke="${col}" stroke-width="0.18" />`;
+  }).join('');
+  // Value labels ride the ray-traced T30 line (the ground-truth series) —
+  // moved off Eyring per the user 2026-05-21. ABOVE each square (offset 2.6
+  // clears the 0.9 half-side marker), white halo (paint-order:stroke) carves
+  // the digits off the ochre line. Below-Schroeder points get NO label:
+  // T30 is modal/unreliable there and a printed number reads as precision
+  // regardless of tint (Dr. Chen — omit, don't grey). Maya placement.
+  const hasT30 = t30Pts.some(p => p);
+  const t30Labels = hasT30 ? t30Pts.filter(p => p && !p.belowFs).map(p =>
+    `<text x="${p.x.toFixed(2)}" y="${(p.y - 2.6).toFixed(2)}" text-anchor="middle" font-size="2.3" font-weight="500" fill="#1A1F24" paint-order="stroke" stroke="#FFFFFF" stroke-width="0.6" stroke-linejoin="round">${p.v.toFixed(2)}</text>`
+  ).join('') : '';
+
+  // ---- Eyring series (headline accent — on top) ---------------------
   const eyringPts = eyring.map((v, i) => v == null ? null : { x: xOf(i), y: yOf(v), v }).filter(p => p);
   const eyringPath = eyringPts.length >= 2
-    ? `<path d="${eyringPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')}" stroke="#8C2A2A" stroke-width="0.4" fill="none" stroke-linejoin="round" stroke-linecap="round" />`
+    ? `<path d="${eyringPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')}" stroke="${C_EYRING}" stroke-width="0.45" fill="none" stroke-linejoin="round" stroke-linecap="round" />`
     : '';
   const eyringDots = eyringPts.map(p =>
-    `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="0.8" fill="#8C2A2A" />`
+    `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="0.8" fill="${C_EYRING}" />`
   ).join('');
-  const eyringLabels = eyringPts.map(p =>
-    `<text x="${p.x.toFixed(2)}" y="${(p.y - 1.6).toFixed(2)}" text-anchor="middle" font-size="2.3" font-weight="500" fill="#1A1F24">${p.v.toFixed(2)}</text>`
+  // Fallback only: a statistical-only report (no precision pass → no T30)
+  // would otherwise have NO value labels, so label Eyring in that case. The
+  // caption names whichever series carries the numbers so it's unambiguous.
+  const eyringLabels = hasT30 ? '' : eyringPts.map(p =>
+    `<text x="${p.x.toFixed(2)}" y="${(p.y - 1.9).toFixed(2)}" text-anchor="middle" font-size="2.3" font-weight="500" fill="#1A1F24">${p.v.toFixed(2)}</text>`
   ).join('');
 
-  // ---- Legend (top-left of plot) ------------------------------------
-  const lx = plotX + 1.5;
-  const ly = plotY + 3;
-  const legend = `
-    <g>
-      <line x1="${lx.toFixed(2)}" y1="${ly.toFixed(2)}" x2="${(lx + 5).toFixed(2)}" y2="${ly.toFixed(2)}" stroke="#8C2A2A" stroke-width="0.4" />
-      <circle cx="${(lx + 2.5).toFixed(2)}" cy="${ly.toFixed(2)}" r="0.7" fill="#8C2A2A" />
-      <text x="${(lx + 6).toFixed(2)}" y="${(ly + 0.9).toFixed(2)}" font-size="2.4" fill="#1A1F24">Eyring</text>
-      <line x1="${(lx + 14).toFixed(2)}" y1="${ly.toFixed(2)}" x2="${(lx + 19).toFixed(2)}" y2="${ly.toFixed(2)}" stroke="#1A1F24" stroke-width="0.2" stroke-dasharray="0.8 0.8" />
-      <text x="${(lx + 20).toFixed(2)}" y="${(ly + 0.9).toFixed(2)}" font-size="2.4" fill="#1A1F24">Sabine</text>
-    </g>`;
+  // ---- Mean α series (teal, secondary right axis — faint/behind) ----
+  const alphaPts = alpha.map((v, i) => v == null ? null : { x: xOf(i), y: yOfA(v) }).filter(p => p);
+  const alphaPath = alphaPts.length >= 2
+    ? `<path d="${alphaPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')}" stroke="${C_ALPHA}" stroke-width="0.3" stroke-dasharray="1.6 0.9" fill="none" stroke-linejoin="round" />`
+    : '';
+  const alphaMarks = alphaPts.map(p =>
+    `<path d="M ${p.x.toFixed(2)} ${(p.y - 0.9).toFixed(2)} L ${(p.x + 0.9).toFixed(2)} ${p.y.toFixed(2)} L ${p.x.toFixed(2)} ${(p.y + 0.9).toFixed(2)} L ${(p.x - 0.9).toFixed(2)} ${p.y.toFixed(2)} Z" fill="#FFFFFF" stroke="${C_ALPHA}" stroke-width="0.18" />`
+  ).join('');
 
-  return `<svg class="pr-rt60-chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" width="100mm" height="70mm">
+  // ---- Secondary right axis (Mean α, fixed 0–1, teal-coded) ---------
+  const rax = plotX + plotW;
+  const alphaAxis = [
+    `<line x1="${rax.toFixed(2)}" y1="${plotY.toFixed(2)}" x2="${rax.toFixed(2)}" y2="${(plotY + plotH).toFixed(2)}" stroke="${C_ALPHA}" stroke-width="0.16" />`,
+  ];
+  for (let a = 0; a <= 1 + 1e-6; a += 0.2) {
+    const y = yOfA(a);
+    alphaAxis.push(`<line x1="${rax.toFixed(2)}" y1="${y.toFixed(2)}" x2="${(rax + 1).toFixed(2)}" y2="${y.toFixed(2)}" stroke="${C_ALPHA}" stroke-width="0.12" />`);
+    alphaAxis.push(`<text x="${(rax + 2).toFixed(2)}" y="${(y + 0.9).toFixed(2)}" text-anchor="start" font-size="2.4" fill="${C_ALPHA}">${a.toFixed(1)}</text>`);
+  }
+  const ratx = rax + 11;
+  alphaAxis.push(`<text x="${ratx.toFixed(2)}" y="${(plotY + plotH / 2).toFixed(2)}" text-anchor="middle" font-size="2.4" font-weight="600" fill="${C_ALPHA}" transform="rotate(90 ${ratx.toFixed(2)} ${(plotY + plotH / 2).toFixed(2)})">Mean α</text>`);
+
+  // Paint order (Dr. Chen): target wash · grid · α (behind) · Sabine ·
+  // T30 · Eyring on top. Right axis + tick labels last so they read clean.
+  return `<svg class="pr-rt60-chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" width="132mm" height="70mm">
     ${targetRect}
     ${gridLines.join('')}
     ${frame}
-    ${legend}
+    ${alphaPath}
+    ${alphaMarks}
     ${sabinePath}
+    ${t30Path}
+    ${t30Marks}
     ${eyringPath}
     ${eyringDots}
     ${eyringLabels}
+    ${t30Labels}
+    ${alphaAxis.join('')}
     ${targetLabel}
     ${yLabels.join('')}
     ${xLabels}
@@ -2154,12 +2271,14 @@ export async function triggerPrint() {
 }
 
 /**
- * Resolve once every .pr-page-logo <img> in the currently mounted
- * print-report has loaded (success OR error). 1500 ms ceiling so a
- * missing-asset 404 doesn't block print forever.
+ * Resolve once every logo <img> in the currently mounted print-report
+ * has loaded (success OR error) — the per-page running-header logos plus
+ * the cover logo. 1500 ms ceiling so a missing-asset 404 doesn't block
+ * print forever.
  */
 function _waitForLogoImages() {
-  const imgs = document.querySelectorAll('#print-report .pr-page-logo');
+  const imgs = document.querySelectorAll(
+    '#print-report .pr-running-logo, #print-report .pr-cover-logo');
   if (!imgs.length) return Promise.resolve();
   const promises = Array.from(imgs).map((img) => {
     if (img.complete && img.naturalWidth > 0) return Promise.resolve();

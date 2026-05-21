@@ -523,6 +523,38 @@ function pointInPoly(x, y, verts) {
   return inside;
 }
 
+// Square-cell grid sizing (Dr. Chen 2026-05-21). Derive cellsX and cellsY
+// INDEPENDENTLY from the extent at a ~0.5 m target so heatmap cells stay
+// SQUARE in any room/zone aspect ratio — instead of stretching a fixed
+// gridSize×gridSize count over a non-square bounding box (which made cells
+// 3:1 rectangles in a tall corridor while a square room got square cells).
+// The cell SIZE in metres governs, not the count; resolution is therefore
+// consistent across room sizes, and the 2D viewport / 3D room plane /
+// print report all sample identically because they all call through here.
+//   * target 0.5 m (half-samples the steepest meaningful direct-field
+//     gradient per Nyquist; matches the precision/3D path's existing
+//     ceil(longestDim/0.5) convention)
+//   * floor 8 / cap 120 cells per axis. When the long axis would exceed
+//     120 the cell size grows so BOTH axes scale together and stay square.
+//   * the per-axis floor can break exact squareness on a sliver-thin
+//     room (the floor wins) — acceptable and bounded.
+// NOTE: avgSPL_db here is an UNWEIGHTED mean over cell centres; with equal-
+// area square cells that is unbiased. Do not reintroduce variable cell
+// areas (e.g. a future per-cell polygon clip) without switching avg to
+// area-weighting, or the mean will bias toward wherever cells are densest.
+const HEATMAP_CELL_TARGET_M = 0.5;
+const HEATMAP_CELL_MIN = 8;
+const HEATMAP_CELL_MAX = 120;
+export function squareCellCounts(totalW, totalD, targetM = HEATMAP_CELL_TARGET_M) {
+  const w = Math.max(1e-3, totalW), d = Math.max(1e-3, totalD);
+  const longest = Math.max(w, d);
+  let cellSize = targetM;
+  if (longest / cellSize > HEATMAP_CELL_MAX) cellSize = longest / HEATMAP_CELL_MAX;
+  const cellsX = Math.max(HEATMAP_CELL_MIN, Math.min(HEATMAP_CELL_MAX, Math.round(w / cellSize)));
+  const cellsY = Math.max(HEATMAP_CELL_MIN, Math.min(HEATMAP_CELL_MAX, Math.round(d / cellSize)));
+  return { cellsX, cellsY };
+}
+
 // `metric: 'spl' | 'sti'` selects what each cell stores. When 'sti', the
 // caller must also pass `stipaCtx` (from precomputeSTIPAContext) and
 // optionally `ambient_per_band`. Field names stay `*_db` for backward
@@ -544,14 +576,18 @@ export function computeZoneSPLGrid({
   const xs = verts.map(v => v.x), ys = verts.map(v => v.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const cellW = (maxX - minX) / gridSize;
-  const cellH = (maxY - minY) / gridSize;
+  // Square cells from the zone's own extent (see squareCellCounts). The
+  // legacy `gridSize` count is superseded — cell SIZE governs so a long
+  // thin audience strip no longer gets 0.5 m × 0.05 m slivers.
+  const { cellsX, cellsY } = squareCellCounts(maxX - minX, maxY - minY);
+  const cellW = (maxX - minX) / cellsX;
+  const cellH = (maxY - minY) / cellsY;
   const grid = [];
   let minVal = Infinity, maxVal = -Infinity, sum = 0, count = 0;
   const earZ = (zone.elevation_m || 0) + earAbove_m;
-  for (let j = 0; j < gridSize; j++) {
+  for (let j = 0; j < cellsY; j++) {
     const row = [];
-    for (let i = 0; i < gridSize; i++) {
+    for (let i = 0; i < cellsX; i++) {
       const x = minX + (i + 0.5) * cellW;
       const y = minY + (j + 0.5) * cellH;
       if (!pointInPoly(x, y, verts)) { row.push(-Infinity); continue; }
@@ -575,7 +611,7 @@ export function computeZoneSPLGrid({
   const ok = count > 0;
   return {
     id: zone.id, label: zone.label,
-    grid, cellsX: gridSize, cellsY: gridSize,
+    grid, cellsX, cellsY,
     boundsX: [minX, maxX], boundsY: [minY, maxY],
     cellW_m: cellW, cellH_m: cellH,
     elevation_m: zone.elevation_m || 0,
@@ -596,8 +632,6 @@ export function computeSPLGrid({
   computeSTIPAAt = null,
 }) {
   const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
-  const cellsX = gridSize;
-  const cellsY = gridSize;
   // Sample over the union of the parent footprint AND every broken-out
   // enclosure — a hut placed adjacent to the parent (so its interior
   // sits past room.width_m or before x=0) was being missed by the grid
@@ -607,6 +641,12 @@ export function computeSPLGrid({
   const bounds = roomEffectiveBounds(room);
   const totalW = Math.max(1e-3, bounds.maxX - bounds.minX);
   const totalD = Math.max(1e-3, bounds.maxY - bounds.minY);
+  // Square cells from the effective extent (see squareCellCounts). The
+  // legacy `gridSize` arg is superseded — cell SIZE (≈0.5 m) governs, so
+  // an elongated room no longer gets stretched rectangular cells. All
+  // surfaces (2D viewport / 3D room plane / print) call through here, so
+  // they sample identically.
+  const { cellsX, cellsY } = squareCellCounts(totalW, totalD);
   const cellW_m = totalW / cellsX;
   const cellD_m = totalD / cellsY;
   const originX_m = bounds.minX;

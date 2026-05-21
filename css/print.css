@@ -41,18 +41,17 @@ body.is-pdf-export #print-report { display: block !important; }
 
   @page {
     size: A4 portrait;
-    /* Tight A4 margins. User asked (v=545) to match the left margin
-       to the right (5mm) — no separate binding gutter. The CSS Paged
-       Media model clips content beyond the .pr-page boundary (the
-       @page margin area is reserved for @page margin boxes only),
-       so the only way to move content closer to the page edge is to
-       shrink the @page margin itself. Body content + per-page logo
-       now sit 5mm from physical page edges left and right.
+    /* A4 margins. User asked (v=562) for 12.5mm left/right/bottom,
+       top stays at 10mm. The CSS Paged Media model clips content beyond
+       the .pr-page boundary (the @page margin area is reserved for
+       @page margin boxes only), so the only way to move content closer
+       to the page edge is to shrink the @page margin itself. Body
+       content + per-page logo now sit 12.5mm from physical page edges
+       left and right.
 
-       5mm leaves ~1mm clearance above the typical consumer printer
-       hard margin (~4mm) but it's TIGHT on both sides — back off to
-       7-8mm if printers crop content. Top + bottom stay at 10mm. */
-    margin: 10mm 5mm 10mm 5mm;         /* top / right / bottom / left */
+       12.5mm sits comfortably clear of the typical consumer printer
+       hard margin (~4mm) on all sides. */
+    margin: 10mm 12.5mm 12.5mm 12.5mm; /* top / right / bottom / left */
 
     /* Page number rendered INSIDE the printable area (not in the
        browser chrome). Survives the user unchecking "Headers and
@@ -145,28 +144,75 @@ body.is-pdf-export .vp-tabs {
     break-after: auto;
   }
 
-  /* Per-page running-header brand mark — top-right of every NON-COVER
-     page. Injected as an <img class="pr-page-logo"> by print-report.js
-     via regex postprocess. Cover gets its own larger .pr-cover-logo
-     inside .pr-cover-titleblock-right; the regex's negative lookahead
-     skips .pr-page-cover so we don't double up.
-     Sized 25% down from v=537 (28mm → 21mm) per user feedback. Sits
-     at the .pr-page corner (top:0 right:0); the visible gap to the
-     physical page edge equals the @page top/right margin (10mm per
-     v=537). Earlier attempts at negative offsets (v=534) were clipped
-     by Chromium's print engine at the .pr-page boundary, so top:0
-     right:0 is the reliable position. */
-  #print-report .pr-page-logo {
+  /* ---------- Running header — non-cover pages (pages 2–N) ----------
+     Injected as the FIRST child of each non-cover .pr-page by the regex
+     postprocess in print-report.js (replaces the old .pr-page-logo
+     top-right overlay, v=562). Mirrors the cover titleblock geometry so
+     the rule lands at the IDENTICAL y on every page: a 25mm-min-height
+     row with the rule on its bottom edge and the eyebrow pinned to the
+     bottom via flex-end + 1mm padding. Differences from the cover:
+       - rule runs FULL content width (no 48mm logo gap),
+       - logo is HALF the cover size (22mm vs 45mm) and STRADDLES the
+         right end of the rule instead of sitting in the top margin. */
+  #print-report .pr-running-header {
+    position: relative;   /* anchor for the straddling logo */
+    display: block;
+  }
+  #print-report .pr-running-header-rule {
+    /* IDENTICAL box model to .pr-cover-titleblock-rule EXCEPT full width
+       (margin-right:0, no logo gap). min-height + flex-end +
+       padding-bottom + border-bottom reproduce the cover's rule-y. */
+    min-height: 25mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding-bottom: 1mm;
+    border-bottom: 1pt solid var(--ink);
+    margin-right: 0;
+  }
+  /* Selector carries the extra .pr-running-header-rule class (specificity
+     1,3,0) so it BEATS any page-scoped descendant eyebrow rule like
+     `.pr-page-appendix .pr-eyebrow` / `.pr-page-plan .pr-eyebrow` (1,2,0).
+     Those were leaking onto the INJECTED running-header eyebrow (the
+     header is a descendant of the page div), adding margin-bottom that
+     lifted the title OFF the rule on the appendix/plan pages while
+     Acoustic results (no such rule) sat correctly flush. This keeps the
+     running-header title flush to the rule on EVERY page. (v=572, user.) */
+  #print-report .pr-running-header .pr-running-header-rule .pr-eyebrow {
+    /* Same position as the cover eyebrow: just above the rule, flush to
+       the left content edge. */
+    display: block;
+    margin: 0;
+  }
+  /* Logo sits ABOVE the right end of the rule. The .pr-running-header is
+     position:relative and its height = the 25mm rule row, so the rule
+     (border-bottom) is at the wrapper's bottom edge. Anchoring the logo
+     bottom 1mm up from there rests it just above the line, fully clear. */
+  #print-report .pr-running-logo {
     position: absolute;
-    top: 0;
     right: 0;
-    width: 21mm;
+    bottom: 1mm;
+    width: 22mm;
     height: auto;
     display: block;
     pointer-events: none;
-    z-index: 5;
-    /* Sharper raster when the browser prints at 2x DPI. */
+    z-index: 5;            /* above the 1pt rule */
     image-rendering: -webkit-optimize-contrast;
+    /* Force the raster to print even on the v=561 effects-drop PDF path. */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  /* Comfort gap below the running-header rule on the appendix page, whose
+     title now lives IN the running header (v=571) so it has no chapter-
+     opener / eyebrow buffer between the line and the BILL OF MATERIALS
+     heading. The running header is injected as the page's first child, so
+     `+ *` is its first real content (the first .pr-section). (v=572.)
+     NOTE: the methodology page needs the same comfort gap, but its intro
+     is .pg-prose whose `margin: 0 0 3pt 0` rule (later, equal specificity)
+     resets margin-top here — so methodology's gap is set directly on
+     `.pg-methodology .pg-intro` further down, where it wins. */
+  #print-report .pr-page-appendix > .pr-running-header + * {
+    margin-top: 7mm;
   }
 
   /* User-flagged: methodology + disclaimers must NEVER continue from a
@@ -222,7 +268,9 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-zebra tbody tr:nth-child(even) td,
   #print-report .pr-bandstrip-label,
   #print-report .pr-tile,
-  #print-report .pr-cover-spec-overlay {
+  #print-report .pr-cover-spec-overlay,
+  #print-report .pr-cover-hero-nameplate h1,
+  #print-report .pr-cover-hero-nameplate .pr-cover-room-name {
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
@@ -296,34 +344,26 @@ body.is-pdf-export .vp-tabs {
     position: relative;
     display: block;
   }
-  /* Title-text column inside the titleblock (the unclassed direct
-     child div containing eyebrow + h1 + h2). The line lives here so
-     it can stop before the logo. 48mm margin-right = 45mm logo + 3mm
-     visual gap. */
-  #print-report .pr-cover-titleblock > div:not(.pr-cover-titleblock-right) {
-    padding-bottom: 4mm;
+  /* Eyebrow row above the rule. The line lives here so it stops before
+     the logo (48mm = 45mm logo + 3mm gap). The names that used to sit
+     here moved onto the hero (.pr-cover-hero-nameplate) in v=562, but
+     the RULE must stay at its original vertical position — so this row
+     keeps a min-height ≈ the old h1+h2 block (~21mm) and pins the
+     eyebrow to the bottom (right above the line). */
+  #print-report .pr-cover-titleblock-rule {
+    min-height: 25mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding-bottom: 1mm;
     border-bottom: 1pt solid var(--ink);
     margin-right: 48mm;
   }
   #print-report .pr-cover-titleblock .pr-eyebrow {
-    /* v=549: eyebrow moved BELOW the line (was above h1). Display as
-       block so it sits on its own line; small top margin for breathing
-       room from the border-bottom above it. margin-bottom retained for
-       spacing toward whatever follows the titleblock (the hero wrap). */
+    /* v=562: eyebrow sits right above the rule (bottom of the row). */
     display: block;
-    margin-top: 3mm;
-    margin-bottom: 4pt;
-  }
-  /* Room name — Sofia v3: sits directly under the project h1 so the
-     reader sees BOTH names at a glance. Lighter weight + smaller size
-     than h1 so the hierarchy reads project → room. */
-  #print-report .pr-cover-titleblock .pr-cover-room-name {
-    font-size: 16pt;
-    font-weight: 300;
-    color: var(--muted);
-    margin: 2pt 0 0 0;
-    letter-spacing: 0;
-    line-height: 1.2;
+    margin-top: 0;
+    margin-bottom: 0;
   }
   #print-report .pr-cover-titleblock-right {
     /* Taken OUT of grid flow via position: absolute (v=547) so the
@@ -342,8 +382,8 @@ body.is-pdf-export .vp-tabs {
     z-index: 10;
   }
   /* Cover hero logo — significantly larger than the per-page running
-     header (21mm). The cover gets a styled brand mark; non-cover pages
-     get the running header overlay (.pr-page-logo, see below) that the
+     header (22mm). The cover gets a styled brand mark; non-cover pages
+     get the running header (.pr-running-logo, see above) that the
      regex postprocess in print-report.js injects. v=541: bumped from
      28mm → 50mm now that the date + engine moved to the left column
      under the room name, freeing the right cell to be a logo-only
@@ -390,6 +430,74 @@ body.is-pdf-export .vp-tabs {
     display: block;
     margin: 0 auto;
     object-fit: contain;
+  }
+  /* Cover nameplate — project + room name overlaid on the top-left of
+     the hero (v=562). Black text with a strong white halo: the white
+     glow lifts the black words off a dark 3D interior render, and reads
+     equally on the light 2D-plan fallback. Top-left is clear of the
+     spec overlay and 2D inset (both bottom-right). */
+  #print-report .pr-cover-hero-nameplate {
+    position: absolute;
+    top: -4mm;                 /* pulled up into the grid gap, close under the rule */
+    left: 0;                   /* flush-left to the eyebrow / page content edge */
+    z-index: 3;
+    max-width: 120mm;          /* leaves the right third for the eye to read the render */
+    pointer-events: none;
+  }
+  #print-report .pr-cover-hero-nameplate h1 {
+    font-size: 26pt;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: 0;
+    margin: 0;
+    color: var(--ink);                       /* black words */
+    /* White halo, always present: a crisp text-stroke (rasterized with
+       the glyph → survives Print-to-PDF) UNDER the black fill, plus a
+       soft white glow for the shadow look. Both white → invisible on
+       white paper, but they keep the black words readable the moment a
+       dark part of the render falls behind them. */
+    -webkit-text-stroke: 0.4mm rgba(255, 255, 255, 0.95);
+    paint-order: stroke fill;
+    /* Long, gradual fade-off: many closely-spaced stops ramping opacity
+       down smoothly out to ~26mm, so the halo dissolves into the render
+       instead of ending in a tight ring. */
+    text-shadow:
+      0 0 1.5mm rgba(255, 255, 255, 0.98),
+      0 0 3mm rgba(255, 255, 255, 0.9),
+      0 0 5mm rgba(255, 255, 255, 0.74),
+      0 0 8mm rgba(255, 255, 255, 0.55),
+      0 0 12mm rgba(255, 255, 255, 0.38),
+      0 0 18mm rgba(255, 255, 255, 0.22),
+      0 0 26mm rgba(255, 255, 255, 0.1);
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  #print-report .pr-cover-hero-nameplate .pr-cover-room-name {
+    font-size: 15pt;            /* nudged 16→15 so the pair reads as one block, not two headlines */
+    font-weight: 400;
+    line-height: 1.2;
+    letter-spacing: 0;
+    margin: 1.5mm 0 0 0;
+    color: var(--ink);
+    -webkit-text-stroke: 0.28mm rgba(255, 255, 255, 0.95);
+    paint-order: stroke fill;
+    text-shadow:
+      0 0 1.3mm rgba(255, 255, 255, 0.98),
+      0 0 2.6mm rgba(255, 255, 255, 0.88),
+      0 0 4.5mm rgba(255, 255, 255, 0.7),
+      0 0 7mm rgba(255, 255, 255, 0.5),
+      0 0 11mm rgba(255, 255, 255, 0.32),
+      0 0 17mm rgba(255, 255, 255, 0.16);
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  /* Guarantee the hero wrap is tall enough to host the top-left
+     nameplate even when the body is just the empty-state notice. */
+  #print-report .pr-cover-hero-wrap {
+    min-height: 40mm;
+  }
+  #print-report .pr-cover-hero:has(.pr-empty-state) {
+    padding-top: 22mm;   /* push the "preview unavailable" line clear of the nameplate */
   }
   #print-report .pr-cover-hero-caption {
     font-size: 7.5pt;
@@ -982,6 +1090,21 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-chapter-opener .pr-eyebrow {
     margin-bottom: 4pt;
   }
+  /* Acoustic results (Chapter 02): drop the whole chapter opener — the
+     ghost "02", the "Chapter 02" eyebrow, and the "Acoustic results"
+     title are all redundant now that the running header labels the page
+     (user request v=562). Scoped to this page so the Chapter 03 opener
+     is untouched. */
+  #print-report .pr-acoustic-results .pr-chapter-opener {
+    display: none;
+  }
+  /* Per-band consolidated table hidden (user request v=562) — its two
+     load-bearing messages (Sabine/Eyring diffuse-field caveat; ray-traced
+     T30 supersedes for sign-off) were folded into the Fig. 02.1 caption.
+     Kept in the DOM (not removed) so the data is still recoverable. */
+  #print-report .pr-acoustic-results .pr-band-section {
+    display: none;
+  }
   #print-report .pr-chapter-opener h2 {
     font-size: 22pt;
     font-weight: 300;
@@ -996,9 +1119,14 @@ body.is-pdf-export .vp-tabs {
      rasterisation pipeline; the wrap rules are layout-only. */
   #print-report .pr-rt60-chart {
     display: block;
-    width: 100mm;
+    width: 132mm;
     height: 70mm;
     margin: 0;
+    /* The T30 value labels carry a white halo (stroke) that must PAINT —
+       not be dropped as "no ink" — so the digits read over the ochre line
+       on the v=561 effects-drop PDF path. (Maya 2026-05-21.) */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
   /* The .pr-rt60-grid 2-col chart+KV layout and .pr-rt60-kv-wrap
      companion rules were retired in v=557. The KV table duplicated
@@ -1357,6 +1485,57 @@ body.is-pdf-export .vp-tabs {
     font-weight: 300;
   }
 
+  /* Ambient NC band-strip pinned to the BOTTOM of the red STI card
+     (v=563, user: "move the NC table to the lowest part of the STI red
+     bar, fit cleverly, match the color"). margin-top:auto eats the
+     card's free vertical space so the strip sits at the floor while the
+     STI headline stays centred above — and it NEVER grows the card,
+     because flex auto-margins only consume EXISTING slack (the RT60
+     chart cell defines the row height). If a future short-chart variant
+     ever makes headline+strip exceed the chart cell, add overflow:hidden
+     to .pr-sti-cell rather than letting the row grow — do NOT do that
+     now (it would clip data silently). */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-sti-ambient {
+    margin-top: auto;            /* pin to card floor; never adds height */
+    padding-top: 6pt;
+    border-top: 0.5pt solid rgba(255, 255, 255, 0.45);
+  }
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-sti-ambient-eyebrow {
+    font-size: 6.5pt;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.78);
+    margin-bottom: 4pt;
+  }
+  /* On-accent band-strip — no label cell (no room in 60 mm); 7 equal
+     band cells fill the width. White-on-accent to match the tier strip:
+     translucent-white dividers, band freqs faint, values solid white. */
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-bandstrip-onaccent {
+    grid-template-columns: repeat(7, 1fr);
+    border-color: rgba(255, 255, 255, 0.45);
+    margin: 0;
+  }
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-bandstrip-onaccent .pr-bandstrip-cell {
+    padding: 3pt 1pt;
+    border-right-color: rgba(255, 255, 255, 0.45);
+  }
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-bandstrip-onaccent .pr-bandstrip-cell-band {
+    /* Keep every band label on ONE line ("125 HZ" was wrapping to two
+       lines in the narrow 60 mm cell while "1 KHZ" stayed on one, which
+       pushed 60/52/45 below 40/36/34/33). nowrap + 5 pt keeps all seven
+       labels single-line so the unit row aligns and the values below sit
+       on one horizontal baseline. (v=570, user.) */
+    font-size: 5pt;
+    color: rgba(255, 255, 255, 0.7);
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+  #print-report .pr-acoustic-results .pr-sti-cell .pr-bandstrip-onaccent .pr-bandstrip-cell-value {
+    font-size: 10pt;
+    font-weight: 400;
+    color: var(--paper);
+  }
+
   /* RT60 chart cell — title on top, chart, then caption. Chart keeps
      its v=557 width (110 mm) since that's the size the inline SVG axis
      labels were tuned at; growing it scales the labels proportionally
@@ -1373,11 +1552,29 @@ body.is-pdf-export .vp-tabs {
     font-size: 9.5pt;
     font-weight: 600;
     color: var(--ink);
-    margin: 0 0 4pt 0;
+    margin: 0 0 3pt 0;
     letter-spacing: 0;
+    text-align: center;          /* v=562 — centered over the figure */
+  }
+  /* 4-series legend, centered row under the title (moved out of the plot
+     interior in v=562 — Eyring/T30/Sabine/Mean α no longer fit inside). */
+  #print-report .pr-acoustic-results .pr-rt60-legend {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 3pt 12pt;
+    font-size: 7pt;
+    color: var(--ink);
+    margin: 0 0 3pt 0;
+  }
+  #print-report .pr-acoustic-results .pr-rt60-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 3pt;
+    white-space: nowrap;
   }
   #print-report .pr-acoustic-results .pr-rt60-cell .pr-rt60-chart {
-    width: 110mm;
+    width: 132mm;
     height: 70mm;
   }
   #print-report .pr-acoustic-results .pr-rt60-cell .pr-caption {
@@ -1457,8 +1654,10 @@ body.is-pdf-export .vp-tabs {
      right. Both demoted from their old Appendix B treatment: inline
      eyebrow instead of h2, dense cells, no breathing room above. */
   #print-report .pr-footer-grid {
+    /* Single column (v=563) — ambient strip moved into the STI card, so
+       the zones table now spans the full page width. */
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 6mm;
     align-items: start;
     margin-top: 4pt;
@@ -1547,7 +1746,7 @@ body.is-pdf-export .vp-tabs {
   /* Section labels — h3 above each block. */
   #print-report .pg-methodology .pg-section-label {
     font-family: var(--font-sans);
-    font-size: 6pt;
+    font-size: 7pt;
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: 0.12em;
@@ -1570,14 +1769,20 @@ body.is-pdf-export .vp-tabs {
      Override #print-report tabular-nums explicitly. */
   #print-report .pg-methodology .pg-prose {
     font-family: var(--font-sans);
-    font-size: 6.5pt;
+    font-size: 7pt;
     line-height: 1.35;
     font-weight: 400;
     font-style: normal;
     letter-spacing: 0;
     word-spacing: normal;
-    text-align: left;          /* NOT justify — narrow columns flowed
-                                  with ugly river-gaps under justify */
+    text-align: justify;       /* Full-width prose (intro, disclaimers,
+                                  acceptance, reviewer) justifies cleanly for
+                                  a neat block edge (user v=576). The NARROW
+                                  4-col method grid is overridden back to
+                                  left below — justify there flows ugly
+                                  river-gaps (the original reason this was
+                                  left); hyphens:auto keeps the wide blocks
+                                  river-free. */
     text-indent: 0;
     hyphens: auto;
     color: var(--ink);
@@ -1589,8 +1794,15 @@ body.is-pdf-export .vp-tabs {
     break-inside: avoid;
   }
   /* Page intro — same prose tier, just a slightly larger bottom margin
-     for visual separation from the first section label. */
+     for visual separation from the first section label. Plus a comfort gap
+     ABOVE: the page title now lives in the running header (v=571), so the
+     intro is the first content under the rule and must clear it. Set here
+     (not in the generic running-header sibling rule) because the .pg-prose
+     `margin: 0 0 3pt 0` shorthand above zeroes margin-top at equal
+     specificity — this later .pg-intro longhand wins. (v=573, user: "still
+     too near to the line".) */
   #print-report .pg-methodology .pg-intro {
+    margin-top: 7mm;
     margin-bottom: 3pt;
   }
   /* Strong tag inside prose (reviewer note "Reviewer's note —" lead)
@@ -1617,7 +1829,7 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pg-methodology .pg-method-heading {
     font-family: var(--font-sans);
-    font-size: 6.5pt;
+    font-size: 7pt;
     font-weight: 700;
     line-height: 1.25;
     letter-spacing: 0;
@@ -1626,7 +1838,7 @@ body.is-pdf-export .vp-tabs {
   }
   #print-report .pg-methodology .pg-method-cite {
     font-family: var(--font-sans);
-    font-size: 5.5pt;
+    font-size: 6pt;
     font-weight: 400;
     font-style: italic;
     line-height: 1.3;
@@ -1639,6 +1851,10 @@ body.is-pdf-export .vp-tabs {
      keep its bottom margin tight inside the entry block. */
   #print-report .pg-methodology .pg-method-entry .pg-prose {
     margin: 0;
+    /* These bodies live in the NARROW 4-column grid where justify flows
+       ugly river-gaps — keep them left-aligned. The wide prose blocks
+       (intro, disclaimers, acceptance, reviewer) stay justified above. */
+    text-align: left;
   }
 
   /* ----- SESSION SIGNATURE ROW — 5 captured fields ----- */
@@ -1664,7 +1880,7 @@ body.is-pdf-export .vp-tabs {
      Value = exact same class spec as .pg-prose, just inline (no margin). */
   #print-report .pg-methodology .pg-signature-key {
     font-family: var(--font-sans);
-    font-size: 6pt;
+    font-size: 6.5pt;
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: 0.12em;
@@ -1701,7 +1917,7 @@ body.is-pdf-export .vp-tabs {
      writing target. */
   #print-report .pg-methodology .pg-signoff-sub {
     font-family: var(--font-sans);
-    font-size: 6pt;
+    font-size: 6.5pt;
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: 0.12em;
@@ -1736,7 +1952,7 @@ body.is-pdf-export .vp-tabs {
   #print-report .pg-methodology .pg-signoff-label {
     display: block;
     font-family: var(--font-sans);
-    font-size: 6pt;
+    font-size: 6.5pt;
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: 0.12em;

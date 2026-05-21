@@ -76,10 +76,16 @@ export function latestRoomInProject(projectName) {
   return matches[0];
 }
 
-// Save a new entry to the front of the list. `room` is a deep-clone
-// of state.room (caller's responsibility to clone — we don't want to
-// pull deepClone in here). Returns the saved entry.
-export function saveCustomRoom({ projectName, roomName, room, rackSystem }) {
+// Save a new entry to the front of the list. Returns the saved entry.
+//
+// `scene` is a full serializeProject() snapshot (the same blob behind
+// 💾 Save → .roomlab.json) — sources, listeners, zones, treatments,
+// physics, racks, and room geometry incl. author notes all round-trip
+// through deserializeProject() on load. Each entry holds EITHER a `scene`
+// blob (current) OR legacy top-level `room`+`rackSystem` (entries saved
+// before 2026-05-21) — never both. The legacy params are still accepted
+// so older callers / tests keep working.
+export function saveCustomRoom({ projectName, roomName, scene = null, room = null, rackSystem = null }) {
   const trimmedRoom = (typeof roomName === 'string') ? roomName.trim() : '';
   const trimmedProj = (typeof projectName === 'string') ? projectName.trim() : '';
   // A room with no name is still saved — falls back to a timestamped
@@ -90,13 +96,15 @@ export function saveCustomRoom({ projectName, roomName, room, rackSystem }) {
     id: 'cr-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     projectName: trimmedProj || null,
     roomName: label,
-    room,
-    // rackSystem is optional but always serialised — the saved entry is
-    // self-contained, so loading the chip later restores both geometry
-    // and any racks DeviceLAB placed into this room.
-    rackSystem: rackSystem ?? { racks: [] },
     savedAt: new Date().toISOString(),
   };
+  if (scene && typeof scene === 'object') {
+    entry.scene = scene;
+  } else {
+    // Legacy geometry-only shape.
+    entry.room = room;
+    entry.rackSystem = rackSystem ?? { racks: [] };
+  }
   const list = [entry, ...readAll()].slice(0, MAX_ENTRIES);
   writeAll(list);
   return entry;
@@ -117,7 +125,14 @@ export function updateCustomRoom(id, patch) {
   const list = readAll();
   const idx = list.findIndex(e => e.id === id);
   if (idx < 0) return null;
-  list[idx] = { ...list[idx], ...patch, savedAt: new Date().toISOString() };
+  const merged = { ...list[idx], ...patch, savedAt: new Date().toISOString() };
+  // Maintain the EITHER/OR invariant: once an entry carries a full `scene`
+  // blob, the legacy top-level `room`/`rackSystem` are dead weight AND a
+  // stale second source of truth (frozen at migration time). Strip them so
+  // the legacy load path can never read back stale geometry. (Martina
+  // review 2026-05-21.)
+  if (merged.scene) { delete merged.room; delete merged.rackSystem; }
+  list[idx] = merged;
   writeAll(list);
   return list[idx];
 }

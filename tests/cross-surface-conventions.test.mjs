@@ -57,6 +57,7 @@ import { join } from 'node:path';
 import { state } from '../js/app-state.js';
 import { buildFloorPlanSVG } from '../js/ui/print-plan-svg.js';
 import { buildHeatmapPageSVG } from '../js/ui/print-heatmap.js';
+import { dilateGridForDisplay, buildSilhouetteMask } from '../js/physics/grid-display.js';
 
 // --------------------------------------------------------------------
 // Registry — the four surfaces this fixture guards.
@@ -548,6 +549,206 @@ function assertRegistryComplete() {
 }
 
 // --------------------------------------------------------------------
+// Heatmap display-fill + clip (bug 2026-05-21).
+//
+// The SPL/STI heatmap renders on 3 of the 4 surfaces (2D viewport, 3D
+// scalar shader, print heatmap) — a cross-surface concept, so it lives
+// here. computeSPLGrid keeps a cell only if its CENTRE is inside the room
+// polygon, but every surface paints the full cell square: edge cells leak
+// past the wall (centre just inside) or leave white gaps (centre just
+// outside). The fix is render-only: dilateGridForDisplay bleeds one
+// boundary ring (fills gaps) and every surface hard-clips to the true
+// room polygon (trims leaks). Both halves must ship together — dilation
+// alone trades gaps for leaks; clipping alone leaves gaps.
+//
+// Guards:
+//   (1) dilateGridForDisplay unit behaviour — one-ring, 8-adjacency,
+//       no-mutate, outside stays -Infinity, fill within neighbour range.
+//   (2) all 3 heatmap surfaces import AND call the SAME shared helper
+//       (grep guard, scene-x-mirror.test.mjs style) — no private re-impl.
+//   (3) the print heatmap emits a clipPath and the raster references it
+//       (functional, via the canvas shim) — print was the surface with
+//       NO clip at all, the worst leak.
+// --------------------------------------------------------------------
+
+const NEG_INF = -Infinity;
+
+function assertDilateUnit() {
+  // 5×5 with a finite 3×3 core so the boundary ring is unambiguous.
+  const N = NEG_INF;
+  const grid = [
+    [N, N, N, N, N],
+    [N, 1, 2, 3, N],
+    [N, 4, 5, 6, N],
+    [N, 7, 8, 9, N],
+    [N, N, N, N, N],
+  ];
+  // -Infinity-safe snapshot so we can prove no mutation.
+  const serialize = g => JSON.stringify(g.map(r => r.map(v => (Number.isFinite(v) ? v : 'NEG_INF'))));
+  const before = serialize(grid);
+  const out = dilateGridForDisplay(grid, 5, 5);
+
+  // (1a) does not mutate input — value AND identity (new outer + new rows).
+  ok(serialize(grid) === before, 'dilate: input grid is not mutated (values unchanged)');
+  ok(out !== grid && out[1] !== grid[1], 'dilate: returns new outer array AND new rows (no shared row ref)');
+
+  // (1b) fills EXACTLY the one boundary ring: a cell becomes finite iff it
+  // was finite OR is 8-adjacent to an ORIGINAL finite cell. Nothing more.
+  let ringOk = true, ringErr = '';
+  for (let j = 0; j < 5 && ringOk; j++) {
+    for (let i = 0; i < 5; i++) {
+      const wasFinite = Number.isFinite(grid[j][i]);
+      let adj = false;
+      for (let dj = -1; dj <= 1 && !adj; dj++) {
+        for (let di = -1; di <= 1; di++) {
+          if (di === 0 && dj === 0) continue;
+          const jj = j + dj, ii = i + di;
+          if (jj < 0 || jj >= 5 || ii < 0 || ii >= 5) continue;
+          if (Number.isFinite(grid[jj][ii])) { adj = true; break; }
+        }
+      }
+      const expectFinite = wasFinite || adj;
+      if (Number.isFinite(out[j][i]) !== expectFinite) {
+        ringOk = false; ringErr = `cell (${j},${i}) expected finite=${expectFinite}, got ${out[j][i]}`; break;
+      }
+    }
+  }
+  ok(ringOk, 'dilate: fills exactly one 8-adjacent boundary ring, no more', ringErr);
+
+  // The four CORNERS of the 5×5 are diagonally 8-adjacent to the finite
+  // core, so they MUST fill — locks the 8-neighbour (not 4-neighbour) rule.
+  ok([out[0][0], out[0][4], out[4][0], out[4][4]].every(Number.isFinite),
+     'dilate: corner cells fill via diagonal adjacency (8-neighbour rule)');
+
+  // (1c) single-pass — running twice fills strictly MORE than once (the
+  // first ring did not seed a second ring within one call). Uses a 7×7
+  // with a centred 3×3 core so one ring (→ 5×5) does NOT saturate the
+  // grid, leaving room for the second pass (→ 7×7) to fill more.
+  const count = g => g.flat().filter(Number.isFinite).length;
+  const c7 = Array.from({ length: 7 }, () => Array(7).fill(NEG_INF));
+  for (let j = 2; j <= 4; j++) for (let i = 2; i <= 4; i++) c7[j][i] = (j - 2) * 3 + (i - 2) + 1;
+  const c7once = dilateGridForDisplay(c7, 7, 7);
+  const c7twice = dilateGridForDisplay(c7once, 7, 7);
+  ok(count(c7) === 9 && count(c7once) === 25 && count(c7twice) === 49,
+     'dilate: single pass grows the finite region by exactly one ring (9 → 25 → 49)',
+     `orig=${count(c7)} once=${count(c7once)} twice=${count(c7twice)}`);
+
+  // (1d) fill value lies within [min,max] of the ORIGINAL finite
+  // 8-neighbours — never fabricates a value outside the sampled range.
+  let rangeOk = true, rangeErr = '';
+  for (let j = 0; j < 5 && rangeOk; j++) {
+    for (let i = 0; i < 5; i++) {
+      if (Number.isFinite(grid[j][i]) || !Number.isFinite(out[j][i])) continue;
+      const ns = [];
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        if (di === 0 && dj === 0) continue;
+        const jj = j + dj, ii = i + di;
+        if (jj < 0 || jj >= 5 || ii < 0 || ii >= 5) continue;
+        if (Number.isFinite(grid[jj][ii])) ns.push(grid[jj][ii]);
+      }
+      const lo = Math.min(...ns), hi = Math.max(...ns), v = out[j][i];
+      if (v < lo - 1e-9 || v > hi + 1e-9) { rangeOk = false; rangeErr = `cell (${j},${i})=${v} outside [${lo},${hi}]`; break; }
+    }
+  }
+  ok(rangeOk, 'dilate: filled value is within [min,max] of real neighbours (no fabricated extremes)', rangeErr);
+
+  // (1e) a cell with NO finite neighbour stays -Infinity. 7×7 with a finite
+  // 2×2 in one corner — the far corner is >1 cell from any data.
+  const big = Array.from({ length: 7 }, () => Array(7).fill(NEG_INF));
+  big[0][0] = 50; big[0][1] = 51; big[1][0] = 52; big[1][1] = 53;
+  const bigOut = dilateGridForDisplay(big, 7, 7);
+  ok(bigOut[6][6] === NEG_INF, 'dilate: cell with no finite neighbour stays -Infinity (no-data preserved)');
+}
+
+function assertHeatmapFillParity() {
+  // (2) All three heatmap surfaces import AND call the shared helper.
+  const surfaces = [
+    ['2d-viewport',  'js/graphics/room-2d.js'],
+    ['3d-shader',    'js/graphics/heatmap-shader.js'],
+    ['print-heatmap','js/ui/print-heatmap.js'],
+  ];
+  for (const [id, file] of surfaces) {
+    let src = '';
+    try { src = readFileSync(file, 'utf8'); } catch (e) { fail(`heatmap-fill: ${id} unreadable (${file})`, String(e)); continue; }
+    ok(/from\s+['"][^'"]*physics\/grid-display\.js['"]/.test(src),
+       `heatmap-fill: ${id} imports dilateGridForDisplay from js/physics/grid-display.js`);
+    ok(/dilateGridForDisplay\s*\(/.test(src),
+       `heatmap-fill: ${id} calls dilateGridForDisplay before its render loop`);
+  }
+
+  // (3) Print heatmap functionally emits a room clipPath and the raster
+  // references it. Use a CUSTOM polygon room so a bbox-rect clip would be
+  // detectably wrong (the clip polygon must carry the room's vertex count).
+  installCanvasShim();
+  buildFixtureState();
+  const verts = [
+    { x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 4 },
+    { x: 4, y: 4 }, { x: 4, y: 8 }, { x: 0, y: 8 },
+  ];
+  state.room.shape = 'custom';
+  state.room.custom_vertices = verts;
+  const svg = buildHeatmapPageSVG(state, makeFakeSplGrid(state.room));
+  ok(/<clipPath id="pr-heat-clip">/.test(svg), 'print-heatmap: emits a room clipPath (was MISSING — the report leak)');
+  ok(/<g clip-path="url\(#pr-heat-clip\)"><g transform="[^"]*"><image\b/.test(svg),
+     'print-heatmap: heat raster <image> is wrapped in the clip group');
+  const clipPoly = svg.match(/<clipPath id="pr-heat-clip"><polygon points="([^"]+)"/);
+  const nClipPts = clipPoly ? clipPoly[1].trim().split(/\s+/).length : 0;
+  ok(nClipPts === verts.length,
+     `print-heatmap: clip polygon traces the true ${verts.length}-vertex outline (not a 4-pt bbox)`,
+     `got ${nClipPts} points`);
+}
+
+function assertSilhouetteMask() {
+  // 3D room-level path (zone-less rooms): the heatmap renders on a
+  // rectangular plane with NO geometric clip, so buildSilhouetteMask is
+  // the polygon boundary. L-shape (asymmetric in Y so a flipped mask is
+  // caught): inside if (x∈[0,4),y∈[0,2)) OR (x∈[0,2),y∈[0,4)).
+  const insideL = (x, y) =>
+    (x >= 0 && x < 4 && y >= 0 && y < 2) ||
+    (x >= 0 && x < 2 && y >= 0 && y < 4);
+  const cellsX = 4, cellsY = 4, originX = 0, originY = 0, totalW = 4, totalD = 4;
+  const scale = 2;
+  const maskW = cellsX * scale, maskH = cellsY * scale;
+  const mask = buildSilhouetteMask(maskW, maskH, originX, originY, totalW, totalD, insideL);
+
+  // (a) every texel matches insideFn at its OWN sub-cell centre — locks the
+  // flipY Y-mapping and the half-texel offset. An asymmetric L would mask
+  // upside-down (leak jumps to the opposite wall) if either is wrong.
+  let exact = true, exErr = '';
+  for (let mj = 0; mj < maskH && exact; mj++) {
+    const sy = originY + (1 - (mj + 0.5) / maskH) * totalD;
+    for (let mi = 0; mi < maskW; mi++) {
+      const sx = originX + ((mi + 0.5) / maskW) * totalW;
+      const expect = insideL(sx, sy) ? 255 : 0;
+      if (mask[mj * maskW + mi] !== expect) {
+        exact = false; exErr = `texel (${mi},${mj}) @ state(${sx},${sy}) expected ${expect}, got ${mask[mj * maskW + mi]}`; break;
+      }
+    }
+  }
+  ok(exact, 'silhouette-mask: every texel matches insideFn at its sub-cell centre (flipY + half-texel correct)', exErr);
+
+  const at = (sx, sy) => {
+    const mi = Math.floor((sx / totalW) * maskW);
+    const mj = Math.floor((1 - sy / totalD) * maskH);
+    return mask[mj * maskW + mi];
+  };
+  // The cut corner is where dilateGridForDisplay's overshoot would leak —
+  // the mask must discard it.
+  ok(at(3, 3) === 0, 'silhouette-mask: cut corner (3,3) OUTSIDE → discarded (dilated overshoot cannot leak)');
+  ok(at(1, 1) === 255, 'silhouette-mask: core (1,1) INSIDE → rendered');
+  ok(at(3, 1) === 255 && at(1, 3) === 255, 'silhouette-mask: both L legs render; Y orientation not flipped');
+
+  // (b) scene.js room-level path actually USES the shader + silhouette
+  // predicate — guards against a silent revert to the leaky CanvasTexture.
+  let scene = '';
+  try { scene = readFileSync('js/graphics/scene.js', 'utf8'); } catch (e) { fail('silhouette-mask: scene.js unreadable', String(e)); return; }
+  ok(/buildHeatmapShaderMaterial\(splResult,\s*\{[\s\S]{0,80}insideAt:/.test(scene),
+     'scene.js: room-level heatmap passes insideAt to buildHeatmapShaderMaterial (not the CanvasTexture leak path)');
+  ok(/insideAt:\s*\(x,\s*y\)\s*=>\s*isInsideRoom3D\(\{\s*x,\s*y,\s*z:\s*ear\s*\},\s*state\.room\)/.test(scene),
+     'scene.js: room-level silhouette predicate is isInsideRoom3D at the grid ear height — the SAME predicate computeSPLGrid uses, so the mask cannot discard finite cells (incl. the surau podium/arcade); a narrower isInsideRoom hid the corridor heatmap in 3D (2026-05-21)');
+}
+
+// --------------------------------------------------------------------
 // Run.
 // --------------------------------------------------------------------
 
@@ -569,6 +770,11 @@ assertNorthArrowAgreement(probes);
 assertScaleBarAgreement(probes);
 assertUnitsCanonical(probes);
 assertRegistryComplete();
+
+// Heatmap display-fill + clip (bug 2026-05-21).
+assertDilateUnit();
+assertHeatmapFillParity();
+assertSilhouetteMask();
 
 // Diagnostic dump — printed before exit so failures carry context.
 if (failed > 0) {

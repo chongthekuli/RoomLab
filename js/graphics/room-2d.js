@@ -6,6 +6,7 @@ import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
 import { roomPlanVertices, isInsideRoom3D, roomEffectiveBounds } from '../physics/room-shape.js';
+import { dilateGridForDisplay } from '../physics/grid-display.js';
 import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
 import { computePerListenerMetrics, formatListenerMetricsLabel } from '../physics/per-listener-metrics.js';
 
@@ -1892,7 +1893,13 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
 // through the same world→screen function speakers and listeners use,
 // or the heatmap will visibly drift away from the source it belongs to.
 function renderHeatmapSVG(splResult, x0, y0, pxW, pxD, room) {
-  const { grid, cellsX, cellsY, cellW_m, cellD_m, originX_m, originY_m } = splResult;
+  const { cellsX, cellsY, cellW_m, cellD_m, originX_m, originY_m } = splResult;
+  // DISPLAY-ONLY fill — bleed boundary cells one ring so the field reaches
+  // the wall instead of leaving a white gap. The room-clip <g> wrapping
+  // this output trims any overshoot back to the polygon. splResult.grid
+  // (physics, drives metrics + legend) is read, never mutated. See
+  // js/physics/grid-display.js and the 2026-05-21 leak/gap fix.
+  const grid = dilateGridForDisplay(splResult.grid, cellsX, cellsY);
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
   const w = room.width_m, d = room.depth_m;
   const ox = Number.isFinite(originX_m) ? originX_m : 0;

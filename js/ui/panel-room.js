@@ -1,4 +1,4 @@
-import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToState, applyTemplateToState, applyBlankCustomRoom } from '../app-state.js';
+import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToState, applyTemplateToState, applyBlankCustomRoom, serializeProject, deserializeProject } from '../app-state.js';
 import { emit, on } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { importDxfFile } from '../physics/dxf-import.js';
@@ -17,6 +17,28 @@ import { roomPlanVertices } from '../physics/room-shape.js';
 // room or clicks an existing chip; cleared when they switch to a
 // preset/template/load.
 let activeCustomRoomId = null;
+// Guard that blocks the debounced active-room auto-sync from firing while
+// the scene is being swapped wholesale (preset / template / draw-new /
+// load). Without it, widening the sync to source/listener/treatment
+// events lets a preset's content overwrite the saved custom room the
+// instant applyPresetToState mutates the arrays. Set true → swap → false,
+// synchronously, and clear any pending sync timer in the same block.
+// (Martina review 2026-05-21 — the data-loss path this fix must not open.)
+let _suppressSync = false;
+
+// Run a wholesale scene swap (preset / template / draw-new / load) with
+// the active-room auto-sync suppressed, and kill any sync the previous
+// scene had pending. All the emits inside swapFn are synchronous, so a
+// plain try/finally fully brackets the swap — no setTimeout callback can
+// run mid-block, so nothing can capture the half-swapped state.
+function runSceneSwap(swapFn) {
+  _suppressSync = true;
+  try { swapFn(); }
+  finally {
+    if (_autoSyncTimer) { clearTimeout(_autoSyncTimer); _autoSyncTimer = null; }
+    _suppressSync = false;
+  }
+}
 // Names captured from the two-prompt flow, held until the polygon
 // closes (roomshape:closed) so the new entry gets the right labels.
 let pendingProjectName = null;
@@ -101,8 +123,11 @@ export function mountRoomPanel({ materials }) {
     <div class="picker-row">
       <span class="picker-label" title="Draw your own room outline on the 2D floor plan — click to place vertices, click point 1 to close the loop. Snap is 0.5 m.">Custom</span>
       <div class="picker-buttons">
+        <select class="picker-dropdown" id="saved-room-dropdown" title="Reopen a room you drew earlier, from any project. Loads its geometry and resets the scene — same as switching presets.">
+          <option value="">— Open a saved room —</option>
+        </select>
         <button id="btn-draw-custom-room" class="btn-custom-draw" title="Open the 2D floor plan in draw mode. Click to place vertices, click point 1 to close.">✎ Draw custom room</button>
-        <button id="btn-place-saved-room" class="btn-custom-draw" title="Place a saved room from any project as a sub-structure inside this room. Useful for huts in a park, balconies, kiosks.">⊕ Place</button>
+        <button id="btn-place-saved-room" class="btn-custom-draw" title="Embed a saved room as a sub-structure inside THIS room — a hut in a park, a kiosk, a balcony. Does not switch which room you're editing.">⊕ Place</button>
         <div id="custom-saved-row" class="custom-saved-row"></div>
       </div>
     </div>
@@ -191,6 +216,31 @@ export function mountRoomPanel({ materials }) {
     if (pd) pd.value = '';
   });
 
+  // Saved-rooms dropdown — reopen a custom room you drew earlier, from ANY
+  // project (independent of state.projectName, unlike the chip row below
+  // which is a contextual "rooms in THIS project" recents list). This is
+  // the always-available library entry point: it fixes the bug where a
+  // saved room became unreachable once the user switched to a preset and
+  // lost the project context (2026-05-21). Options are (re)populated by
+  // renderSavedRoomDropdown() on every render(); the listener lives on the
+  // <select> so it survives option repopulation. Mirrors the preset/
+  // template confirm → load → reset-siblings → revert-on-cancel pattern.
+  const savedRoomDropdown = root.querySelector('#saved-room-dropdown');
+  savedRoomDropdown.addEventListener('change', (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    const entry = getCustomRoomById(id);
+    const label = entry?.roomName || 'this saved room';
+    if (!confirmDestructiveSceneChange(label)) {
+      e.target.value = activeCustomRoomId || '';   // revert — never lie about state
+      return;
+    }
+    loadCustomRoomById(id);
+    // One active selection at a time across the three pickers.
+    const pd = root.querySelector('#preset-dropdown'); if (pd) pd.value = '';
+    const td = root.querySelector('#template-dropdown'); if (td) td.value = '';
+  });
+
   // Custom row — entry to the draw-custom-room flow.
   //
   // Full state reset (sources / listeners / zones / structures all gone)
@@ -213,12 +263,14 @@ export function mountRoomPanel({ materials }) {
       const { projectName, roomName } = result;
       pendingProjectName = projectName;
       pendingRoomName = roomName;
-      activeCustomRoomId = null;     // a fresh draw starts a new entry
-      applyBlankCustomRoom({ projectName });
-      activeTemplateKey = null;
-      render();
-      emit('scene:reset');     // panels rebuild — the previous scene's data is gone
-      emit('room:changed');
+      runSceneSwap(() => {
+        activeCustomRoomId = null;     // a fresh draw starts a new entry
+        applyBlankCustomRoom({ projectName });
+        activeTemplateKey = null;
+        render();
+        emit('scene:reset');     // panels rebuild — the previous scene's data is gone
+        emit('room:changed');
+      });
       document.querySelector('.vp-tab[data-view="2d"]')?.click();
       setTimeout(() => startDrawCustomShape(), 50);
     });
@@ -342,19 +394,21 @@ export function mountRoomPanel({ materials }) {
   document.addEventListener('roomshape:closed', () => {
     try {
       // Bake the captured room name into state.room BEFORE snapshotting,
-      // so the saved entry's geometry blob itself carries the label and
-      // the print-report cover renders it on first load.
+      // so the saved entry's scene blob itself carries the label and the
+      // print-report cover renders it on first load.
       if (typeof pendingRoomName === 'string' && pendingRoomName.trim()) {
         state.room.name = pendingRoomName.trim();
       }
-      // Deep-clone so the saved entry is independent of further edits.
-      const roomSnapshot = JSON.parse(JSON.stringify(state.room));
-      const rackSnapshot = JSON.parse(JSON.stringify(state.rackSystem ?? { racks: [] }));
+      // Store a FULL scene snapshot (same serializer as 💾 Save →
+      // .roomlab.json) so sources / listeners / zones / treatments /
+      // physics / author notes all persist with the room — not just
+      // geometry. At draw-complete the scene is mostly the new room; the
+      // debounced auto-sync (scheduleActiveRoomSync) keeps it current as
+      // the user then adds speakers/listeners. See custom-rooms.js.
       const entry = saveCustomRoom({
         projectName: pendingProjectName,
         roomName: pendingRoomName,
-        room: roomSnapshot,
-        rackSystem: rackSnapshot,
+        scene: serializeProject(),
       });
       activeCustomRoomId = entry.id;
       // Re-render the room panel so the new chip appears immediately.
@@ -647,6 +701,7 @@ function render() {
   renderShapeParams();
   renderCeilingParams();
   renderSurfaceMaterials();
+  renderSavedRoomDropdown();
   renderSavedCustomRooms();
   renderPlacedSubStructures();
 }
@@ -1080,6 +1135,39 @@ function showBreakConfirm(sourceRoomName) {
 // (state.projectName) — when the user switches project via the header
 // dropdown, this row should narrow to that project's rooms only. A
 // project banner above the chip row makes the active filter visible.
+// Populate the "Open a saved room" dropdown from ALL saved custom rooms,
+// grouped by project (one <optgroup> each), newest project first — the
+// same grouping listProjects() drives in the New-custom-room dialog and
+// the header switcher. Crucially this reads listProjects() and NEVER
+// filters by state.projectName: that independence is the fix for the
+// 2026-05-21 bug where saved rooms were unreachable after switching to a
+// preset. The chip row (renderSavedCustomRooms) stays project-filtered as
+// a contextual recents list; this dropdown is the full library.
+function renderSavedRoomDropdown() {
+  const dd = document.getElementById('saved-room-dropdown');
+  if (!dd) return;
+  const projects = listProjects();   // [{ name, rooms, lastSavedAt }], newest-first
+  const total = projects.reduce((n, p) => n + p.rooms.length, 0);
+  if (total === 0) {
+    // Empty state: disabled + relabelled, NOT hidden — a vanishing control
+    // teaches the user it doesn't exist (discoverability is the whole bug).
+    dd.disabled = true;
+    dd.innerHTML = '<option value="">— No saved rooms yet —</option>';
+    return;
+  }
+  dd.disabled = false;
+  let html = '<option value="">— Open a saved room —</option>';
+  for (const proj of projects) {
+    html += `<optgroup label="${escapeAttr(proj.name)}">`;
+    for (const r of proj.rooms) {
+      const sel = r.id === activeCustomRoomId ? ' selected' : '';
+      html += `<option value="${escapeAttr(r.id)}"${sel}>${escapeHtml(r.roomName || 'Untitled')}</option>`;
+    }
+    html += '</optgroup>';
+  }
+  dd.innerHTML = html;
+}
+
 function renderSavedCustomRooms() {
   const host = document.getElementById('custom-saved-row');
   if (!host) return;
@@ -1127,39 +1215,71 @@ function renderSavedCustomRooms() {
       if (!window.confirm('Delete this saved custom room?')) return;
       deleteCustomRoom(id);
       if (activeCustomRoomId === id) activeCustomRoomId = null;
+      renderSavedRoomDropdown();
       renderSavedCustomRooms();
       emit('projects:changed');   // header dropdown may need to drop a project
     });
   });
 }
 
-function loadCustomRoomById(id) {
-  const entry = getCustomRoomById(id);
-  if (!entry) return;
-  // Reset the scene first so the previous preset's sources / listeners /
-  // zones don't survive the swap (same discipline as preset / template
-  // switching — see js/state/scene-lifecycle.js).
+// Restore a legacy library entry (geometry + rackSystem only — saved
+// before full-scene snapshots existed 2026-05-21). Resets the scene,
+// overlays the saved room geometry, restores racks. Sources / listeners
+// / zones were never captured in these old entries, so they stay empty.
+function loadLegacyCustomRoomGeometry(entry) {
   applyBlankCustomRoom({ projectName: entry.projectName ?? null });
-  // Overlay the saved geometry on top of the freshly-blanked room.
-  Object.assign(state.room, JSON.parse(JSON.stringify(entry.room)));
-  // Backfill room.name from the saved-rooms library entry's roomName
-  // when the snapshot itself didn't carry one (saved before room.name
-  // existed as a state field). Keeps the print-report cover stable.
-  if (!state.room.name && typeof entry.roomName === 'string' && entry.roomName.trim()) {
-    state.room.name = entry.roomName.trim();
+  if (entry.room && typeof entry.room === 'object') {
+    Object.assign(state.room, JSON.parse(JSON.stringify(entry.room)));
   }
-  // Restore the saved-room's rackSystem so racks placed via DeviceLAB
-  // into this saved entry land in the live scene now. Empty default
-  // when the entry pre-dates the rackSystem-on-saved-rooms feature.
   state.rackSystem = entry.rackSystem
     ? JSON.parse(JSON.stringify(entry.rackSystem))
     : { racks: [] };
-  activeCustomRoomId = entry.id;
-  activeTemplateKey = null;
-  render();
-  emit('scene:reset');
-  emit('room:changed');
-  emit('rack:changed');   // 3D scene rebuilds racksGroup with the loaded set
+}
+
+function loadCustomRoomById(id) {
+  const entry = getCustomRoomById(id);
+  if (!entry) return;
+  // Suppressed swap — loading sets activeCustomRoomId, and the scene:reset
+  // / room:changed emits below would otherwise schedule an immediate
+  // auto-sync that re-writes the just-loaded entry (bumping savedAt and
+  // reordering the project list on every open). The guard also kills any
+  // sync the PREVIOUS scene had pending. (Martina review 2026-05-21.)
+  runSceneSwap(() => {
+    // New entries carry a full scene blob (serializeProject output) —
+    // restore it through the canonical deserializer so sources / listeners
+    // / zones / treatments / physics / author notes all come back exactly
+    // as .roomlab.json would load them. Legacy entries (geometry only)
+    // fall back to the old overlay path. A corrupt blob also falls back
+    // rather than leaving a half-reset scene.
+    if (entry.scene && typeof entry.scene === 'object') {
+      try {
+        deserializeProject(entry.scene);
+      } catch (err) {
+        console.warn('saved-room scene blob failed to load — falling back to geometry-only', err);
+        loadLegacyCustomRoomGeometry(entry);
+      }
+    } else {
+      loadLegacyCustomRoomGeometry(entry);
+    }
+    // Backfill room.name from the library label when the blob lacked one
+    // (older entries). Keeps the print-report cover stable.
+    if (!state.room.name && typeof entry.roomName === 'string' && entry.roomName.trim()) {
+      state.room.name = entry.roomName.trim();
+    }
+    // Library metadata is authoritative for the project name — the user
+    // may have renamed the project after this snapshot was taken, and the
+    // header dropdown groups by entry.projectName.
+    state.projectName = entry.projectName ?? state.projectName;
+    activeCustomRoomId = entry.id;
+    // A loaded custom room is NOT a live template — clear the key so a
+    // later dimension edit can't trigger a template regen that nukes the
+    // restored geometry.
+    activeTemplateKey = null;
+    render();
+    emit('scene:reset');
+    emit('room:changed');
+    emit('rack:changed');   // 3D scene rebuilds racksGroup with the loaded set
+  });
 }
 
 function escapeHtml(s) {
@@ -1922,24 +2042,31 @@ function buildMatSelect(dataKey, currentValue) {
 }
 
 function applyPreset(key) {
-  applyPresetToState(key);
-  // Presets have fixed geometry — no template regen on dim changes.
-  activeTemplateKey = null;
-  activeCustomRoomId = null;
-  render();
-  // scene:reset tells every panel/viewport that state arrays were replaced wholesale.
-  // room:changed kept for listeners that only care about room geometry.
-  emit('scene:reset');
-  emit('room:changed');
+  // Suppressed swap: clearing activeCustomRoomId mid-block + the pending-
+  // timer kill prevents the preset's content from being auto-synced over
+  // the custom room the user was just editing.
+  runSceneSwap(() => {
+    applyPresetToState(key);
+    // Presets have fixed geometry — no template regen on dim changes.
+    activeTemplateKey = null;
+    activeCustomRoomId = null;
+    render();
+    // scene:reset tells every panel/viewport that state arrays were replaced wholesale.
+    // room:changed kept for listeners that only care about room geometry.
+    emit('scene:reset');
+    emit('room:changed');
+  });
 }
 
 function applyTemplate(key) {
-  applyTemplateToState(key);
-  activeTemplateKey = key;
-  activeCustomRoomId = null;
-  render();
-  emit('scene:reset');
-  emit('room:changed');
+  runSceneSwap(() => {
+    applyTemplateToState(key);
+    activeTemplateKey = key;
+    activeCustomRoomId = null;
+    render();
+    emit('scene:reset');
+    emit('room:changed');
+  });
 }
 
 async function handleDxfImport(file) {
@@ -2004,30 +2131,45 @@ on('scene:reset', () => {
   // which is the conservative default.
 });
 
-// Auto-sync the active saved-custom-room entry when the user mutates
-// the live scene. Without this, racks placed via DeviceLAB into the
-// "Current scene" while editing room A would be lost the moment the
-// user clicked another chip — the saved entry's rackSystem would
-// override what's in state. Debounced 300 ms to coalesce bursts.
+// Auto-sync the active saved-custom-room entry when the user mutates the
+// live scene. Captures a FULL scene snapshot (serializeProject) so
+// speakers / listeners / zones / treatments / physics / author notes the
+// user adds AFTER drawing the room persist with it — not just geometry
+// and racks (the 2026-05-21 "everything gone on reopen" bug). Debounced
+// 300 ms to coalesce bursts. The _suppressSync guard + the inner
+// activeCustomRoomId re-check stop a wholesale scene swap (preset /
+// template / load) from clobbering the saved room with transient state.
 let _autoSyncTimer = null;
 function scheduleActiveRoomSync() {
+  if (_suppressSync) return;
   if (!activeCustomRoomId) return;
   if (_autoSyncTimer) clearTimeout(_autoSyncTimer);
   _autoSyncTimer = setTimeout(() => {
     _autoSyncTimer = null;
+    if (_suppressSync) return;
     if (!activeCustomRoomId) return;
     try {
-      updateCustomRoom(activeCustomRoomId, {
-        room: JSON.parse(JSON.stringify(state.room)),
-        rackSystem: JSON.parse(JSON.stringify(state.rackSystem ?? { racks: [] })),
+      const patch = {
+        scene: serializeProject(),
         projectName: state.projectName ?? null,
-      });
+      };
+      // Only override the library label when the live room actually has a
+      // name — passing undefined would blow away the stored roomName.
+      if (state.room?.name && state.room.name.trim()) patch.roomName = state.room.name.trim();
+      updateCustomRoom(activeCustomRoomId, patch);
     } catch (err) {
       console.warn('failed to sync active custom room', err);
     }
   }, 300);
 }
+// Every scene-content mutation must keep the active saved room current.
+// zones emit room:changed (already covered); sources / listeners /
+// treatments have their own granular events that were NOT wired before —
+// which is exactly why they vanished on reopen.
 on('rack:changed', scheduleActiveRoomSync);
+on('source:changed', scheduleActiveRoomSync);
+on('listener:changed', scheduleActiveRoomSync);
+on('treatment:changed', scheduleActiveRoomSync);
 
 // Header project dropdown → load that project's most recent saved room.
 // header-nav.js emits with the saved-room id already resolved, so we just

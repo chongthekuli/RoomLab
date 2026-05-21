@@ -239,9 +239,46 @@ const zg = computeZoneSPLGrid({
   getSpeakerDef: () => speaker,
   room: zoneRoom, gridSize: 5,
 });
-const zgok = zg && zg.id === 'Z1' && zg.grid.length === 5 && isFinite(zg.avgSPL_db);
-console.log(`${zgok ? 'PASS' : 'FAIL'}  Zone SPL grid computed (avg=${zg.avgSPL_db.toFixed(1)} dB)`);
+// Square-cell rule (2026-05-21): gridSize is superseded by a ~0.5 m target
+// with an 8-cell floor. A 2 m square zone → 8×8 cells of 0.25 m. Assert the
+// grid is well-formed and SQUARE (cellW_m ≈ cellH_m), not the old fixed 5.
+const zgok = zg && zg.id === 'Z1' && zg.grid.length === zg.cellsY
+  && zg.grid.length >= 8 && isFinite(zg.avgSPL_db);
+console.log(`${zgok ? 'PASS' : 'FAIL'}  Zone SPL grid computed (avg=${zg.avgSPL_db.toFixed(1)} dB, ${zg.cellsX}x${zg.cellsY})`);
 if (!zgok) failed++;
+const zSquare = Math.abs(zg.cellW_m - zg.cellH_m) < 1e-6;
+console.log(`${zSquare ? 'PASS' : 'FAIL'}  Zone cells are square (cellW=${zg.cellW_m.toFixed(3)} ≈ cellH=${zg.cellH_m.toFixed(3)})`);
+if (!zSquare) failed++;
+
+// --- Square-cell rule on an ELONGATED room (Dr. Chen 2026-05-21) ---
+// The bug: a fixed 25×25 count over a 6×18 bbox gave 3:1 stretched cells.
+// Square rule must keep cellW_m ≈ cellD_m regardless of room aspect ratio.
+import { computeSPLGrid as _computeSPLGrid, squareCellCounts } from '../js/physics/spl-calculator.js';
+{
+  const corridor = {
+    shape: 'rectangular', width_m: 6, height_m: 3, depth_m: 18,
+    ceiling_type: 'flat',
+    surfaces: { floor: 'f', ceiling: 'c', wall_north: 'w', wall_south: 'w', wall_east: 'w', wall_west: 'w' },
+  };
+  const cg = _computeSPLGrid({
+    sources: [{ modelUrl: 'x', position: { x: 3, y: 9, z: 1.2 }, aim: { yaw: 0, pitch: 0 }, power_watts: 1 }],
+    getSpeakerDef: () => speaker, room: corridor, gridSize: 25,
+  });
+  const square = Math.abs(cg.cellW_m - cg.cellD_m) < 0.05;   // within 5 cm
+  console.log(`${square ? 'PASS' : 'FAIL'}  Elongated 6×18 room → square cells (cellW=${cg.cellW_m.toFixed(3)} ≈ cellD=${cg.cellD_m.toFixed(3)}, ${cg.cellsX}x${cg.cellsY})`);
+  if (!square) failed++;
+  // Long axis gets ~3× the cells of the short axis (independent counts).
+  const aspect = cg.cellsY / cg.cellsX;
+  const aspectOk = aspect > 2.5 && aspect < 3.5;
+  console.log(`${aspectOk ? 'PASS' : 'FAIL'}  Cell counts track room aspect (cellsY/cellsX=${aspect.toFixed(2)} ≈ 3)`);
+  if (!aspectOk) failed++;
+  // Floor + cap guards.
+  const sliver = squareCellCounts(1, 1);
+  const huge = squareCellCounts(200, 200);
+  const guardsOk = sliver.cellsX >= 8 && huge.cellsX <= 120;
+  console.log(`${guardsOk ? 'PASS' : 'FAIL'}  Floor 8 / cap 120 enforced (1m→${sliver.cellsX}, 200m→${huge.cellsX})`);
+  if (!guardsOk) failed++;
+}
 
 // --- Line-array expansion tests ---
 import { expandLineArrayToElements, expandSources } from '../js/app-state.js';

@@ -159,6 +159,27 @@ if (touchHandler) {
      '_onTouchMove: cameraYaw -= dx * 0.006 (original direction)');
 }
 
+// ---- 17. Text/logo textures mirror-cancel the scene X flip (2026-05-21) -
+// scene.scale.x = -1 flips every text/logo texture so it reads reversed.
+// Three sites carry readable branding and must compensate:
+//   * scoreboard LED cube — mesh-level box.scale.x = -1 (the 4 faces carry
+//     their texture-U on different world axes, so a texture flip can't fix
+//     all four; only restoring an identity frame does).
+//   * speaker-grille "amperes" wordmark + mall storefront signs — single
+//     planes, so a texture-level repeat.x = -1 (robust under their Y-rotation,
+//     which a mesh scale would fight).
+const scoreboardBlock = scene.match(/scoreboard_box[\s\S]{0,400}/);
+ok(/box\.scale\.x\s*=\s*-1\s*;/.test(scene),
+   'scoreboard LED cube mirror-cancels the scene flip (box.scale.x = -1) so the Amperes logo reads correctly');
+
+const amperesText = scene.match(/function getAmperesTextTexture\(\)[\s\S]*?\n\}/);
+ok(!!amperesText && /repeat\.x\s*=\s*-1/.test(amperesText[0]),
+   'getAmperesTextTexture flips repeat.x = -1 (speaker-grille wordmark reads correctly under the scene mirror)');
+
+const shopBrand = scene.match(/function getShopBrandTexture\(brand\)[\s\S]*?\n\}/);
+ok(!!shopBrand && /repeat\.x\s*=\s*-1/.test(shopBrand[0]),
+   'getShopBrandTexture flips repeat.x = -1 (mall storefront signs read correctly under the scene mirror)');
+
 console.log(failed === 0
   ? '\nAll scene X-mirror v=504 tests passed.'
   : `\n${failed} test(s) FAILED`);

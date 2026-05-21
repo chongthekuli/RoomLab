@@ -89,10 +89,20 @@ presentCss('font-size: 54pt',
 // number vanishes (exactly the v=560 → v=561 regression the user hit).
 // This assert pins the cell INTO that list.
 {
-  // Find the selector list immediately ABOVE the first exact-render block.
-  const idx = css.indexOf('print-color-adjust: exact');
-  const preceding = idx > 0 ? css.slice(Math.max(0, idx - 900), idx) : '';
-  assert(/\.pr-sti-cell\s*[,{]/.test(preceding),
+  // .pr-sti-cell must sit in SOME print-color-adjust:exact selector list.
+  // (v=562: there are now several exact blocks — the running-header logo
+  // and cover nameplate added their own — so scan ALL occurrences, not
+  // just the first, and pass if the cell precedes any of them.)
+  let inExactList = false;
+  let from = 0;
+  for (;;) {
+    const idx = css.indexOf('print-color-adjust: exact', from);
+    if (idx < 0) break;
+    const preceding = css.slice(Math.max(0, idx - 900), idx);
+    if (/\.pr-sti-cell\s*[,{]/.test(preceding)) { inExactList = true; break; }
+    from = idx + 1;
+  }
+  assert(inExactList,
     'pr-sti-cell is in the print-color-adjust:exact opt-in list '
     + '(else its --accent background is stripped on print → white STI text on white = invisible)');
 }
@@ -139,16 +149,32 @@ assert(!/\.pr-rt60-hero\s*[,{]/.test(css),
   'pr-rt60-hero CSS selector removed (rule body gone)');
 
 // ---- Block 3: RT60 chart full-row hero (v=557 — KV column dropped) ----
-present('Fig. 02.1 — Octave-band reverberation time per ISO 3382-1',
+present('Fig. 02.1 — Octave-band reverberation per ISO 3382-1',
   'RT60 chart caption — ISO 3382-1 standard cited');
 present('ISO 9613-1 air absorption',
   'ISO 9613-1 air-absorption citation in chart caption');
 present('Beranek volume heuristic',
   'Beranek target-band citation in chart caption');
-present('Eyring solid, Sabine dotted',
-  'chart legend cue (which series is which)');
+present('Eyring solid, Sabine dotted, T30 ochre; plotted numeric values label',
+  'chart legend cue in caption (which series is which, + which series the value labels ride) — v=568 T30-labelled');
 present('Geometric metadata (Volume, Surface area, r_c, f_s) carried on the cover and Drawing 01',
   'caption signposts where the dropped KV-table figures live now');
+// v=562 — RT60 chart gained two series (ray-traced T30 mean + Mean α on a
+// secondary right axis) and an HTML legend moved out of the plot interior.
+present('pr-rt60-legend',
+  'RT60 chart HTML legend block (moved out of the plot for the 4-series version)');
+present('Mean α (right axis)',
+  'legend names the secondary-axis α series (Dr. Chen: α must read as the other axis)');
+present('Ray-traced T30',
+  'legend names the ray-traced T30 series');
+present('ISO 3382-1 §A.2.2',
+  'caption cites the Schroeder T30 method for the ray-traced series (Dr. Chen condition 2)');
+present('the ray-traced T30 mean supersedes both for sign-off when present',
+  'v=562 — sign-off-supersedes message relocated from the now-hidden band table into the caption');
+presentCss('pr-band-section',
+  'v=562 — per-band consolidated table hidden (display:none); messages folded into Fig. 02.1 caption');
+present('Area-weighted mean absorption α̅ (surface-only — the dominant term in, not sole driver of',
+  'caption qualifies α̅ as dominant-term-not-sole-driver (Dr. Chen condition 5: α̅ excludes the air term)');
 // (Note: pr-rt60-hero was the v=557 class for the full-row chart block;
 //  in v=559 it was absorbed into pr-sti-rt60-row alongside the STI cell.
 //  The pr-rt60-cell + pr-sti-cell presence asserts above cover the new
@@ -240,12 +266,24 @@ assert(!src.includes('pr-rt60-kv-wrap'),
 present('Audience zones (', 'zones footer eyebrow (n count interpolated)');
 present('No audience zones defined. Add a zone via the Zones panel',
   'empty-zones guidance preserved');
-present('Ambient noise · ',
-  'ambient-noise footer eyebrow (NC preset interpolated)');
+// v=563 — ambient NC strip relocated from the footer's right cell INTO
+// the red STI accent card (pinned to its bottom edge), restyled
+// white-on-accent. The footer collapses to a single full-width zones
+// cell. Assert the new composition, not the old footer eyebrow.
+present('Ambient · ',
+  'ambient eyebrow inside STI card (NC preset + dB/oct unit interpolated)');
+present('pr-sti-ambient',
+  'ambient block lives inside the STI accent card (v=563)');
+present('pr-bandstrip-onaccent',
+  'on-accent band-strip variant (white-on-red, no label cell)');
+assert(/\.pr-bandstrip-onaccent\s+\.pr-bandstrip-cell-band\s*\{[^}]*white-space:\s*nowrap/.test(css),
+  'on-accent band labels are single-line (white-space:nowrap) so "125 HZ" does not wrap and all 7 values sit on one horizontal baseline (v=570)');
 present('pr-bandstrip',
   'ambient band-strip "fingerprint" element preserved (the N term in STIPA)');
+assert(!src.includes('class="pr-bandstrip-label"'),
+  'footer NC-preset label cell dropped (no room across the 60 mm card column)');
 present('pr-footer-grid',
-  'footer 2-col grid layout class');
+  'footer grid layout class retained (now single-column zones)');
 
 // ---- Test 3: Treatment chapter (renumbered 04 → 03) ----------------
 // Already covered above; no additional asserts needed.
@@ -264,6 +302,38 @@ assert(!src.includes('function renderPrecisionSection'),
 // the limiting-STI calculation.
 present('.filter(v => Number.isFinite(v))',
   'finite-STI filter present (was at old line 2070, now in stiHeadline IIFE)');
+
+// ---- Running-header de-duplication (v=571, user: "repeating the title
+// is weird") — the page title lives ONCE, in the running header, not
+// echoed by an in-content eyebrow/h2 just below it. ------------------
+present('data-running-title="Appendix A · Equipment schedule"',
+  'equipment page carries the full appendix title in the running header');
+assert(!src.includes('<span class="pr-eyebrow">Appendix A · Equipment schedule</span>'),
+  'duplicate "Appendix A · Equipment schedule" eyebrow removed (was echoing the running header)');
+present('data-running-title="Methodology, Standards & Disclaimers"',
+  'methodology page carries its full title in the running header');
+assert(!src.includes('<h2 class="pg-page-title">Methodology, Standards'),
+  'duplicate methodology page-title h2 removed (was echoing the running header)');
+// The running-header eyebrow selector must carry .pr-running-header-rule
+// (specificity 1,3,0) so page-scoped `.pr-page-appendix .pr-eyebrow` /
+// `.pr-page-plan .pr-eyebrow` (1,2,0) can't lift the title off the rule —
+// the running title sits flush on the line on EVERY page (v=572).
+presentCss('.pr-running-header .pr-running-header-rule .pr-eyebrow',
+  'running-header eyebrow rule out-specifies page-scoped eyebrow rules (title flush to rule on all pages)');
+// Comfort gap below the rule on the opener-less pages (appendix +
+// methodology) so their first content isn't cramped against the line.
+// Appendix uses the running-header sibling rule; methodology sets it on
+// .pg-intro directly (the .pg-prose shorthand would otherwise zero it).
+presentCss('.pr-page-appendix > .pr-running-header + *',
+  'comfort spacing below the running-header rule on the appendix page (BILL OF MATERIALS not cramped against the line, v=572)');
+assert(/\.pg-methodology\s+\.pg-intro\s*\{[^}]*margin-top:\s*7mm/.test(css),
+  'methodology intro carries margin-top so it clears the running-header rule (v=573 — beats the .pg-prose margin:0 reset)');
+// Wide methodology/disclaimer/acceptance prose is justified for a neat
+// block edge (v=576); the narrow 4-col method grid stays left (rivers).
+assert(/\.pg-methodology\s+\.pg-prose\s*\{[^}]*text-align:\s*justify/.test(css),
+  'methodology wide prose is justified (neat block edge)');
+assert(/\.pg-methodology\s+\.pg-method-entry\s+\.pg-prose\s*\{[^}]*text-align:\s*left/.test(css),
+  'narrow 4-col method-grid bodies stay left-aligned (justify there flows ugly river-gaps)');
 
 if (failed > 0) {
   console.log(`\n${failed} test(s) FAILED`);

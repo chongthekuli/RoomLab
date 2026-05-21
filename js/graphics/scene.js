@@ -9293,6 +9293,16 @@ function rebuildStadiumFurniture() {
     const faceMats = [ledMat, ledMat, bodyMat, bodyMat, ledMat, ledMat];
     const box = new THREE.Mesh(boxGeo, faceMats);
     box.position.set(0, 0, 0);
+    // Mirror-cancel: the global scene.scale.x = -1 (east-right convention,
+    // v=504) flips the Amperes logo texture so it reads "ƨɘɿɘqmɒ" on all 4
+    // LED faces. Net world scale.x = +1 restores an identity frame, which
+    // un-flips the logo on BOTH the ±Z faces (texture-U along local X) AND
+    // the ±X faces (texture-U along local Z) — a texture-level repeat.x=-1
+    // can't, because the four faces carry their U-axis along different world
+    // axes. The box is centred at the group origin, so this scales geometry
+    // only; the group's world position stays mirrored to match the scene.
+    // Same mirror-cancel pattern as avatarMirrorCancel / surfaceSelectionEdges.
+    box.scale.x = -1;
     box.userData.acoustic_material = sb.material_id ?? 'led-glass';
     box.userData.tag = 'scoreboard_box';
     scoreboard.add(box);
@@ -9359,6 +9369,13 @@ function getShopBrandTexture(brand) {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  // Mirror-cancel for the global scene.scale.x = -1: storefront signs are
+  // single planes (one U axis), so flip the texture horizontally about its
+  // centre — robust regardless of the sign's Y-rotation (a mesh scale.x=-1
+  // would fight the ±90° rotated vertical signs). See scoreboard box note.
+  tex.center.set(0.5, 0.5);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.repeat.x = -1;
   tex.needsUpdate = true;
   _shopBrandTexCache.set(brand, tex);
   return tex;
@@ -9388,6 +9405,13 @@ function getAmperesTextTexture() {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
+  // Mirror-cancel for the global scene.scale.x = -1 — the speaker-grille
+  // "amperes" wordmark is a single plane, so flip the texture horizontally
+  // about its centre so it reads correctly under the mirror. See scoreboard
+  // box note for why planes use a texture flip but the box uses mesh scale.
+  tex.center.set(0.5, 0.5);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.repeat.x = -1;
   tex.needsUpdate = true;
   _amperesTextTex = tex;
   return tex;
@@ -9442,6 +9466,10 @@ function rebuildHeatmap() {
     scene.remove(heatmapMesh);
     heatmapMesh.geometry.dispose();
     heatmapMesh.material.map?.dispose();
+    // Shader-path sub-textures (scalar + hi-res silhouette mask) stashed on
+    // userData — dispose explicitly; the ShaderMaterial has no .map.
+    heatmapMesh.userData?._scalarTex?.dispose();
+    heatmapMesh.userData?._maskTex?.dispose();
     heatmapMesh.material.dispose();
     heatmapMesh = null;
   }
@@ -9491,40 +9519,7 @@ function rebuildHeatmap() {
   // Publish the grid for the 3D legend to read (with metric tag so the
   // legend's metric filter picks it up only in matching mode).
   state.results.splGrid = splResult;
-  const { grid, cellsX, cellsY } = splResult;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = cellsX;
-  canvas.height = cellsY;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(cellsX, cellsY);
-
-  // Pick palette by metric — STI (0..1) gets the IEC 5-tier red→teal
-  // ramp; SPL gets the dB heatmap ramp. The legend reads
-  // state.display.heatmapMode independently so the bar matches.
-  const colorFn = splResult.metric === 'sti' ? stiColorRGB : splColorRGB;
-  for (let j = 0; j < cellsY; j++) {
-    for (let i = 0; i < cellsX; i++) {
-      const val = grid[j][i];
-      const idx = (j * cellsX + i) * 4;
-      if (!isFinite(val)) {
-        img.data[idx + 3] = 0;
-        continue;
-      }
-      const [r, g, b] = colorFn(val);
-      img.data[idx + 0] = r;
-      img.data[idx + 1] = g;
-      img.data[idx + 2] = b;
-      // Near-opaque per-pixel alpha. Stays < 255 so the floor grid still
-      // shows through faintly — depth cue helps the user read elevation.
-      img.data[idx + 3] = 240;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearFilter;
+  const { cellsX, cellsY } = splResult;
 
   // Heatmap plane uses the EFFECTIVE bounds of the grid — when an
   // enclosure has been merged in past the parent's bbox, computeSPLGrid
@@ -9535,12 +9530,39 @@ function rebuildHeatmap() {
   const planeD = (splResult.cellD_m ?? 0) * cellsY || state.room.depth_m;
   const ox = splResult.originX_m ?? 0;
   const oy = splResult.originY_m ?? 0;
-  const geo = new THREE.PlaneGeometry(planeW, planeD);
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex, transparent: true, opacity: 0.95,
-    side: THREE.DoubleSide, depthWrite: false, alphaTest: 0.01,
+
+  // Route through the scalar-field shader (same pipeline as the zone path)
+  // with a HI-RES silhouette mask. The rectangular plane spans the grid
+  // bbox, which for an L/T-shaped room is larger than the polygon — the
+  // old CanvasTexture path bilinear-smeared the alpha=240↔0 boundary,
+  // leaking colour ~half a cell past the walls (worse on 0.5 m resizes as
+  // cell-vs-wall alignment shifted). The shader masks per-fragment with a
+  // NearestFilter discard at sub-cell resolution: hard polygon edge, no
+  // smear, and dilateGridForDisplay (inside buildScalarTexture) fills the
+  // white gap. splResult stays the untouched physics grid (published above
+  // for the legend); buildScalarTexture reads it, dilates a display copy,
+  // never mutates it. See heatmap-shader.js + js/physics/grid-display.js
+  // and the 2026-05-21 leak/gap fix. Unconditional (not gated on
+  // PHYSICS_P1_5): the CanvasTexture room path was the buggy one, retired.
+  //
+  // The mask MUST use the SAME inclusion predicate computeSPLGrid used to
+  // decide which cells are finite — isInsideRoom3D at the grid's ear
+  // height — NOT isInsideRoom. isInsideRoom3D unions the surau podium /
+  // arcade (isOnSurauPodium) and the height check; isInsideRoom does not.
+  // Masking with the narrower isInsideRoom discarded the podium/corridor
+  // cells the grid HAD computed (finite), so the arcade heatmap vanished
+  // in 3D while 2D — which renders the same grid without this mask — still
+  // showed it. Using the grid's own predicate guarantees mask⇔grid parity:
+  // every finite cell renders, every -Infinity cell is discarded. (2026-05-21.)
+  const bundle = buildHeatmapShaderMaterial(splResult, {
+    insideAt: (x, y) => isInsideRoom3D({ x, y, z: ear }, state.room),
   });
-  heatmapMesh = new THREE.Mesh(geo, mat);
+  const geo = new THREE.PlaneGeometry(planeW, planeD);
+  heatmapMesh = new THREE.Mesh(geo, bundle.material);
+  // Stash sub-textures so the rebuild cleanup can dispose them (the shader
+  // material has no .map; without these refs the DataTexture pair leaks
+  // one per rebuild over a long resizing session).
+  heatmapMesh.userData = { _scalarTex: bundle.scalarTex, _maskTex: bundle.maskTex };
   heatmapMesh.rotation.x = -Math.PI / 2;
   heatmapMesh.position.set(ox + planeW / 2, ear, oy + planeD / 2);
   heatmapMesh.visible = state.display.showHeatmaps;

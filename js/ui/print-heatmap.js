@@ -21,6 +21,7 @@
 import { colorForMetric, splColorRGB } from '../graphics/colour-ramps.js';
 import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from '../graphics/legend-ticks.js';
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
+import { dilateGridForDisplay } from '../physics/grid-display.js';
 
 // 1.5m margin gives the North arrow + scale bar enough room to live
 // fully inside the margin band without overlapping the room outline,
@@ -94,7 +95,14 @@ function aimTrianglePoints(cx, cy, r, yawDeg) {
 export function buildHeatmapDataURL(splGrid) {
   if (!splGrid || !splGrid.grid || !splGrid.cellsX || !splGrid.cellsY) return null;
   if (typeof document === 'undefined') return null;
-  const { grid, cellsX, cellsY, metric } = splGrid;
+  const { cellsX, cellsY, metric } = splGrid;
+  // DISPLAY-ONLY fill — bleed boundary cells one ring so the printed
+  // field reaches the wall instead of leaving a white moat. The page SVG
+  // clips this raster to the true room polygon (see buildHeatmapPageSVG →
+  // clipInner) so the generous fill cannot leak past the wall. splGrid.grid
+  // (physics, drives the legend min/max) is read, never mutated. See
+  // js/physics/grid-display.js and the 2026-05-21 leak/gap fix.
+  const grid = dilateGridForDisplay(splGrid.grid, cellsX, cellsY);
   const canvas = document.createElement('canvas');
   canvas.width = cellsX;
   canvas.height = cellsY;
@@ -277,6 +285,47 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false, listenerM
     }
   }
 
+  // Heatmap clip — the print raster is a plain rectangular PNG with no
+  // intrinsic room shape, so without this it leaks past every wall (the
+  // bug the user photographed in the report). Clip it to the true room
+  // boundary in world coords. Mirrors the 2D viewport clip
+  // (room-2d.js renderClipPath), including the surau-podium special case:
+  // when a podium extension is present the heatmap legitimately covers the
+  // arcade rectangle beyond the prayer-hall walls, so the clip widens to
+  // the podium bbox rather than the hall polygon. Paired with the
+  // display-fill (buildHeatmapDataURL → dilateGridForDisplay): fill closes
+  // the gaps, clip trims the overshoot. See js/physics/grid-display.js.
+  let clipInner = '';
+  const podiumExt = room?.surauStructure?.podium?.extension_m;
+  if (Number.isFinite(podiumExt) && podiumExt > 0) {
+    const cxw = (-podiumExt + offsetX).toFixed(3);
+    const cyw = (anchorY - (room.depth_m + podiumExt)).toFixed(3);
+    clipInner = `<rect x="${cxw}" y="${cyw}" width="${(room.width_m + 2 * podiumExt).toFixed(3)}" height="${(room.depth_m + 2 * podiumExt).toFixed(3)}" />`;
+  } else if (room.shape === 'round') {
+    const cx = room.width_m / 2 + offsetX;
+    const cy = anchorY - room.depth_m / 2;
+    clipInner = `<circle cx="${cx.toFixed(3)}" cy="${cy.toFixed(3)}" r="${room.round_radius_m.toFixed(3)}" />`;
+  } else if (room.shape === 'custom' && (room.custom_vertices || []).length >= 3) {
+    const pts = room.custom_vertices.map(v => `${(v.x + offsetX).toFixed(3)},${(anchorY - v.y).toFixed(3)}`).join(' ');
+    clipInner = `<polygon points="${pts}" />`;
+  } else if (room.shape === 'polygon') {
+    const cx = room.width_m / 2 + offsetX;
+    const cy = anchorY - room.depth_m / 2;
+    const r = room.polygon_radius_m;
+    const N = room.polygon_sides;
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+      const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
+      pts.push(`${(cx + r * Math.cos(angle)).toFixed(3)},${(cy - r * Math.sin(angle)).toFixed(3)}`);
+    }
+    clipInner = `<polygon points="${pts.join(' ')}" />`;
+  } else {
+    // rectangular, no podium
+    clipInner = `<rect x="${offsetX.toFixed(3)}" y="${(anchorY - room.depth_m).toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" />`;
+  }
+  const clipDefs = clipInner ? `<defs><clipPath id="pr-heat-clip">${clipInner}</clipPath></defs>` : '';
+  const clippedHeat = clipInner ? `<g clip-path="url(#pr-heat-clip)">${heatEl}</g>` : heatEl;
+
   // Audience zones — semi-transparent fills on top of the heatmap so
   // the user can still read the metric inside each zone.
   const zonesEl = (state.zones || []).map((z, idx) => {
@@ -395,7 +444,7 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false, listenerM
   // Render as fixed-CSS-pixel HTML overlay on the .pr-heatmap-stage
   // container (see print.css .pr-heatmap-stage::after).
   const chromeEl = compact ? '' : `${scaleBarEl}`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-heatmap-svg">${heatEl}${zonesEl}${outlineEl}${minaretEl}${sourcesEl}${listenersEl}${chromeEl}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-heatmap-svg">${clipDefs}${clippedHeat}${zonesEl}${outlineEl}${minaretEl}${sourcesEl}${listenersEl}${chromeEl}</svg>`;
 }
 
 // Build the horizontal legend that sits below the heatmap. Same
@@ -440,6 +489,12 @@ export function buildHeatmapLegend(splGrid) {
     stops.push(`rgb(${r},${g},${b}) ${(t * 100).toFixed(2)}%`);
   }
   const gradient = `linear-gradient(to right, ${stops.join(', ')})`;
+  // Honest-disclosure footnote (Dr. Chen, 2026-05-21): the colour field is
+  // extrapolated the last half-cell to the wall from the nearest computed
+  // sample (render-only fill, see grid-display.js). Owning the limitation
+  // in the legend — not in the pixels — keeps the map readable while not
+  // implying the near-wall band is independently sampled. Wording pending
+  // Maya art-direction review.
   return `
     <div class="pr-heatmap-legend">
       <div class="pr-heatmap-legend-header">${legendHeader(tickMode)}</div>
@@ -447,6 +502,7 @@ export function buildHeatmapLegend(splGrid) {
         <div class="pr-heatmap-legend-bar" style="background:${gradient}"></div>
         <div class="pr-heatmap-legend-ticks">${minorRows}${tickRows}</div>
       </div>
+      <div class="pr-heatmap-legend-note" style="font-size:0.62em;opacity:0.6;margin-top:0.35em;line-height:1.3">Field extrapolated to room boundary from nearest grid sample.</div>
     </div>`;
 }
 
