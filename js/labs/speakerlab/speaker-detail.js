@@ -3,7 +3,7 @@
 // SpeakerLAB-local `state.selectedSpeakerUrl` so the module stays free
 // of RoomLAB scene-state coupling.
 
-import { SPEAKER_CATALOG } from '../../shared/speaker-catalog.js';
+import { SPEAKER_CATALOG, SPEAKER_CATEGORIES, speakerCategoryLabel } from '../../shared/speaker-catalog.js';
 import { on, emit } from '../../shared/events.js';
 import { getCachedLoudspeaker, loadLoudspeaker, interpolateAttenuation, registerLoudspeaker } from '../../physics/loudspeaker.js';
 import { analyseSpeaker, estimateNominalDispersion, onAxisResponseDb, csdPerBand } from '../../physics/speaker-expert.js';
@@ -22,7 +22,7 @@ const lab = bindLab('speakerlab');
 // collections etc. Exported so the boot script (main.js) can seed
 // selectedSpeakerUrl from the URL's ?model= query param before the
 // first render().
-export const state = { selectedSpeakerUrl: null };
+export const state = { selectedSpeakerUrl: null, catFilter: 'all' };
 
 // Imported speakers live here. URL of each imported file is a synthetic
 // `imported:<id>` token; the in-memory cache of loudspeaker.js stores the
@@ -361,9 +361,35 @@ function renderCatalog() {
   if (!host) return;
   const active = state.selectedSpeakerUrl;
 
+  // Category of an entry = its loudspeaker JSON's `mount_type` (the single
+  // source of truth for the taxonomy). Null when unloaded or unset.
+  const categoryOf = (url) => getCachedLoudspeaker(url)?.mount_type ?? null;
+
+  // Which categories actually appear in the loaded catalogue, in the
+  // canonical order, plus an 'Uncategorised' bucket if any speaker has no
+  // mount_type. Drives the filter dropdown — we never show a category that
+  // matches zero speakers.
+  const present = new Set(SPEAKER_CATALOG.map(c => categoryOf(c.url)));
+  const filterOpts = SPEAKER_CATEGORIES.filter(c => present.has(c.value));
+  if (present.has(null)) filterOpts.push({ value: 'uncategorised', label: 'Uncategorised' });
+
+  // Active filter falls back to 'all' if the previously-selected category
+  // is no longer present (e.g. all speakers of that type were removed).
+  if (state.catFilter !== 'all' && !filterOpts.some(o => o.value === state.catFilter)) {
+    state.catFilter = 'all';
+  }
+  const matchesFilter = (url) => {
+    if (state.catFilter === 'all') return true;
+    const cat = categoryOf(url);
+    if (state.catFilter === 'uncategorised') return cat == null;
+    return cat === state.catFilter;
+  };
+
+  const filtered = SPEAKER_CATALOG.filter(c => matchesFilter(c.url));
+
   // Synchronous summary — read from the already-loaded cache; anything
   // not yet loaded shows a "—" until its card is clicked and resolved.
-  const cards = SPEAKER_CATALOG.map(entry => {
+  const cards = filtered.map(entry => {
     const def = getCachedLoudspeaker(entry.url);
     const summary = def ? [
       def.acoustic?.sensitivity_db_1w_1m != null ? `${def.acoustic.sensitivity_db_1w_1m.toFixed(0)} dB/W` : null,
@@ -372,21 +398,39 @@ function renderCatalog() {
     ].filter(Boolean).join(' · ') : 'loading…';
     const label = def?.model ?? entry.label ?? entry.url;
     const brand = def?.manufacturer ?? '';
+    const catLabel = def ? speakerCategoryLabel(def.mount_type) : null;
     const isActive = entry.url === active;
     return `
       <div class="sv-cat-card${isActive ? ' active' : ''}" data-cat-url="${escapeHtml(entry.url)}" tabindex="0">
         <div class="sv-cat-brand">${escapeHtml(brand)}</div>
         <div class="sv-cat-model">${escapeHtml(label)}</div>
+        ${catLabel ? `<div class="sv-cat-kind">${escapeHtml(catLabel)}</div>` : ''}
         <div class="sv-cat-summary">${escapeHtml(summary)}</div>
       </div>
     `;
   }).join('');
 
+  const filterUI = filterOpts.length > 0 ? `
+    <label class="sv-cat-filter">Category
+      <select id="sv-cat-filter">
+        <option value="all"${state.catFilter === 'all' ? ' selected' : ''}>All categories</option>
+        ${filterOpts.map(o => `<option value="${escapeHtml(o.value)}"${state.catFilter === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
+      </select>
+    </label>` : '';
+
   host.innerHTML = `
     <h2>Catalogue</h2>
-    <div class="sv-cat-head">Models <span class="sv-cat-count">${SPEAKER_CATALOG.length}</span></div>
-    ${cards || '<div class="sv-cat-empty">No speakers yet — import one above.</div>'}
+    ${filterUI}
+    <div class="sv-cat-head">Models <span class="sv-cat-count">${filtered.length}</span></div>
+    ${cards || '<div class="sv-cat-empty">No speakers in this category.</div>'}
   `;
+  const filterSel = host.querySelector('#sv-cat-filter');
+  if (filterSel) {
+    filterSel.addEventListener('change', () => {
+      state.catFilter = filterSel.value;
+      renderCatalog();
+    });
+  }
   for (const card of host.querySelectorAll('.sv-cat-card')) {
     card.addEventListener('click', () => {
       state.selectedSpeakerUrl = card.dataset.catUrl;

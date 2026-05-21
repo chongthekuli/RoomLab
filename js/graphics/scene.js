@@ -45,6 +45,10 @@ let racksGroup = null;
 // v1 = visual-only; not part of any physics group.
 let treatmentsGroup = null;
 let _floorGrid = null;       // GridHelper backdrop; hidden during print capture
+let _exteriorGround = null;  // Large subtle solid ground plane under everything
+                             // (covers far-field exterior listeners, e.g. surau
+                             // azan-reach probes out to 600 m); hidden during
+                             // print capture alongside _floorGrid.
 let _ambientLight = null;    // Module-scope refs so captureViewportImage can
 let _hemiLight = null;       // mildly lift exposure during print, restore after.
 let _keyLight = null;        // Shadow-casting directional. Capture expands its
@@ -629,11 +633,45 @@ function initScene() {
   scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
 
   // Subtle floor grid only — no more axes helper (looked like a WIP viewport).
+  // Kept at 60 m with 2 m cells for crisp NEAR-FIELD reference around the
+  // building; the large solid ground plane below carries the FAR field.
   _floorGrid = new THREE.GridHelper(60, 30, 0x262b33, 0x1a1d22);
   _floorGrid.position.y = -0.01;
   _floorGrid.material.transparent = true;
   _floorGrid.material.opacity = 0.35;
   scene.add(_floorGrid);
+
+  // Large subtle ground plane — a single 1200 m × 1200 m quad (≈600 m radius)
+  // so far-field EXTERIOR listeners (e.g. the surau azan-reach probes that
+  // step NORTH out to 600 m) stand over solid ground instead of floating over
+  // the void. Visual reference only:
+  //   - added to `scene`, NOT roomGroup, so it is OUTSIDE the iso camera-fit
+  //     `groups` list (frameCameraToRoom() ignores it entirely — it frames
+  //     purely from room.width/height/depth, so the default camera does NOT
+  //     zoom out to swallow this plane and the building stays the subject).
+  //   - no physics tags needed (it's a raw scene child, never traversed by the
+  //     tracer's roomGroup walk or the walk-mode collision raycaster).
+  //   - castShadow / receiveShadow OFF — a 1200 m plane must never enter the
+  //     shadow camera's accounting; the dir-light shadow frustum stays room-
+  //     scaled.
+  //   - just two triangles + frustum culling on: zero meaningful frame cost.
+  // NOTE: scene.fog (far = 110 m) fades this plane to the slate background
+  // past ~110 m, so it reads as ground softening into a horizon rather than a
+  // hard 1200 m slab. That same fog also fades the 250/450/600 m listener
+  // markers — see the camera/fog caveat in the report; that is a pre-existing
+  // property of the far-field listeners, not introduced by this plane.
+  const GROUND_HALF = 600;     // metres — covers the 600 m azan-reach probe
+  const groundGeo = new THREE.PlaneGeometry(GROUND_HALF * 2, GROUND_HALF * 2);
+  const groundMat = new THREE.MeshStandardMaterial({
+    color: 0x1d2128, roughness: 1.0, metalness: 0.0,   // matches the dark grid tone
+  });
+  _exteriorGround = new THREE.Mesh(groundGeo, groundMat);
+  _exteriorGround.rotation.x = -Math.PI / 2;
+  _exteriorGround.position.y = -0.05;   // just below the grid (y=-0.01) and podium top (y=0)
+  _exteriorGround.castShadow = false;
+  _exteriorGround.receiveShadow = false;
+  _exteriorGround.userData.tag = 'exterior_ground';
+  scene.add(_exteriorGround);
 
   initWalkthrough();
   initProbeTool();
@@ -4156,6 +4194,7 @@ export function captureViewportImage(opts = {}) {
   const prevTween = _focusTween;
   const prevBackground = scene.background;        // swap to white for print, restore after
   const prevGridVisible = _floorGrid ? _floorGrid.visible : null;
+  const prevGroundVisible = _exteriorGround ? _exteriorGround.visible : null;
   // Hide audience FIGURES during capture (kept from previous commit —
   // helps even at small scale for arenas with seating).
   const prevAudienceVisible = audienceGroup ? audienceGroup.visible : null;
@@ -4255,6 +4294,10 @@ export function captureViewportImage(opts = {}) {
     // extends past the room and looks like a cropped wood floor. The
     // room is the subject — drop the surrounding noise.
     if (_floorGrid) _floorGrid.visible = false;
+    // Hide the large exterior ground plane too — with fog nulled below it
+    // would render full-bright out to 600 m and swamp the cover. The room is
+    // the subject; the far-field ground is live-viewport-only reference.
+    if (_exteriorGround) _exteriorGround.visible = false;
     if (audienceGroup) audienceGroup.visible = false;
     scene.fog = null;       // <-- THE FIX. Stops far-room saturation to fog colour.
     // Mild exposure lift — fog was contributing implicit depth-darkening
@@ -4349,6 +4392,7 @@ export function captureViewportImage(opts = {}) {
       _focusTween = prevTween;
       scene.background = prevBackground;
       if (_floorGrid && prevGridVisible !== null) _floorGrid.visible = prevGridVisible;
+      if (_exteriorGround && prevGroundVisible !== null) _exteriorGround.visible = prevGroundVisible;
       if (audienceGroup && prevAudienceVisible !== null) audienceGroup.visible = prevAudienceVisible;
       scene.fog = prevFog;
       if (renderer) renderer.toneMappingExposure = prevExposure;
@@ -4521,6 +4565,34 @@ function speakerCabinetDims(modelUrl) {
       shape: def.physical?.shape || 'round',
       driverInches: def.physical?.driver_size_inches ?? 6,
       isCoax: /coaxial|co-axial/i.test(def.model || ''),
+      isAmperes: /amperes/i.test(def.manufacturer || '') || /^amperes-/i.test(def.id || ''),
+    };
+  }
+
+  // New Amperes commercial/installed categories (horns, columns, surface
+  // boxes, full-range boxes, sound projectors, garden bollard, pendant
+  // ball). Each declares its category via `mount_type` + `physical.shape`
+  // and gets a dedicated procedural builder (see buildSpeakerEnclosure).
+  // We pull the real-ish dims + driver layout straight from the JSON so a
+  // horn and a column no longer collapse to the same generic box. Visual
+  // only — physics still runs against the loudspeaker JSON directivity.
+  const MOUNT_TYPES = new Set([
+    'surface-mount', 'full-range', 'column',
+    'horn', 'sound-projector', 'garden', 'pendant',
+  ]);
+  if (def?.mount_type && MOUNT_TYPES.has(def.mount_type) && def?.physical) {
+    const phys = def.physical;
+    const dim = phys.dimensions_m || {};
+    return {
+      w: dim.w ?? 0.2,
+      h: dim.h ?? 0.2,
+      d: dim.d ?? dim.w ?? 0.2,
+      type: def.mount_type,                 // builder branch key
+      shape: phys.shape || 'box',
+      finish: phys.finish || 'white',       // body colour token (white/aluminium/grey/black/green/off-white)
+      driverInches: phys.driver_size_inches ?? 5,
+      driverCount: phys.driver_count ?? 1,
+      hasTweeter: !!phys.has_tweeter,
       isAmperes: /amperes/i.test(def.manufacturer || '') || /^amperes-/i.test(def.id || ''),
     };
   }
@@ -4740,6 +4812,765 @@ function buildCeilingSpeakerEnclosure(dims, groupInt, outside) {
   return encl;
 }
 
+// ---------------------------------------------------------------------------
+// Amperes commercial / installed-sound category builders.
+//
+// SHARED ORIENTATION CONVENTION (all of the below):
+//   The enclosure Group is positioned with encl.lookAt(pos + aim) in
+//   rebuildSources(), which aligns the Group's LOCAL +Z with the aim
+//   direction. Therefore every directional builder here puts its
+//   grille / horn mouth / firing face at LOCAL +Z (same as the ceiling
+//   builder, opposite the generic cabinet which fires at -Z). For the
+//   rotationally-symmetric pole types (garden bollard, pendant ball) the
+//   firing face is the body itself; we keep their structural up-axis at
+//   LOCAL +Y so they read as "standing" / "hanging" for the common
+//   horizontal-aim case.
+//
+// All builders are sized from the JSON dims, low-poly (16–32 segs), and
+// use only standard Mesh/geometry/material (dispose-safe via the
+// caller's disposeGroup / the preview's traverse-dispose).
+// ---------------------------------------------------------------------------
+
+// Finish lookup — maps a JSON `physical.finish` token to a MeshStandard
+// material spec for the cabinet BODY/structural parts. Amperes commercial
+// gear is mostly white / aluminium / grey; only a few are black. When
+// `outside` (exterior placement) is true the body keeps the red exterior-
+// flag colour regardless of finish — that's an intentional UX signal, so
+// finish only applies to interior speakers. Grille tint is handled
+// separately (group colour) and is unaffected by finish.
+const _FINISH_SPECS = {
+  'white':     { color: 0xeef0f2, roughness: 0.72, metalness: 0.05 },
+  'off-white': { color: 0xe9ebee, roughness: 0.72, metalness: 0.08 },
+  'aluminium': { color: 0xc2c6cc, roughness: 0.35, metalness: 0.85 },
+  'grey':      { color: 0x9a9ea5, roughness: 0.6,  metalness: 0.25 },
+  'black':     { color: 0x1c1f24, roughness: 0.6,  metalness: 0.3  },
+  'green':     { color: 0x2f4a38, roughness: 0.7,  metalness: 0.1  },
+};
+function _finishMaterial(finish, outside) {
+  if (outside) {
+    // Exterior red-tint override — stays regardless of finish.
+    return new THREE.MeshStandardMaterial({ color: 0x6a1a0c, roughness: 0.72, metalness: 0.3 });
+  }
+  const spec = _FINISH_SPECS[finish] || _FINISH_SPECS['white'];
+  return new THREE.MeshStandardMaterial({ ...spec });
+}
+
+// Shared material helpers — honour the `outside` (exterior) red-tint variant.
+// `_spkBodyMat` now takes the finish token first; callers pass the dims.finish
+// they read from the JSON. Falls back to white when finish is missing.
+function _spkBodyMat(finish, outside) {
+  return _finishMaterial(finish, outside);
+}
+function _spkMetalMat(outside) {
+  return new THREE.MeshStandardMaterial({
+    color: outside ? 0xc06a4a : 0x8a8e98, roughness: 0.3, metalness: 0.85,
+  });
+}
+function _spkGrilleMat(groupInt, outside) {
+  const color = outside ? 0xff5a3c : (groupInt ?? 0x4a515b);
+  const emissive = outside ? 0x551100 : (groupInt ? (groupInt & 0x2a2a2a) : 0x141414);
+  return new THREE.MeshStandardMaterial({
+    color, roughness: 0.9, metalness: 0.05, emissive, side: THREE.DoubleSide,
+  });
+}
+const _spkConeMat = () => new THREE.MeshStandardMaterial({ color: 0x16191f, roughness: 0.65, metalness: 0.22 });
+
+// Box-type FULL-FACE grille material. The catalogue BS506/508/410 read as a
+// WHITE speaker with a fine mesh grille — no black driver cone proud of the
+// baffle. So this grille is LIGHT (derived from the cabinet finish, nudged a
+// shade darker for a fabric/mesh look, low metalness). The speaker-group tint
+// still applies: when groupInt is present we blend the finish base toward the
+// group colour so the colour-coding survives, but we keep it light so the
+// dominant read stays "white mesh grille", not a coloured-plastic disc.
+// `outside` keeps the exterior red-tint signal. Used by surface-mount (box),
+// full-range and column ONLY — horn/projector/garden/pendant keep _spkGrilleMat.
+function _spkBoxGrilleMat(finish, groupInt, outside) {
+  if (outside) {
+    return new THREE.MeshStandardMaterial({
+      color: 0xff5a3c, roughness: 0.92, metalness: 0.05, emissive: 0x551100, side: THREE.DoubleSide,
+    });
+  }
+  const base = new THREE.Color((_FINISH_SPECS[finish] || _FINISH_SPECS['white']).color);
+  // Slightly darker than the body so the grille reads as a distinct inset.
+  base.multiplyScalar(0.86);
+  if (groupInt != null) {
+    // Blend the finish base 45% toward the group colour so colour-coding is
+    // legible without turning the grille into a saturated chip.
+    base.lerp(new THREE.Color(groupInt), 0.45);
+  }
+  return new THREE.MeshStandardMaterial({
+    color: base, roughness: 0.92, metalness: 0.06, side: THREE.DoubleSide,
+  });
+}
+
+// Faint recessed driver hint placed BEHIND a full-face grille. Renders only a
+// dim ring + dark disc set back from the grille plane so the driver is a
+// subtle shadow through the mesh, never a glossy disc proud of the baffle.
+// (Problem 1 fix — replaces the old _addBaffleDrivers exposed-cone look for
+// box-types.) recessZ should be the grille plane z; geometry sits behind it.
+function _addRecessedDriverHint(parent, cx, cy, r, recessZ) {
+  const ringMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2e35, roughness: 0.95, metalness: 0.05, side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(r * 0.86, r, 20), ringMat);
+  ring.position.set(cx, cy, recessZ - 0.006);
+  parent.add(ring);
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(r * 0.86, 20),
+    new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: 0.9, metalness: 0.08 }),
+  );
+  disc.position.set(cx, cy, recessZ - 0.008);
+  parent.add(disc);
+}
+
+// Adds the small "amperes" wordmark badge on a FLAT +Z-facing plane at
+// (x,y,z). `cabW` is the cabinet width; the badge is sized to ~0.28× of it
+// (height = 0.25× the badge width for the 4:1 canvas) so it reads small and
+// subtle, matching the ceiling-speaker badge proportion — NOT the old
+// plateW*0.7 which dominated the baffle. Use this only on genuinely flat
+// front faces (BS410 flat grille, box/full-range/column baffles). Curved
+// bodies use _addAmperesBadgeCurved so the sticker follows the surface.
+function _addAmperesBadge(parent, x, y, z, cabW) {
+  const textTex = getAmperesTextTexture();
+  const textW = cabW * 0.28;
+  const textH = textW * 0.25;          // 768 × 192 canvas → 4:1
+  const badge = new THREE.Mesh(
+    new THREE.PlaneGeometry(textW, textH),
+    new THREE.MeshBasicMaterial({ map: textTex, transparent: true }),
+  );
+  badge.position.set(x, y, z);
+  parent.add(badge);
+}
+
+// Adds the "amperes" wordmark wrapped onto a CURVED, +Y-axis body (bollard
+// post, horn throat pod) so the sticker follows the surface instead of
+// floating off a flat plane. Renders the wordmark on a thin open-ended
+// CylinderGeometry arc whose radius matches the body (`r`), centred at
+// vertical `cy`, swept symmetrically about the +Z meridian so it faces the
+// aim direction. `arcFrac` is the badge width as a fraction of the
+// circumference; height = (arc length)*0.25 keeps the 4:1 canvas aspect.
+//
+// Mirror note: the global scene.scale.x = -1 flips the whole 3D scene.
+// getAmperesTextTexture() already applies repeat.x = -1 to cancel that for
+// flat planes. A CylinderGeometry wraps its texture U around the
+// circumference; under the scene mirror the arc's handedness flips too, so
+// the SAME repeat.x = -1 keeps the text reading left-to-right. Both flat
+// and curved badges share the one cached texture — no per-instance flip.
+function _addAmperesBadgeCurvedY(parent, r, cy, arcFrac) {
+  const textTex = getAmperesTextTexture();
+  const arcLen = 2 * Math.PI * r * arcFrac;
+  const thetaLength = 2 * Math.PI * arcFrac;
+  const badgeH = arcLen * 0.25;
+  // Three.js CylinderGeometry places vertices at x=r·sinθ, z=r·cosθ, so the
+  // +Z FRONT is at θ=0 (NOT θ=π/2 — that's the +X SIDE, where the badge wrongly
+  // landed before). Centre the arc on θ=0 so the badge sits on the FRONT of
+  // the bulge facing the aim.
+  const thetaStart = -thetaLength / 2;
+  const geo = new THREE.CylinderGeometry(
+    r * 1.006, r * 1.006, badgeH, 20, 1, true, thetaStart, thetaLength,
+  );
+  const badge = new THREE.Mesh(
+    geo, new THREE.MeshBasicMaterial({ map: textTex, transparent: true, side: THREE.DoubleSide }),
+  );
+  badge.position.y = cy;
+  parent.add(badge);
+}
+
+// Small woofer disc (+ optional tweeter) sitting on a +Z baffle at z=baffleZ.
+function _addBaffleDrivers(parent, w, h, baffleZ, driverInches, hasTweeter) {
+  const woofR = Math.min(Math.min(w, h) * 0.38, driverInches * 0.0127);
+  const surround = new THREE.Mesh(
+    new THREE.RingGeometry(woofR * 0.82, woofR, 24),
+    new THREE.MeshStandardMaterial({ color: 0x0e1014, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide }),
+  );
+  surround.position.set(0, hasTweeter ? -h * 0.12 : 0, baffleZ + 0.004);
+  parent.add(surround);
+  const cone = new THREE.Mesh(new THREE.CircleGeometry(woofR * 0.82, 24), _spkConeMat());
+  cone.position.set(0, hasTweeter ? -h * 0.12 : 0, baffleZ + 0.003);
+  parent.add(cone);
+  if (hasTweeter) {
+    const tw = new THREE.Mesh(
+      new THREE.CircleGeometry(woofR * 0.34, 20),
+      new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.35, metalness: 0.6 }),
+    );
+    tw.position.set(0, h * 0.28, baffleZ + 0.004);
+    parent.add(tw);
+  }
+}
+
+// Closed, correctly-wound tapered box: a BoxGeometry whose BACK face (z<0)
+// is scaled in x/y by `backFrac` so the front baffle (+Z) is the larger
+// face — the BS508/FS cabinet silhouette. Built off BoxGeometry (not a
+// hand-rolled BufferGeometry) so the winding/normals are guaranteed solid;
+// the earlier hand-rolled trapezoid had an inverted front face that rendered
+// see-through ("transparent empty body").
+function _taperedBoxGeo(w, h, d, backFrac) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    if (p.getZ(i) < 0) { p.setX(i, p.getX(i) * backFrac); p.setY(i, p.getY(i) * backFrac); }
+  }
+  p.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
+}
+
+// Framed inset grille for box-type cabinets (BS506/508, FS). White-on-white
+// reads as a blank box, so: a darker recess FRAME proud of the body, then a
+// lighter mesh panel proud of THAT — the white body shows as an outer border
+// and the grille reads as a real framed mesh insert. Group tint on the mesh.
+function _addBoxGrille(parent, w, h, baffleZ, finish, groupInt, outside) {
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 0.92, h * 0.92),
+    new THREE.MeshStandardMaterial({ color: outside ? 0x5a1810 : 0x6f747b, roughness: 0.85, metalness: 0.15 }),
+  );
+  frame.position.z = baffleZ;
+  parent.add(frame);
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 0.84, h * 0.84),
+    _spkBoxGrilleMat(finish, groupInt, outside),
+  );
+  mesh.position.z = baffleZ + 0.004;
+  parent.add(mesh);
+}
+
+// surface-mount — small shallow wall box. `box-halfmoon` (BS410) renders a
+// D-profile with the CURVED face as the FRONT/firing direction (+Z) and the
+// FLAT face mounting to the wall (-Z). Plain `box` is a tapered wall box.
+function buildSurfaceMountEnclosure(dims, groupInt, outside) {
+  const { w, h, d, shape, driverInches, isAmperes, finish } = dims;
+  const encl = new THREE.Group();
+  const bodyMat = _spkBodyMat(finish, outside);
+
+  if (shape === 'box-halfmoon') {
+    // BS410 D-PROFILE wall speaker. Real dims w×h×d = 0.185×0.215×0.09.
+    // Per the product owner: the CURVED face is the FRONT / firing direction
+    // (+Z) with the mesh grille on it; the FLAT face is the BACK that mounts
+    // flush to the wall. (An earlier pass wrongly flipped these.)
+    // CylinderGeometry(theta): x=r·sinθ, z=r·cosθ; thetaStart=-90°, len=180°
+    // sweeps (-r,0)→(0,+r)→(+r,0): the bulge points +Z, flat chord along X
+    // at z=0. Axis vertical (= h).
+    const radius = d;                   // depth = how far the bulge bows out front
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, h, 24, 1, false, -Math.PI / 2, Math.PI),
+      bodyMat,
+    );
+    encl.add(body);
+    // Flat BACK plate (w × h) closing the flat cut, flush to the wall at z≈0.
+    const back = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.012), bodyMat);
+    back.position.z = -0.005;
+    encl.add(back);
+    // Curved mesh grille on the front bulge (+Z) — the dominant white-mesh read.
+    const grille = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 1.012, radius * 1.012, h * 0.94, 24, 1, true, -Math.PI / 2, Math.PI),
+      _spkBoxGrilleMat(finish, groupInt, outside),
+    );
+    encl.add(grille);
+    // No flat driver hint behind a CURVED grille (it pokes through the side
+    // edges as "crescents"). Small badge WRAPPED onto the curved front,
+    // CENTRED on the +Z apex (cy = 0) so it sits tight on the mesh.
+    if (isAmperes) _addAmperesBadgeCurvedY(encl, radius * 1.016, -h * 0.15, (0.34 * w) / (2 * Math.PI * radius));
+  } else {
+    // BS506/508 surface-mount box — front baffle (+Z) larger than the rear,
+    // sides taper toward the wall. Framed mesh grille fills the front; small
+    // gold badge centred on it. No protruding rear bracket (it read as an ugly
+    // black box and isn't part of the product's visible form).
+    const body = new THREE.Mesh(_taperedBoxGeo(w, h, d, 0.78), bodyMat);
+    encl.add(body);
+    const baffleZ = d / 2 + 0.002;
+    _addBoxGrille(encl, w, h, baffleZ, finish, groupInt, outside);
+    if (isAmperes) _addAmperesBadge(encl, 0, 0, baffleZ + 0.007, w);
+  }
+
+  encl.userData.acoustic_material = 'speaker_cabinet';
+  encl.userData.speaker_type = 'surface-mount';
+  return encl;
+}
+
+// full-range — bass-reflex cabinet, woofer + (optional) tweeter on the +Z
+// baffle, plus a bass-reflex port slot. Grille/baffle at +Z.
+function buildFullRangeEnclosure(dims, groupInt, outside) {
+  const { w, h, d, driverInches, hasTweeter, isAmperes, finish } = dims;
+  const encl = new THREE.Group();
+
+  // FS650 full-range — same family as the BS508 box: front baffle (+Z) larger
+  // than the back, sides taper toward the wall, portrait. Full-face mesh
+  // grille, large driver behind it, low-centre badge, rear bracket. FS650 is
+  // black (finish field). Reliable tapered BoxGeometry (solid, correct normals).
+  const bodyGeo = _taperedBoxGeo(w, h, d, 0.78);
+  const body = new THREE.Mesh(bodyGeo, _spkBodyMat(finish, outside));
+  encl.add(body);
+
+  const baffleZ = d / 2 + 0.002;
+  _addBoxGrille(encl, w, h, baffleZ, finish, groupInt, outside);
+  // Gold badge low-centre on the grille (the FS series carries it near the
+  // bottom). No protruding rear bracket.
+  if (isAmperes) _addAmperesBadge(encl, 0, -h * 0.36, baffleZ + 0.007, w);
+
+  encl.userData.acoustic_material = 'speaker_cabinet';
+  encl.userData.speaker_type = 'full-range';
+  return encl;
+}
+
+// column — tall slim cabinet; `driverCount` small driver circles stacked
+// vertically on a narrow +Z baffle.
+function buildColumnEnclosure(dims, groupInt, outside) {
+  const { w, h, d, driverCount, isAmperes, finish } = dims;
+  const encl = new THREE.Group();
+  // CL740/780/900 column. CATALOGUE PHOTO: tall slim rectangular cabinet, a
+  // slim FRAME border around a full vertical fine mesh grille, four visible
+  // corner SCREWS, a grey rear mounting bracket (side-visible), tiny gold
+  // badge at the very BOTTOM. driverCount drivers subtly behind the mesh.
+  const bodyMat = _spkBodyMat(finish, outside);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
+  encl.add(body);
+
+  const baffleZ = d / 2 + 0.002;
+  // Slim frame border (cabinet finish) framing the recessed mesh grille.
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 0.98, h * 0.99), bodyMat,
+  );
+  frame.position.z = baffleZ - 0.001;
+  encl.add(frame);
+  const grille = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 0.82, h * 0.93), _spkBoxGrilleMat(finish, groupInt, outside),
+  );
+  grille.position.z = baffleZ;
+  encl.add(grille);
+
+  // Stack driverCount faint driver shadows up the column BEHIND the grille.
+  const n = Math.max(2, Math.min(16, driverCount | 0));
+  const usable = h * 0.88;
+  const pitch = usable / n;
+  const r = Math.min(w * 0.30, pitch * 0.42);
+  for (let i = 0; i < n; i++) {
+    const y = -usable / 2 + pitch * (i + 0.5);
+    _addRecessedDriverHint(encl, 0, y, r, baffleZ);
+  }
+
+  // Four corner screws — small dark discs at the frame corners on the baffle.
+  const screwMat = new THREE.MeshStandardMaterial({ color: 0x3a3e44, roughness: 0.5, metalness: 0.7 });
+  const screwR = Math.min(w * 0.08, 0.006);
+  const sx = w * 0.42, sy = h * 0.47;
+  for (const [px, py] of [[-sx, sy], [sx, sy], [-sx, -sy], [sx, -sy]]) {
+    const screw = new THREE.Mesh(new THREE.CircleGeometry(screwR, 12), screwMat);
+    screw.position.set(px, py, baffleZ + 0.001);
+    encl.add(screw);
+  }
+
+  // Grey rear mounting bracket — a vertical plate behind the cabinet, taller
+  // than wide, visible from the side (matches the photo's wall mount).
+  const bracket = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.7, h * 0.5, 0.025), _spkMetalMat(outside),
+  );
+  bracket.position.set(0, 0, -d / 2 - 0.014);
+  encl.add(bracket);
+
+  // Tiny badge at the very bottom (per photo). Columns are narrow, so size
+  // off h instead of w so it stays legible without being huge.
+  if (isAmperes) _addAmperesBadge(encl, 0, -h * 0.47, baffleZ + 0.004, h * 0.22);
+
+  encl.userData.acoustic_material = 'speaker_cabinet';
+  encl.userData.speaker_type = 'column';
+  return encl;
+}
+
+// Exponential horn-bell profile as a LatheGeometry: a trumpet flare that stays
+// narrow at the throat (y=0) and widens fast toward the mouth (y=bellLen) — the
+// signature catalogue silhouette, not a straight cone. Revolved about +Y, then
+// rotateX(π/2) maps the axis to +Z (throat at z=0, mouth at z=bellLen).
+function _hornBellGeo(throatR, mouthR, bellLen) {
+  const pts = [];
+  const N = 18;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const r = throatR * Math.pow(mouthR / throatR, Math.pow(t, 1.7));
+    pts.push(new THREE.Vector2(Math.max(r, 0.003), t * bellLen));
+  }
+  const g = new THREE.LatheGeometry(pts, 40);
+  g.rotateX(Math.PI / 2);
+  return g;
+}
+
+// horn — the signature flared horn. A deep flaring BELL (round = exponential
+// lathe trumpet; rect = rounded pyramidal flare, no fins) with a cylindrical
+// DRIVER TUBE + motor running back from the throat (long for LH long-throw
+// models) and a U-yoke bracket. Mouth fires +Z (the aim direction).
+function buildHornEnclosure(dims, groupInt, outside) {
+  const { w, h, d, shape, isAmperes, finish } = dims;
+  const encl = new THREE.Group();
+  const bodyMat = _spkBodyMat(finish, outside);
+  const mouthR = Math.max(w, h) / 2;                       // mouth radius (front, +Z)
+  const throatR = Math.max(0.02, mouthR * 0.26);
+  const bellLen = Math.min(d, mouthR * 1.4);               // capped so it's a BELL, not a long cone
+  const tubeLen = Math.max(mouthR * 0.35, d - bellLen);    // driver tube (long for LH long-throw)
+  const mouthZ = d / 2;
+  const throatZ = mouthZ - bellLen;
+
+  // ---- Flaring bell ----
+  if (shape === 'horn-rect') {
+    // Rounded-rect pyramidal flare: big rect mouth at +Z, small rect throat at
+    // throatZ. DoubleSide so the concave bell interior reads. No radial fins —
+    // the real HS820/822 bell is clean with a central driver tube.
+    const mw = w / 2, mh = h / 2, tw = mw * 0.26, th = mh * 0.26;
+    const verts = new Float32Array([
+      -mw, -mh, mouthZ,  mw, -mh, mouthZ,  mw, mh, mouthZ,  -mw, mh, mouthZ,
+      -tw, -th, throatZ, tw, -th, throatZ, tw, th, throatZ, -tw, th, throatZ,
+    ]);
+    const idx = [0, 1, 5, 0, 5, 4,  1, 2, 6, 1, 6, 5,  2, 3, 7, 2, 7, 6,  3, 0, 4, 3, 4, 7];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const bell = new THREE.Mesh(geo, bodyMat);
+    bell.material.side = THREE.DoubleSide;
+    encl.add(bell);
+  } else {
+    // Round exponential bell (trumpet flare).
+    const bell = new THREE.Mesh(_hornBellGeo(throatR, mouthR, bellLen), bodyMat);
+    bell.material.side = THREE.DoubleSide;
+    bell.position.z = throatZ;                  // throat at throatZ, mouth at +d/2
+    encl.add(bell);
+    // Bright rim around the mouth so the bell pops at distance.
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(mouthR * 0.99, mouthR * 0.04, 8, 32), _spkMetalMat(outside),
+    );
+    rim.position.z = mouthZ;
+    encl.add(rim);
+  }
+
+  // ---- Driver tube + motor pod running back from the throat ----
+  const tube = new THREE.Mesh(
+    new THREE.CylinderGeometry(throatR * 1.15, throatR * 1.05, tubeLen, 20, 1, false),
+    bodyMat,
+  );
+  tube.rotation.x = Math.PI / 2;                // axis +Y → +Z
+  tube.position.z = throatZ - tubeLen / 2;      // from the throat back toward -Z
+  encl.add(tube);
+  const motor = new THREE.Mesh(
+    new THREE.CylinderGeometry(throatR * 1.35, throatR * 1.2, mouthR * 0.35, 18),
+    _spkMetalMat(outside),
+  );
+  motor.rotation.x = Math.PI / 2;
+  motor.position.z = throatZ - tubeLen - mouthR * 0.12;
+  encl.add(motor);
+  // Throat cap so the bell isn't see-through into empty space; small badge on it.
+  const cap = new THREE.Mesh(
+    new THREE.CircleGeometry(throatR * 1.05, 20), _spkGrilleMat(groupInt, outside),
+  );
+  cap.position.z = throatZ + 0.003;
+  encl.add(cap);
+  if (isAmperes) _addAmperesBadge(encl, 0, 0, throatZ + 0.005, throatR * 3.4);
+
+  // ---- U-yoke mounting bracket, hinged at the tube, dropping below ----
+  const yokeMat = _spkMetalMat(outside);
+  const armThick = Math.max(0.006, mouthR * 0.05);
+  const dropY = mouthR * 0.9;
+  const yokeZ = throatZ - tubeLen * 0.35;       // pivot around the tube
+  for (const sx of [-1, 1]) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(armThick, dropY, armThick), yokeMat);
+    arm.position.set(sx * (throatR * 1.5 + armThick), -dropY * 0.5, yokeZ);
+    encl.add(arm);
+  }
+  const cross = new THREE.Mesh(
+    new THREE.BoxGeometry(throatR * 3 + armThick * 2, armThick, armThick), yokeMat,
+  );
+  cross.position.set(0, -dropY, yokeZ);
+  encl.add(cross);
+
+  encl.userData.acoustic_material = 'speaker_cabinet';
+  encl.userData.speaker_type = 'horn';
+  return encl;
+}
+
+// sound-projector — cylindrical tube firing out the +Z end. `cylinder-bi`
+// (SP319) is bi-directional: grille at BOTH ends (+Z and -Z).
+function buildSoundProjectorEnclosure(dims, groupInt, outside) {
+  const { w, h, d, shape, isAmperes, finish } = dims;
+  const encl = new THREE.Group();
+  // SP220 sound projector. CATALOGUE PHOTO: a horizontal RIBBED cylinder/tube
+  // (longitudinal ribs along the body), a fine mesh grille recessed in the
+  // circular FIRING END (+Z), and a rounded U-yoke bracket underneath. The
+  // long dimension (h) is the firing axis (Z); diameter ~ w.
+  const radius = Math.max(w, d) / 2;
+  const len = h;
+  const bodyMat = _spkBodyMat(finish, outside);
+  const bodyGeo = new THREE.CylinderGeometry(radius, radius, len, 24, 1, false);
+  bodyGeo.rotateX(Math.PI / 2);                 // axis +Y → +Z
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  encl.add(body);
+
+  // Longitudinal RIBS — thin raised slats running along the tube length,
+  // spaced around the circumference (the cooling fins visible in the photo).
+  const ribMat = bodyMat;
+  const ribCount = 16;
+  for (let i = 0; i < ribCount; i++) {
+    const ang = (i / ribCount) * Math.PI * 2;
+    const rib = new THREE.Mesh(
+      new THREE.BoxGeometry(radius * 0.04, radius * 0.06, len * 0.9), ribMat,
+    );
+    rib.position.set(Math.cos(ang) * radius * 1.0, Math.sin(ang) * radius * 1.0, 0);
+    rib.rotation.z = ang;
+    encl.add(rib);
+  }
+
+  const bi = shape === 'cylinder-bi';
+  const grilleMat = _spkGrilleMat(groupInt, outside);
+  const coneMat = _spkConeMat();
+  const addEndCap = (zSign) => {
+    // Slightly recessed mesh grille dome on the firing end (per photo the
+    // mesh sits a touch proud in a rim). Rim ring + recessed grille + cone.
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(radius * 0.94, radius * 0.06, 8, 24), bodyMat,
+    );
+    rim.position.z = zSign * (len / 2 + 0.004);
+    encl.add(rim);
+    const grille = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.9, 24), grilleMat);
+    grille.position.z = zSign * (len / 2 + 0.002);
+    grille.rotation.y = zSign > 0 ? 0 : Math.PI;   // face outward
+    encl.add(grille);
+    const cone = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.62, 20), coneMat);
+    cone.position.z = zSign * (len / 2 - 0.012);
+    cone.rotation.y = zSign > 0 ? 0 : Math.PI;
+    encl.add(cone);
+  };
+  addEndCap(+1);                  // firing end (+Z = aim)
+  if (bi) addEndCap(-1);          // bi-directional rear end
+
+  // U-YOKE bracket underneath — a rounded-U arm hanging below the tube and a
+  // pivot stud on each side. Aluminium. Bottom of the U sits below the tube.
+  const yokeMat = _spkMetalMat(outside);
+  const yokeR = radius * 1.5;
+  // Side arms (down from the tube sides to the U bottom).
+  for (const sx of [-1, 1]) {
+    const arm = new THREE.Mesh(
+      new THREE.BoxGeometry(radius * 0.1, yokeR, radius * 0.1), yokeMat,
+    );
+    arm.position.set(sx * radius * 1.05, -yokeR * 0.4, 0);
+    encl.add(arm);
+    // Pivot stud where the arm meets the tube.
+    const stud = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 0.12, radius * 0.12, radius * 0.16, 12), yokeMat,
+    );
+    stud.rotation.z = Math.PI / 2;
+    stud.position.set(sx * radius * 1.02, 0, 0);
+    encl.add(stud);
+  }
+  // U bottom bar.
+  const bottom = new THREE.Mesh(
+    new THREE.BoxGeometry(radius * 2.2, radius * 0.1, radius * 0.1), yokeMat,
+  );
+  bottom.position.set(0, -yokeR * 0.85, 0);
+  encl.add(bottom);
+
+  if (isAmperes) {
+    // Wordmark wraps the TOP of the tube following its curve (the tube axis
+    // is +Z, so build an arc cylinder along +Z and centre the arc at the +Y
+    // top). Mirror-safe via the shared texture's repeat.x = -1.
+    const textTex = getAmperesTextTexture();
+    const arcFrac = 0.34;
+    const arcLen = 2 * Math.PI * radius * arcFrac;
+    const thetaLength = 2 * Math.PI * arcFrac;
+    const badgeLen = arcLen * 0.25;        // along the tube (Z)
+    // Cylinder native axis is +Y; rotate so axis → +Z. After rotateX(+90°),
+    // the geometry's +Y(top) maps to -Z... we want the arc to span the tube
+    // length along Z and the open face to point +Y. Build the arc centred on
+    // the +Y meridian: thetaStart from +X toward +Z; +Y is at θ=π/2.
+    const thetaStart = Math.PI / 2 - thetaLength / 2;
+    const geo = new THREE.CylinderGeometry(
+      radius * 1.05, radius * 1.05, badgeLen, 20, 1, true, thetaStart, thetaLength,
+    );
+    geo.rotateX(Math.PI / 2);              // cylinder axis +Y → +Z (tube axis)
+    const badge = new THREE.Mesh(
+      geo, new THREE.MeshBasicMaterial({ map: textTex, transparent: true, side: THREE.DoubleSide }),
+    );
+    encl.add(badge);
+  }
+
+  encl.userData.acoustic_material = 'speaker_cabinet';
+  encl.userData.speaker_type = 'sound-projector';
+  return encl;
+}
+
+// garden — MUSHROOM bollard. CATALOGUE PHOTO (SG320): a truncated-cone base
+// (wider at the bottom), a domed CAP floating ABOVE on short posts, with the
+// driver firing UP/OUT through the 360° GAP between base top and cap. Foot
+// tabs at the base bottom. Stands along LOCAL +Y. Rotationally symmetric in
+// the horizontal plane → yaw invisible (the 360° dispersion is the point).
+function buildGardenBollardEnclosure(dims, groupInt, outside) {
+  const { w, h, isAmperes, finish } = dims;
+  const encl = new THREE.Group();
+  const radius = w / 2;
+  const bodyMat = _spkBodyMat(finish, outside);
+
+  // Truncated-cone BASE — wide at the bottom, narrowing up to the gap. Solid.
+  const baseH = h * 0.55;
+  const baseBotR = radius;
+  const baseTopR = radius * 0.72;
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(baseTopR, baseBotR, baseH, 28), bodyMat,
+  );
+  base.position.y = baseH / 2;
+  encl.add(base);
+  // Cap the top of the base so we don't see into it (closed cone top disc).
+  const baseTop = new THREE.Mesh(
+    new THREE.CircleGeometry(baseTopR, 28),
+    new THREE.MeshStandardMaterial({ color: 0x14171a, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide }),
+  );
+  baseTop.rotation.x = -Math.PI / 2;
+  baseTop.position.y = baseH;
+  encl.add(baseTop);
+
+  // UPWARD-FIRING driver visible in the gap — a small cone pointing up,
+  // sitting on the base top, plus a centre post the cap mounts to.
+  const driver = new THREE.Mesh(
+    new THREE.ConeGeometry(baseTopR * 0.6, h * 0.16, 24, 1, true), _spkConeMat(),
+  );
+  driver.position.y = baseH + h * 0.08;
+  encl.add(driver);
+  const centrePost = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius * 0.12, radius * 0.12, h * 0.26, 12), bodyMat,
+  );
+  centrePost.position.y = baseH + h * 0.13;
+  encl.add(centrePost);
+
+  // The GAP region: short outer POSTS holding the cap above the base (the
+  // sound escapes 360° between them).
+  const gapY = baseH + h * 0.13;       // mid-height of the gap
+  const postMat = bodyMat;
+  for (let i = 0; i < 4; i++) {
+    const ang = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const post = new THREE.Mesh(
+      new THREE.BoxGeometry(radius * 0.1, h * 0.26, radius * 0.1), postMat,
+    );
+    post.position.set(Math.cos(ang) * baseTopR * 0.9, gapY, Math.sin(ang) * baseTopR * 0.9);
+    encl.add(post);
+  }
+
+  // Floating domed CAP above the gap (the mushroom head).
+  const capR = radius * 1.05;
+  const capY = baseH + h * 0.26;
+  const cap = new THREE.Mesh(
+    new THREE.SphereGeometry(capR, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), bodyMat,
+  );
+  cap.position.y = capY;
+  encl.add(cap);
+  // Underside disc of the cap so it's not hollow when seen from below.
+  const capUnder = new THREE.Mesh(
+    new THREE.CircleGeometry(capR, 28),
+    new THREE.MeshStandardMaterial({ color: 0x14171a, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide }),
+  );
+  capUnder.rotation.x = Math.PI / 2;
+  capUnder.position.y = capY;
+  encl.add(capUnder);
+
+  // Foot tabs at the very bottom of the base (small flat lugs).
+  const tabMat = bodyMat;
+  for (let i = 0; i < 3; i++) {
+    const ang = (i / 3) * Math.PI * 2;
+    const tab = new THREE.Mesh(
+      new THREE.BoxGeometry(radius * 0.18, h * 0.04, radius * 0.1), tabMat,
+    );
+    tab.position.set(Math.cos(ang) * radius * 1.02, h * 0.02, Math.sin(ang) * radius * 1.02);
+    tab.rotation.y = -ang;
+    encl.add(tab);
+  }
+
+  // Badge wraps the curved BASE cone surface, just below the gap, following
+  // its curve (the base is roughly cylindrical there). Uses the +Y-axis
+  // curved-wrap helper centred on the +Z meridian.
+  if (isAmperes) _addAmperesBadgeCurvedY(encl, baseTopR * 1.02, baseH * 0.62, 0.30);
+
+  encl.userData.acoustic_material = 'speaker_cabinet';
+  encl.userData.speaker_type = 'garden';
+  return encl;
+}
+
+// pendant — hanging SPHERE. CATALOGUE PHOTO (PS820): a white sphere hanging
+// from a small truncated-cone ceiling CUP on a thin cable; a cable-clamp
+// collar where the cable meets the sphere top; the LOWER hemisphere has a
+// recessed FINNED/LOUVRED down-firing opening (radial fin vanes inside a
+// recessed cylinder). Upper hemisphere is smooth white. Cable points LOCAL
+// +Y (up) so it hangs correctly.
+function buildPendantEnclosure(dims, groupInt, outside) {
+  const { w, isAmperes, finish } = dims;
+  const encl = new THREE.Group();
+  const radius = w / 2;
+  const bodyMat = _spkBodyMat(finish, outside);
+  // Sphere body — upper hemisphere smooth, lower hemisphere mostly smooth
+  // with a recessed down-firing opening at the bottom (built below). Render
+  // the whole sphere as the body so the silhouette reads as a ball.
+  const upper = new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 28, 18, 0, Math.PI * 2, 0, Math.PI * 0.62), bodyMat,
+  );
+  encl.add(upper);
+  // Lower band of the sphere (between the equator and the down-opening) —
+  // same finish, slightly larger so it reads as a seam.
+  const lower = new THREE.Mesh(
+    new THREE.SphereGeometry(radius * 1.002, 28, 18, 0, Math.PI * 2, Math.PI * 0.62, Math.PI * 0.20),
+    bodyMat,
+  );
+  encl.add(lower);
+
+  // Recessed down-firing OPENING — a short open cylinder set up into the
+  // bottom of the sphere, with radial fin vanes inside (the louvres).
+  const openR = radius * 0.62;
+  const recessMat = new THREE.MeshStandardMaterial({
+    color: 0x14171a, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide,
+  });
+  const recess = new THREE.Mesh(
+    new THREE.CylinderGeometry(openR, openR * 0.86, radius * 0.5, 24, 1, true), recessMat,
+  );
+  recess.position.y = -radius * 0.62;
+  encl.add(recess);
+  // Top of the recess (driver disc seen up inside the louvres).
+  const cone = new THREE.Mesh(new THREE.CircleGeometry(openR * 0.86, 24), _spkConeMat());
+  cone.rotation.x = -Math.PI / 2;              // face down (-Y)
+  cone.position.y = -radius * 0.4;
+  encl.add(cone);
+  // Radial FIN vanes inside the opening (the louvred look from the photo).
+  const finMat = bodyMat;
+  for (let i = 0; i < 6; i++) {
+    const ang = (i / 6) * Math.PI;
+    const fin = new THREE.Mesh(
+      new THREE.BoxGeometry(openR * 1.7, radius * 0.46, radius * 0.03), finMat,
+    );
+    fin.rotation.y = ang;
+    fin.position.y = -radius * 0.62;
+    encl.add(fin);
+  }
+
+  // Ceiling CUP (truncated cone, wide at the ceiling) + cable + clamp collar.
+  const cupMat = bodyMat;
+  const cup = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius * 0.34, radius * 0.22, radius * 0.34, 18), cupMat,
+  );
+  cup.position.y = radius * 2.1;
+  encl.add(cup);
+  const cable = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius * 0.035, radius * 0.035, radius * 1.6, 8),
+    new THREE.MeshStandardMaterial({ color: 0xb8bcc2, roughness: 0.5, metalness: 0.3 }),
+  );
+  cable.position.y = radius * 1.25;
+  encl.add(cable);
+  // Cable-clamp collar where the cable meets the sphere top.
+  const collar = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius * 0.12, radius * 0.14, radius * 0.12, 14), cupMat,
+  );
+  collar.position.y = radius * 0.96;
+  encl.add(collar);
+
+  // Badge wraps the curved sphere on the +Z meridian, just below the equator,
+  // following the surface. Use the local sphere radius at that latitude so
+  // the arc hugs the ball. At y = -0.3·R the cross-section radius ≈
+  // R·cos(asin(0.3)) ≈ 0.954·R.
+  if (isAmperes) _addAmperesBadgeCurvedY(encl, radius * 0.95, -radius * 0.3, 0.26);
+
+  encl.userData.acoustic_material = 'speaker_cabinet';
+  encl.userData.speaker_type = 'pendant';
+  return encl;
+}
+
 // Builds a speaker enclosure group oriented so its front face (local -Z) points
 // along the aim vector. Used by both lookAt() + optional roll-about-aim.
 function buildSpeakerEnclosure(src, groupInt, outside) {
@@ -4750,6 +5581,18 @@ function buildSpeakerEnclosure(src, groupInt, outside) {
   // behind) — same geometry as the Speaker-workbench preview so the
   // model looks consistent across the app.
   if (type === 'ceiling') return buildCeilingSpeakerEnclosure(dims, groupInt, outside);
+
+  // Amperes commercial/installed categories — each builder keeps the
+  // ceiling convention: the firing face lives at LOCAL +Z so that after
+  // encl.lookAt(pos + aim) in rebuildSources() the grille/mouth fires
+  // along the aim direction (not the "butt"). See buildCeilingSpeakerEnclosure.
+  if (type === 'surface-mount')   return buildSurfaceMountEnclosure(dims, groupInt, outside);
+  if (type === 'full-range')      return buildFullRangeEnclosure(dims, groupInt, outside);
+  if (type === 'column')          return buildColumnEnclosure(dims, groupInt, outside);
+  if (type === 'horn')            return buildHornEnclosure(dims, groupInt, outside);
+  if (type === 'sound-projector') return buildSoundProjectorEnclosure(dims, groupInt, outside);
+  if (type === 'garden')          return buildGardenBollardEnclosure(dims, groupInt, outside);
+  if (type === 'pendant')         return buildPendantEnclosure(dims, groupInt, outside);
 
   // Matte-black cabinet body. Line-array elements are RECTANGULAR boxes
   // (stacking flat face-to-face is the point of a line array — the wedge
@@ -8481,6 +9324,77 @@ function rebuildSurauStructure(room) {
         stepMesh.userData.no_walk_collide = true;
         roomGroup.add(stepMesh);
         zCursor += stepBudget;
+      }
+    }
+
+    // ----- Şerefe gallery — cantilevered balcony that carries the horns ---
+    // Optional mn.gallery: a projecting square platform partway up the shaft
+    // with a low solid parapet, sitting ABOVE the decorative belt and BELOW
+    // the cap. The 4 azan horns (group-Z sources) mount on the cardinal faces
+    // at z≈6.6 m, 0.95 m out from the shaft centre, so a ~2.0 m square slab +
+    // 1.0 m parapet lands right under/around them and reads as their balcony.
+    // All pieces are painted concrete (stuccoMat) and VISUAL-ONLY — the
+    // precision tracer ignores them (no_acoustic), and the avatar walks under
+    // them (no_walk_collide), exactly like the belt / lantern / dome / finial.
+    if (mn.gallery) {
+      const g = mn.gallery;
+      const galFloorY = Number.isFinite(g.floor_height_m) ? g.floor_height_m : totalH * 0.72;
+      const galSize = Number.isFinite(g.size_m) ? g.size_m : baseSize + 0.8;
+      const parapetH = Number.isFinite(g.parapet_height_m) ? g.parapet_height_m : 1.0;
+      const slabT = 0.18;          // platform slab thickness
+      const half = galSize / 2;
+
+      // Corbel / moulding — a short tapered-ish band wider than the shaft
+      // tucked just under the slab where the balcony meets the tower. Reads
+      // as a supporting bracket so the slab doesn't appear to float. Modelled
+      // as a thin box slightly narrower than the slab, sitting directly below
+      // the slab's underside.
+      const corbelH = 0.22;
+      const corbelSize = baseSize + (galSize - baseSize) * 0.55;   // between shaft and slab
+      const corbel = new THREE.Mesh(
+        new THREE.BoxGeometry(corbelSize, corbelH, corbelSize), stuccoMat,
+      );
+      corbel.position.set(co.x, galFloorY - slabT - corbelH / 2, co.y);
+      corbel.userData.tag = 'surau_minaret_gallery_corbel';
+      corbel.userData.no_acoustic = true;
+      corbel.userData.no_walk_collide = true;
+      roomGroup.add(corbel);
+
+      // Cantilevered platform slab — square, wider than the shaft so it
+      // reads as a projecting balcony. Top face sits at galFloorY (the horns'
+      // "floor"); the slab body hangs below it.
+      const slab = new THREE.Mesh(
+        new THREE.BoxGeometry(galSize, slabT, galSize), stuccoMat,
+      );
+      slab.position.set(co.x, galFloorY - slabT / 2, co.y);
+      slab.userData.tag = 'surau_minaret_gallery_slab';
+      slab.userData.no_acoustic = true;
+      slab.userData.no_walk_collide = true;
+      roomGroup.add(slab);
+
+      // Solid parapet / balustrade — a low painted-concrete band around the
+      // slab perimeter (Malaysian vernacular reads as a solid wall, not
+      // turned balusters). Four thin slabs, one per edge, standing on the
+      // platform top. Wall thickness 0.10 m, inset so the outer face is flush
+      // with the slab edge. The horns sit just outside/atop this band.
+      const wallT = 0.10;
+      const railCY = galFloorY + parapetH / 2;
+      const parapetEdges = [
+        // [width, depth, x-offset, z-offset]  — N/S run full width, E/W fit between
+        [galSize, wallT, 0, -half + wallT / 2],   // south edge (−z)
+        [galSize, wallT, 0,  half - wallT / 2],   // north edge (+z)
+        [wallT, galSize - 2 * wallT, -half + wallT / 2, 0],   // west edge (−x)
+        [wallT, galSize - 2 * wallT,  half - wallT / 2, 0],   // east edge (+x)
+      ];
+      for (const [pw, pd, dx, dz] of parapetEdges) {
+        const rail = new THREE.Mesh(
+          new THREE.BoxGeometry(pw, parapetH, pd), stuccoMat,
+        );
+        rail.position.set(co.x + dx, railCY, co.y + dz);
+        rail.userData.tag = 'surau_minaret_gallery_parapet';
+        rail.userData.no_acoustic = true;
+        rail.userData.no_walk_collide = true;
+        roomGroup.add(rail);
       }
     }
   }

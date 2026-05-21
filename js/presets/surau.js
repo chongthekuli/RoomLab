@@ -35,6 +35,27 @@ const H = 4.5;           // ceiling
 const SPK_CEILING_Z = 4.30;  // ceiling-mount speaker height (just under ceiling)
 const SPK_ARCADE_Z  = 4.20;  // arcade ceiling-mount speaker height (under arcade flat roof at 4.4)
 const SPK_MODEL = 'data/loudspeakers/amperes-cs520.json';
+// Exterior azan (call-to-prayer) horn — Amperes HS880 (20" long-throw, 80 W,
+// 110 dB, ~70° coverage). Chosen by the 2026-05-22 expert review (Felix/PA +
+// Dr. Chen/acoustics + Islamic-architecture) as the best reach-vs-coverage
+// balance for 4 horns tiling 360° from the minaret. See project memory
+// project_surau_azan_horns. The minaret sits at the NW corner; scene.js places
+// its shaft centre at state (-clearance, D+clearance) = (-1.2, 18.9) with
+// clearance = 0.6 + base/2. The horns ring it on a şerefe gallery at ~6.5 m,
+// one per cardinal face, aimed OUTWARD (yaw 0=N, 90=E, 180=S, 270=W) and
+// tilted 12° down for ground coverage.
+const HORN_MODEL = 'data/loudspeakers/amperes-hs880.json';
+const MIN_CX = -1.2;          // minaret shaft centre X (NW corner, outside)
+const MIN_CY = D + 1.2;       // minaret shaft centre Y
+// Horns sit ON the gallery railing, NOT buried in it. The gallery parapet top
+// is at floor (6.1) + parapet (0.5) = 6.6 m. The horn centre is lifted to 7.0 m
+// and pushed to the platform edge (offset 1.0 = gallery half-width) so the bell
+// (≈±0.25 m, tilted −12°) clears ABOVE and OUTSIDE the railing while the yoke
+// rests on the rail — instead of the bell passing through a solid parapet wall.
+const HORN_Z = 7.0;           // horn centre height (bell ≈ 6.75–7.25 m, above the 6.6 m rail)
+const HORN_OFF = 1.0;         // offset from shaft centre = gallery edge (bell projects outward)
+const HORN_W = 80;            // 100 V line, 80 W tap (full rated — azan wants headroom)
+const HORN_TILT = -12;        // downtilt
 
 // IMAM_STRIP is the depth in front of the mihrab reserved for the imam
 // — used to position the imam ceiling speaker and the L1 listener.
@@ -204,6 +225,19 @@ export default {
       base_size_m: 1.2,
       height_m: 8.5,
       cap_style: 'crescent',
+      // şerefe gallery — cantilevered platform + parapet that carries the 4
+      // azan horns (group Z), one per cardinal face. Per the 2026-05-22
+      // Islamic-architecture review: floor at ~0.72 H (6.1 m), ~2.0 m square
+      // (shaft + ~0.4 m/side), 1.0 m parapet, clean cap above. Rendered by
+      // rebuildSurauStructure(). Horn MESHES come from the 4 group-Z sources;
+      // this just adds the balcony they stand on.
+      gallery: {
+        floor_height_m: 6.1,
+        size_m: 2.0,
+        // Low rail (0.5 m) so the horns sit ON it with the bell clear above —
+        // a full 1.0 m parapet engulfed the horn bells ("through a wall").
+        parapet_height_m: 0.5,
+      },
     },
     // Arcade / serambi — covered porch wrapping the front (south) plus
     // the two side walls (east + west). The qibla wall (north) is never
@@ -364,6 +398,16 @@ export default {
       power_watts: 20,
       groupId: 'I',
     },
+
+    // ---- AZAN MINARET HORNS (Z6) — 4× Amperes HS880, exterior ----
+    // Ring of 4 long-throw horns on the minaret gallery (şerefe) at ~6.5 m,
+    // one per cardinal face, aimed OUTWARD + 12° down, broadcasting the azan
+    // across the neighbourhood. Own zone/amp (group Z), separate from the
+    // interior CS520 PA. Expert-chosen 2026-05-22 (see HORN_MODEL comment).
+    { modelUrl: HORN_MODEL, position: { x: MIN_CX, y: MIN_CY + HORN_OFF, z: HORN_Z }, aim: { yaw: 0,   pitch: HORN_TILT, roll: 0 }, power_watts: HORN_W, groupId: 'Z' }, // North
+    { modelUrl: HORN_MODEL, position: { x: MIN_CX + HORN_OFF, y: MIN_CY, z: HORN_Z }, aim: { yaw: 90,  pitch: HORN_TILT, roll: 0 }, power_watts: HORN_W, groupId: 'Z' }, // East
+    { modelUrl: HORN_MODEL, position: { x: MIN_CX, y: MIN_CY - HORN_OFF, z: HORN_Z }, aim: { yaw: 180, pitch: HORN_TILT, roll: 0 }, power_watts: HORN_W, groupId: 'Z' }, // South
+    { modelUrl: HORN_MODEL, position: { x: MIN_CX - HORN_OFF, y: MIN_CY, z: HORN_Z }, aim: { yaw: 270, pitch: HORN_TILT, roll: 0 }, power_watts: HORN_W, groupId: 'Z' }, // West
   ],
   listeners: [
     // Inside the prayer hall — 5 representative congregation positions.
@@ -382,5 +426,11 @@ export default {
     { id: 'L6', label: 'South arcade centre',      position: { x: W / 2,        y: -1.5                 }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
     { id: 'L7', label: 'East arcade',              position: { x: W + 1.5,      y: D / 2                }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
     { id: 'L8', label: 'West arcade',              position: { x: -1.5,         y: D / 2                }, elevation_m: 0, posture: 'standing', custom_ear_height_m: null },
+    // (Azan-reach probes A1–A5 removed per user 2026-05-22 — they sat far out
+    // on the empty grid beyond the surau footprint and cluttered the view /
+    // ballooned the iso+print camera fit. To re-test azan projection distance,
+    // drop a listener anywhere outside and read its per-listener SPL; the
+    // exterior ground plane still extends ~600 m for that. Dr. Chen's HS880
+    // @80 W free-field estimate: ~450 m to 70 dB, ~820 m to 60 dB.)
   ],
 };

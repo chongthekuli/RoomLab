@@ -137,7 +137,12 @@ ok(ilCascade <= 8.001, `3-column cascade ≤ 8 dB cap at 4 kHz (got ${ilCascade.
 // the obstacle registry — isolates the minaret IL directly without
 // confounding wall-TL geometry. The control "no obstacles" run uses
 // a room with surauStructure cleared so extractOutdoorObstacles returns [].
-const flatSources = state.sources.map(src => ({ ...src }));
+// Exclude the exterior azan minaret horns (group 'Z', added to the surau
+// preset 2026-05-22): they sit AT the minaret and flood the shadow probe with
+// direct sound from the unshadowed side, masking the insertion loss this
+// integration test isolates. The minaret IL physics is unchanged — we measure
+// it against the original (genuinely shadowed) source set only.
+const flatSources = state.sources.filter(src => src.groupId !== 'Z').map(src => ({ ...src }));
 const splShadowWith = computeMultiSourceSPL({
   sources: flatSources,
   getSpeakerDef: url => getCachedLoudspeaker(url),

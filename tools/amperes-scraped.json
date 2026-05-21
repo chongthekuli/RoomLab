@@ -1,0 +1,569 @@
+{
+  "bs410": {
+    "sens_db": 92,
+    "freq_hz": [
+      100,
+      16000
+    ],
+    "dims_mm": {
+      "w_mm": 185,
+      "h_mm": 215,
+      "d_mm": 90,
+      "form": "box"
+    },
+    "net_weight_kg": null,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "10W 100V line",
+    "taps": "1W 3W 6W 10W",
+    "_url": "/bs410"
+  },
+  "bs506": {
+    "sens_db": 93,
+    "freq_hz": [
+      100,
+      15000
+    ],
+    "dims_mm": {
+      "w_mm": 172,
+      "h_mm": 195,
+      "d_mm": 105,
+      "form": "box"
+    },
+    "net_weight_kg": null,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "6W 100V line",
+    "taps": "1W 3W 6W",
+    "_url": "/bs506"
+  },
+  "bs508": {
+    "sens_db": 94,
+    "freq_hz": [
+      120,
+      18000
+    ],
+    "dims_mm": {
+      "w_mm": 220,
+      "h_mm": 130,
+      "d_mm": 70,
+      "form": "box"
+    },
+    "net_weight_kg": null,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "10W 100V line",
+    "taps": "1W 3W 6W 10W",
+    "_url": "/bs508"
+  },
+  "fs420": {
+    "sens_db": 89,
+    "freq_hz": [
+      100,
+      18000
+    ],
+    "dims_mm": {
+      "w_mm": 160,
+      "h_mm": 225,
+      "d_mm": 165,
+      "form": "box"
+    },
+    "net_weight_kg": 1.95,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "20W 100V line",
+    "taps": null,
+    "_url": "/fs-speakers/fs420"
+  },
+  "fs425": {
+    "sens_db": 87,
+    "freq_hz": [
+      105,
+      18000
+    ],
+    "dims_mm": {
+      "w_mm": 165,
+      "h_mm": 270,
+      "d_mm": 170,
+      "form": "box"
+    },
+    "net_weight_kg": 2.2,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "20W 100V line",
+    "taps": "10W 20W",
+    "_url": "/fs425"
+  },
+  "fs338": {
+    "sens_db": 87,
+    "freq_hz": [
+      70,
+      16000
+    ],
+    "dims_mm": {
+      "w_mm": 135,
+      "h_mm": 385,
+      "d_mm": 260,
+      "form": "box"
+    },
+    "net_weight_kg": 3.5,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "40W 100V line",
+    "taps": "5W 10W 20W 40W",
+    "_url": "/fs338"
+  },
+  "fs640": {
+    "sens_db": 88,
+    "freq_hz": [
+      70,
+      18000
+    ],
+    "dims_mm": {
+      "w_mm": 215,
+      "h_mm": 284,
+      "d_mm": 190,
+      "form": "box"
+    },
+    "net_weight_kg": 3.7,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "40W 100V line",
+    "taps": "5W 10W 20W 40W",
+    "_url": "/fs-speakers/fs640"
+  },
+  "fs650": {
+    "sens_db": 90,
+    "freq_hz": [
+      70,
+      17000
+    ],
+    "dims_mm": {
+      "w_mm": 230,
+      "h_mm": 200,
+      "d_mm": 340,
+      "form": "box"
+    },
+    "net_weight_kg": 4.5,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "50W 100V line",
+    "taps": "5W 10W 30W 50W",
+    "_url": "/fs650"
+  },
+  "hs815": {
+    "sens_db": 103,
+    "freq_hz": [
+      350,
+      7000
+    ],
+    "dims_mm": {
+      "w_mm": 210,
+      "h_mm": 210,
+      "d_mm": 240,
+      "form": "round"
+    },
+    "net_weight_kg": 1.4,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "15W 100V line",
+    "taps": "1W 3W 5W 10W 15W",
+    "_url": "/horn-speakers/hs815"
+  },
+  "hs830": {
+    "sens_db": 110,
+    "freq_hz": [
+      400,
+      7000
+    ],
+    "dims_mm": {
+      "w_mm": 310,
+      "h_mm": 310,
+      "d_mm": 345,
+      "form": "round"
+    },
+    "net_weight_kg": 2.4,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "30W 100V line",
+    "taps": "3W 5W 10W 15W 30W",
+    "_url": "/horn-speakers/hs830"
+  },
+  "hs820": {
+    "sens_db": 105,
+    "freq_hz": [
+      250,
+      8000
+    ],
+    "dims_mm": {
+      "w_mm": 220,
+      "h_mm": 220,
+      "d_mm": 160,
+      "form": "round"
+    },
+    "net_weight_kg": 1.5,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "15W 100V line",
+    "taps": "1W 3W 5W 10W 15W",
+    "_url": "/horn-speakers/hs820"
+  },
+  "hs822": {
+    "sens_db": 105,
+    "freq_hz": [
+      400,
+      8000
+    ],
+    "dims_mm": {
+      "w_mm": 285,
+      "h_mm": 285,
+      "d_mm": 205,
+      "form": "round"
+    },
+    "net_weight_kg": 2.2,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "30W 100V line",
+    "taps": "3W 5W 10W 15W 30W",
+    "_url": "/horn-speakers/hs822"
+  },
+  "hs725": {
+    "sens_db": 90,
+    "freq_hz": [
+      100,
+      10000
+    ],
+    "dims_mm": {
+      "w_mm": 366,
+      "h_mm": 172,
+      "d_mm": 272,
+      "form": "box"
+    },
+    "net_weight_kg": 3.25,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "30W 100V line",
+    "taps": "3.8W 7.5W 15W 30W",
+    "_url": "/horn-speakers/hs725"
+  },
+  "hs750": {
+    "sens_db": 98,
+    "freq_hz": [
+      90,
+      17000
+    ],
+    "dims_mm": {
+      "w_mm": 363,
+      "h_mm": 253,
+      "d_mm": 310,
+      "form": "box"
+    },
+    "net_weight_kg": 3.6,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "50W 100V line",
+    "taps": "15W 30W 50W",
+    "_url": "/horn-speakers/hs750"
+  },
+  "hs810": {
+    "sens_db": 103,
+    "freq_hz": [
+      200,
+      8000
+    ],
+    "dims_mm": {
+      "w_mm": 360,
+      "h_mm": 360,
+      "d_mm": 465,
+      "form": "round"
+    },
+    "net_weight_kg": 3.75,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "50W 100V line 100W 8 Ohm",
+    "taps": null,
+    "_url": "/horn-speakers/hs810"
+  },
+  "hs880": {
+    "sens_db": 110,
+    "freq_hz": [
+      160,
+      6000
+    ],
+    "dims_mm": {
+      "w_mm": 504,
+      "h_mm": 504,
+      "d_mm": 335,
+      "form": "round"
+    },
+    "net_weight_kg": 4,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "80W 100V line",
+    "taps": null,
+    "_url": "/horn-speakers/hs880"
+  },
+  "lh100": {
+    "sens_db": 115,
+    "freq_hz": [
+      350,
+      7000
+    ],
+    "dims_mm": {
+      "w_mm": 730,
+      "h_mm": 385,
+      "d_mm": 1565,
+      "form": "box"
+    },
+    "net_weight_kg": 6.5,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "100W 100V line",
+    "taps": null,
+    "_url": "/horn-speakers/lh100"
+  },
+  "lh201": {
+    "sens_db": 110,
+    "freq_hz": null,
+    "dims_mm": {
+      "w_mm": 536,
+      "h_mm": 536,
+      "d_mm": 1170,
+      "form": "round"
+    },
+    "net_weight_kg": 5.4,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "100W 100V line",
+    "taps": null,
+    "_url": "/horn-speakers/lh201"
+  },
+  "sp219": {
+    "sens_db": 91,
+    "freq_hz": [
+      130,
+      15000
+    ],
+    "dims_mm": {
+      "w_mm": 138,
+      "h_mm": 138,
+      "d_mm": 192,
+      "form": "round"
+    },
+    "net_weight_kg": 2,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "15W 100V line",
+    "taps": "7.5W 15W",
+    "_url": "/horn-speakers/sp219"
+  },
+  "sp220": {
+    "sens_db": 90,
+    "freq_hz": [
+      90,
+      15000
+    ],
+    "dims_mm": {
+      "w_mm": 140,
+      "h_mm": 140,
+      "d_mm": 195,
+      "form": "round"
+    },
+    "net_weight_kg": 1.6,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "20W 100V line",
+    "taps": "7.5W 15W 20W",
+    "_url": "/sp220"
+  },
+  "sp319": {
+    "sens_db": 91,
+    "freq_hz": [
+      150,
+      18000
+    ],
+    "dims_mm": {
+      "w_mm": 138,
+      "h_mm": 138,
+      "d_mm": 195,
+      "form": "round"
+    },
+    "net_weight_kg": 3,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "40W 100V line",
+    "taps": "20W 40W",
+    "_url": "/horn-speakers/sp319"
+  },
+  "sg320": {
+    "sens_db": 84,
+    "freq_hz": [
+      70,
+      16000
+    ],
+    "dims_mm": {
+      "w_mm": 320,
+      "h_mm": 360,
+      "d_mm": 320,
+      "form": "bollard"
+    },
+    "net_weight_kg": 3.8,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "20W 100V line",
+    "taps": null,
+    "_url": "/sg320"
+  },
+  "ps820": {
+    "sens_db": 91,
+    "freq_hz": [
+      80,
+      18000
+    ],
+    "dims_mm": {
+      "w_mm": 254,
+      "h_mm": 254,
+      "d_mm": 254,
+      "form": "sphere"
+    },
+    "net_weight_kg": 2.3,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "20W 100V line",
+    "taps": null,
+    "_url": "/ps820"
+  },
+  "cl902": {
+    "sens_db": 87,
+    "freq_hz": [
+      200,
+      16000
+    ],
+    "dims_mm": {
+      "w_mm": 79,
+      "h_mm": 190,
+      "d_mm": 89,
+      "form": "box"
+    },
+    "net_weight_kg": 1.1,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "10W 100V line",
+    "taps": "6W 10W",
+    "_url": "/cl900"
+  },
+  "cl904": {
+    "sens_db": 88,
+    "freq_hz": [
+      200,
+      17000
+    ],
+    "dims_mm": {
+      "w_mm": 79,
+      "h_mm": 350,
+      "d_mm": 89,
+      "form": "box"
+    },
+    "net_weight_kg": 1.5,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "20W 100V line",
+    "taps": "10W 20W",
+    "_url": "/cl900"
+  },
+  "cl908": {
+    "sens_db": 89,
+    "freq_hz": [
+      240,
+      16000
+    ],
+    "dims_mm": {
+      "w_mm": 79,
+      "h_mm": 567,
+      "d_mm": 89,
+      "form": "box"
+    },
+    "net_weight_kg": 2.5,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "40W 100V line",
+    "taps": "30W 40W",
+    "_url": "/cl900"
+  },
+  "cl912": {
+    "sens_db": 94,
+    "freq_hz": [
+      220,
+      17000
+    ],
+    "dims_mm": {
+      "w_mm": 79,
+      "h_mm": 782,
+      "d_mm": 89,
+      "form": "box"
+    },
+    "net_weight_kg": 3.9,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "60W 100V line",
+    "taps": "50W 60W",
+    "_url": "/cl900"
+  },
+  "cl916": {
+    "sens_db": 87,
+    "freq_hz": [
+      220,
+      18000
+    ],
+    "dims_mm": {
+      "w_mm": 79,
+      "h_mm": 1128,
+      "d_mm": 89,
+      "form": "box"
+    },
+    "net_weight_kg": 5.55,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "80W 100V line",
+    "taps": "70W 80W",
+    "_url": "/cl900"
+  },
+  "cl740": {
+    "sens_db": 88,
+    "freq_hz": [
+      100,
+      16000
+    ],
+    "dims_mm": {
+      "w_mm": 130,
+      "h_mm": 310,
+      "d_mm": 140,
+      "form": "box"
+    },
+    "net_weight_kg": 3.5,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "40W 100V line",
+    "taps": "30W 40W",
+    "_url": "/cl740-780"
+  },
+  "cl780": {
+    "sens_db": 88,
+    "freq_hz": [
+      100,
+      17000
+    ],
+    "dims_mm": {
+      "w_mm": 130,
+      "h_mm": 620,
+      "d_mm": 140,
+      "form": "box"
+    },
+    "net_weight_kg": 6.1,
+    "driver_mm": null,
+    "driver_in": null,
+    "driver_raw": "80W 100V line",
+    "taps": "70W 80W",
+    "_url": "/cl740-780"
+  }
+}

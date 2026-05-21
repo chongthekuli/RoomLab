@@ -29,6 +29,7 @@ import { state, earHeightFor, expandSources, POSTURE_LABELS, SPEAKER_CATALOG } f
 import { computeAllBands } from '../physics/rt60.js';
 import { roomVolume, baseArea } from '../physics/room-shape.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
+import { speakerCategoryLabel } from '../shared/speaker-catalog.js';
 import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend } from './print-heatmap.js';
@@ -182,6 +183,7 @@ export function buildPrintModel({ materials, nameHint } = {}) {
     sources: (state.sources ?? []).map((s, i) => ({
       index: i + 1,
       kind: s.kind ?? 'speaker',
+      category: getSpeakerCategory(s.modelUrl),
       modelUrl: s.modelUrl ?? '—',
       modelLabel: getSpeakerLabel(s.modelUrl),
       x: (s.position?.x ?? s.origin?.x) ?? null,
@@ -391,6 +393,14 @@ function getSpeakerLabel(url) {
   if (entry?.label) return entry.label;
   // Fallback: basename stripped of .json + path.
   return url.replace(/.*\//, '').replace(/\.json$/, '');
+}
+
+// Speaker product category — read from the loudspeaker JSON's `mount_type`
+// (the single source of truth for the taxonomy). Null when the model isn't
+// cached or carries no mount_type, so the Kind column can fall back.
+function getSpeakerCategory(url) {
+  if (!url) return null;
+  return getCachedLoudspeaker(url)?.mount_type ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1124,7 +1134,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   const sourceRows = model.sources.map(s => `
     <tr>
       <td>${s.index}</td>
-      <td>${s.kind === 'line-array' ? 'line-array' : 'speaker'}</td>
+      <td>${s.kind === 'line-array' ? 'Line array' : (s.category ? speakerCategoryLabel(s.category) : 'Speaker')}</td>
       <td class="pr-mono">${escapeHtml(s.modelLabel)}</td>
       <td>${fmt(s.x, 2)} m</td>
       <td>${fmt(s.y, 2)} m</td>

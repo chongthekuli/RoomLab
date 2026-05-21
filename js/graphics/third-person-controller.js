@@ -37,6 +37,13 @@ export class ThirdPersonController {
     this.targetYaw = 0;               // slerp target
     this.vy = 0;                      // vertical velocity
     this.grounded = true;
+    // Void-fall recovery: if the avatar walks off the map edge it free-falls
+    // forever. Track continuous fall time; after `maxFallTime` seconds of
+    // falling (a normal jump lands in well under this), respawn at the last
+    // deliberate spawn position. `spawnPos` is captured in setPosition().
+    this.spawnPos = new THREE.Vector3(0, 0, 0);
+    this.fallTimer = 0;               // seconds in continuous free fall
+    this.maxFallTime = 2.0;           // respawn after this long falling
     this.movementSpeed = 2.8;         // m/s walking
     this.runMultiplier = 1.9;         // ×1.9 when Shift held (≈5.3 m/s running)
     this.rotationSlerp = 12;          // rad/s, tuned for "snappy but not instant"
@@ -143,6 +150,12 @@ export class ThirdPersonController {
     this.character.position.copy(v);
     this.currentOffset.copy(v);
     this.currentLookAt.copy(v);
+    // Remember this as the respawn point for void-fall recovery, and reset
+    // the fall state so a placement never inherits a stale falling timer.
+    this.spawnPos.copy(v);
+    this.vy = 0;
+    this.fallTimer = 0;
+    this.grounded = true;
   }
   setYaw(y) {
     this.yaw = y;
@@ -436,6 +449,24 @@ export class ThirdPersonController {
     // the actual impact velocity (gets zeroed by the snap).
     this._justLanded = !preSnapGrounded && this.grounded;
     this._impactVy = this._justLanded ? preSnapVy : 0;
+
+    // Void-fall recovery — walking off the map edge leaves the avatar
+    // ungrounded and falling forever. Accumulate continuous fall time; once
+    // it passes maxFallTime (a normal jump lands long before 2 s), respawn at
+    // the spawn point. Any frame back on the ground resets the timer.
+    if (!this.grounded && this.vy < 0) {
+      this.fallTimer += dt;
+      if (this.fallTimer >= this.maxFallTime) {
+        // setPosition snaps pos + the camera-smoothing vars to the spawn and
+        // zeroes vy/fallTimer/grounded — so the camera pulls back from the
+        // spawn instead of swooping across the map from the fall location.
+        this.setPosition(this.spawnPos);
+        this._justLanded = false;
+        this._impactVy = 0;
+      }
+    } else {
+      this.fallTimer = 0;
+    }
 
     // Slerp character yaw (smooth turn).
     const yawDelta = shortestAngle(this.yaw, this.targetYaw);

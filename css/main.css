@@ -1230,6 +1230,31 @@ html[data-more-menu] .vp-more-panel {
   overflow: auto;
   max-height: 100%;
 }
+.sv-cat-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.7rem;
+}
+.sv-cat-filter select {
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.32rem 0.45rem;
+  cursor: pointer;
+}
+.sv-cat-filter select:hover {
+  border-color: var(--border-strong);
+}
 .sv-cat-head {
   display: flex;
   justify-content: space-between;
@@ -1279,6 +1304,18 @@ html[data-more-menu] .vp-more-panel {
   color: var(--fg-strong);
   margin-top: 0.1rem;
   line-height: 1.3;
+}
+.sv-cat-kind {
+  display: inline-block;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.04rem 0.4rem;
+  margin-top: 0.3rem;
 }
 .sv-cat-summary {
   font-size: 0.7rem;
@@ -2120,6 +2157,19 @@ section h3 {
   font-variant-numeric: tabular-nums;
   background: var(--bg-elev);
   color: var(--fg);
+  min-width: 0;          /* allow shrink below intrinsic <select> width */
+}
+/* Model / Group rows: the label grid is `1fr auto auto`, which sizes a
+   <select> to its widest option (long speaker-model names, "Group A") and
+   pushes it off the panel's right edge. For any label that holds a select,
+   give the select a flexible, shrinkable column so the dropdown fills the
+   row and clips instead of overflowing. (Labels with inputs + units keep the
+   default grid since `:has` only matches select-bearing labels.) */
+.field-group label:has(select) {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.field-group label > select {
+  width: 100%;
 }
 .field-group input:focus,
 .field-group select:focus {
