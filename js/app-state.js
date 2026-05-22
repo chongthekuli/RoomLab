@@ -586,6 +586,23 @@ export const state = {
       ],
     },
   },
+  // Outdoor simulation mode — long-throw exterior coverage over an open
+  // field (e.g. surau azan horns reaching across the community). When
+  // `enabled`, the heatmap extends beyond the room footprint over a
+  // user-sized ground plane (`field_size_m`, metres), the room renders
+  // at field centre, and cells OUTSIDE the room footprint are evaluated
+  // as FREE FIELD — no reverberant lift — while interior cells keep the
+  // room's reverberant field (continuous inside+outside in one grid).
+  //
+  // VIEWPORT-ONLY: the print report NEVER renders the outdoor field; it
+  // stays room-only (guarded by tests/outdoor-report-exclusion.test.mjs).
+  // Lives on `state` (not state.display) so `field_size_m` round-trips
+  // in saved projects — additive, no formatVersion bump. Reset on every
+  // scene swap via scene-lifecycle.js.
+  //
+  // DISTINCT from room.enclosure:'outdoor' (an open-top Sabine ROOM) —
+  // this is the free-field surround AROUND the room, not the room model.
+  outdoor: { enabled: false, field_size_m: 400 },
 };
 
 // Interpolate the EQ gain (in dB) at an arbitrary frequency from the band
@@ -863,6 +880,12 @@ export function serializeProject(src = state) {
       eq:               deepClone(src.physics?.eq ?? { enabled: false, bands: [] }),
     },
     rackSystem: deepClone(src.rackSystem ?? { racks: [] }),
+    // Outdoor field mode — design intent, round-trips. Additive (v1
+    // superset, no formatVersion bump). field_size_m clamped on read.
+    outdoor: {
+      enabled:      !!src.outdoor?.enabled,
+      field_size_m: Number.isFinite(src.outdoor?.field_size_m) ? src.outdoor.field_size_m : 400,
+    },
   };
 }
 
@@ -1048,6 +1071,16 @@ export function deserializeProject(obj) {
   // --- PA equipment racks — accept the saved value, default already []
   if (obj.rackSystem && typeof obj.rackSystem === 'object' && Array.isArray(obj.rackSystem.racks)) {
     state.rackSystem = deepClone(obj.rackSystem);
+  }
+
+  // --- Outdoor field mode — restore after reset (defaults already set
+  // by resetSceneState). Clamp field_size_m to the supported 50–1000 m
+  // range; ignore malformed values rather than corrupt the viewport.
+  if (obj.outdoor && typeof obj.outdoor === 'object') {
+    if (typeof obj.outdoor.enabled === 'boolean') state.outdoor.enabled = obj.outdoor.enabled;
+    if (Number.isFinite(obj.outdoor.field_size_m)) {
+      state.outdoor.field_size_m = Math.max(50, Math.min(1000, obj.outdoor.field_size_m));
+    }
   }
   // (results caches already cleared by resetSceneState above.)
 

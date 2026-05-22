@@ -71,6 +71,19 @@ export function resetSceneState({ state, defaultRoomState, deepClone, projectNam
   state.rackSystem = { racks: [] };
   state.projectName = projectName;
 
+  // Outdoor field mode — reset to default on every scene swap. A fresh
+  // preset/template/blank-custom always starts INDOORS at the default
+  // field size; deserializeProject restores the saved value AFTER this
+  // reset (same pattern as room fields). field_size_m default mirrors
+  // the state literal in app-state.js (kept here too because this module
+  // stays import-free of app-state to avoid a circular dependency).
+  if (state.outdoor) {
+    state.outdoor.enabled = false;
+    state.outdoor.field_size_m = 400;
+  } else {
+    state.outdoor = { enabled: false, field_size_m: 400 };
+  }
+
   if (state.results) {
     state.results.splGrid   = null;
     state.results.zoneGrids = [];

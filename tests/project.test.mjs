@@ -180,5 +180,41 @@ state.listeners = [];
   assert(Array.isArray(obj.listeners) && obj.listeners.length === 0, 'Empty listeners serialize as []');
 }
 
+// 7. Outdoor field mode (Phase 1, v=597) — round-trip, clamp, reset.
+applyTemplateToState('hifi');
+state.outdoor.enabled = true;
+state.outdoor.field_size_m = 600;
+{
+  const { ok } = roundTripSnapshot('hifi + outdoor enabled @600m');
+  assert(ok, 'Round-trip clean: outdoor.enabled=true, field_size_m=600 survives');
+}
+// 7a. field_size_m clamps to [50, 1000] on load (defends against a
+//     hand-edited or corrupted project file).
+deserializeProject({ formatVersion: 1, outdoor: { enabled: true, field_size_m: 5000 } });
+assert(state.outdoor.field_size_m === 1000,
+  `field_size_m clamps high to 1000 (got ${state.outdoor.field_size_m})`);
+deserializeProject({ formatVersion: 1, outdoor: { enabled: true, field_size_m: 1 } });
+assert(state.outdoor.field_size_m === 50,
+  `field_size_m clamps low to 50 (got ${state.outdoor.field_size_m})`);
+// 7b. Malformed / missing outdoor block → defaults, no throw.
+deserializeProject({ formatVersion: 1, outdoor: { field_size_m: 'huge' } });
+assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
+  'Malformed outdoor block falls back to defaults (disabled, 400 m)');
+deserializeProject({ formatVersion: 1 });
+assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
+  'Missing outdoor block (older file) defaults to disabled, 400 m');
+// 7c. A fresh preset/template apply resets outdoor mode — a new scene
+//     always starts indoors at the default size.
+state.outdoor.enabled = true;
+state.outdoor.field_size_m = 800;
+applyPresetToState('auditorium');
+assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
+  `applyPresetToState resets outdoor to default (got enabled=${state.outdoor.enabled}, size=${state.outdoor.field_size_m})`);
+state.outdoor.enabled = true;
+state.outdoor.field_size_m = 800;
+applyTemplateToState('hifi');
+assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
+  `applyTemplateToState resets outdoor to default (got enabled=${state.outdoor.enabled}, size=${state.outdoor.field_size_m})`);
+
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll project round-trip tests passed.');
