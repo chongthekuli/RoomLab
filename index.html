@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=597" />
-  <link rel="stylesheet" href="css/theme.css?v=597" />
-  <link rel="stylesheet" href="css/print.css?v=597" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=598" />
+  <link rel="stylesheet" href="css/theme.css?v=598" />
+  <link rel="stylesheet" href="css/print.css?v=598" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -92,6 +92,7 @@
         <button class="rail-icon" data-panel="treatments" data-side="left" type="button" aria-label="Acoustic treatments"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1"/><path d="M8 10v4M12 9v6M16 11v2"/></svg></button>
         <button class="rail-icon" data-panel="ambient"   data-side="left" type="button" aria-label="Environment noise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l3-7 4 14 3-7h5"/></svg></button>
         <button class="rail-icon" data-panel="library"   data-side="left" type="button" aria-label="Library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3"/><path d="M9 8h7M9 12h7"/></svg></button>
+        <button class="rail-icon" data-panel="outdoor"   data-side="left" type="button" aria-label="Outdoor field"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18"/><circle cx="12" cy="20" r="1.3"/><path d="M7.5 20a4.5 4.5 0 0 1 9 0M4 20a8 8 0 0 1 16 0"/></svg></button>
       </nav>
       <aside id="panel-left" class="rail-panel rail-panel-left" aria-hidden="true">
         <section id="panel-room"><h2>Room</h2></section>
@@ -103,6 +104,10 @@
         <section id="panel-library">
           <h2>Library</h2>
           <div class="phase-placeholder">Browse &amp; import JSON loudspeaker files — coming later.</div>
+        </section>
+        <section id="panel-outdoor">
+          <h2>Outdoor field</h2>
+          <div class="phase-placeholder">Long-throw exterior coverage over an open field — enable the field, set its size, and adjust temperature / humidity. Map &amp; shape controls coming next. (Free-field, ISO 9613-1; ground effect not modelled.)</div>
         </section>
       </aside>
       <section id="viewport">
@@ -361,6 +366,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=597"></script>
+  <script type="module" src="js/main.js?v=598"></script>
 </body>
 </html>
