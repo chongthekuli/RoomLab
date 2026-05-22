@@ -6819,6 +6819,47 @@ section h3 {
 .wall-method-hint { font-size: 11.5px; color: var(--muted-dim); margin: var(--space-3) 0 0; }
 .wall-method-hint strong { color: var(--muted); }
 
+/* --- Mode segmented control --- */
+.wall-mode-seg {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: var(--space-3);
+}
+.wall-seg-btn {
+  background: var(--bg);
+  color: var(--muted);
+  border: none;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wall-seg-btn + .wall-seg-btn { border-left: 1px solid var(--border-strong); }
+.wall-seg-btn.is-active { background: var(--accent-dim); color: var(--fg-strong); }
+.wall-seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* --- Over-wall diffraction: status line + cross-section --- */
+.wall-diff-status {
+  margin-top: var(--space-3);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.wall-status-shadow { color: var(--data-amber); font-weight: 600; }
+.wall-status-lit { color: var(--data-green); font-weight: 600; }
+
+.xs-ground { stroke: var(--border-strong); stroke-width: 1.5; }
+.xs-wall { fill: var(--border-strong); stroke: var(--muted); stroke-width: 1; }
+.xs-sight { stroke: var(--muted-dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.xs-path { fill: none; stroke-width: 2; }
+.xs-path-shadow { stroke: var(--data-amber); }
+.xs-path-lit { stroke: var(--data-green); }
+.xs-src { fill: var(--accent); }
+.xs-recv { fill: var(--data-cyan); }
+.xs-label { fill: var(--muted); font-size: 9px; }
+
 /* --- Standards & method --- */
 .wall-eq {
   background: var(--bg);

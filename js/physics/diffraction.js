@@ -88,6 +88,35 @@ export function maekawaIL(delta_m, lambda_m) {
   return Math.min(MAEKAWA_IL_MAX_DB, il);
 }
 
+// SIGNED 2D over-a-single-thin-screen path-length difference δ (metres), for
+// the WallLAB over-wall diffraction demo. Vertical plane only:
+//   source   S = (0, sourceH)
+//   screen top T = (sourceToBarrier, barrierH)
+//   receiver R = (sourceToBarrier + barrierToReceiver, receiverH)
+//
+//   detour = (|S→T| + |T→R|) − |S→R|        always ≥ 0 (triangle inequality)
+//
+// The triangle inequality can't sign the result, so we sign it by whether the
+// straight S→R sightline passes BELOW the screen top at the screen's
+// horizontal position (receiver in shadow → +δ) or ABOVE it (lit → −δ).
+// maekawaIL() then reads +δ as insertion loss and −δ (below the graze window)
+// as the lit zone (0 dB). This is exactly the surau geometry: a source
+// mounted ABOVE a wall has its sightline clear the top → −δ → ~no loss →
+// sound "leaks over". Standard barrier model; ISO 9613-2 §7.4 / Maekawa 1968.
+export function overBarrierPathDifference({ sourceH, barrierH, sourceToBarrier, barrierToReceiver, receiverH }) {
+  const d1 = Math.max(0, sourceToBarrier);
+  const d2 = Math.max(0, barrierToReceiver);
+  const dST = Math.hypot(d1, barrierH - sourceH);
+  const dTR = Math.hypot(d2, receiverH - barrierH);
+  const dSR = Math.hypot(d1 + d2, receiverH - sourceH);
+  const detour = (dST + dTR) - dSR;
+  const totalD = d1 + d2;
+  // Height of the straight sightline where it crosses the screen plane.
+  const hLine = totalD > 0 ? sourceH + (receiverH - sourceH) * (d1 / totalD) : Math.max(sourceH, receiverH);
+  const shadowed = barrierH > hLine;
+  return shadowed ? detour : -detour;
+}
+
 // Pierce-Hadden wedge correction on top of Maekawa for an outdoor
 // building corner (Dr. Chen Tier 1a commit (e) spec, derived from
 // Pierce *Acoustics* §9.5 collapsed to the right-angle case).
