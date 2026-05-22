@@ -602,7 +602,16 @@ export const state = {
   //
   // DISTINCT from room.enclosure:'outdoor' (an open-top Sabine ROOM) —
   // this is the free-field surround AROUND the room, not the room model.
-  outdoor: { enabled: false, field_size_m: 400 },
+  //
+  // temperature_C + humidity_pct drive ISO 9613-1 atmospheric absorption
+  // for the FIELD only (Phase 2). At room distances the T/RH dependence
+  // is negligible, so indoor physics keep the existing fixed table —
+  // this avoids shifting any existing scene's RT60/SPL. At 600 m the
+  // 8 kHz coefficient swings ~25 dB with humidity, so the field needs
+  // it parametric. Defaults: tropical (Malaysian demo ground); user-
+  // adjustable from the outdoor panel. Ground effect (ISO 9613-2 A_gr)
+  // is intentionally NOT modelled in v1 — see the outdoor-mode label.
+  outdoor: { enabled: false, field_size_m: 400, temperature_C: 30, humidity_pct: 70 },
 };
 
 // Interpolate the EQ gain (in dB) at an arbitrary frequency from the band
@@ -883,8 +892,10 @@ export function serializeProject(src = state) {
     // Outdoor field mode — design intent, round-trips. Additive (v1
     // superset, no formatVersion bump). field_size_m clamped on read.
     outdoor: {
-      enabled:      !!src.outdoor?.enabled,
-      field_size_m: Number.isFinite(src.outdoor?.field_size_m) ? src.outdoor.field_size_m : 400,
+      enabled:       !!src.outdoor?.enabled,
+      field_size_m:  Number.isFinite(src.outdoor?.field_size_m)  ? src.outdoor.field_size_m  : 400,
+      temperature_C: Number.isFinite(src.outdoor?.temperature_C) ? src.outdoor.temperature_C : 30,
+      humidity_pct:  Number.isFinite(src.outdoor?.humidity_pct)  ? src.outdoor.humidity_pct  : 70,
     },
   };
 }
@@ -1080,6 +1091,13 @@ export function deserializeProject(obj) {
     if (typeof obj.outdoor.enabled === 'boolean') state.outdoor.enabled = obj.outdoor.enabled;
     if (Number.isFinite(obj.outdoor.field_size_m)) {
       state.outdoor.field_size_m = Math.max(50, Math.min(1000, obj.outdoor.field_size_m));
+    }
+    // ISO 9613-1 air-absorption inputs — clamp to physically sane ranges.
+    if (Number.isFinite(obj.outdoor.temperature_C)) {
+      state.outdoor.temperature_C = Math.max(-20, Math.min(50, obj.outdoor.temperature_C));
+    }
+    if (Number.isFinite(obj.outdoor.humidity_pct)) {
+      state.outdoor.humidity_pct = Math.max(0, Math.min(100, obj.outdoor.humidity_pct));
     }
   }
   // (results caches already cleared by resetSceneState above.)

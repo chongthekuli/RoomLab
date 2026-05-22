@@ -184,10 +184,19 @@ state.listeners = [];
 applyTemplateToState('hifi');
 state.outdoor.enabled = true;
 state.outdoor.field_size_m = 600;
+state.outdoor.temperature_C = 32;
+state.outdoor.humidity_pct = 85;
 {
-  const { ok } = roundTripSnapshot('hifi + outdoor enabled @600m');
-  assert(ok, 'Round-trip clean: outdoor.enabled=true, field_size_m=600 survives');
+  const { ok } = roundTripSnapshot('hifi + outdoor enabled @600m, 32C/85%RH');
+  assert(ok, 'Round-trip clean: outdoor enabled, field_size_m=600, T=32C, RH=85% survives');
 }
+// 7-T/RH. Temperature + humidity clamp to physical ranges on load.
+deserializeProject({ formatVersion: 1, outdoor: { temperature_C: 99, humidity_pct: 250 } });
+assert(state.outdoor.temperature_C === 50 && state.outdoor.humidity_pct === 100,
+  `T/RH clamp high (got ${state.outdoor.temperature_C}C / ${state.outdoor.humidity_pct}%)`);
+deserializeProject({ formatVersion: 1, outdoor: { temperature_C: -99, humidity_pct: -5 } });
+assert(state.outdoor.temperature_C === -20 && state.outdoor.humidity_pct === 0,
+  `T/RH clamp low (got ${state.outdoor.temperature_C}C / ${state.outdoor.humidity_pct}%)`);
 // 7a. field_size_m clamps to [50, 1000] on load (defends against a
 //     hand-edited or corrupted project file).
 deserializeProject({ formatVersion: 1, outdoor: { enabled: true, field_size_m: 5000 } });
@@ -201,8 +210,9 @@ deserializeProject({ formatVersion: 1, outdoor: { field_size_m: 'huge' } });
 assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
   'Malformed outdoor block falls back to defaults (disabled, 400 m)');
 deserializeProject({ formatVersion: 1 });
-assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
-  'Missing outdoor block (older file) defaults to disabled, 400 m');
+assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400
+  && state.outdoor.temperature_C === 30 && state.outdoor.humidity_pct === 70,
+  'Missing outdoor block (older file) defaults to disabled, 400 m, 30C/70%');
 // 7c. A fresh preset/template apply resets outdoor mode — a new scene
 //     always starts indoors at the default size.
 state.outdoor.enabled = true;

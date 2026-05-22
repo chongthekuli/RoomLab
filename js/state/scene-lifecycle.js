@@ -80,8 +80,10 @@ export function resetSceneState({ state, defaultRoomState, deepClone, projectNam
   if (state.outdoor) {
     state.outdoor.enabled = false;
     state.outdoor.field_size_m = 400;
+    state.outdoor.temperature_C = 30;
+    state.outdoor.humidity_pct = 70;
   } else {
-    state.outdoor = { enabled: false, field_size_m: 400 };
+    state.outdoor = { enabled: false, field_size_m: 400, temperature_C: 30, humidity_pct: 70 };
   }
 
   if (state.results) {
