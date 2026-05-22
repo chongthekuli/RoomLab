@@ -4462,9 +4462,12 @@ const _topDownRoofStash = [];
 // roof + pyramid cap, main hip-roof + atap tumpang tiers, clerestory
 // cap, jali screens) and a per-tag allowlist keeps missing some new
 // addition. The bounding-box rule is invariant: anything overhead is
-// dimmed, period. Skips structural reference lines (no material) and
-// the heatmap mesh itself (heatmapMesh is added to `scene`, not
-// roomGroup, so this traversal never touches it anyway).
+// dimmed, period. Includes overhead LINE geometry (roof hip/ridge
+// strokes — THREE.Line, e.g. the surau atap-tumpang ridges) so they
+// don't float over the heatmap in Top view. Floor-level reference
+// lines (room outline) are protected by the height gate below, not by
+// the type filter. The heatmap mesh itself is added to `scene`, not
+// roomGroup, so this traversal never touches it anyway.
 const TOPDOWN_DIM_FLOOR_Z = 1.6;   // a hair above ear-mic height (1.5 m)
 function _setRoofsDimmedForTopDown(dim) {
   if (!roomGroup) return;
@@ -4472,7 +4475,10 @@ function _setRoofsDimmedForTopDown(dim) {
     if (_topDownRoofStash.length > 0) return; // already hidden
     const bb = new THREE.Box3();
     roomGroup.traverse((obj) => {
-      if (!obj.isMesh || !obj.geometry) return;
+      // Meshes (roof faces) AND lines (roof ridge strokes). LineSegments
+      // extends Line so isLine covers it, but check both for clarity.
+      const drawable = obj.isMesh || obj.isLine || obj.isLineSegments;
+      if (!drawable || !obj.geometry) return;
       if (obj.visible === false) return;   // already hidden by other logic; don't disturb
       // Compute bbox in WORLD space — many surau meshes are positioned
       // via their THREE object transform rather than baked vertices,
