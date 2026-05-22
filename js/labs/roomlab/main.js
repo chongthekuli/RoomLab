@@ -25,6 +25,7 @@ import { mountListenersPanel } from '../../ui/panel-listeners.js';
 import { mountZonesPanel } from '../../ui/panel-zones.js';
 import { mountTreatmentsPanel } from '../../ui/panel-treatments.js';
 import { mountAmbientPanel } from '../../ui/panel-ambient.js';
+import { mountOutdoorPanel } from '../../ui/panel-outdoor.js';
 import { mountResultsPanel } from '../../ui/panel-results.js';
 import { mountAuthorNotePanel } from '../../ui/panel-author-note.js';
 import { mountPrecisionPanel } from '../../ui/panel-precision.js';
@@ -457,6 +458,7 @@ export async function mountRoomLab() {
   mountTreatmentsPanel({ materials }).catch(err =>
     console.warn('[roomlab] treatments panel mount failed:', err));
   mountAmbientPanel();
+  mountOutdoorPanel();
   mountResultsPanel({ materials });
   mountAuthorNotePanel();
   mountPrecisionPanel({ materials });

@@ -198,33 +198,73 @@ const VERT = /* glsl */`
 
 // Fragment shader — sample bilinear-interpolated scalar, nearest-neighbour
 // validity mask, then look up palette. Cells with mask=0 discard.
+//
+// OUTDOOR radial falloff (fieldFalloff=1): the field plane spans a SQUARE
+// `fieldBounds`, but a free-field SPL map reads as a circle of influence —
+// a hard square edge looks like a cropped screenshot. We feather the alpha
+// near the plane's outer rim using the UV-space radius from centre:
+//   r = length(vUv - 0.5) * 2.0     // 0 at centre, 1 at edge-midpoint, ~1.41 at corners
+//   alpha *= 1 - smoothstep(falloffStart, 1.0, r)
+// fieldFalloff=0 (indoor) multiplies the ramp out → byte-identical to the
+// pre-outdoor single-line `gl_FragColor = vec4(color, opacity)` path.
+// The solid-wall SPL STEP (wall TL, Dr. Chen) is left intact — this ramp
+// only fades the FIELD's outer edge, never the interior/exterior boundary.
 const FRAG = /* glsl */`
   uniform sampler2D scalarTex;
   uniform sampler2D maskTex;
   uniform sampler2D paletteTex;
   uniform float opacity;
+  uniform float fieldFalloff;   // 0 = indoor (no edge feather), 1 = outdoor
+  uniform float falloffStart;   // normalised radius where the feather begins
   varying vec2 vUv;
   void main() {
     float valid = texture2D(maskTex, vUv).r;
     if (valid < 0.5) discard;
     float t = texture2D(scalarTex, vUv).r;
     vec3 color = texture2D(paletteTex, vec2(t, 0.5)).rgb;
-    gl_FragColor = vec4(color, opacity);
+    float a = opacity;
+    // Radial edge feather — only contributes when fieldFalloff > 0.
+    float r = length(vUv - 0.5) * 2.0;
+    float edge = 1.0 - smoothstep(falloffStart, 1.0, r);
+    a *= mix(1.0, edge, fieldFalloff);
+    if (a <= 0.001) discard;
+    gl_FragColor = vec4(color, a);
   }
 `;
 
 // Build a ShaderMaterial that renders the scalar-field heatmap with
 // fragment-shader palette lookup. Returns { material, scalarTex, maskTex }.
 // Caller is responsible for disposing all three on rebuild.
-export function buildHeatmapShaderMaterial(splInfo, { opacity = 0.95, insideAt = null } = {}) {
-  const { scalarTex, maskTex } = buildScalarTexture(splInfo, { insideAt });
+//
+// `outdoor` (default false) enables the radial edge feather. When false the
+// fieldFalloff uniform is 0 → the fragment path is byte-identical to the
+// pre-outdoor build (indoor mode visually unchanged). `falloffStart` is the
+// normalised radius (0 at centre, 1 at edge-midpoint) where the alpha ramp
+// begins; 0.78 keeps the colour solid out to ~78 % of the half-span then
+// feathers to transparent, so the field reads as a soft disc, not a square.
+export function buildHeatmapShaderMaterial(
+  splInfo,
+  { opacity = 0.95, insideAt = null, outdoor = false, falloffStart = 0.78 } = {}
+) {
+  // OUTDOOR: ignore any insideAt predicate. The grid already decided per-cell
+  // validity (finite over the whole field, interior + exterior), so the
+  // grid-res finite mask (insideAt=null path in buildScalarTexture) is what we
+  // want — every finite cell renders, the radial shader feather rounds the rim.
+  // A hi-res silhouette mask here would re-discard the exterior field cells the
+  // grid HAD computed (the Phase 2 brief's explicit warning). Callers may still
+  // pass the indoor predicate (call-site stability for the cross-surface
+  // fixture); we drop it when outdoor.
+  const effInsideAt = outdoor ? null : insideAt;
+  const { scalarTex, maskTex } = buildScalarTexture(splInfo, { insideAt: effInsideAt });
   const paletteTex = buildPaletteTexture(splInfo.metric ?? 'spl');
   const material = new THREE.ShaderMaterial({
     uniforms: {
-      scalarTex:  { value: scalarTex },
-      maskTex:    { value: maskTex },
-      paletteTex: { value: paletteTex },
-      opacity:    { value: opacity },
+      scalarTex:    { value: scalarTex },
+      maskTex:      { value: maskTex },
+      paletteTex:   { value: paletteTex },
+      opacity:      { value: opacity },
+      fieldFalloff: { value: outdoor ? 1.0 : 0.0 },
+      falloffStart: { value: falloffStart },
     },
     vertexShader: VERT,
     fragmentShader: FRAG,

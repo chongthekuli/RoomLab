@@ -2141,6 +2141,28 @@ section h3 {
   color: var(--fg);
 }
 .field-group .unit { color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+
+/* Outdoor field panel (Phase 5). Toggle + field-size + ISO 9613-1 T/RH. */
+.outdoor-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 0.5rem;
+  grid-template-columns: none !important;
+  cursor: pointer;
+}
+.outdoor-toggle input { width: auto; }
+#outdoor-controls.is-disabled { opacity: 0.45; pointer-events: none; }
+.outdoor-size-row { display: flex; align-items: center; gap: 0.4rem; }
+.outdoor-size-row input { width: 5rem; }
+.outdoor-airrow { grid-template-columns: 1fr 1fr; display: grid; gap: 0.6rem; }
+.outdoor-inline { display: inline-flex; align-items: center; gap: 0.25rem; }
+.outdoor-inline input { width: 3.6rem; }
+.outdoor-note {
+  margin-top: 0.6rem;
+  line-height: 1.45;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
 .field-group .rated-cap {
   color: var(--muted);
   font-size: 0.68rem;

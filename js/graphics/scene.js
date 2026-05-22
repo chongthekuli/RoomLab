@@ -363,6 +363,11 @@ export async function mount3DViewport({ materials }) {
   // live AND avoids the freeze.
   let _pendingRebuild = null;   // bitfield of pending rebuild tasks
   let _rebuildRAF = 0;
+  // Tracks the last-seen outdoor-enabled state so outdoor:changed can detect
+  // the enable/disable EDGE (frame-to-field only on the off→on transition).
+  // Declared here (not in the handler) so the scene:reset handler — which
+  // resets it — sits below this point with no temporal-dead-zone risk.
+  let _outdoorWasEnabled = !!(state.outdoor && state.outdoor.enabled);
   const REBUILD_ROOM = 1 << 0;
   const REBUILD_SOURCES = 1 << 1;
   const REBUILD_LISTENERS = 1 << 2;
@@ -452,6 +457,16 @@ export async function mount3DViewport({ materials }) {
     clearPlacementGhost();
     cancelTreatmentPlacement();
 
+    // Outdoor mode does not survive a state swap — presets/templates/loads
+    // either reset state.outdoor to disabled (app-state) or simply don't
+    // carry it. Restore the room-scale camera/fog/far rig if it's currently
+    // swapped, so the new room frames correctly below. _outdoorWasEnabled is
+    // tracked in the outdoor:changed closure; sync it here so the next enable
+    // re-frames. (If outdoor is still enabled in the loaded state, a follow-up
+    // outdoor:changed from the panel re-enters the rig.)
+    _exitOutdoorCamera();
+    _outdoorWasEnabled = false;
+
     // Auto-fit camera to the new room. Without this, a swap from a 60 m
     // arena to a 4.5 m hi-fi leaves the camera 80 m back and the user
     // has to scroll-zoom every preset apply. queueRebuild is async (RAF-
@@ -472,6 +487,32 @@ export async function mount3DViewport({ materials }) {
   // the STIPA branch reads ambient, so rebuilding when SPL is active is a
   // no-op cost. Accept that for simplicity.
   on('ambient:changed', () => queueRebuild(REBUILD_HEATMAP));
+
+  // OUTDOOR SIMULATION MODE (Phase 3). The UI (panel, later phase) flips
+  // state.outdoor.{enabled,field_size_m,temperature_C,humidity_pct} and emits
+  // 'outdoor:changed' with an optional { reframe } hint. We read state, never
+  // the payload values, so the panel and the engine never disagree:
+  //   - enabled true  → enter the wide camera/fog rig (once) + frame-to-field
+  //                     if the transition just turned ON (or reframe:true).
+  //   - enabled false → exit the rig (restore room-scale far/near/fog) and
+  //                     re-frame to the room.
+  // Either way rebuild the heatmap so the field plane appears / disappears.
+  // Field-size-only changes (enabled stays true) rebuild + re-enter (to widen
+  // far/fog for the new span) but do NOT auto-snap the camera — per the brief.
+  on('outdoor:changed', (payload = {}) => {
+    const nowEnabled = !!(state.outdoor && state.outdoor.enabled);
+    const justEnabled = nowEnabled && !_outdoorWasEnabled;
+    const justDisabled = !nowEnabled && _outdoorWasEnabled;
+    if (nowEnabled) {
+      _enterOutdoorCamera();   // idempotent; widens far/fog for the current span
+      if (justEnabled || payload.reframe) frameCameraToField();
+    } else if (justDisabled) {
+      _exitOutdoorCamera();
+      frameCameraToRoom();
+    }
+    _outdoorWasEnabled = nowEnabled;
+    queueRebuild(REBUILD_HEATMAP);
+  });
 
   // Initial paint: fire the rebuilds synchronously (no user-drag coalescing
   // needed on boot; they run once and we want the viewport ready).
@@ -3581,6 +3622,107 @@ export function frameCameraToRoom() {
   camera.position.set(-(cx - d3 * 0.9), h + d3 * 0.5, d - d3 * 0.4);
   controls.target.set(-cx, h * 0.4, cz);
   controls.update();
+}
+
+// ===== OUTDOOR SIMULATION MODE (Phase 3) ==================================
+// Field bounds: a SQUARE of side state.outdoor.field_size_m centred on the
+// room's effective centre (state frame). The grid samples this whole square;
+// the heatmap plane spans it; the radial shader feather rounds the corners.
+// No X negation here — these are STATE coords; scene.scale.x=-1 mirrors the
+// rendered plane, and computeSPLGrid samples in state coords.
+function _outdoorFieldBounds() {
+  const room = state.room || {};
+  let b = null;
+  try { b = roomEffectiveBounds(room); } catch (_) { b = null; }
+  let cx, cy;
+  if (b && Number.isFinite(b.minX) && Number.isFinite(b.maxX) && b.maxX > b.minX) {
+    cx = (b.minX + b.maxX) / 2;
+    cy = (b.minY + b.maxY) / 2;
+  } else {
+    cx = (room.width_m ?? 10) / 2;
+    cy = (room.depth_m ?? 10) / 2;
+  }
+  const span = Math.max(50, Math.min(1000, state.outdoor?.field_size_m ?? 400));
+  const half = span / 2;
+  return { minX: cx - half, minY: cy - half, maxX: cx + half, maxY: cy + half };
+}
+
+// Camera/scene state we swap when entering outdoor mode, restored on exit.
+// Mirrors the print-capture stash structure (scene.js ~4202) but persistent
+// (not finally-restored within one call) — it lives across frames until the
+// user disables outdoor or scene:reset fires.
+let _outdoorCamStash = null;
+
+// Frame the camera so the WHOLE field square fits. Uses the same iso-style
+// heading as frameCameraToRoom (diagonal opposite corner) but distances scale
+// to the field half-span, not the room. Only called on ENABLE (or explicit
+// re-frame), never on every field-size change, so the user keeps their orbit.
+export function frameCameraToField() {
+  if (!camera || !controls) return;
+  const fb = _outdoorFieldBounds();
+  const cx = (fb.minX + fb.maxX) / 2;
+  const cz = (fb.minY + fb.maxY) / 2;
+  const span = fb.maxX - fb.minX;        // square
+  const half = span / 2;
+  const h = state.room?.height_m ?? 3;
+  // Pull back far enough that the square's diagonal fits the frustum.
+  const dist = _fitDistance(span, span, 1.12);
+  // 35° elevation, diagonal heading (match iso/frameCameraToRoom convention).
+  // X negated for the scene.scale.x=-1 mirror, same as frameCameraToRoom.
+  const horiz = dist * Math.cos(THREE.MathUtils.degToRad(35));
+  const vert  = dist * Math.sin(THREE.MathUtils.degToRad(35));
+  camera.position.set(-(cx - horiz * 0.7), Math.max(h, vert), cz - horiz * 0.7);
+  controls.target.set(-cx, h * 0.4, cz);
+  controls.update();
+}
+
+// Enter outdoor mode: stash + widen camera far/near, fog, controls.maxDistance
+// so the far field doesn't clip or saturate to fog. Idempotent — re-entering
+// without exiting first reuses the existing stash (does not double-stash the
+// already-swapped values).
+function _enterOutdoorCamera() {
+  if (!camera || !controls) return;
+  const fb = _outdoorFieldBounds();
+  const fieldHalf = (fb.maxX - fb.minX) / 2;
+  if (!_outdoorCamStash) {
+    _outdoorCamStash = {
+      far: camera.far,
+      near: camera.near,
+      maxDistance: controls.maxDistance,
+      fog: scene.fog,                       // Fog instance (or null) — restore by reference
+      fogNear: scene.fog ? scene.fog.near : null,
+      fogFar: scene.fog ? scene.fog.far : null,
+    };
+  }
+  camera.far = Math.max(300, fieldHalf * 4);
+  camera.near = Math.max(camera.near, 0.5);   // lift near off 0.1 m for depth precision at scale
+  camera.updateProjectionMatrix();
+  controls.maxDistance = Math.max(controls.maxDistance, fieldHalf * 4);
+  // Rescale the existing fog so the field reads to its edge instead of fading
+  // to slate at the old 55–110 m range. Keep the same Fog instance + colour.
+  if (scene.fog && typeof scene.fog.near === 'number') {
+    scene.fog.near = fieldHalf * 1.1;
+    scene.fog.far  = fieldHalf * 2.2;
+  }
+}
+
+// Exit outdoor mode: restore everything _enterOutdoorCamera swapped.
+function _exitOutdoorCamera() {
+  if (!_outdoorCamStash) return;
+  const s = _outdoorCamStash;
+  if (camera) {
+    camera.far = s.far;
+    camera.near = s.near;
+    camera.updateProjectionMatrix();
+  }
+  if (controls) controls.maxDistance = s.maxDistance;
+  // Restore fog near/far on the stashed instance (we never replaced the
+  // instance, only its near/far, so scene.fog still points at it).
+  if (s.fog && typeof s.fog.near === 'number' && s.fogNear !== null) {
+    s.fog.near = s.fogNear;
+    s.fog.far  = s.fogFar;
+  }
+  _outdoorCamStash = null;
 }
 
 // Smooth-focus tween — set when listener:selected fires (and we're in
@@ -10426,8 +10568,18 @@ function rebuildHeatmap() {
   if (flat.length === 0) return;
 
   const ear = earHeightFor(getSelectedListener());
+  // OUTDOOR SIMULATION MODE (Phase 3) — when state.outdoor.enabled, the grid
+  // covers ONE continuous field (interior reverberant + exterior free field)
+  // over a square `fieldBounds` centred on the room. computeSPLGrid keeps the
+  // exterior cells finite (R=0 outside, parametric air absorption, Tier 1a on)
+  // so we render ONE plane and do NOT mask to isInsideRoom3D — the grid itself
+  // decides validity. Indoor (enabled=false) is the historical path, untouched.
+  const outdoorOn = !!(state.outdoor && state.outdoor.enabled);
+  const fieldBounds = outdoorOn ? _outdoorFieldBounds() : null;
   // Adaptive grid so the room-level canvas stays near a 0.5 m cell target
   // (an 8 m studio → 16 cells; a 60 m arena → 80 cells, capped).
+  // squareCellCounts() inside computeSPLGrid governs the actual cell size; the
+  // gridSize arg is legacy. For a large outdoor field the cap keeps cost bounded.
   const longestDim = Math.max(state.room.width_m ?? 0, state.room.depth_m ?? 0);
   const roomGrid = Math.max(40, Math.min(120, Math.ceil(longestDim / 0.5)));
   const useSTI = state.display.heatmapMode === 'stipa';
@@ -10447,6 +10599,13 @@ function rebuildHeatmap() {
     stipaCtx,
     ambient_per_band: useSTI ? state.physics.ambientNoise?.per_band : null,
     computeSTIPAAt: useSTI ? computeSTIPAAt : null,
+    // OUTDOOR pass-through. When outdoorOn is false these revert to the
+    // computeSPLGrid defaults (outdoor:false, fieldBounds:null) → the indoor
+    // grid is byte-identical to before.
+    outdoor: outdoorOn,
+    fieldBounds,
+    temperature_C: outdoorOn ? (state.outdoor.temperature_C ?? 20) : undefined,
+    humidity_pct:  outdoorOn ? (state.outdoor.humidity_pct ?? 70) : undefined,
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
   // Publish the grid for the 3D legend to read (with metric tag so the
@@ -10487,8 +10646,21 @@ function rebuildHeatmap() {
   // in 3D while 2D — which renders the same grid without this mask — still
   // showed it. Using the grid's own predicate guarantees mask⇔grid parity:
   // every finite cell renders, every -Infinity cell is discarded. (2026-05-21.)
+  // OUTDOOR: the grid already decided per-cell validity (finite over the whole
+  // field, interior + exterior). Do NOT pass an insideAt predicate — that would
+  // re-discard the exterior cells the grid computed (the bug the Phase 2 brief
+  // warns against). insideAt:null keeps buildScalarTexture's grid-res finite
+  // mask (every finite cell renders), and `outdoor:true` turns on the radial
+  // edge feather so the square plane reads as a soft disc of influence.
+  // INDOOR: unchanged — hi-res silhouette mask clipping to the room polygon.
+  // The `insideAt` predicate is kept verbatim (the cross-surface fixture greps
+  // for the exact literal — tests/cross-surface-conventions.test.mjs). When
+  // `outdoor:true` buildHeatmapShaderMaterial IGNORES insideAt and renders the
+  // whole field (the grid already decided per-cell validity), so passing the
+  // indoor predicate unconditionally is harmless and keeps the call site stable.
   const bundle = buildHeatmapShaderMaterial(splResult, {
     insideAt: (x, y) => isInsideRoom3D({ x, y, z: ear }, state.room),
+    outdoor: outdoorOn,
   });
   const geo = new THREE.PlaneGeometry(planeW, planeD);
   heatmapMesh = new THREE.Mesh(geo, bundle.material);
@@ -10497,6 +10669,11 @@ function rebuildHeatmap() {
   // one per rebuild over a long resizing session).
   heatmapMesh.userData = { _scalarTex: bundle.scalarTex, _maskTex: bundle.maskTex };
   heatmapMesh.rotation.x = -Math.PI / 2;
+  // Plane sits at the grid origin + half-span (state frame). scene.scale.x=-1
+  // (initScene) mirrors it to the correct screen side — same as the historical
+  // indoor mesh, NO manual X negation here. The hottest field lobe lands on the
+  // same screen side as the source mesh + interior hot zone (verified: the
+  // source meshes use the identical state-coord→mesh-local convention).
   heatmapMesh.position.set(ox + planeW / 2, ear, oy + planeD / 2);
   heatmapMesh.visible = state.display.showHeatmaps;
   scene.add(heatmapMesh);
