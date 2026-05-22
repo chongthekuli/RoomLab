@@ -1454,6 +1454,11 @@ function renderNormal(vp) {
       room: state.room, gridSize: 25, freq_hz: freq, earHeight_m: ear,
       airAbsorption: phys.airAbsorption !== false,
       coherent: !!phys.coherent,
+      // Material-aware wall TL — must match the 3D path (scene.js
+      // currentPhysicsOpts). Omitting this fell back to the legacy flat
+      // 30 dB, leaking ~23 dB too much through walls (e.g. surau azan
+      // horn bleeding into the prayer hall). Dr. Chen diagnosis 2026-05-22.
+      materials: materialsRef || null,
       roomConstantR: phys.reverberantField && materialsRef
         ? computeRoomConstant(state.room, materialsRef, freq, state.zones, { treatments: state.treatments }) : 0,
     });
