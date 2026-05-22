@@ -1389,13 +1389,46 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // heatLegend are rebuilt locally here so the heatmap-detail page
   // (and the operating-range strip below) remain unchanged.
   const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid, { listenerMetrics: model.listenerMetrics }) : '';
-  const heatLegend = (model.heatmap && splGrid) ? buildHeatmapLegend(splGrid) : '';
   // 2026-05-19: stage is now a fixed-square slot in print.css so wide /
   // landscape rooms (pavilion) don't render a very wide, very short
   // heatmap that crowds the SPL legend label underneath. The SVG inside
   // the square uses preserveAspectRatio="xMidYMid meet" to letterbox.
   const heatStageStyle = '';
   const rt60_1k = model.rt60[3];
+
+  // ------ Page 2 restructure (Maya, 2026-05-22) -----------------------
+  // The page is now a two-column composition:
+  //   LEFT  — full-size coverage map, then (SPL only) the three
+  //           operating-range minis below it, then ONE shared SPL legend,
+  //           then the figure caption.
+  //   RIGHT — the 12 scene-summary KPI tiles as a single vertical rail.
+  // The standalone "Drawing 02" operating-range page is dropped — its
+  // three minis fold into the bottom-left of this page and share the
+  // page's one legend (operatingRangePage removed from the pages array).
+  //
+  // SHARED-SCALE PHYSICS (Dr. Chen ruling, option (a)):
+  //   The cell ramp (colorForMetric → splColorRGB) is FIXED-DOMAIN
+  //   (SPL 30–110 dB). The full-size map's cells and the three minis'
+  //   cells are therefore ALREADY coloured on the same absolute scale —
+  //   no raster ever auto-scaled to a grid's own min/max. The only thing
+  //   that previously auto-scaled was the full-size legend's TICK range
+  //   (buildHeatmapLegend used splGrid.min/maxSPL_db). To honestly serve
+  //   ONE legend for the big map + all three minis, we drop that
+  //   auto-ranged legend and use a single buildHeatmapStripLegend whose
+  //   ticks + gradient span the shared 5-dB-aligned [sharedMin,sharedMax]
+  //   envelope (the −20 dB plot floor → 0 dB plot ceiling). Because the
+  //   gradient is sampled from the same splColorRGB ramp, colour-at-
+  //   position on the legend matches colour-at-value in every plot,
+  //   full-size included. The caption states the fixed scale explicitly
+  //   so coverage uniformity is read against a known range.
+  //   Dr. Chen re-confirmed option (a) 2026-05-22 after verifying at the
+  //   source that splColorRGB is fixed-domain (colour-ramps.js): widening
+  //   the legend cannot compress the hero's contrast because the pixels
+  //   never auto-scaled. Honest as long as the shared span contains every
+  //   value present (it does — top = 0 dB plot max = hero max). Caption
+  //   names all four drive states so the reader knows the scale's low end
+  //   belongs to the lower-drive minis, not the full-drive hero.
+  const heatmapIsSpl = (model.heatmap?.metric ?? 'spl') === 'spl';
   let heatmapPage = '';
   if (heatSvg) {
     const metricLabel = model.heatmap.metric === 'sti' ? 'STI (IEC 60268-16)' : 'SPL @ 1 kHz';
@@ -1408,91 +1441,88 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     const meanTxt = model.heatmap.metric === 'sti'
       ? `mean ${fmt(model.heatmap.avgSPL_db, 2)}`
       : `mean ${fmt(model.heatmap.avgSPL_db, 0)} dB`;
+
+    // Operating-range minis + the page's single shared legend. Built
+    // only for SPL heatmaps (a drive offset has no linear meaning on an
+    // intelligibility metric); for STI the bottom-left simply stays
+    // empty and ONE auto-ranged legend serves the single map.
+    let minisStrip = '';
+    let sharedLegend = '';
+    let scaleNote = '';
+    if (splGrid && heatmapIsSpl) {
+      const LEVELS = [
+        { offsetDb: -20, label: 'Background', sub: '−20 dB rel. rated' },
+        { offsetDb: -10, label: 'Programme',  sub: '−10 dB rel. rated' },
+        { offsetDb:   0, label: 'Max',        sub: '0 dB rel. rated' },
+      ];
+      const shifted = LEVELS.map(L => ({
+        ...L,
+        grid: shiftSplGridByDb(splGrid, L.offsetDb),
+      }));
+      // Shared integer envelope: −20 dB plot floor → 0 dB plot ceiling,
+      // rounded out to 5 dB ticks at both ends. This same envelope colours
+      // the legend ticks/gradient; the cell colours are already on the
+      // fixed splColorRGB domain (see SHARED-SCALE note above).
+      const topGrid = shifted[shifted.length - 1].grid;
+      const sharedMin = Math.floor(shifted[0].grid.minSPL_db / 5) * 5;
+      const sharedMax = Math.ceil(topGrid.maxSPL_db / 5) * 5;
+      const stripCells = shifted.map((L, idx) => {
+        const svg = buildHeatmapPageSVG(state, L.grid, { compact: true });
+        const sub = `${fmt(L.grid.minSPL_db, 0)} / ${fmt(L.grid.avgSPL_db, 0)} / ${fmt(L.grid.maxSPL_db, 0)} dB · ${L.sub}`;
+        return `
+          <div class="pr-strip-cell">
+            <div class="pr-strip-cell-label">
+              <span class="pr-strip-cell-tag">${String(idx + 1).padStart(2, '0')}</span>
+              <span class="pr-strip-cell-title">${escapeHtml(L.label)}</span>
+            </div>
+            <div class="pr-strip-cell-stage">${svg}</div>
+            <div class="pr-strip-cell-sub">${escapeHtml(sub)}</div>
+          </div>`;
+      }).join('');
+      minisStrip = `<div class="pr-strip">${stripCells}</div>`;
+      sharedLegend = buildHeatmapStripLegend({
+        minDb: sharedMin,
+        maxDb: sharedMax,
+        stepDb: 5,
+        header: `SPL @ 1 kHz · shared scale, ${sharedMin}–${sharedMax} dB`,
+      });
+      scaleNote = ` The colour scale is absolute and fixed at ${sharedMin}–${sharedMax} dB, shared across the full-coverage map and all three drive states (Background −20 / Programme −10 / Max 0 dB rel. rated); its lower end is reached only by the lower-drive plots.`;
+    } else {
+      // STI (or any non-SPL): no drive-shifted minis. Single map keeps
+      // its own auto-ranged legend.
+      sharedLegend = buildHeatmapLegend(splGrid);
+    }
+
     heatmapPage = `
       <div class="pr-page pr-page-heatmap" data-running-title="Coverage map · top-down view">
         <!-- Drawing-register eyebrow removed v=562 — the running header
              carries the page title; the descriptive subtitle was redundant. -->
         <div class="pr-heatmap-grid">
-          <div class="pr-heatmap-stage"${heatStageStyle}>${heatSvg}</div>
-          ${heatLegend}
-        </div>
-        <p class="pr-caption">
-          ${escapeHtml(metricLabel)} ${escapeHtml(earTxt)} across
-          ${model.heatmap.sourceCount} element${model.heatmap.sourceCount === 1 ? '' : 's'}.
-          ${escapeHtml(valueRange)}, ${escapeHtml(meanTxt)}. Grey is outside the room footprint.
-        </p>
-        <div class="pr-tilegrid">
-          ${tile('Volume',                  `${fmt(room.volume_m3, 0)} m³`)}
-          ${tile('Floor area',              `${fmt(room.baseArea_m2, 1)} m²`)}
-          ${tile('Surface area',            `${fmt(room.totalArea_m2, 0)} m²`)}
-          ${tile('Mean α @ 1 kHz',          fmt(room.meanAbsorption_1k, 3))}
-          ${tile('RT60 @ 1 kHz · Sabine',   rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
-          ${tile('RT60 @ 1 kHz · Eyring',   rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
-          ${tile('Sources (raw / elements)', `${model.sourceFlat.raw} / ${model.sourceFlat.total}`)}
-          ${tile('Listeners',               `${model.listeners.length}`)}
-          ${tile('Audience zones',          `${model.zones.length}`)}
-          ${tile('Schroeder cutoff',        model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—')}
-          ${tile('Critical distance',       model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
-          ${tile('Ambient preset',          escapeHtml(model.ambient.preset))}
-        </div>
-      </div>`;
-  }
-
-  // ------ Drawing 02: operating-range coverage strip ------------------
-  // Per Sofia v3 + Dr. Chen: ONE physics solve, three shifted copies of
-  // the same grid at −20 / −10 / 0 dB rel. rated drive. Shared 5 dB-
-  // step integer legend below the strip; per-plot sub-caption with
-  // min/mean/max so the absolute numbers are in type as well as colour.
-  //
-  // Suppressed for STI heatmaps (drive offset has no linear meaning on
-  // an intelligibility metric) and for the empty-scene case.
-  let operatingRangePage = '';
-  const heatmapIsSpl = (model.heatmap?.metric ?? 'spl') === 'spl';
-  if (heatSvg && splGrid && heatmapIsSpl) {
-    const LEVELS = [
-      { offsetDb: -20, label: 'Background', sub: '−20 dB rel. rated' },
-      { offsetDb: -10, label: 'Programme',  sub: '−10 dB rel. rated' },
-      { offsetDb:   0, label: 'Max',        sub: '0 dB rel. rated' },
-    ];
-    const shifted = LEVELS.map(L => ({
-      ...L,
-      grid: shiftSplGridByDb(splGrid, L.offsetDb),
-    }));
-    // Shared integer range derived from the max-level plot (offsetDb=0).
-    // Rounded out to 5 dB ticks at both ends so all three plots map
-    // cleanly onto a single legend. The lower plots will have darker
-    // colours overall; that's the point of the comparison.
-    const topGrid = shifted[shifted.length - 1].grid;
-    const sharedMin = Math.floor(shifted[0].grid.minSPL_db / 5) * 5;
-    const sharedMax = Math.ceil(topGrid.maxSPL_db / 5) * 5;
-    const stripCells = shifted.map((L, idx) => {
-      const svg = buildHeatmapPageSVG(state, L.grid, { compact: true });
-      const sub = `${fmt(L.grid.minSPL_db, 0)} / ${fmt(L.grid.avgSPL_db, 0)} / ${fmt(L.grid.maxSPL_db, 0)} dB · ${L.sub}`;
-      return `
-        <div class="pr-strip-cell">
-          <div class="pr-strip-cell-label">
-            <span class="pr-strip-cell-tag">${String(idx + 1).padStart(2, '0')}</span>
-            <span class="pr-strip-cell-title">${escapeHtml(L.label)}</span>
+          <div class="pr-heatmap-main">
+            <div class="pr-heatmap-stage"${heatStageStyle}>${heatSvg}</div>
+            ${minisStrip}
+            <div class="pr-strip-legend-wrap">${sharedLegend}</div>
+            <p class="pr-caption">
+              ${escapeHtml(metricLabel)} ${escapeHtml(earTxt)} across
+              ${model.heatmap.sourceCount} element${model.heatmap.sourceCount === 1 ? '' : 's'}.
+              ${escapeHtml(valueRange)}, ${escapeHtml(meanTxt)}.${escapeHtml(scaleNote)} Grey is outside the room footprint.
+            </p>
           </div>
-          <div class="pr-strip-cell-stage">${svg}</div>
-          <div class="pr-strip-cell-sub">${escapeHtml(sub)}</div>
-        </div>`;
-    }).join('');
-    const sharedLegend = buildHeatmapStripLegend({
-      minDb: sharedMin,
-      maxDb: sharedMax,
-      stepDb: 5,
-      header: `SPL @ 1 kHz · shared scale, ${sharedMin}–${sharedMax} dB`,
-    });
-    operatingRangePage = `
-      <div class="pr-page pr-page-operating-range" data-running-title="Operating range">
-        <span class="pr-eyebrow">Drawing 02 · Operating-range coverage, top-down view</span>
-        <div class="pr-strip">${stripCells}</div>
-        <div class="pr-strip-legend-wrap">${sharedLegend}</div>
-        <p class="pr-caption">
-          SPL @ 1 kHz at three operating power levels, shared colour scale. Grey = outside footprint.
-          Levels per RoomLAB operating-range model; see methodology.
-        </p>
+          <div class="pr-tilegrid">
+            ${tile('Volume',                  `${fmt(room.volume_m3, 0)} m³`)}
+            ${tile('Floor area',              `${fmt(room.baseArea_m2, 1)} m²`)}
+            ${tile('Surface area',            `${fmt(room.totalArea_m2, 0)} m²`)}
+            ${tile('Mean α @ 1 kHz',          fmt(room.meanAbsorption_1k, 3))}
+            ${tile('RT60 @ 1 kHz · Sabine',   rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
+            ${tile('RT60 @ 1 kHz · Eyring',   rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
+            ${tile('Sources (raw / elements)', `${model.sourceFlat.raw} / ${model.sourceFlat.total}`)}
+            ${tile('Listeners',               `${model.listeners.length}`)}
+            ${tile('Audience zones',          `${model.zones.length}`)}
+            ${tile('Schroeder cutoff',        model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—')}
+            ${tile('Critical distance',       model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
+            ${tile('Ambient preset',          escapeHtml(model.ambient.preset))}
+          </div>
+        </div>
       </div>`;
   }
 
@@ -1673,7 +1703,6 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   const reportHtml = `
     ${cover}
     ${heatmapPage}
-    ${operatingRangePage}
     ${acousticResultsPage}
     ${sourcePage}
     ${treatmentPages}

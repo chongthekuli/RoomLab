@@ -136,8 +136,10 @@ export function buildHeatmapDataURL(splGrid) {
 }
 
 // Produce a shallow-copy splGrid with every finite cell value shifted
-// by `offsetDb`. Used by Drawing 02 (operating-range strip) to render
-// the same coverage map at −20 / −10 / 0 dB rel. rated drive without
+// by `offsetDb`. Used by the coverage-map page's operating-range minis
+// (the −20 / −10 / 0 dB strip that lived on the standalone "Drawing 02"
+// page until 2026-05-22, now folded under the full-size map) to render
+// the same coverage map at three drive levels without
 // re-running the full SPL solver. Physics: total SPL = direct +
 // reverberant, both proportional to source power, so a uniform power
 // offset is mathematically a uniform dB shift on every in-room cell.

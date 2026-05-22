@@ -744,22 +744,50 @@ body.is-pdf-export .vp-tabs {
      vertical legend column with numeric ticks shared with the 2D
      and 3D viewports via computeTicks(). */
   #print-report .pr-heatmap-grid {
-    /* 2026-05-19: was 2-column (heatmap | legend). User requested the
-       heatmap take the full available width with a narrow horizontal
-       legend underneath. Single-column flow now; legend follows the
-       stage in document order.
-       2026-05-19 (later): fixed 15cm slot centred on the page so wide /
-       landscape rooms (pavilion) don't render a very wide, very short
-       heatmap that crowds the SPL legend label underneath. The legend
-       bar matches the heatmap's width since the grid sets the column
-       width. */
+    /* 2026-05-22 (Maya) restructure: two-column composition.
+       LEFT  (.pr-heatmap-main, flex:1) — full-size map, then the three
+             operating-range minis, then ONE shared legend, then caption.
+       RIGHT (.pr-tilegrid, fixed rail) — the 12 KPI tiles stacked.
+       History: was a single full-width column (legend under a 15cm
+       centred square). The minis used to live on a separate Drawing 02
+       page; they now fold into the bottom-left of this column and share
+       this page's one legend. */
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8pt;
+    margin: 4pt 0 8pt 0;
+    width: 100%;
+  }
+  /* Left column — map + minis + shared legend + caption, top-aligned. */
+  #print-report .pr-heatmap-main {
+    flex: 1 1 auto;
+    min-width: 0;          /* let the square stage shrink to the column */
     display: flex;
     flex-direction: column;
-    gap: 8pt;
-    margin: 4pt auto 8pt auto;
-    width: 15cm;
-    max-width: 100%;
+    gap: 6pt;
   }
+  /* Minis + shared legend live in the narrower left column now, not on a
+     full-width standalone page — tighten the spacing/type so the three
+     thumbnails + their one legend fit under the square map. (2026-05-22) */
+  #print-report .pr-heatmap-main .pr-strip {
+    gap: 4pt;
+    margin: 0;
+  }
+  #print-report .pr-heatmap-main .pr-strip-cell-title { font-size: 8pt; }
+  #print-report .pr-heatmap-main .pr-strip-cell-tag   { font-size: 6.5pt; }
+  #print-report .pr-heatmap-main .pr-strip-cell-label { padding-bottom: 1.5pt; margin-bottom: 2pt; }
+  #print-report .pr-heatmap-main .pr-strip-cell-sub   { font-size: 6.5pt; margin-top: 2pt; line-height: 1.25; }
+  #print-report .pr-heatmap-main .pr-strip-cell-stage svg { max-height: 5cm; }
+  /* Suppress the per-mini north arrow in this context — the full-size map
+     directly above already establishes north for the whole column, and
+     four "N" kites clustered in one column reads as clutter. (2026-05-22) */
+  #print-report .pr-heatmap-main .pr-strip-cell-stage::after { content: none !important; }
+  /* Shared legend spans the full left-column width here (the standalone
+     page centred it at 70%). */
+  #print-report .pr-heatmap-main .pr-strip-legend-wrap { justify-content: stretch; margin: 0; }
+  #print-report .pr-heatmap-main .pr-strip-legend { width: 100%; max-width: none; }
+  #print-report .pr-heatmap-main .pr-caption { margin-top: 2pt; }
   #print-report .pr-heatmap-stage {
     border: 1pt solid var(--rule);
     padding: 4mm;
@@ -768,8 +796,14 @@ body.is-pdf-export .vp-tabs {
     position: relative;
     /* Fixed square slot so room aspect ratio doesn't change the page
        layout. SVG inside uses preserveAspectRatio="xMidYMid meet" so
-       wide / tall rooms letterbox cleanly inside this square. */
+       wide / tall rooms letterbox cleanly inside this square.
+       2026-05-22: the stage now fills the LEFT column width (it used to
+       be a 15cm centred slot). max-height caps it so the column (square
+       map + 3 minis + shared legend + caption) fits one A4 page even
+       when the tile rail is narrow and the column is wide. */
     aspect-ratio: 1 / 1;
+    width: 100%;
+    max-height: 128mm;
     /* overflow: hidden — clip the north-arrow ::after to the stage's
        printed box. WHY: Chrome's print-paginator can render a
        `position: absolute` ::after on EVERY printable page that the
@@ -1044,7 +1078,20 @@ body.is-pdf-export .vp-tabs {
     white-space: nowrap;
   }
 
-  /* Tile grid (moved off cover, lives below plan) */
+  /* Tile rail — 2026-05-22 (Maya): the 12 KPI tiles were a full-width
+     4-col grid BELOW the heatmap; now a single vertical column to the
+     RIGHT of the map (see .pr-heatmap-grid). Fixed 46mm rail keeps the
+     left map column as large as the page allows while the labels still
+     fit on ≤ 2 lines at 7pt. */
+  #print-report .pr-heatmap-grid > .pr-tilegrid {
+    display: flex;
+    flex-direction: column;
+    gap: 4pt;
+    margin: 0;
+    flex: 0 0 46mm;
+    width: 46mm;
+  }
+  /* Legacy 4-col grid kept for any other caller of .pr-tilegrid. */
   #print-report .pr-tilegrid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
