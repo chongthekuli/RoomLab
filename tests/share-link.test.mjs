@@ -173,6 +173,10 @@ applyPresetToState('auditorium');
     'rackSystem',  // PA equipment racks (Felix Brandt's RACK_BUILDER_DESIGN spec)
     'projectName', // user-set project label (Hospital Serdang, etc.)
     'treatments', 'selectedTreatmentId',   // acoustic treatments (PR-2 physics integration, May 2026)
+    'outdoor',     // outdoor-field config: {enabled, field_size_m, temperature_C,
+                   // humidity_pct} — 4 small scalars, scene config like physics.
+                   // serializeProject (app-state.js) emits it intentionally so a
+                   // shared scene reproduces its outdoor settings (v=600 outdoor mode).
   ]);
   const present = Object.keys(parsed);
   const unexpected = present.filter(k => !allowedTopKeys.has(k));
