@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=603" />
-  <link rel="stylesheet" href="css/theme.css?v=603" />
-  <link rel="stylesheet" href="css/print.css?v=603" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=606" />
+  <link rel="stylesheet" href="css/theme.css?v=606" />
+  <link rel="stylesheet" href="css/print.css?v=606" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -313,14 +313,27 @@
     </main>
   </div>
 
-  <!-- WALLLAB ROUTE — Lab #5 (2026-05-22). Wall sound-isolation explorer +
-       the BETA toggle for over-wall acoustics (Tier 1a: Maekawa edge
-       diffraction + Kuttruff re-radiation, default OFF). Phase 1 ships the
-       tab + toggle; the material/thickness simulator (Phases 2-3) mounts
-       into #view-wall. No rail-system yet — single centred workbench. -->
+  <!-- WALLLAB ROUTE — Lab #5 (2026-05-22). Wall sound-isolation explorer.
+       Rail-system layout matching the other labs (viewport-bound, no page
+       scroll): left rail = "Physics mode" panel (the over-wall-acoustics
+       BETA toggle, Tier 1a, default OFF); centre #view-wall = the simulator
+       (material + thickness → mass-law TL vs measured); right rail =
+       "Standards & method" panel (live equation + citations). -->
   <div class="lab-route" id="route-wall" data-route="wall">
     <main id="walllab-root">
+      <nav class="rail rail-left" id="rail-left-wall" aria-label="Left tools">
+        <button class="rail-icon" data-panel="physics" data-side="left" type="button" aria-label="Physics mode (over-wall acoustics)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l3-7 4 14 3-7h5"/></svg></button>
+      </nav>
+      <aside id="panel-left" class="rail-panel rail-panel-left" aria-hidden="true">
+        <section id="panel-physics"><h2>Physics mode</h2><div id="wall-physics-body"><div class="phase-placeholder">Loading…</div></div></section>
+      </aside>
       <div id="view-wall" class="walllab-view"></div>
+      <aside id="panel-right" class="rail-panel rail-panel-right" aria-hidden="true">
+        <section id="panel-method"><h2>Standards &amp; method</h2><div id="wall-method-body"><div class="phase-placeholder">Pick a material to see the method.</div></div></section>
+      </aside>
+      <nav class="rail rail-right" id="rail-right-wall" aria-label="Right tools">
+        <button class="rail-icon" data-panel="method" data-side="right" type="button" aria-label="Standards &amp; method"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6Z"/><path d="M14 3v5h5M9 12h7M9 16h5M9 8h2"/></svg></button>
+      </nav>
     </main>
   </div>
 
@@ -374,6 +387,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=603"></script>
+  <script type="module" src="js/main.js?v=606"></script>
 </body>
 </html>

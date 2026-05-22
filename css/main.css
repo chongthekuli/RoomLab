@@ -616,7 +616,10 @@ html[data-rail-left="openings"]         #panel-openings,
 html[data-rail-left="systems"]          #panel-systems,
 html[data-rail-right="absorption"]      #panel-absorption,
 html[data-rail-right="polardiffusion"]  #panel-polardiffusion,
-html[data-rail-right="construction"]    #panel-construction {
+html[data-rail-right="construction"]    #panel-construction,
+/* WallLAB (Lab #5) — left: physics-mode (over-wall toggle); right: method. */
+html[data-rail-left="physics"]          #panel-physics,
+html[data-rail-right="method"]          #panel-method {
   display: block;
 }
 #viewport {
@@ -6543,28 +6546,38 @@ section h3 {
 #panel-precision .precision-v3-live strong { color: var(--fg, #e6edf3); }
 
 /* ===================================================================
-   WallLAB (Lab #5) — Phase 1: header + over-wall-acoustics BETA toggle.
-   Single centred workbench (no rail-system yet). Matches the dark
-   engineering palette; BETA chip uses the calm amber data accent, never
-   red, per Maya's honest-not-alarming framing.
+   WallLAB (Lab #5). Rail-system layout matching the other labs:
+   viewport-bound (no page scroll), glass header pinned. Left rail =
+   "Physics mode" panel (over-wall-acoustics BETA toggle); centre
+   #view-wall = the simulator; right rail = "Standards & method".
+   BETA chip uses the calm amber data accent, never red, per Maya.
    =================================================================== */
 #walllab-root {
-  width: 100%;
-  height: 100%;
-  overflow: auto;
+  height: 100vh;          /* content extends behind the glass header */
   background: var(--bg);
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr;
+  position: relative;
 }
-.walllab-view { display: block; }
-.wall-workbench {
-  max-width: 760px;
-  margin: 0 auto;
-  /* Clear the 44px fixed glass #app-header — WallLAB is a document-style
-     page, so its content must start BELOW the header rather than scroll
-     behind it the way the RoomLAB scene does. */
-  padding: calc(44px + var(--space-5)) var(--space-4) 64px;
+/* Centre view — the simulator. Scrolls INTERNALLY only if a very short
+   viewport can't fit it; on normal heights everything fits without scroll.
+   Top padding clears the 44px fixed header. */
+.walllab-view {
+  height: 100vh;
+  overflow-y: auto;
+  padding: calc(44px + var(--space-4)) var(--space-4) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
+  align-items: center;
+}
+.wall-workbench {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 .wall-head h1 {
   display: flex;
@@ -6604,19 +6617,28 @@ section h3 {
   color: var(--fg-strong);
   margin: 0 0 var(--space-2);
 }
-.wall-toggle-row {
+/* Toggle lives inside the left "Physics mode" rail panel (narrow). Name +
+   switch on one row, description + status stacked below. */
+.wall-toggle-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
-.wall-toggle-text { flex: 1 1 auto; }
+.wall-toggle-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-strong);
+}
 .wall-toggle-desc {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.55;
   margin: 0;
-  max-width: 52ch;
 }
 .wall-toggle-desc em { color: var(--fg); font-style: italic; }
 .wall-validation {
@@ -6707,9 +6729,123 @@ section h3 {
 .wall-reload-btn:hover { background: var(--accent-hover); }
 .wall-reload-btn:focus-visible { outline: 2px solid var(--fg-strong); outline-offset: 2px; }
 
-.wall-sim-placeholder .phase-placeholder {
+.wall-sim-placeholder .phase-placeholder,
+.wall-sim .phase-placeholder {
   color: var(--muted);
   font-size: 12.5px;
   line-height: 1.55;
   margin: 0;
+}
+
+/* --- Simulator controls --- */
+.wall-sim-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.wall-ctrl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.wall-ctrl select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  min-width: 150px;
+}
+.wall-ctrl-slider { flex: 1 1 220px; min-width: 200px; }
+.wall-ctrl input[type="range"] { width: 100%; accent-color: var(--accent); margin: 6px 0 0; }
+.wall-thick-val { font-size: 13px; color: var(--fg); text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.wall-ctrl select:focus-visible,
+.wall-ctrl input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* --- Results: summary + plot --- */
+.wall-sim-results {
+  display: flex;
+  gap: var(--space-4);
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.wall-summary {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  padding: var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.wall-summary-num { font-size: 38px; font-weight: 700; color: var(--fg-strong); line-height: 1; font-variant-numeric: tabular-nums; }
+.wall-summary-unit { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.wall-summary-cap { font-size: 10px; color: var(--muted-dim); text-align: center; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.wall-plot { flex: 1 1 360px; min-width: 300px; }
+.wall-plot-svg { width: 100%; height: auto; display: block; }
+
+/* SVG plot primitives (shape-coded, not colour-only — deuteranopia) */
+.wp-grid { stroke: var(--border); stroke-width: 1; }
+.wp-ytick { fill: var(--muted); font-size: 9px; text-anchor: end; }
+.wp-xtick { fill: var(--muted); font-size: 9px; text-anchor: middle; }
+.wp-axis-title { fill: var(--muted); font-size: 10px; text-anchor: middle; }
+.wp-computed { fill: none; stroke: var(--accent); stroke-width: 2; }
+.wp-measured { fill: none; stroke: var(--data-cyan); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.wp-measured-pt { fill: var(--data-cyan); }
+.wp-dip-leader { stroke: var(--data-amber); stroke-width: 1; stroke-dasharray: 2 2; }
+.wp-dip-label { fill: var(--data-amber); font-size: 9px; }
+.wp-legend { fill: var(--muted); font-size: 10px; }
+
+/* --- Per-band table --- */
+.wall-table-wrap { margin-top: var(--space-4); overflow-x: auto; }
+.wall-tl-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.wall-tl-table th, .wall-tl-table td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--border); }
+.wall-tl-table thead th { color: var(--muted); font-weight: 600; }
+.wall-tl-table tbody th { text-align: left; color: var(--fg); font-weight: 600; }
+.wall-tl-table td { color: var(--fg); }
+.wall-tl-delta td, .wall-tl-delta th { color: var(--muted); }
+.wall-tl-note td { text-align: left; color: var(--muted-dim); font-style: italic; border-bottom: none; }
+.wall-method-hint { font-size: 11.5px; color: var(--muted-dim); margin: var(--space-3) 0 0; }
+.wall-method-hint strong { color: var(--muted); }
+
+/* --- Standards & method --- */
+.wall-eq {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  font-family: 'JetBrains Mono', monospace;
+}
+.wall-eq-line { font-size: 14px; color: var(--fg-strong); }
+.wall-eq-sub { font-size: 11px; color: var(--muted); margin: 4px 0; }
+.wall-eq-result { font-size: 13px; color: var(--fg); margin-top: 4px; }
+.wall-eq-result strong { color: var(--accent); }
+.wall-method-plain { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin: 0 0 var(--space-3); }
+.wall-method-plain em { color: var(--fg); font-style: italic; }
+.wall-cites { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.wall-cites li { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.wall-cites strong { color: var(--fg); }
+.wall-cite-sep { border-top: 1px solid var(--border); padding-top: var(--space-2); }
+.wall-est-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--data-amber);
+  background: rgba(255, 180, 84, 0.12);
+  border: 1px solid rgba(255, 180, 84, 0.4);
+  border-radius: var(--radius);
+  padding: 1px 5px;
+  margin-right: 4px;
 }

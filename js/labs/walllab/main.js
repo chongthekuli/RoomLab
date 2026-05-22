@@ -14,11 +14,20 @@
 // instead of it being a hidden localhost auto-enable.
 
 import { mountWallSim } from './wall-sim.js';
+import { mountRailSystem, getOpenPanel, openPanel } from '../../ui/rail-system.js';
 
 let _mounted = false;
 
 export async function mountWallLab() {
   if (_mounted) return;
   _mounted = true;
+
   mountWallSim();
+  mountRailSystem({ routeId: 'wall' });
+
+  // First-visit affordance: the over-wall-acoustics toggle is WallLAB's
+  // headline control, so surface the Physics panel by default when the rail
+  // system hasn't already restored a left-panel from this session. (The
+  // user can close it; the choice then persists per the rail-system rules.)
+  if (!getOpenPanel('left')) openPanel('left', 'physics');
 }
