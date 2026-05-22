@@ -3553,7 +3553,8 @@ export function getPlacementBindings() {
 // Also bound to the F shortcut so the user can re-fit after manual
 // dimension edits or a misadventure with the orbit drag.
 //
-// Camera at the NE 3/4-iso position. Convention: state +y at screen-top,
+// Camera at the 3/4-iso position (180°-flipped corner as of 2026-05-22).
+// Convention: state +y at screen-top,
 // state +x at screen-right. The X-axis match with 2D is enforced by the
 // scene-level `scale.x = -1` applied in initScene() (2026-05-18 — user
 // validated the X mismatch empirically after multiple iterations of
@@ -3573,7 +3574,11 @@ export function frameCameraToRoom() {
   // X negated — scene.scale.x = -1 mirrors meshes; state.x lands at
   // world.x = -state.x. Camera position/target are in WORLD coords, so
   // they target the mirrored room location.
-  camera.position.set(-(cx + d3 * 0.9), h + d3 * 0.5, d + d3 * 0.4);
+  // 180° azimuth flip 2026-05-22 (user) — match the iso preset's new
+  // opposite-corner heading. Negate the d3 directional offsets (x & z)
+  // while keeping the cx/d base, so the camera orbits to the diagonally
+  // opposite corner at the same height. Was -(cx + d3*0.9) / d + d3*0.4.
+  camera.position.set(-(cx - d3 * 0.9), h + d3 * 0.5, d - d3 * 0.4);
   controls.target.set(-cx, h * 0.4, cz);
   controls.update();
 }
@@ -3858,7 +3863,11 @@ function _cameraPresetTransform(name) {
       // read as flat in a square frame; (0.85, 0.6, 0.45) lifts the
       // camera so the floor + room volume both project visibly without
       // losing the 3/4 "lean" of a classic iso.
-      const dirToCam  = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
+      // 180° azimuth flip (2026-05-22, user) — view from the opposite
+      // 3/4 corner. Negating x AND z rotates the horizontal heading 180°
+      // while leaving y (and the horizontal magnitude) untouched, so the
+      // ~32° pitch is preserved. Was (0.85, 0.6, 0.45).
+      const dirToCam  = new THREE.Vector3(-0.85, 0.6, -0.45).normalize();
 
       // Silhouette point set. For a CIRCULAR / POLYGON room the Box3
       // is the inscribed-cylinder's AABB — w × d × h with 4 corners
@@ -4129,7 +4138,11 @@ export function captureViewportImage(opts = {}) {
       const room = state.room;
       const aabb = _roomWorldAABB?.();
       if (room && aabb && aabb.w > 0 && aabb.d > 0) {
-        const dirToCam = new THREE.Vector3(0.85, 0.6, 0.45).normalize();
+        // Must match the iso preset's dirToCam (scene.js ~3861) — 180°
+        // azimuth flip 2026-05-22. If these two desync, the print-cover
+        // aspect pre-pass frames the OLD corner while capture frames the
+        // new one → wrong cover aspect on non-square rooms.
+        const dirToCam = new THREE.Vector3(-0.85, 0.6, -0.45).normalize();
         const viewDir = dirToCam.clone().negate();
         const worldUp = new THREE.Vector3(0, 1, 0);
         const rightV = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();

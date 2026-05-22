@@ -37,8 +37,11 @@ ok(/scene\.scale\.x\s*=\s*-1\s*;/.test(scene),
 const frame = scene.match(/export function frameCameraToRoom[\s\S]*?\n\}/);
 ok(!!frame, 'frameCameraToRoom exists');
 if (frame) {
-  ok(/camera\.position\.set\(-\(cx \+ d3 \* 0\.9\)/.test(frame[0]),
-     'frameCameraToRoom: camera.position.x = -(cx + d3*0.9)');
+  // 180° iso azimuth flip (2026-05-22) — camera orbits to the opposite
+  // corner: the d3 directional offset is SUBTRACTED, not added. X is
+  // still negated for the scene.scale.x = -1 mirror.
+  ok(/camera\.position\.set\(-\(cx - d3 \* 0\.9\)/.test(frame[0]),
+     'frameCameraToRoom: camera.position.x = -(cx - d3*0.9) [180° flip]');
   ok(/controls\.target\.set\(-cx,/.test(frame[0]),
      'frameCameraToRoom: controls.target.x = -cx');
 }
