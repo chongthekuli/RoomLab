@@ -24,6 +24,7 @@ const LABS = [
   { id: 'speaker', label: 'SpeakerLAB', href: '#/speaker', sublabel: 'Speaker library' },
   { id: 'device',  label: 'DeviceLAB',  href: '#/device',  sublabel: 'PA equipment' },
   { id: 'surface', label: 'SurfaceLAB', href: '#/surface', sublabel: 'Treatment & finishes' },
+  { id: 'wall',    label: 'WallLAB',    href: '#/wall',    sublabel: 'Wall isolation (beta)' },
 ];
 
 export function mountHeaderNav({ activeLab } = {}) {

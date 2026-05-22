@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=600" />
-  <link rel="stylesheet" href="css/theme.css?v=600" />
-  <link rel="stylesheet" href="css/print.css?v=600" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=603" />
+  <link rel="stylesheet" href="css/theme.css?v=603" />
+  <link rel="stylesheet" href="css/print.css?v=603" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -313,6 +313,17 @@
     </main>
   </div>
 
+  <!-- WALLLAB ROUTE — Lab #5 (2026-05-22). Wall sound-isolation explorer +
+       the BETA toggle for over-wall acoustics (Tier 1a: Maekawa edge
+       diffraction + Kuttruff re-radiation, default OFF). Phase 1 ships the
+       tab + toggle; the material/thickness simulator (Phases 2-3) mounts
+       into #view-wall. No rail-system yet — single centred workbench. -->
+  <div class="lab-route" id="route-wall" data-route="wall">
+    <main id="walllab-root">
+      <div id="view-wall" class="walllab-view"></div>
+    </main>
+  </div>
+
   <div id="help-overlay" hidden>
     <div class="help-modal">
       <div class="help-head">
@@ -363,6 +374,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=600"></script>
+  <script type="module" src="js/main.js?v=603"></script>
 </body>
 </html>

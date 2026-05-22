@@ -22,7 +22,7 @@
 
 import { showLoadingOverlay, hideLoadingOverlay } from './lab-loading-overlay.js';
 
-const ROUTES = ['room', 'speaker', 'device', 'surface'];
+const ROUTES = ['room', 'speaker', 'device', 'surface', 'wall'];
 const DEFAULT_ROUTE = 'room';
 
 // Human-readable labels for the loading overlay. Match header-nav.js
@@ -33,6 +33,7 @@ const ROUTE_LABELS = {
   speaker: 'SpeakerLAB',
   device:  'DeviceLAB',
   surface: 'SurfaceLAB',
+  wall:    'WallLAB',
 };
 
 /**
