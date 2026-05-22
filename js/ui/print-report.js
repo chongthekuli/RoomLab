@@ -292,6 +292,15 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
       coherent,
       airAbsorption: airAbs,
       metric: 'spl',
+      // HARD CONSTRAINT — the print report is ALWAYS room-only. The open-
+      // ground field mode extends the on-screen viewport heatmap (2D + 3D)
+      // over a large field, but it must NEVER render into the proposal
+      // report. We pass the room-only flag explicitly and deliberately do
+      // NOT pass any field-extent override, so the grid is bounded by
+      // roomEffectiveBounds(state.room) and cells outside the footprint
+      // stay -Infinity. Do NOT wire the field-mode scene flag into this
+      // path — enforced by tests/outdoor-report-exclusion.test.mjs.
+      outdoor: false,
     });
   } catch (err) {
     console.warn('[print-report] heatmap grid compute failed:', err);

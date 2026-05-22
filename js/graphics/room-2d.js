@@ -796,6 +796,56 @@ function currentRoomGeom() {
   return { scale, pxW, pxD, x0, y0, bounds };
 }
 
+// OUTDOOR field bounds — a SQUARE of side state.outdoor.field_size_m centred
+// on the room's effective centre, in STATE coords. This MUST byte-match the
+// 3D path's _outdoorFieldBounds (scene.js ~3633): same clamp [50,1000], same
+// roomEffectiveBounds centre, same fallback. Parity is mandatory — the two
+// viewports sample the identical field square so the heatmap reads the same
+// in 2D and 3D (Sam owns the cross-surface fixture). No X negation here:
+// these are state coords; the 2D Y-flip is applied downstream by x0/y0/scale.
+function outdoorFieldBounds() {
+  const room = state.room || {};
+  let b = null;
+  try { b = roomEffectiveBounds(room); } catch (_) { b = null; }
+  let cx, cy;
+  if (b && Number.isFinite(b.minX) && Number.isFinite(b.maxX) && b.maxX > b.minX) {
+    cx = (b.minX + b.maxX) / 2;
+    cy = (b.minY + b.maxY) / 2;
+  } else {
+    cx = (room.width_m ?? 10) / 2;
+    cy = (room.depth_m ?? 10) / 2;
+  }
+  const span = Math.max(50, Math.min(1000, state.outdoor?.field_size_m ?? 400));
+  const half = span / 2;
+  return { minX: cx - half, minY: cy - half, maxX: cx + half, maxY: cy + half };
+}
+
+// Geometry for OUTDOOR mode: fit the SVG viewBox band to the FIELD square
+// (fb) instead of the room footprint, while keeping pxW / pxD pinned to the
+// ROOM's metre dimensions so EVERY existing world→screen call site
+// (renderHeatmapSVG, renderOneSpeakerSymbol, renderListenersSVG,
+// renderRoomOutline, …) keeps working unchanged. Those sites all derive
+// their per-metre scale as `pxW / room.width_m` (== `scale`), so as long as
+// pxW = width_m * scale and pxD = depth_m * scale, a world coord anywhere in
+// the field (incl. negative / past-the-walls) lands at the right pixel via
+// `x0 + worldX * scale`. x0/y0 absorb the field offset so the room renders at
+// its correct position inside the larger frame. Same Y-flip convention as
+// currentRoomGeom (world-Y=0 → screen-bottom).
+function currentFieldGeom(fb) {
+  const { width_m: w, depth_m: d } = state.room;
+  const totW = Math.max(1e-3, fb.maxX - fb.minX);
+  const totD = Math.max(1e-3, fb.maxY - fb.minY);
+  const vbW = 800, vbH = 500, pad = 90;
+  const scale = Math.min((vbW - pad * 2) / totW, (vbH - pad * 2) / totD);
+  const pxW = w * scale;
+  const pxD = d * scale;
+  const pxTotalW = totW * scale;
+  const pxTotalD = totD * scale;
+  const x0 = (vbW - pxTotalW) / 2 - fb.minX * scale;
+  const y0 = (vbH - pxTotalD) / 2 + fb.maxY * scale;
+  return { scale, pxW, pxD, x0, y0, bounds: fb };
+}
+
 // --- Mount ---
 export function mount2DViewport({ materials }) {
   materialsRef = materials;
@@ -809,6 +859,15 @@ export function mount2DViewport({ materials }) {
   on('treatment:changed', render);
   on('treatment:selected', render);
   on('scene:reset', render);
+  // OUTDOOR SIMULATION MODE (Phase 3b) — the UI panel mutates
+  // state.outdoor.{enabled,field_size_m,temperature_C,humidity_pct} then emits
+  // 'outdoor:changed'. Like the 3D handler (scene.js), we read STATE, not the
+  // payload. Toggling on widens the viewBox to the field square; toggling off
+  // (or scene:reset, which app-state resets outdoor → off) returns to the
+  // room-fit framing. Reset the wheel-zoom so the new extent shows at default
+  // scale — otherwise a zoomed-in room view stays cropped when the field
+  // suddenly spans up to 1000 m.
+  on('outdoor:changed', () => { resetView2dZoom(); render(); });
   // STI labels next to each listener come out of state.results.precision —
   // re-render when the precision engine completes so the value appears
   // immediately instead of waiting for the next scene mutation.
@@ -1434,7 +1493,12 @@ function renderNormal(vp) {
   const alphaOf = id => materialsRef.byId[id]?.absorption[useIdx] ?? 0;
   const nameOf = id => materialsRef.byId[id]?.name ?? id;
 
-  const geom = currentRoomGeom();
+  // OUTDOOR SIMULATION MODE (Phase 3b) — when state.outdoor.enabled, fit the
+  // viewBox to the FIELD square (currentFieldGeom) and sample computeSPLGrid
+  // over the same square the 3D path uses. Indoor: room-fit geom, unchanged.
+  const outdoorOn = !!(state.outdoor && state.outdoor.enabled);
+  const fieldBounds = outdoorOn ? outdoorFieldBounds() : null;
+  const geom = outdoorOn ? currentFieldGeom(fieldBounds) : currentRoomGeom();
   const { x0, y0, pxW, pxD } = geom;
   // Origin crosshair shown in normal mode too — Maya §2: pros need to
   // know where world (0, 0) sits before they decide where to draw.
@@ -1461,6 +1525,16 @@ function renderNormal(vp) {
       materials: materialsRef || null,
       roomConstantR: phys.reverberantField && materialsRef
         ? computeRoomConstant(state.room, materialsRef, freq, state.zones, { treatments: state.treatments }) : 0,
+      // OUTDOOR pass-through — must match the 3D call site (scene.js ~10605).
+      // When outdoorOn is false these revert to computeSPLGrid's defaults
+      // (outdoor:false, fieldBounds:null) → the indoor grid is byte-identical.
+      // outdoor:true returns ONE continuous grid over fieldBounds: finite free-
+      // field SPL outside the walls, room reverb inside. The 25-cell gridSize is
+      // legacy; squareCellCounts() inside computeSPLGrid governs actual cell size.
+      outdoor: outdoorOn,
+      fieldBounds,
+      temperature_C: outdoorOn ? (state.outdoor.temperature_C ?? 20) : undefined,
+      humidity_pct:  outdoorOn ? (state.outdoor.humidity_pct ?? 70) : undefined,
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;
@@ -1474,7 +1548,15 @@ function renderNormal(vp) {
   }
 
   const roomOutline = renderRoomOutline(state.room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces);
-  const clipPathSvg = renderClipPath(state.room, x0, y0, pxW, pxD);
+  // Indoor: clip the heatmap to the room polygon (the field stops at the
+  // walls). Outdoor: the field extends PAST the walls, so we do NOT clip it —
+  // instead we apply a radial alpha feather at the field's OUTER edge (the 2D
+  // analogue of heatmap-shader.js's circular falloff) so the square doesn't end
+  // in a hard edge. The wall SPL step (interior↔exterior) is NOT feathered —
+  // that boundary is correct physics (Dr. Chen). The feather only touches the
+  // outermost rim of the field square.
+  const clipPathSvg = outdoorOn ? '' : renderClipPath(state.room, x0, y0, pxW, pxD);
+  const fieldFeatherDef = outdoorOn ? renderFieldFeatherMask(fieldBounds, geom) : '';
 
   const zonesSvg = renderZones(state.zones, state.selectedZoneId, x0, y0, pxW, pxD, state.room, false);
   // Render speakers from state.sources DIRECTLY (not the flat-element
@@ -1531,13 +1613,18 @@ function renderNormal(vp) {
     ? nameOf(matIdOf(surfaces.wall_north ?? surfaces.walls))
     : nameOf(matIdOf(surfaces.walls ?? surfaces.wall_north));
 
+  const fieldSpanLabel = outdoorOn
+    ? ` — outdoor field ${Math.round(Math.max(50, Math.min(1000, state.outdoor?.field_size_m ?? 400)))} m`
+    : '';
   vp.innerHTML = `
     <div class="viewport-2d">
-      <div class="vp-header">Floor plan — top-down</div>
+      <div class="vp-header">Floor plan — top-down${fieldSpanLabel}</div>
       <svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
-        <defs>${clipPathSvg}</defs>
+        <defs>${clipPathSvg}${fieldFeatherDef}</defs>
         ${roomOutline.floorFill}
-        <g clip-path="url(#room-clip)">${splSvg}</g>
+        ${outdoorOn
+          ? `<g mask="url(#field-feather-mask)">${splSvg}</g>`
+          : `<g clip-path="url(#room-clip)">${splSvg}</g>`}
         ${roomOutline.walls}
         ${roomOutline.labels}
         ${zonesSvg}
@@ -1784,6 +1871,44 @@ function renderClipPath(room, x0, y0, pxW, pxD) {
     return `${sx.toFixed(1)},${sy.toFixed(1)}`;
   }).join(' ');
   return `<clipPath id="room-clip"><polygon points="${points}" /></clipPath>`;
+}
+
+// OUTDOOR radial edge feather — the 2D analogue of heatmap-shader.js's
+// circular falloff (FRAG: r = length(uv-0.5)*2; edge = 1 - smoothstep(0.78,1,r)).
+// Returns an SVG <mask> whose alpha is 1 (opaque) out to ~78 % of the field's
+// half-span then ramps to 0 at the edge midpoint, so the square field reads as
+// a soft disc of influence rather than a cropped screenshot. The mask is keyed
+// to the FIELD square only — it never touches the interior/wall SPL step (that
+// boundary is correct physics, Dr. Chen). Corners of the square (radius > the
+// half-side) fall past the gradient's outer stop and are fully transparent,
+// exactly as the shader discards r > 1.
+//
+// SVG gradient r is a fraction of the bounding-box's longest side. We size an
+// explicit ellipse covering the field's pixel span and give the gradient an
+// objectBoundingBox so the 0.78 / 1.0 stops land at the same normalised radius
+// the shader uses. falloffStart MUST match heatmap-shader.js (0.78).
+const FIELD_FEATHER_START = 0.78;   // keep in lock-step with heatmap-shader.js falloffStart
+function renderFieldFeatherMask(fb, geom) {
+  const { scale, x0, y0 } = geom;
+  const cxW = (fb.minX + fb.maxX) / 2;
+  const cyW = (fb.minY + fb.maxY) / 2;
+  const cxPx = x0 + cxW * scale;
+  const cyPx = y0 - cyW * scale;            // Y-flip
+  const halfPx = ((fb.maxX - fb.minX) / 2) * scale;   // square → X half-span == Y half-span
+  // Gradient: white (mask=on) solid to FIELD_FEATHER_START, ramp to black at
+  // the edge midpoint. Mask backdrop stays black so anything past the disc is
+  // hidden — including the square's corners (distance √2·halfPx > halfPx).
+  return `
+    <radialGradient id="field-feather-grad" gradientUnits="userSpaceOnUse"
+      cx="${cxPx.toFixed(1)}" cy="${cyPx.toFixed(1)}" r="${halfPx.toFixed(1)}"
+      fx="${cxPx.toFixed(1)}" fy="${cyPx.toFixed(1)}">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset="${FIELD_FEATHER_START}" stop-color="#fff"/>
+      <stop offset="1" stop-color="#000"/>
+    </radialGradient>
+    <mask id="field-feather-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="800" height="500">
+      <circle cx="${cxPx.toFixed(1)}" cy="${cyPx.toFixed(1)}" r="${halfPx.toFixed(1)}" fill="url(#field-feather-grad)"/>
+    </mask>`;
 }
 
 // Wall slots may be either a string (legacy: material id only) or an

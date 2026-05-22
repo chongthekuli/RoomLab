@@ -2149,19 +2149,69 @@ section h3 {
   gap: 0.5rem;
   grid-template-columns: none !important;
   cursor: pointer;
+  font-weight: 600;
 }
 .outdoor-toggle input { width: auto; }
-#outdoor-controls.is-disabled { opacity: 0.45; pointer-events: none; }
-.outdoor-size-row { display: flex; align-items: center; gap: 0.4rem; }
-.outdoor-size-row input { width: 5rem; }
-.outdoor-airrow { grid-template-columns: 1fr 1fr; display: grid; gap: 0.6rem; }
-.outdoor-inline { display: inline-flex; align-items: center; gap: 0.25rem; }
-.outdoor-inline input { width: 3.6rem; }
-.outdoor-note {
-  margin-top: 0.6rem;
+.outdoor-lede {
+  margin: 0;
   line-height: 1.45;
   color: var(--muted);
   font-size: 0.72rem;
+}
+
+/* Field controls dim when outdoor is off. The inputs themselves carry the
+   real `disabled` attribute (set in JS) — that, not pointer-events, is what
+   takes them out of the tab order and tells AT they're inert. Keep them
+   visible (no pointer-events:none) so a screen reader can still announce
+   "disabled" on focus traversal. */
+#outdoor-controls { margin-top: 0.85rem; display: grid; gap: 0.85rem; }
+#outdoor-controls.is-disabled { opacity: 0.5; }
+#outdoor-controls input:disabled { cursor: not-allowed; color: var(--muted-dim); }
+
+.outdoor-size-group { gap: 0.4rem; }
+.outdoor-size-range { width: 100%; accent-color: var(--accent); cursor: pointer; }
+.outdoor-size-range:disabled { cursor: not-allowed; }
+.outdoor-size-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+#outdoor-size-readout {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.outdoor-airrow { gap: 0.45rem; }
+.outdoor-section-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.outdoor-air-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.outdoor-air-pair label { grid-template-columns: 1fr; gap: 0.25rem; align-items: start; }
+.outdoor-inline { display: inline-flex; align-items: center; gap: 0.3rem; }
+.outdoor-inline input { width: 3.6rem; }
+.outdoor-air-hint { margin: 0; line-height: 1.4; color: var(--muted); font-size: 0.7rem; }
+
+.outdoor-note {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  line-height: 1.5;
+  color: var(--muted);
+  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid var(--data-amber);
+  border-radius: 0 2px 2px 0;
+}
+.outdoor-note-head {
+  display: block;
+  font-weight: 600;
+  color: var(--data-amber);
+  margin-bottom: 0.2rem;
 }
 .field-group .rated-cap {
   color: var(--muted);
