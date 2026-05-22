@@ -3,7 +3,7 @@ import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea, roomEffectiveBoun
 import { computeRT60Band } from './rt60.js';
 import {
   AIR_ABSORPTION_DB_PER_M as AIR_ABS_TABLE,
-  airAbsorptionDbPerM, airSabins,
+  airAbsorptionDbPerM, airSabins, airAbsorptionDbPerM_param,
 } from './air-absorption.js';
 import {
   wallsCrossedByPath, transmissionLossDb, bandIndexForFreq,
@@ -183,7 +183,7 @@ export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   };
 }
 
-export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null }) {
+export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null, airAbsorptionFn = null }) {
   const { r, azimuth_deg, elevation_deg } = localAngles(
     speakerState.position, speakerState.aim, listenerPos
   );
@@ -195,10 +195,15 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
   // passes 0. Typical professional-PA range is ±12 dB.
   const effW = effectivePowerWatts(speakerDef, speakerState.power_watts);
   let spl_db = sens + 10 * Math.log10(effW) - 20 * Math.log10(clampedR) + attn + eqGainDb;
-  // Air absorption (ISO 9613-1) — negligible at 1 kHz short range, significant
-  // at 4+ kHz / long range. Pre-scaled α (dB / m) × distance.
+  // Air absorption — negligible at 1 kHz short range, significant at
+  // 4+ kHz / long range. Pre-scaled α (dB / m) × distance.
+  //   • INDOOR (airAbsorptionFn == null): the fixed dry-ish indoor table
+  //     via airAbsorptionAt(). Held constant so no existing scene shifts.
+  //   • OUTDOOR FIELD (airAbsorptionFn supplied): a T/RH-parametric
+  //     ISO 9613-1 coefficient closure bound by the caller (the field grid).
   if (airAbsorption) {
-    spl_db -= airAbsorptionAt(freq_hz) * clampedR;
+    const alpha = airAbsorptionFn ? airAbsorptionFn(freq_hz) : airAbsorptionAt(freq_hz);
+    spl_db -= alpha * clampedR;
   }
   // Material-aware wall transmission loss when both `room` AND `materials`
   // are in scope. Falls back to the legacy flat 30 dB if only `room` is
@@ -277,6 +282,11 @@ export function precomputeSPLContext({
   isSourceInside = null,    // optional (src) => bool — excludes outdoor sources
                             // from the interior reverberant aggregate.
   eqGainDb = 0,
+  enableTier1a = PHYSICS_P1_5_ENABLED,  // Phase 2d outdoor opt-in. When true,
+                            // Maekawa diffraction + Kuttruff re-radiation are
+                            // active regardless of the public-deploy flag, so
+                            // the interior→field boundary is a gradient.
+                            // Defaults to the historical flag for indoor.
 }) {
   const reverbActive = roomConstantR > 0;
   const revConst_db = reverbActive ? 10 * Math.log10(4 / roomConstantR) : 0;
@@ -297,7 +307,7 @@ export function precomputeSPLContext({
   // per-active-frequency) per the Tier 1a "per-band always" decision:
   // future per-band UI + STIPA both need all 7 values.
   let L_p_rev_inside_per_band = null;
-  if (PHYSICS_P1_5_ENABLED && Array.isArray(roomR_per_band) && roomR_per_band.length === 7) {
+  if (enableTier1a && Array.isArray(roomR_per_band) && roomR_per_band.length === 7) {
     const sourceLwPerBand = sourceCtx.map(s => ({
       src: s.src,
       // Source L_w is band-independent under the current model
@@ -312,7 +322,7 @@ export function precomputeSPLContext({
   }
   return {
     sourceCtx, freq_hz, roomConstantR, reverbActive, revConst_db, eqGainDb,
-    L_p_rev_inside_per_band,
+    L_p_rev_inside_per_band, enableTier1a,
   };
 }
 
@@ -327,8 +337,14 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   temperature_C = DEFAULT_TEMPERATURE_C,
   airAbsorption = true,
   outdoorObstacles = null,    // optional; auto-extracted from room.surauStructure when null
+  airAbsorptionFn = null,     // optional (freq_hz)=>dB/m closure — OUTDOOR field
+                              // T/RH-parametric ISO 9613-1. Null → indoor table.
 } = {}) {
   const { sourceCtx, freq_hz, reverbActive, revConst_db, eqGainDb, L_p_rev_inside_per_band } = ctx;
+  // Tier 1a opt-in: ctx.enableTier1a (Phase 2d outdoor) overrides the
+  // module-level flag. Falls back to the flag for older ctx objects that
+  // predate the field (defensive — every fresh ctx now carries it).
+  const tier1aEnabled = ctx.enableTier1a ?? PHYSICS_P1_5_ENABLED;
   // Lazily extract outdoor obstacles ONCE per call. Non-surau presets
   // (and rooms without a surauStructure block) return an empty array so
   // the per-source check below short-circuits with a single length test.
@@ -342,7 +358,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   // zero when PHYSICS_P1_5_ENABLED is false, so this block is a no-op
   // on public deploys. The bandIdx + per-band L_p_rev scalar are resolved
   // once per call (constant across sources).
-  const useP15 = PHYSICS_P1_5_ENABLED && materials && room;
+  const useP15 = tier1aEnabled && materials && room;
   const bandIdx = useP15 ? bandIndexForFreq(materials, freq_hz) : -1;
   const L_p_rev_inside_band_db = (useP15 && L_p_rev_inside_per_band)
     ? L_p_rev_inside_per_band[bandIdx]
@@ -355,7 +371,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     const d = computeDirectSPL({
       speakerDef: def, speakerState: src, listenerPos,
       freq_hz, room, materials, airAbsorption, eqGainDb,
-      outdoorObstacles: obstacles,
+      outdoorObstacles: obstacles, airAbsorptionFn,
     });
     const spl_db = d.spl_db;
     if (!isFinite(spl_db)) continue;
@@ -397,7 +413,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
       const diff = computeDiffractionContributions({
         src, listener: listenerPos, room, wallsCrossed: d.wallsCrossed,
         materials, freq_hz, sourceLpFreeField_db, temperature_C, airAbsorption,
-        groundG, groundPlaneZ: 0,
+        groundG, groundPlaneZ: 0, enable: tier1aEnabled,
       });
       diffractionPowerSum += diff.totalPower;
       if (Number.isFinite(L_p_rev_inside_band_db)) {
@@ -405,7 +421,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
           src, listener: listenerPos, room, wallsCrossed: d.wallsCrossed,
           materials, freq_hz,
           L_p_rev_inside_band_db,
-          airAbsorption,
+          airAbsorption, enable: tier1aEnabled,
         });
         reradiationPowerSum += rerad.totalPower;
       }
@@ -450,6 +466,8 @@ export function computeMultiSourceSPL({
   temperature_C = DEFAULT_TEMPERATURE_C,
   airAbsorption = true,
   eqGainDb = 0,
+  enableTier1a = PHYSICS_P1_5_ENABLED,
+  airAbsorptionFn = null,
 }) {
   // One-shot helper: build a context and evaluate at this listener.
   // Callers with many listeners against the same source set should use
@@ -457,10 +475,10 @@ export function computeMultiSourceSPL({
   // to avoid redoing the per-source resolution on every vertex.
   const ctx = precomputeSPLContext({
     sources, getSpeakerDef, freq_hz, roomConstantR,
-    roomR_per_band, isSourceInside, eqGainDb,
+    roomR_per_band, isSourceInside, eqGainDb, enableTier1a,
   });
   return computeMultiSourceSPLFromContext(ctx, listenerPos, {
-    room, materials, coherent, temperature_C, airAbsorption,
+    room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn,
   });
 }
 
@@ -630,15 +648,23 @@ export function computeSPLGrid({
   roomConstantR = 0, coherent = false, airAbsorption = true,
   metric = 'spl', stipaCtx = null, ambient_per_band = null,
   computeSTIPAAt = null,
+  // --- OUTDOOR FIELD MODE (Phase 2b/2c/2d) -------------------------------
+  outdoor = false,             // when true: sample the full field, KEEP cells
+                               // outside the footprint (evaluated free-field
+                               // R=0), and use the parametric air-absorption.
+  fieldBounds = null,          // {minX,minY,maxX,maxY} — field extent (metres).
+                               // Required when outdoor; ignored otherwise.
+  temperature_C = DEFAULT_TEMPERATURE_C,  // ISO 9613-1 parametric inputs (field)
+  humidity_pct = 70,
+  pressure_kPa = 101.325,
 }) {
   const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
-  // Sample over the union of the parent footprint AND every broken-out
-  // enclosure — a hut placed adjacent to the parent (so its interior
-  // sits past room.width_m or before x=0) was being missed by the grid
-  // because the grid origin/extent assumed (0,0)..(width_m, depth_m).
-  // originX/Y get returned alongside cellW_m/cellD_m so the heatmap
-  // renderer can place the cells at the correct world coords.
-  const bounds = roomEffectiveBounds(room);
+
+  // Bounds + cell sizing. Indoor: union of parent footprint + every
+  // broken-out enclosure (a hut placed past room.width_m was being missed
+  // when the grid assumed (0,0)..(width_m,depth_m)). Outdoor: the explicit
+  // field extent so the grid covers the whole open ground.
+  const bounds = (outdoor && fieldBounds) ? fieldBounds : roomEffectiveBounds(room);
   const totalW = Math.max(1e-3, bounds.maxX - bounds.minX);
   const totalD = Math.max(1e-3, bounds.maxY - bounds.minY);
   // Square cells from the effective extent (see squareCellCounts). The
@@ -651,6 +677,73 @@ export function computeSPLGrid({
   const cellD_m = totalD / cellsY;
   const originX_m = bounds.minX;
   const originY_m = bounds.minY;
+
+  // OUTDOOR: bind a T/RH-parametric ISO 9613-1 air-absorption closure once
+  // per frame. INDOOR: null → computeDirectSPL falls back to the fixed
+  // indoor table (no existing scene shifts). The closure is per-band cheap;
+  // hoisted out of the cell loop.
+  const airAbsorptionFn = outdoor
+    ? (f) => airAbsorptionDbPerM_param(f, temperature_C, humidity_pct, pressure_kPa)
+    : null;
+
+  // OUTDOOR: smooth the interior→field wall cliff. Maekawa diffraction +
+  // Kuttruff re-radiation must be active at the boundary regardless of the
+  // public-deploy PHYSICS_P1_5 flag (Phase 2d). Indoor keeps the flag.
+  const enableTier1a = outdoor ? true : PHYSICS_P1_5_ENABLED;
+
+  // OUTDOOR ONLY: the dominant interior→field leakage through a solid wall
+  // mid-span is Kuttruff RE-RADIATION of the building's interior reverberant
+  // field — NOT edge diffraction (which only helps near the wall corners).
+  // To drive it, the context needs the per-band interior room constant R so
+  // it can compute L_p_rev_inside_per_band once per frame. Compute R[7] from
+  // the building's own absorption budget.
+  //
+  // We deliberately gate this on `outdoor`, NOT on `enableTier1a`, so the
+  // INDOOR path stays byte-identical to the historical computeMultiSourceSPL
+  // call (which never passed roomR_per_band / isSourceInside) on EVERY
+  // origin — including localhost where PHYSICS_P1_5_ENABLED is true. The
+  // 2a hoist contract is "identical output to the old per-cell path"; adding
+  // re-radiation to indoor would break it. Indoor re-radiation, if ever
+  // wanted, is a separate decision wired by the indoor caller.
+  let roomR_per_band = null;
+  let isSourceInside = null;
+  if (outdoor && materials && room && Array.isArray(materials.frequency_bands_hz)) {
+    const bands = materials.frequency_bands_hz;
+    roomR_per_band = bands.map(fb => computeRoomConstant(room, materials, fb, []));
+    // Pad/truncate to the 7-length the re-radiation context expects.
+    if (roomR_per_band.length !== 7) {
+      const padded = new Array(7).fill(0);
+      for (let k = 0; k < Math.min(7, roomR_per_band.length); k++) padded[k] = roomR_per_band[k];
+      roomR_per_band = padded;
+    }
+    // Classify outdoor-mounted sources (e.g. azan horns on a podium) as
+    // OUTSIDE the building so they don't inflate the interior reverberant
+    // aggregate that feeds wall re-radiation. Indoor sources stay inside.
+    isSourceInside = (src) => isInsideRoom3D(src.position, room);
+  }
+
+  // Hoist the SPL context OUT of the cell loop (was rebuilt per cell via
+  // computeMultiSourceSPL — violated the "build context once per frame"
+  // contract). We build TWO contexts when reverb is in play: one with the
+  // room constant R (interior cells) and one with R=0 (exterior/field
+  // cells). The per-source resolution (def lookup, L_w, revConst) differs
+  // only by R, so the cost is two cheap context builds, not per-cell. Both
+  // carry roomR_per_band so wall re-radiation (the cliff-smoother) is fed
+  // for receivers on EITHER side of the wall.
+  const ctxInside = useSTI ? null : precomputeSPLContext({
+    sources, getSpeakerDef, freq_hz, roomConstantR, enableTier1a,
+    roomR_per_band, isSourceInside,
+  });
+  // Field cells (outside the footprint) have no enclosing room → no diffuse
+  // reverberant lift → R=0. They DO still receive wall re-radiation, so they
+  // keep roomR_per_band. Reuse ctxInside when R is already 0.
+  const ctxOutside = useSTI ? null
+    : (roomConstantR > 0
+        ? precomputeSPLContext({ sources, getSpeakerDef, freq_hz, roomConstantR: 0, enableTier1a, roomR_per_band, isSourceInside })
+        : ctxInside);
+
+  const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn };
+
   const grid = [];
   let minVal = Infinity, maxVal = -Infinity, sum = 0, count = 0;
 
@@ -660,16 +753,21 @@ export function computeSPLGrid({
       const x = originX_m + (i + 0.5) * cellW_m;
       const y = originY_m + (j + 0.5) * cellD_m;
       const listenerPos = { x, y, z: earHeight_m };
-      if (!isInsideRoom3D(listenerPos, room)) {
+      const inside = isInsideRoom3D(listenerPos, room);
+      // INDOOR mode: cells outside the footprint are not measurement
+      // points → -Infinity (unchanged behaviour). OUTDOOR mode: KEEP those
+      // cells — they're the open field — evaluated with R=0 (free-field).
+      if (!inside && !outdoor) {
         row.push(-Infinity);
         continue;
       }
-      const v = useSTI
-        ? computeSTIPAAt(stipaCtx, listenerPos, ambient_per_band)
-        : computeMultiSourceSPL({
-            sources, getSpeakerDef, listenerPos, freq_hz, room, materials,
-            roomConstantR, coherent, airAbsorption,
-          });
+      let v;
+      if (useSTI) {
+        v = computeSTIPAAt(stipaCtx, listenerPos, ambient_per_band);
+      } else {
+        const ctx = inside ? ctxInside : ctxOutside;
+        v = computeMultiSourceSPLFromContext(ctx, listenerPos, evalOpts);
+      }
       row.push(v);
       if (isFinite(v)) {
         if (v < minVal) minVal = v;
@@ -695,5 +793,6 @@ export function computeSPLGrid({
     uniformity_db: hasResults ? (maxVal - minVal) : 0,
     freq_hz, earHeight_m,
     sourceCount: sources.length,
+    outdoor,
   };
 }

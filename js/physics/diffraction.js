@@ -314,8 +314,14 @@ export function computeDiffractionContributions({
   airAbsorption = true,
   groundG = 0,                  // NEW (h): ground absorption [0,1]; 0 = hard
   groundPlaneZ = 0,             // NEW (h): mirror plane for image source
+  // Outdoor mode (Phase 2d) needs the interior→field boundary to be a
+  // gradient regardless of the public-deploy PHYSICS_P1_5 flag. An
+  // explicit `enable: true` activates this contribution even when the
+  // module-level flag is off. When omitted, behaviour is identical to
+  // the historical flag-gated path. Indoor public deploys never pass it.
+  enable = PHYSICS_P1_5_ENABLED,
 }) {
-  if (!PHYSICS_P1_5_ENABLED) return { paths: [], totalPower: 0 };
+  if (!enable) return { paths: [], totalPower: 0 };
   if (!Array.isArray(wallsCrossed) || wallsCrossed.length === 0) {
     return { paths: [], totalPower: 0 };
   }

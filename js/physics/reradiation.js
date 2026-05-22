@@ -148,8 +148,13 @@ export function computeReradiationContributions({
   src, listener, room, wallsCrossed, materials, freq_hz,
   L_p_rev_inside_band_db,
   airAbsorption = true,
+  // Outdoor mode (Phase 2d) opt-in — see computeDiffractionContributions.
+  // Explicit `enable: true` activates the Kuttruff wall re-radiation term
+  // regardless of the module-level PHYSICS_P1_5 flag. Omitting it preserves
+  // the historical flag-gated behaviour for indoor public deploys.
+  enable = PHYSICS_P1_5_ENABLED,
 }) {
-  if (!PHYSICS_P1_5_ENABLED) return { perWall: [], totalPower: 0 };
+  if (!enable) return { perWall: [], totalPower: 0 };
   if (!Array.isArray(wallsCrossed) || wallsCrossed.length === 0) {
     return { perWall: [], totalPower: 0 };
   }
