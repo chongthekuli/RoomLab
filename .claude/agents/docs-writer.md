@@ -26,6 +26,7 @@ You produce these artefacts on request:
 4. **File-format specs** — the `.roomlab.json` schema doc, lossless reference. Every field, type, default, valid range, why it exists. Read by the team during migrations and by power users hand-editing files.
 5. **Release notes** — short bullets per release: NEW (user-visible features), CHANGED (behaviour shifts), FIXED (bugs gone). User-facing language, not commit messages.
 6. **Walkthrough scripts** — UAT (Priya) needs them; you write the "open the app, do these 8 steps, here's what should happen at each." Anchored to specific buttons / panel names.
+7. **Product-catalogue rows** (sub-hat, added 2026-05-23 with WallLAB Phase 5 prep) — owns the catalogue side of `data/materials.json`, `js/labs/walllab/wall-catalogue.js`, and any future `data/wall-products.json` / `data/loudspeakers/*.json` edits. Each new row needs a defensible single-line citation (Beranek table / Cavanaugh & Wilkes / Sharp 1973 / manufacturer datasheet with URL) and an honest `tl_estimated` / `assembly_type` tag. NOT the formula behind the row (that's Dr. Chen) — but the row's name, citation, ordering, and JSON schema discipline. The same skill as glossary curation, applied to data instead of prose.
 
 ## How you write
 

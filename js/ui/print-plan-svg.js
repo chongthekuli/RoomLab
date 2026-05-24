@@ -17,12 +17,73 @@
 // so legend annotations don't crowd the room edge.
 
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
+import { wallInsetPolygon, wallLabelAnchor, WALL_LABEL_MAX_CHARS } from '../physics/wall-inset.js';
+import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
 
 // 1.5m margin gives the North arrow + scale bar enough room to live
 // fully inside the top-right and bottom-left margin bands without ever
 // overlapping the room outline — even for tiny (1-2m wide) rooms.
 const MARGIN_M = 1.5;
 const NICE_BAR_M = [0.5, 1, 2, 5, 10, 20, 50];
+
+// --------------------------------------------------------------------
+// Wall hatch SVG <pattern> defs — print plan (Maya, Phase 7 Commit 4).
+//
+// MONOCHROME by contract — fabricators print on black-and-white office
+// machines. Pattern dimensions are in METRES (the print SVG viewBox is
+// metres), so the hatch period is constant in real-world units (3 cm
+// stripes regardless of room size). userSpaceOnUse so the pattern
+// doesn't distort with the polygon's aspect ratio.
+//
+// IDs are prefixed `pr-` to namespace away from the 2D viewport's
+// inline defs (same SVG document can't host two patterns with the same
+// id without the second silently overriding).
+// --------------------------------------------------------------------
+const WALL_HATCH_DEFS_PRINT = `
+  <pattern id="pr-hatch-solid-dark" width="0.04" height="0.04" patternUnits="userSpaceOnUse">
+    <rect width="0.04" height="0.04" fill="#2a2a2a" />
+  </pattern>
+  <pattern id="pr-hatch-diagonal" width="0.06" height="0.06" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <rect width="0.06" height="0.06" fill="#dcdcdc" />
+    <line x1="0" y1="0" x2="0" y2="0.06" stroke="#3a3a3a" stroke-width="0.008" />
+  </pattern>
+  <pattern id="pr-hatch-outline" width="0.04" height="0.04" patternUnits="userSpaceOnUse">
+    <rect width="0.04" height="0.04" fill="#ffffff" fill-opacity="0" />
+  </pattern>
+  <pattern id="pr-hatch-openair" width="0.04" height="0.04" patternUnits="userSpaceOnUse">
+    <rect width="0.04" height="0.04" fill="#ffffff" fill-opacity="0" />
+  </pattern>
+  <pattern id="pr-hatch-unknown" width="0.05" height="0.05" patternUnits="userSpaceOnUse">
+    <rect width="0.05" height="0.05" fill="#efefef" />
+    <circle cx="0.025" cy="0.025" r="0.006" fill="#888888" />
+  </pattern>
+`;
+
+function printHatchFor(kind) {
+  switch (kind) {
+    case 'solid-dark':     return { fill: 'url(#pr-hatch-solid-dark)', draw: true,  stroke: '#1c1c1c' };
+    case 'diagonal-hatch': return { fill: 'url(#pr-hatch-diagonal)',   draw: true,  stroke: '#3a3a3a' };
+    case 'outline-only':   return { fill: 'url(#pr-hatch-outline)',    draw: true,  stroke: '#3a3a3a' };
+    case 'open-air':       return { fill: 'url(#pr-hatch-openair)',    draw: false, stroke: '#bbbbbb' };
+    case 'unknown':
+    default:               return { fill: 'url(#pr-hatch-unknown)',    draw: true,  stroke: '#888888' };
+  }
+}
+
+// matIdOf — same shape as the room-2d.js helper. Resolves a slot
+// (string or { materialId, ... }) to a materialId string.
+function matIdOfPrint(slot, fallback = 'gypsum-board') {
+  if (typeof slot === 'string') return slot;
+  if (slot && typeof slot === 'object' && typeof slot.materialId === 'string') return slot.materialId;
+  return fallback;
+}
+
+// Optional materials reference for label name lookup. The print report
+// (print-report.js) calls buildFloorPlanSVG with opts.materialsRef when
+// available; the fallback is the materialId itself.
+function nameOfPrint(materialsRef, id) {
+  return materialsRef?.byId?.[id]?.name || id || '';
+}
 
 function escapeText(s) {
   if (s == null) return '';
@@ -52,53 +113,85 @@ function pickScaleBar(roomWidth_m) {
   return best;
 }
 
-// Build the room-outline path. Returns an SVG element string
-// (or empty on degenerate state). Caller passes `anchorY` = the SVG
-// pixel y where world-Y=0 lives (bottom edge of the effective room
-// band). Every world-Y is mapped to `anchorY - y_m` so larger world Y
-// renders HIGHER on the page (math convention; v=458 Y-flip).
-function buildRoomOutline(room, offsetX, anchorY) {
-  const stroke = '#222';
-  const sw = 0.06; // 6 cm in plan, scales as a hairline at print DPI
-  if (room.shape === 'rectangular') {
-    // Rect top-left is at (offsetX, anchorY - depth_m).
-    return `<rect x="${offsetX.toFixed(3)}" y="${(anchorY - room.depth_m).toFixed(3)}" width="${room.width_m.toFixed(3)}" height="${room.depth_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
-  }
-  if (room.shape === 'polygon') {
-    const cx = room.width_m / 2 + offsetX;
-    const cy = anchorY - room.depth_m / 2;
-    const r = room.polygon_radius_m;
-    const N = room.polygon_sides;
-    const pts = [];
-    for (let i = 0; i < N; i++) {
-      const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
-      // World vertex = (cx_world + r*cos, cy_world + r*sin). Map cx
-      // directly (X-axis unchanged) and subtract sin since world +Y
-      // now maps to SVG -Y. For symmetric N-gons (even sides) the
-      // result is visually identical to the previous render; odd-N
-      // polygons flip mirror-image, as expected.
-      const py = cy - r * Math.sin(angle);
-      const px = cx + r * Math.cos(angle);
-      pts.push(`${px.toFixed(3)},${py.toFixed(3)}`);
+// Build the room walls — Phase 7 Commit 4 (Maya).
+//
+// Walls render as FILLED RECTANGLES (trapezoids at corners with
+// varying thickness) using the family hatch from
+// material-family-hatch.js. The outer polygon comes from
+// wallInsetPolygon(); the inner polygon comes from the same call. ALL
+// thickness math funnels through wall-inset.js — Sam's anti-leak grep
+// would catch any raw `thickness_m / 2` etc.
+//
+// Returns { walls, labels } as concatenated SVG strings (both pure
+// strings, no DOM). Caller composes them into the page.
+//
+// Coordinate convention (matches the rest of this file):
+//   state +x → SVG +x at `x + offsetX`
+//   state +y → SVG -y at `anchorY - y` (Y-flip: state y=0 sits at the
+//                                       BOTTOM of the room band on the
+//                                       printed page)
+function buildWallThicknessSVG(room, offsetX, anchorY, materialsRef) {
+  if (!room) return { walls: '', labels: '' };
+  const inset = wallInsetPolygon(room);
+  const outer = inset.outer || [];
+  const inner = inset.inner || [];
+  const thicknesses = inset.thicknesses || [];
+  const n = outer.length;
+  if (n < 3 || inner.length !== n) return { walls: '', labels: '' };
+
+  const shape = room.shape ?? 'rectangular';
+  const surfaces = room.surfaces || {};
+
+  // State → SVG mapping (metric units throughout).
+  const sxOf = (xm) => xm + offsetX;
+  const syOf = (ym) => anchorY - ym;
+
+  // Resolve per-edge materialId in CCW order — matches wall-inset.js
+  // rectEdgeSlotKey for rectangular, surfaces.edges[i] for custom,
+  // surfaces.walls (shared) for polygon / round.
+  function edgeMaterialId(i) {
+    if (shape === 'rectangular') {
+      const key = ['wall_north', 'wall_east', 'wall_south', 'wall_west'][i & 3];
+      return matIdOfPrint(surfaces[key]);
     }
-    return `<polygon points="${pts.join(' ')}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
+    if (shape === 'custom') {
+      const edges = surfaces.edges || [];
+      return matIdOfPrint(edges[i]);
+    }
+    return matIdOfPrint(surfaces.walls ?? surfaces.wall_north);
   }
-  if (room.shape === 'round') {
-    const cx = room.width_m / 2 + offsetX;
-    const cy = anchorY - room.depth_m / 2;
-    return `<circle cx="${cx.toFixed(3)}" cy="${cy.toFixed(3)}" r="${room.round_radius_m.toFixed(3)}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
+
+  let walls = '';
+  let labels = '';
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const A = { x: sxOf(outer[i].x), y: syOf(outer[i].y) };
+    const B = { x: sxOf(outer[j].x), y: syOf(outer[j].y) };
+    const C = { x: sxOf(inner[j].x), y: syOf(inner[j].y) };
+    const D = { x: sxOf(inner[i].x), y: syOf(inner[i].y) };
+    const matId = edgeMaterialId(i);
+    const kind = getMaterialHatchKind(matId);
+    const skin = printHatchFor(kind);
+    if (!skin.draw) continue;
+    const pts = `${A.x.toFixed(3)},${A.y.toFixed(3)} ${B.x.toFixed(3)},${B.y.toFixed(3)} ${C.x.toFixed(3)},${C.y.toFixed(3)} ${D.x.toFixed(3)},${D.y.toFixed(3)}`;
+    walls += `<polygon points="${pts}" fill="${skin.fill}" stroke="${skin.stroke}" stroke-width="0.018" stroke-linejoin="miter" />`;
+
+    // Per-wall material label — INSIDE face, edge midpoint, offset
+    // inward by thickness/2 + 10 mm gap via wallLabelAnchor. Truncate
+    // to WALL_LABEL_MAX_CHARS. Y-flip → negate rotation_deg so the
+    // text rides the wall direction visually.
+    const stateEdge = { v1: outer[i], v2: outer[j] };
+    const tEdge = Number.isFinite(thicknesses[i]) ? thicknesses[i] : 0.10;
+    const anchor = wallLabelAnchor(stateEdge, tEdge);
+    const labelTxt = String(nameOfPrint(materialsRef, matId)).slice(0, WALL_LABEL_MAX_CHARS);
+    if (labelTxt) {
+      const lsx = sxOf(anchor.x);
+      const lsy = syOf(anchor.y);
+      const rot = -anchor.rotation_deg;
+      labels += `<text x="${lsx.toFixed(3)}" y="${lsy.toFixed(3)}" transform="rotate(${rot.toFixed(2)} ${lsx.toFixed(3)} ${lsy.toFixed(3)})" font-size="0.22" text-anchor="middle" fill="#1a1a1a">${escapeText(labelTxt)}</text>`;
+    }
   }
-  if (room.shape === 'custom') {
-    const verts = room.custom_vertices || [];
-    if (verts.length < 3) return '';
-    const pts = verts.map(v => {
-      const sx = v.x + offsetX;
-      const sy = anchorY - v.y;
-      return `${sx.toFixed(3)},${sy.toFixed(3)}`;
-    }).join(' ');
-    return `<polygon points="${pts}" fill="none" stroke="${stroke}" stroke-width="${sw}" />`;
-  }
-  return '';
+  return { walls, labels };
 }
 
 // State y grows toward the north / FRONT wall. SVG y grows DOWN. We
@@ -140,6 +233,7 @@ function aimTrianglePoints(cx, cy, r, yawDeg) {
 // Returns empty string if room is degenerate (no width / depth).
 export function buildFloorPlanSVG(state, opts = {}) {
   const listenerMetrics = Array.isArray(opts.listenerMetrics) ? opts.listenerMetrics : null;
+  const materialsRef = opts.materialsRef || null;
   const room = state.room;
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
 
@@ -161,7 +255,9 @@ export function buildFloorPlanSVG(state, opts = {}) {
   // SVG y=MARGIN_M + maxY = anchorY.
   const anchorY = MARGIN_M + maxY;
 
-  const roomEl = buildRoomOutline(room, offsetX, anchorY);
+  const wallParts = buildWallThicknessSVG(room, offsetX, anchorY, materialsRef);
+  const roomEl = wallParts.walls;
+  const wallLabelsEl = wallParts.labels;
 
   // Zone fills + centroid labels.
   const zonesEl = (state.zones || []).map((z, idx) => {
@@ -282,7 +378,12 @@ export function buildFloorPlanSVG(state, opts = {}) {
   // the arrow as a fixed-CSS-pixel HTML overlay (see print.css for
   // .pr-cover-hero-plan::after / .pr-heatmap-stage::after).
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg">${roomEl}${zonesEl}${minaretEl}${sourcesEl}${listenersEl}${scaleBarEl}</svg>`;
+  // Hatch <defs> for the wall fills — monochrome by contract (see
+  // WALL_HATCH_DEFS_PRINT comment above). Defs are inside the SVG so
+  // the print pipeline rasterises them with the rest of the document
+  // (a separate <svg defs> would be lost when the report node is
+  // cloned into the print iframe).
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg"><defs>${WALL_HATCH_DEFS_PRINT}</defs>${roomEl}${zonesEl}${minaretEl}${sourcesEl}${listenersEl}${wallLabelsEl}${scaleBarEl}</svg>`;
 }
 
 // Build a small legend block (paste-ready HTML) that names the symbol

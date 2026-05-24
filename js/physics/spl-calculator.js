@@ -16,6 +16,9 @@ import {
   extractOutdoorObstacles, outdoorObstacleLossDb,
 } from './outdoor-obstacles.js';
 import { PHYSICS_P1_5_ENABLED } from './feature-flags.js';
+import { wallInsetPolygon } from './wall-inset.js';
+import { extractOverheadReflectors, computeOverheadReflectionPower } from './overhead-reflection.js';
+import { extractPorches, computePorchReverbPower } from './porch-enclosure.js';
 
 // Re-exports for backward compatibility with existing callers (tests, scene.js).
 export const AIR_ABSORPTION_DB_PER_M = AIR_ABS_TABLE;
@@ -349,6 +352,19 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   // (and rooms without a surauStructure block) return an empty array so
   // the per-source check below short-circuits with a single length test.
   const obstacles = outdoorObstacles ?? (room ? extractOutdoorObstacles(room) : []);
+  // Phase 8 Step 1 — overhead reflectors (arcade roof, portico cap base).
+  // Extracted once per call; non-surau presets yield an empty list and the
+  // per-source loop short-circuits. Indoor room ceiling is NOT included
+  // here (already captured by ctx.reverbActive's room constant R).
+  const overheadReflectors = room ? extractOverheadReflectors(room) : [];
+  // Phase 8 Step 4 — porch partial-enclosure reverberant lift. Empty list
+  // when no arcade is defined (non-surau presets). When the listener is
+  // inside a porch polygon, each source contributes an extra reverberant
+  // term whose lift comes from the porch's Sabine room constant. This is
+  // what makes the arcade roof material matter REGARDLESS of whether the
+  // source path crosses the roof — addresses the v=639 user-reported
+  // "still the same" case.
+  const porches = room ? extractPorches(room) : [];
   let directPressureSum = 0;
   let Re = 0, Im = 0;
   const c = coherent ? speedOfSound(temperature_C) : 0;
@@ -365,6 +381,8 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     : -Infinity;
   let diffractionPowerSum = 0;
   let reradiationPowerSum = 0;
+  let overheadReflPowerSum = 0;
+  let porchReverbPowerSum = 0;
 
   for (let i = 0; i < sourceCtx.length; i++) {
     const { src, def, L_w_with_eq } = sourceCtx[i];
@@ -432,9 +450,86 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     // computeDiffractionContributions. Same physics done explicitly,
     // no scalar fudge. computeCornerDiffractionContributions is now
     // deprecated and will be deleted in commit (i).
+
+    // Phase 8 Step 1 — overhead specular reflection. Image-source mirror
+    // across roof/canopy/soffit polygons, attenuated by 10·log10(1 − α_roof).
+    // Empty list → 0 (the common non-surau case). Falls through to the
+    // incoherent pressure² accumulator alongside diffraction + re-rad —
+    // the four exterior energy paths (direct, edge-diffraction, wall
+    // re-radiation, overhead reflection) sum in pressure².
+    if (overheadReflectors.length > 0) {
+      const overheadP = computeOverheadReflectionPower({
+        src, speakerDef: def, listenerPos, freq_hz, room, materials,
+        airAbsorption, airAbsorptionFn, eqGainDb,
+        reflectors: overheadReflectors,
+      });
+      overheadReflPowerSum += overheadP;
+    }
+    // Phase 8 Step 4 — porch partial-enclosure reverberant lift. Adds an
+    // extra reverberant term when the listener is inside an arcade/canopy
+    // polygon.
+    //
+    // Drive includes diffraction (not just direct path). For the surau
+    // azan-horn geometry — horns at z=7m above the 4.5m building roof —
+    // the direct path from horn to porch midpoint crosses the room
+    // ceiling + the building wall (~86 dB combined TL on concrete +
+    // gypsum), so a direct-only drive is ~0 dB and the lift contributes
+    // nothing. The dominant path is Maekawa diffraction over the
+    // building eave (~10-15 dB IL only) — that's the energy that
+    // physically fills the porch, so it must drive the porch lift.
+    //
+    // The drive at the porch midpoint = energy-sum of {direct after TL,
+    // edge diffraction over each crossed wall, wall re-radiation}. Same
+    // four-path stack the listener cell already uses, computed once per
+    // source per porch BEFORE the cell evaluation.
+    if (porches.length > 0) {
+      const porchP = computePorchReverbPower({
+        src, listenerPos, freq_hz, room, materials, porches,
+        getDirectSplDb: (srcLike, pos) => {
+          // Direct path to the drive point — includes per-band wall TL
+          // because we want to know the actual sound energy arriving.
+          const dd = computeDirectSPL({
+            speakerDef: def, speakerState: srcLike, listenerPos: pos,
+            freq_hz, room, materials, airAbsorption, eqGainDb,
+            outdoorObstacles: obstacles, airAbsorptionFn,
+          });
+          let pSum = Number.isFinite(dd.spl_db) ? Math.pow(10, dd.spl_db / 10) : 0;
+          // Diffraction over each crossed wall — same machinery as the
+          // listener-cell evaluation. Skipped when Tier 1a is off OR
+          // when the path doesn't cross any wall.
+          if (useP15 && dd.wallsCrossed?.length > 0 && Number.isFinite(dd.spl_db)) {
+            const drive_free_db = dd.spl_db + dd.tl_db_applied;
+            const floorMatId = room?.surfaces?.floor;
+            const groundG = (floorMatId && materials?.byId?.[floorMatId]?.ground_absorption_G) ?? 0;
+            const diffDrive = computeDiffractionContributions({
+              src: srcLike, listener: pos, room, wallsCrossed: dd.wallsCrossed,
+              materials, freq_hz, sourceLpFreeField_db: drive_free_db,
+              temperature_C, airAbsorption, groundG, groundPlaneZ: 0,
+              enable: tier1aEnabled,
+            });
+            pSum += diffDrive.totalPower;
+            // Wall re-radiation at the porch entry — only when the
+            // listener-side reverb context is meaningful (otherwise
+            // the L_p_rev_inside_band_db term is -Infinity).
+            if (Number.isFinite(L_p_rev_inside_band_db)) {
+              const reradDrive = computeReradiationContributions({
+                src: srcLike, listener: pos, room, wallsCrossed: dd.wallsCrossed,
+                materials, freq_hz,
+                L_p_rev_inside_band_db,
+                airAbsorption, enable: tier1aEnabled,
+              });
+              pSum += reradDrive.totalPower;
+            }
+          }
+          return pSum > 0 ? 10 * Math.log10(pSum) : -Infinity;
+        },
+      });
+      porchReverbPowerSum += porchP;
+    }
   }
   const totalPower = (coherent ? (Re * Re + Im * Im) : directPressureSum)
-                   + reverbPowerSum + diffractionPowerSum + reradiationPowerSum;
+                   + reverbPowerSum + diffractionPowerSum + reradiationPowerSum
+                   + overheadReflPowerSum + porchReverbPowerSum;
   return totalPower > 0 ? 10 * Math.log10(totalPower) : -Infinity;
 }
 
@@ -456,6 +551,38 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
 // Top-level keyword args. Adds `materials` (catalogue: `{ frequency_bands_hz, list, byId }`
 // from `loadMaterials`) so per-band wall TL applies; legacy callers that omit it
 // keep the flat 30 dB back-compat path. Otherwise unchanged.
+// Phase 7 (Dr. Chen audit 2026-05-24): listener at (x, y) is in the
+// building's interior reverberant field iff it sits inside the parent
+// INNER polygon (wallInsetPolygon's `inner`). Cells in the wall annulus
+// or in outdoor zones (surau podium, sub-enclosures, free field) MUST
+// NOT inherit the 4/R interior lift — the live walk-mode probe was
+// showing ~6 dB of false lift on outdoor cells under the arcade roof
+// before this fix.
+//
+// Returns true when the listener should get ctxInside-equivalent
+// treatment (R > 0 honoured), false when R + RBands must be zeroed.
+// Returns null when geometry can't be resolved (no room, no inset, no
+// listenerPos) → caller defaults to "honour R" for back-compat.
+function isListenerInsideBuildingInterior(listenerPos, room) {
+  if (!room || !listenerPos
+      || !Number.isFinite(listenerPos.x) || !Number.isFinite(listenerPos.y)) return null;
+  const inset = wallInsetPolygon(room);
+  if (!inset || !Array.isArray(inset.inner) || inset.inner.length < 3) return null;
+  return pointInPolygon2DLocal(listenerPos.x, listenerPos.y, inset.inner);
+}
+
+function pointInPolygon2DLocal(x, y, verts) {
+  let inside = false;
+  const n = verts.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    if (((verts[i].y > y) !== (verts[j].y > y)) &&
+        (x < (verts[j].x - verts[i].x) * (y - verts[i].y) / (verts[j].y - verts[i].y) + verts[i].x)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 export function computeMultiSourceSPL({
   sources, getSpeakerDef, listenerPos,
   freq_hz = 1000, room = null, materials = null,
@@ -469,13 +596,23 @@ export function computeMultiSourceSPL({
   enableTier1a = PHYSICS_P1_5_ENABLED,
   airAbsorptionFn = null,
 }) {
+  // Phase 7 — gate the interior reverberant context on the listener's
+  // geometric classification. When the listener is OUTSIDE the parent
+  // inner polygon (podium, enclosure, outdoor open field), zero R + RBands
+  // so the building's interior reverberant field is not falsely attributed
+  // to outdoor receivers. When the helper returns null (no room geometry
+  // resolvable), keep the legacy behaviour and honour whatever R the
+  // caller passed.
+  const inInterior = isListenerInsideBuildingInterior(listenerPos, room);
+  const effR = (inInterior === false) ? 0 : roomConstantR;
+  const effRBands = (inInterior === false) ? null : roomR_per_band;
   // One-shot helper: build a context and evaluate at this listener.
   // Callers with many listeners against the same source set should use
   // `precomputeSPLContext` + `computeMultiSourceSPLFromContext` directly
   // to avoid redoing the per-source resolution on every vertex.
   const ctx = precomputeSPLContext({
-    sources, getSpeakerDef, freq_hz, roomConstantR,
-    roomR_per_band, isSourceInside, eqGainDb, enableTier1a,
+    sources, getSpeakerDef, freq_hz, roomConstantR: effR,
+    roomR_per_band: effRBands, isSourceInside, eqGainDb, enableTier1a,
   });
   return computeMultiSourceSPLFromContext(ctx, listenerPos, {
     room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn,
@@ -487,6 +624,13 @@ export function computeListenerBreakdown({
   freq_hz = 1000, room = null, materials = null,
   roomConstantR = 0, airAbsorption = true,
 }) {
+  // Phase 7 — same listener-classification gate as computeMultiSourceSPL.
+  // The reverb leak term below adds (4/R · L_w) to every per-source
+  // power; if the listener is outside the parent inner polygon, that term
+  // is a false attribution of the building's reverberant field to an
+  // outdoor receiver. Zero R when the listener is NOT in true interior.
+  const inInterior = isListenerInsideBuildingInterior(listenerPos, room);
+  if (inInterior === false) roomConstantR = 0;
   // Extract outdoor obstacles once for the whole breakdown (cheap; only
   // a few dozen entries even for surau). Per-source calls reuse this list.
   const obstacles = room ? extractOutdoorObstacles(room) : [];
@@ -744,6 +888,34 @@ export function computeSPLGrid({
 
   const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn };
 
+  // Phase 7 (Dr. Chen audit 2026-05-23): cells inside the PARENT footprint
+  // but in the WALL-THICKNESS annulus (between outer + inner polygons) are
+  // physically wall, not room interior. Before this fix they were getting
+  // `isInsideRoom3D = true` → ctxInside → full 4/R reverberant lift →
+  // a non-physical RED ring at wall-thickness-distance from the outer face
+  // (the user-spotted "yellow → red → yellow" anomaly past the surau west
+  // wall). Resolve by computing the parent inner polygon ONCE per grid
+  // rebuild; per-cell ray-cast point-in-polygon costs ~6n ops on a 4-vert
+  // rectangle (negligible). Sub-structures / enclosures / podium routes in
+  // isInsideRoom3D are NOT subject to this — only the parent footprint's
+  // own annulus is in scope.
+  const insetInfo = room ? wallInsetPolygon(room) : null;
+  const parentOuter = insetInfo?.outer || null;
+  const parentInner = insetInfo?.inner || null;
+  const haveInsetMask = Array.isArray(parentOuter) && Array.isArray(parentInner)
+    && parentOuter.length >= 3 && parentInner.length === parentOuter.length;
+  const pointInPoly = (x, y, verts) => {
+    let inside = false;
+    const n = verts.length;
+    for (let k = 0, m = n - 1; k < n; m = k++) {
+      if (((verts[k].y > y) !== (verts[m].y > y)) &&
+          (x < (verts[m].x - verts[k].x) * (y - verts[k].y) / (verts[m].y - verts[k].y) + verts[k].x)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
   const grid = [];
   let minVal = Infinity, maxVal = -Infinity, sum = 0, count = 0;
 
@@ -761,11 +933,51 @@ export function computeSPLGrid({
         row.push(-Infinity);
         continue;
       }
+      // Phase 7 (Dr. Chen audit 2026-05-23/24): refine the SPL-context
+      // classification using the parent inner + outer polygons.
+      //
+      // isInsideRoom3D returns TRUE for THREE distinct populations:
+      //   1. Cells inside the parent footprint (true interior).
+      //   2. Cells in the wall-thickness ANNULUS (between outer + inner
+      //      polygon) — physically wall, not measurable air.
+      //   3. Cells in OUTDOOR ZONES that the function intentionally
+      //      reports inside so the heatmap covers them: the surau podium
+      //      (the porch the arcade roof sits on), standaloneEnclosures,
+      //      etc. Acoustically these are OUTDOOR — they must not inherit
+      //      the building's interior 4/R reverberant lift.
+      //
+      // Before this fix all three populations went through ctxInside,
+      // producing two well-defined bugs:
+      //   - (2) hot ring of cells at wall-thickness distance from the
+      //         outer face (user-spotted on west wall, fixed in C4).
+      //   - (3) the surau arcade corridor reading ~6 dB HIGHER than the
+      //         uncovered corridor next to it (user-spotted 2026-05-24).
+      //         The roof material is irrelevant — the heatmap doesn't
+      //         trace reflections off it — the lift comes entirely from
+      //         the prayer hall's reverberant tail being attributed to
+      //         the outdoor porch.
+      //
+      // New classification:
+      //   inside parent outer ∧ inside parent inner  → ctxInside
+      //   inside parent outer ∧ outside parent inner → -Infinity (wall)
+      //   outside parent outer ∧ inside-via-podium/enclosure → ctxOutside
+      let cellInTrueInterior;
+      if (haveInsetMask) {
+        const inOuter = pointInPoly(x, y, parentOuter);
+        if (inOuter && !pointInPoly(x, y, parentInner)) {
+          row.push(-Infinity);
+          continue;
+        }
+        cellInTrueInterior = inOuter;
+      } else {
+        // Legacy / unsupported geometry — fall back to the original flag.
+        cellInTrueInterior = inside;
+      }
       let v;
       if (useSTI) {
         v = computeSTIPAAt(stipaCtx, listenerPos, ambient_per_band);
       } else {
-        const ctx = inside ? ctxInside : ctxOutside;
+        const ctx = cellInTrueInterior ? ctxInside : ctxOutside;
         v = computeMultiSourceSPLFromContext(ctx, listenerPos, evalOpts);
       }
       row.push(v);

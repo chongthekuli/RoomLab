@@ -9,6 +9,8 @@ import { roomPlanVertices, isInsideRoom3D, roomEffectiveBounds } from '../physic
 import { dilateGridForDisplay } from '../physics/grid-display.js';
 import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
 import { computePerListenerMetrics, formatListenerMetricsLabel } from '../physics/per-listener-metrics.js';
+import { wallInsetPolygon, wallLabelAnchor, WALL_LABEL_MAX_CHARS } from '../physics/wall-inset.js';
+import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
 
 let materialsRef;
 
@@ -1032,8 +1034,12 @@ function renderZoneDraw(vp) {
   const clipPathSvg = renderClipPath(state.room, x0, y0, pxW, pxD);
   const zoneColor = colorForZone(state.zones.length);
 
+  // Zone-draw mode: walls render with thickness so the user has a
+  // proper room boundary to draw zone vertices against, but we OMIT
+  // the per-wall material labels — they'd compete for attention with
+  // the zone-drawing crosshair and snap markers.
   let svg = `<svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">`;
-  svg += `<defs>${clipPathSvg}</defs>`;
+  svg += `<defs>${clipPathSvg}${WALL_HATCH_DEFS_2D}</defs>`;
   svg += roomOutline.floorFill;
   svg += roomOutline.walls;
   svg += renderZones(state.zones, state.selectedZoneId, x0, y0, pxW, pxD, state.room, true);
@@ -1620,7 +1626,7 @@ function renderNormal(vp) {
     <div class="viewport-2d">
       <div class="vp-header">Floor plan — top-down${fieldSpanLabel}</div>
       <svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
-        <defs>${clipPathSvg}${fieldFeatherDef}</defs>
+        <defs>${clipPathSvg}${fieldFeatherDef}${WALL_HATCH_DEFS_2D}</defs>
         ${roomOutline.floorFill}
         ${outdoorOn
           ? `<g mask="url(#field-feather-mask)">${splSvg}</g>`
@@ -1945,71 +1951,192 @@ function renderNorthArrowSVG(x0, y0, pxW, pxD) {
   `;
 }
 
+// --------------------------------------------------------------------
+// Wall hatch SVG <pattern> defs — 2D viewport (Maya, Phase 7 Commit 4).
+//
+// Five families locked by material-family-hatch.js. Patterns are
+// MONOCHROME by contract (Sam's anti-leak grep would catch any
+// rgb(255,*,*) leakage); the 2D viewport may layer a thin coloured
+// outline stroke ON TOP as an absorption accent (kept for parity with
+// the previous wall renderer).
+//
+// patternUnits="userSpaceOnUse" so the hatch period is in viewport
+// pixels — independent of the polygon's own size. Print uses the same
+// helper but with metric-scale pattern sizes (see print-plan-svg.js).
+// --------------------------------------------------------------------
+const WALL_HATCH_DEFS_2D = `
+  <pattern id="r2d-hatch-solid-dark" width="6" height="6" patternUnits="userSpaceOnUse">
+    <rect width="6" height="6" fill="#2a2a2a" />
+  </pattern>
+  <pattern id="r2d-hatch-diagonal" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <rect width="6" height="6" fill="#d8d8d8" />
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#3a3a3a" stroke-width="0.9" />
+  </pattern>
+  <pattern id="r2d-hatch-outline" width="6" height="6" patternUnits="userSpaceOnUse">
+    <rect width="6" height="6" fill="#ffffff" fill-opacity="0" />
+  </pattern>
+  <pattern id="r2d-hatch-openair" width="6" height="6" patternUnits="userSpaceOnUse">
+    <rect width="6" height="6" fill="#ffffff" fill-opacity="0" />
+  </pattern>
+  <pattern id="r2d-hatch-unknown" width="5" height="5" patternUnits="userSpaceOnUse">
+    <rect width="5" height="5" fill="#efefef" />
+    <circle cx="2.5" cy="2.5" r="0.7" fill="#888888" />
+  </pattern>
+`;
+
+function r2dHatchFor(kind) {
+  switch (kind) {
+    case 'solid-dark':     return { fill: 'url(#r2d-hatch-solid-dark)',  draw: true,  outlineStroke: '#1c1c1c' };
+    case 'diagonal-hatch': return { fill: 'url(#r2d-hatch-diagonal)',    draw: true,  outlineStroke: '#3a3a3a' };
+    case 'outline-only':   return { fill: 'url(#r2d-hatch-outline)',     draw: true,  outlineStroke: '#3a3a3a' };
+    case 'open-air':       return { fill: 'url(#r2d-hatch-openair)',     draw: false, outlineStroke: '#bbbbbb' };
+    case 'unknown':
+    default:               return { fill: 'url(#r2d-hatch-unknown)',     draw: true,  outlineStroke: '#888888' };
+  }
+}
+
+// --------------------------------------------------------------------
+// renderRoomOutline — Phase 7 Commit 4.
+//
+// Walls render as FILLED RECTANGLES (trapezoids at corners with varying
+// thickness) using the family hatch from material-family-hatch.js. The
+// outer polygon comes from roomPlanVertices(); the inner polygon comes
+// from wallInsetPolygon(), so the corner geometry matches the 3D
+// extrusion in scene.js exactly. ALL thickness math is funnelled
+// through wall-inset.js — Sam's anti-leak grep enforces no raw
+// `thickness_m / 2` etc. in this file.
+//
+// Returns { floorFill, walls, labels } so the caller (renderNormal) can
+// keep its existing layering: floorFill goes under the heatmap clip,
+// walls + labels paint on top.
+// --------------------------------------------------------------------
 function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
   const shape = room.shape ?? 'rectangular';
-  const verts = roomPlanVertices(room);
-  const svgPts = verts.map(v => ({
-    sx: x0 + (v.x / room.width_m) * pxW,
-    sy: y0 - (v.y / room.depth_m) * pxD,
-  }));
+  const inset = wallInsetPolygon(room);
+  const outer = inset.outer || [];
+  const inner = inset.inner || [];
+  const thicknesses = inset.thicknesses || [];
 
+  // State → screen projection. scale = pxW / room.width_m (and pxD /
+  // room.depth_m on the Y axis — both match the speaker/listener
+  // renderers above). Y-flip puts state +y at the top of the canvas.
+  const sxOf = (xm) => x0 + (xm / room.width_m) * pxW;
+  const syOf = (ym) => y0 - (ym / room.depth_m) * pxD;
+  const projOuter = outer.map(v => ({ sx: sxOf(v.x), sy: syOf(v.y) }));
+  const projInner = inner.map(v => ({ sx: sxOf(v.x), sy: syOf(v.y) }));
+
+  // Inner polygon = room interior face. The floor fill paints the
+  // inside of the walls; the heatmap clip (renderClipPath) still uses
+  // the OUTER polygon, but the wall trapezoids paint on top of the
+  // heatmap's outer ring so the visual result is "heatmap stops at the
+  // inner wall face" — exactly what the user expects.
+  const innerPointsAttr = projInner.map(p => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' ');
+  const floorFillColor = colorFor(alphaOf(surfaces.floor));
+  const floorFill = projInner.length >= 3
+    ? `<polygon points="${innerPointsAttr}" fill="${floorFillColor}" fill-opacity="0.15" />`
+    : '';
+
+  // Resolve the materialId for each edge in CCW order. Rectangular has
+  // a per-side slot map (matches the CCW edge order locked in
+  // wall-inset.js → rectEdgeSlotKey). Custom uses surfaces.edges[i].
+  // Polygon / round share surfaces.walls across every edge.
+  function edgeMaterialId(i) {
+    if (shape === 'rectangular') {
+      const key = ['wall_north', 'wall_east', 'wall_south', 'wall_west'][i & 3];
+      return matIdOf(surfaces[key]);
+    }
+    if (shape === 'custom') {
+      const edges = surfaces.edges || [];
+      return matIdOf(edges[i]);
+    }
+    return matIdOf(surfaces.walls ?? surfaces.wall_north);
+  }
+
+  // Build the wall trapezoids. Edge i runs outer[i] → outer[i+1]; the
+  // matching inner segment runs inner[i] → inner[i+1] (winding-aware:
+  // we go around the trapezoid as outer[i] → outer[i+1] → inner[i+1] →
+  // inner[i] so the polygon is non-self-intersecting). Open-air walls
+  // are skipped (no fill, no stroke) — the contractor reads "opening".
+  let walls = '';
+  let labels = '';
+  const n = projOuter.length;
+  if (n >= 3 && projInner.length === n) {
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const A = projOuter[i], B = projOuter[j];
+      const C = projInner[j], D = projInner[i];
+      const matId = edgeMaterialId(i);
+      const kind = getMaterialHatchKind(matId);
+      const skin = r2dHatchFor(kind);
+      if (!skin.draw) continue;   // open-air: no wall drawn
+      const pts = `${A.sx.toFixed(1)},${A.sy.toFixed(1)} ${B.sx.toFixed(1)},${B.sy.toFixed(1)} ${C.sx.toFixed(1)},${C.sy.toFixed(1)} ${D.sx.toFixed(1)},${D.sy.toFixed(1)}`;
+      // Absorption-derived accent stroke on the INNER face only — keeps
+      // the prior "wall colour = absorption" signal visible without
+      // breaking monochrome-safety of the hatch fill. Kind 'unknown'
+      // uses its own grey stroke (no absorption claim).
+      const accent = kind === 'unknown' ? skin.outlineStroke : colorFor(alphaOf(matId));
+      walls += `<polygon points="${pts}" fill="${skin.fill}" stroke="${skin.outlineStroke}" stroke-width="0.6" stroke-linejoin="miter" />`;
+      // Inner-face accent line (C → D, the room-side edge of the trap).
+      walls += `<line x1="${D.sx.toFixed(1)}" y1="${D.sy.toFixed(1)}" x2="${C.sx.toFixed(1)}" y2="${C.sy.toFixed(1)}" stroke="${accent}" stroke-width="1.6" stroke-linecap="butt" opacity="0.85" />`;
+
+      // Per-wall material label — wallLabelAnchor places it on the
+      // INSIDE face, centred on the edge midpoint, offset inward by
+      // thickness/2 + 10 mm gap. Truncate to WALL_LABEL_MAX_CHARS.
+      // Y-flip: state-frame rotation needs sign-flip for SVG-y-down.
+      const stateEdge = { v1: outer[i], v2: outer[j] };
+      const tEdge = Number.isFinite(thicknesses[i]) ? thicknesses[i] : 0.10;
+      const anchor = wallLabelAnchor(stateEdge, tEdge);
+      const labelTxt = String(nameOf(matId) || matId || '').slice(0, WALL_LABEL_MAX_CHARS);
+      if (labelTxt) {
+        const lsx = sxOf(anchor.x);
+        const lsy = syOf(anchor.y);
+        // SVG screen-Y is INVERTED vs state-frame Y. A CCW rotation in
+        // state-frame becomes CW on screen — negate the angle so the
+        // label still tracks the wall direction visually.
+        const rot = -anchor.rotation_deg;
+        labels += `<text x="${lsx.toFixed(1)}" y="${lsy.toFixed(1)}" transform="rotate(${rot.toFixed(2)} ${lsx.toFixed(1)} ${lsy.toFixed(1)})" text-anchor="middle" class="vp-lbl vp-lbl-wall vp-lbl-wall-mat">${escapeText2D(labelTxt)}</text>`;
+      }
+    }
+  }
+
+  // Cardinal direction tags for rectangular rooms — unchanged from the
+  // pre-Commit-4 layout (Maya v9 audit §2 retained). The wall material
+  // name lives on the wall itself now (see labels above), so the
+  // direction tags stay as orientation cues for the contractor.
   if (shape === 'rectangular') {
-    const wN = matIdOf(surfaces.wall_north), wS = matIdOf(surfaces.wall_south);
-    const wE = matIdOf(surfaces.wall_east),  wW = matIdOf(surfaces.wall_west);
-    // Y-flip: world-Y=0 lives at screen-Y=y0 (bottom edge of room band);
-    // world-Y=depth_m lives at screen-Y=y0-pxD (top edge).
-    //   yTop    = y0 - pxD   (wall at world-Y=depth_m — scene.js wall_south)
-    //   yBottom = y0         (wall at world-Y=0       — scene.js wall_north)
-    const yTop = y0 - pxD;
-    const yBottom = y0;
-    const floorFill = `<rect x="${x0}" y="${yTop}" width="${pxW}" height="${pxD}" fill="${colorFor(alphaOf(surfaces.floor))}" fill-opacity="0.15" rx="2" />`;
-    const walls = `
-      <line x1="${x0}" y1="${yBottom}" x2="${x0 + pxW}" y2="${yBottom}" stroke="${colorFor(alphaOf(wN))}" stroke-width="8" stroke-linecap="round" />
-      <line x1="${x0}" y1="${yTop}" x2="${x0 + pxW}" y2="${yTop}" stroke="${colorFor(alphaOf(wS))}" stroke-width="8" stroke-linecap="round" />
-      <line x1="${x0 + pxW}" y1="${yTop}" x2="${x0 + pxW}" y2="${yBottom}" stroke="${colorFor(alphaOf(wE))}" stroke-width="8" stroke-linecap="round" />
-      <line x1="${x0}" y1="${yTop}" x2="${x0}" y2="${yBottom}" stroke="${colorFor(alphaOf(wW))}" stroke-width="8" stroke-linecap="round" />
-    `;
-    // Maya v9 audit §2 — direction tags only (small caps, muted),
-    // material name moves to a hover tooltip on the wall stroke and
-    // is restated authoritatively in the page footer. Drops the
-    // "Front — Gypsum board 13mm on studs" inline label that was
-    // shouting louder than the architecture.
-    //
-    // FRONT stays at the TOP of the canvas (north arrow points to it).
-    // After Y-flip, the topmost wall is at yTop = y0 - pxD.
-    const labels = `
+    const yTop = y0 - pxD, yBottom = y0;
+    labels += `
       <text x="${x0 + pxW/2}" y="${yTop - 14}" text-anchor="middle" class="vp-lbl vp-lbl-wall">FRONT</text>
       <text x="${x0 + pxW/2}" y="${yBottom + 22}" text-anchor="middle" class="vp-lbl vp-lbl-wall">BACK</text>
       <text x="${x0 + pxW + 14}" y="${(yTop + pxD/2) + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">RIGHT</text>
       <text x="${x0 - 14}" y="${(yTop + pxD/2) + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">LEFT</text>
     `;
-    return { floorFill, walls, labels };
-  }
-
-  const pointsAttr = svgPts.map(p => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' ');
-  const floorFill = `<polygon points="${pointsAttr}" fill="${colorFor(alphaOf(surfaces.floor))}" fill-opacity="0.15" />`;
-
-  if (shape === 'custom') {
-    const edges = surfaces.edges || [];
-    let walls = '';
-    for (let i = 0; i < svgPts.length; i++) {
-      const a = svgPts[i], b = svgPts[(i + 1) % svgPts.length];
-      const mat = matIdOf(edges[i]);
-      walls += `<line x1="${a.sx.toFixed(1)}" y1="${a.sy.toFixed(1)}" x2="${b.sx.toFixed(1)}" y2="${b.sy.toFixed(1)}" stroke="${colorFor(alphaOf(mat))}" stroke-width="8" stroke-linecap="round" />`;
+  } else if (shape === 'custom') {
+    // Per-edge numeric tag — keeps the previous edge-handle UX legible
+    // when the user is selecting a custom edge from the room panel.
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const a = projOuter[i], b = projOuter[j];
       const midX = (a.sx + b.sx) / 2, midY = (a.sy + b.sy) / 2;
-      walls += `<circle cx="${midX.toFixed(1)}" cy="${midY.toFixed(1)}" r="8" fill="#0e1116" stroke="${colorFor(alphaOf(mat))}" stroke-width="1" />`;
-      walls += `<text x="${midX.toFixed(1)}" y="${(midY + 3).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-edge">${i + 1}</text>`;
+      labels += `<circle cx="${midX.toFixed(1)}" cy="${midY.toFixed(1)}" r="8" fill="#0e1116" stroke="#888" stroke-width="1" />`;
+      labels += `<text x="${midX.toFixed(1)}" y="${(midY + 3).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-edge">${i + 1}</text>`;
     }
-    return { floorFill, walls, labels: '' };
+  } else if (n >= 3) {
+    // Polygon / round — single WALLS tag at the top of the outline.
+    const centerX = projOuter.reduce((s, p) => s + p.sx, 0) / n;
+    const topY = Math.min(...projOuter.map(p => p.sy));
+    labels += `<text x="${centerX.toFixed(1)}" y="${(topY - 14).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall">WALLS</text>`;
   }
 
-  const wallsMat = matIdOf(surfaces.walls ?? surfaces.wall_north);
-  const walls = `<polygon points="${pointsAttr}" fill="none" stroke="${colorFor(alphaOf(wallsMat))}" stroke-width="8" stroke-linejoin="round" />`;
-  const centerX = svgPts.reduce((s, p) => s + p.sx, 0) / svgPts.length;
-  const topY = Math.min(...svgPts.map(p => p.sy));
-  // Maya v9 audit §2 — single direction tag, no material name on canvas.
-  const labels = `<text x="${centerX.toFixed(1)}" y="${(topY - 14).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall">WALLS</text>`;
   return { floorFill, walls, labels };
+}
+
+// Minimal text escape for SVG (used by wall material labels). The
+// existing print-plan-svg.js carries its own; both stay consistent.
+function escapeText2D(s) {
+  return String(s).replace(/[<>&"']/g, c => ({
+    '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
 // Render the SPL/STI grid as colored rectangles.

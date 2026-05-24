@@ -436,11 +436,16 @@ export const state = {
     //
     // Shape per entry:
     //   { id, x1, y1, x2, y2, elevation_m, height_m, materialId,
-    //     openings: [...], sourceLabel }
+    //     thickness_m, openings: [...], sourceLabel }
     //
     // Phase 1 (Dr. Chen audit gate): VISUAL ONLY. roomSurfaces() does NOT
     // include these segments yet — same physics deferral as subStructures
     // and standaloneEnclosures. See rebuildWallSegments in scene.js.
+    //
+    // Phase 7 Commit 1 (Hannes 2026-05-23): added optional `thickness_m`.
+    // Default DEFAULT_WALL_THICKNESS_M (0.10 m) when missing — same default
+    // as room-shape.js `normalizeWallSlot`. wallSegments use flat shape,
+    // not the slot normaliser, so consumers read `seg.thickness_m ?? 0.10`.
     wallSegments: [],
     surfaces: {
       floor: 'wood-floor',

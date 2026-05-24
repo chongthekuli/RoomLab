@@ -23,27 +23,31 @@ function assertClose(actual, expected, tol, label) {
 
 // ---- normalizeWallSlot ---------------------------------------------------
 
+// Phase 7 Commit 1 (Hannes 2026-05-23): normalizer now also threads a
+// `thickness_m` field with default 0.10 m. Expectations updated to match
+// the new shape. See tests/wall-slot-thickness.test.mjs for the dedicated
+// schema regression guard.
 assertEq(
   normalizeWallSlot('gypsum-board'),
-  { materialId: 'gypsum-board', openings: [] },
-  'string slot → object with empty openings',
+  { materialId: 'gypsum-board', thickness_m: 0.10, openings: [] },
+  'string slot → object with empty openings + default thickness',
 );
 
 assertEq(
   normalizeWallSlot({ materialId: 'concrete-painted', openings: [{ kind: 'door' }] }),
-  { materialId: 'concrete-painted', openings: [{ kind: 'door' }] },
-  'object slot pass-through',
+  { materialId: 'concrete-painted', thickness_m: 0.10, openings: [{ kind: 'door' }] },
+  'object slot pass-through (default thickness injected)',
 );
 
 assertEq(
   normalizeWallSlot(null),
-  { materialId: 'gypsum-board', openings: [] },
+  { materialId: 'gypsum-board', thickness_m: 0.10, openings: [] },
   'null slot → fallback default',
 );
 
 assertEq(
   normalizeWallSlot(undefined, 'wood-floor'),
-  { materialId: 'wood-floor', openings: [] },
+  { materialId: 'wood-floor', thickness_m: 0.10, openings: [] },
   'undefined slot → caller-supplied fallback',
 );
 

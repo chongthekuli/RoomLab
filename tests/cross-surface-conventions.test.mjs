@@ -776,6 +776,222 @@ assertDilateUnit();
 assertHeatmapFillParity();
 assertSilhouetteMask();
 
+// ---------------------------------------------------------------------------
+// Phase 7 — WallLAB thickness flowing into RoomLAB rendering.
+//
+// Sam spec, 2026-05-23. The thickness field landed in Commit 1 (schema +
+// normalizeWallSlot — guarded by tests/wall-slot-thickness.test.mjs). The
+// VISUAL parity gates land per-commit:
+//
+//   commit2_3d_consumed: 'hard'  — scene.js MUST consume wallInsetPolygon
+//                                  for the rectangular + custom wall
+//                                  geometry. HARD gate as soon as
+//                                  Commit 2 ships.
+//   commit3_2d_consumed: 'soft'  — room-2d.js consumes wallInsetPolygon
+//                                  for the 2D fill. Maya, Commit 3 —
+//                                  flips to 'hard' when that lands.
+//   commit3_print_consumed: 'soft' — print-plan-svg.js consumes
+//                                  wallInsetPolygon for the print fill.
+//                                  Maya, Commit 3.
+//   commit3_hatch_buckets: 'soft' — material-family-hatch.js stub exists
+//                                  so this fixture's file-existence check
+//                                  doesn't trip. Lin / Maya populate the
+//                                  hatch buckets in Commit 3.
+//
+// Anti-leak grep: thickness arithmetic outside wall-inset.js (raw
+// `thickness_m / 2`, `+ thickness_m`, `thickness_m * 0.5` patterns) trips
+// the gate. The point of wall-inset.js is that EVERY visual surface
+// shares one resolution + one inset polygon. If somebody slips
+// `thickness_m / 2` into a render path, the surfaces silently desync
+// when the wallSegments override kicks in (Phase 8).
+// ---------------------------------------------------------------------------
+
+const PHASE7_GATES = {
+  commit2_3d_consumed:    'hard',  // scene.js (Viktor, Commit 2)
+  commit3_2d_consumed:    'hard',  // room-2d.js (Maya, Commit 4 — flipped)
+  commit3_print_consumed: 'hard',  // print-plan-svg.js (Maya, Commit 4 — flipped)
+  commit3_hatch_buckets:  'hard',  // material-family-hatch.js (Lin, Commit 4 — flipped)
+  commit3_hatch_shared:   'hard',  // both render files import + call getMaterialHatchKind
+  commit3_label_anchor:   'hard',  // both render files use wallLabelAnchor for label position
+};
+
+function gateOK(level, name, cond, detail = '') {
+  if (level === 'hard') {
+    ok(cond, name, detail);
+  } else {
+    // Soft gate — print a SKIP/SOFT line so the absence of the upcoming
+    // wiring is visible but doesn't fail the build. Commit 3 flips these
+    // to 'hard' when Maya lands the 2D + print parity.
+    if (cond) {
+      console.log(`PASS  ${name} (soft)`);
+    } else {
+      console.log(`SOFT  ${name}${detail ? ' — ' + detail : ''}`);
+    }
+  }
+}
+
+function assertPhase7WallThickness() {
+  // (1) wall-inset.js exists and exports the contract Sam locked.
+  let wallInsetSrc = '';
+  try {
+    wallInsetSrc = readFileSync('js/physics/wall-inset.js', 'utf8');
+  } catch (e) {
+    fail('phase7: js/physics/wall-inset.js must exist (Commit 2 deliverable)', String(e));
+    return;
+  }
+  ok(/export\s+function\s+wallInsetPolygon\b/.test(wallInsetSrc),
+     'phase7: wall-inset.js exports wallInsetPolygon');
+  ok(/export\s+function\s+wallLabelAnchor\b/.test(wallInsetSrc),
+     'phase7: wall-inset.js exports wallLabelAnchor');
+  ok(/export\s+function\s+getWallEdgeThickness\b/.test(wallInsetSrc),
+     'phase7: wall-inset.js exports getWallEdgeThickness');
+  ok(/export\s+const\s+WALL_LABEL_MAX_CHARS\s*=\s*12/.test(wallInsetSrc),
+     'phase7: WALL_LABEL_MAX_CHARS === 12 (locked)');
+
+  // (2) wall-inset.js MUST NOT import Three.js / DOM globals — pure module.
+  ok(!/from\s+['"]three['"]/i.test(wallInsetSrc),
+     'phase7: wall-inset.js does NOT import Three.js (pure Node module)');
+  ok(!/\bdocument\.|\bwindow\./.test(wallInsetSrc),
+     'phase7: wall-inset.js does NOT reference document / window');
+
+  // (3) room-shape.js MUST NOT import wall-inset.js — the inset is for
+  //     RENDER only. baseArea() / roomSurfaces() / RT60 must stay
+  //     untouched by the visual thickness story.
+  const roomShapeSrc = readFileSync('js/physics/room-shape.js', 'utf8');
+  ok(!/from\s+['"][^'"]*wall-inset(?:\.js)?['"]/.test(roomShapeSrc),
+     'phase7: room-shape.js does NOT import wall-inset.js (acoustic math untouched)');
+
+  // (4) Commit 2 (HARD) — scene.js consumes wallInsetPolygon.
+  const sceneSrc = readFileSync('js/graphics/scene.js', 'utf8');
+  gateOK(PHASE7_GATES.commit2_3d_consumed,
+    'phase7-commit2: scene.js imports wallInsetPolygon',
+    /from\s+['"][^'"]*physics\/wall-inset(?:\.js)?['"]/.test(sceneSrc) &&
+    /\bwallInsetPolygon\b/.test(sceneSrc));
+  gateOK(PHASE7_GATES.commit2_3d_consumed,
+    'phase7-commit2: scene.js calls wallInsetPolygon (rectangular + custom wall geometry)',
+    /wallInsetPolygon\s*\(/.test(sceneSrc));
+
+  // (5) Anti-leak grep — raw thickness_m arithmetic OUTSIDE wall-inset.js
+  //     trips the gate. Render surfaces must funnel through the helper
+  //     so wallSegments overrides take effect uniformly.
+  const ANTI_LEAK_FILES = [
+    'js/graphics/scene.js',
+    'js/graphics/room-2d.js',
+    'js/ui/print-plan-svg.js',
+  ];
+  const LEAK_PATTERNS = [
+    /thickness_m\s*\/\s*2\b/,
+    /thickness_m\s*\*\s*0\.5\b/,
+    /\+\s*thickness_m\b/,
+  ];
+  for (const f of ANTI_LEAK_FILES) {
+    let src = '';
+    try { src = readFileSync(f, 'utf8'); } catch { continue; }
+    // Strip line comments (// …) and block-comment bodies (/* … */) so a
+    // docstring that LITERALLY says "don't write `thickness_m / 2` here"
+    // doesn't trip its own gate. The grep targets actual code paths.
+    const stripped = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+      .replace(/[ \t]+\/\/.*$/gm, '');
+    let leaked = null;
+    for (const pat of LEAK_PATTERNS) {
+      const m = stripped.match(pat);
+      if (m) { leaked = m[0]; break; }
+    }
+    ok(leaked === null,
+       `phase7 anti-leak: ${f} has no raw thickness_m arithmetic`,
+       leaked ? `found "${leaked}" — route through wall-inset.js helpers` : '');
+  }
+
+  // (6) Commit 3 (SOFT) — 2D + print SVG consume wallInsetPolygon.
+  //     Soft gates today; Maya flips them to 'hard' in Commit 3.
+  const room2dSrc = readFileSync('js/graphics/room-2d.js', 'utf8');
+  gateOK(PHASE7_GATES.commit3_2d_consumed,
+    'phase7-commit3: room-2d.js consumes wallInsetPolygon for 2D fill',
+    /\bwallInsetPolygon\b/.test(room2dSrc));
+
+  const printPlanSrc = readFileSync('js/ui/print-plan-svg.js', 'utf8');
+  gateOK(PHASE7_GATES.commit3_print_consumed,
+    'phase7-commit3: print-plan-svg.js consumes wallInsetPolygon for print fill',
+    /\bwallInsetPolygon\b/.test(printPlanSrc));
+
+  // (7) Commit 4 (HARD) — material-family-hatch.js exists AND exports
+  //     getMaterialHatchKind. Lin shipped this in parallel with Maya's
+  //     2D + print consumers (see Phase 7 Commit 4 brief).
+  let hatchExists = false;
+  let hatchSrc = '';
+  try {
+    statSync('js/labs/walllab/material-family-hatch.js');
+    hatchSrc = readFileSync('js/labs/walllab/material-family-hatch.js', 'utf8');
+    hatchExists = true;
+  } catch { /* missing */ }
+  gateOK(PHASE7_GATES.commit3_hatch_buckets,
+    'phase7-commit4: js/labs/walllab/material-family-hatch.js exists',
+    hatchExists,
+    'create the file before flipping the gate to hard');
+  if (hatchExists) {
+    gateOK(PHASE7_GATES.commit3_hatch_buckets,
+      'phase7-commit4: material-family-hatch.js exports getMaterialHatchKind',
+      /export\s+function\s+getMaterialHatchKind\b/.test(hatchSrc));
+    // Locked bucket strings — Sam's anti-leak grep would catch a rename.
+    for (const bucket of ['solid-dark', 'diagonal-hatch', 'outline-only', 'open-air', 'unknown']) {
+      gateOK(PHASE7_GATES.commit3_hatch_buckets,
+        `phase7-commit4: material-family-hatch.js carries locked bucket '${bucket}'`,
+        new RegExp(`['"]${bucket}['"]`).test(hatchSrc));
+    }
+  }
+
+  // (8) Commit 4 (HARD) — commit3_hatch_shared. Both render files
+  //     import getMaterialHatchKind from material-family-hatch.js AND
+  //     call it on the wall slot's materialId. Locked by Sam so a
+  //     drive-by renderer-side inlined family branch trips the gate.
+  for (const [id, file] of [
+    ['room-2d',         'js/graphics/room-2d.js'],
+    ['print-plan-svg',  'js/ui/print-plan-svg.js'],
+  ]) {
+    let src = '';
+    try { src = readFileSync(file, 'utf8'); } catch (e) {
+      fail(`phase7-commit4 hatch-shared: ${id} unreadable (${file})`, String(e));
+      continue;
+    }
+    gateOK(PHASE7_GATES.commit3_hatch_shared,
+      `phase7-commit4: ${id} imports getMaterialHatchKind from material-family-hatch.js`,
+      /from\s+['"][^'"]*walllab\/material-family-hatch(?:\.js)?['"]/.test(src) &&
+      /\bgetMaterialHatchKind\b/.test(src));
+    gateOK(PHASE7_GATES.commit3_hatch_shared,
+      `phase7-commit4: ${id} calls getMaterialHatchKind() on a wall material`,
+      /getMaterialHatchKind\s*\(/.test(src));
+  }
+
+  // (9) Commit 4 (HARD) — commit3_label_anchor. Both render files use
+  //     wallLabelAnchor from wall-inset.js for per-wall label position.
+  //     Anti-leak: nobody is re-implementing "edge midpoint + inward
+  //     normal * thickness/2" by hand on a render path.
+  for (const [id, file] of [
+    ['room-2d',         'js/graphics/room-2d.js'],
+    ['print-plan-svg',  'js/ui/print-plan-svg.js'],
+  ]) {
+    let src = '';
+    try { src = readFileSync(file, 'utf8'); } catch (e) {
+      fail(`phase7-commit4 label-anchor: ${id} unreadable (${file})`, String(e));
+      continue;
+    }
+    gateOK(PHASE7_GATES.commit3_label_anchor,
+      `phase7-commit4: ${id} imports wallLabelAnchor from wall-inset.js`,
+      /from\s+['"][^'"]*physics\/wall-inset(?:\.js)?['"]/.test(src) &&
+      /\bwallLabelAnchor\b/.test(src));
+    gateOK(PHASE7_GATES.commit3_label_anchor,
+      `phase7-commit4: ${id} calls wallLabelAnchor() to position a wall label`,
+      /wallLabelAnchor\s*\(/.test(src));
+    gateOK(PHASE7_GATES.commit3_label_anchor,
+      `phase7-commit4: ${id} imports WALL_LABEL_MAX_CHARS for label truncation`,
+      /\bWALL_LABEL_MAX_CHARS\b/.test(src));
+  }
+}
+
+assertPhase7WallThickness();
+
 // Diagnostic dump — printed before exit so failures carry context.
 if (failed > 0) {
   console.log('\n--- Probe results (state-frame source (+1,+2), listener (-1,-3)) ---');

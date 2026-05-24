@@ -15,6 +15,7 @@ import { buildRackGroup } from './rack-render.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
 import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, normalizeWallSlot, applySurauOpeningsToSlot } from '../physics/room-shape.js';
+import { wallInsetPolygon } from '../physics/wall-inset.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { openPanel } from '../ui/rail-system.js';
@@ -2739,6 +2740,176 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     wallMesh.add(opMesh);
   };
 
+  // -----------------------------------------------------------------------
+  // Phase 7 Commit 2 (Viktor, 2026-05-23) — extrude walls inward to give
+  // them real thickness. The outer-face mesh built above is kept intact
+  // (so raycasts, opening child meshes, surface_id tagging, walk
+  // collision all still behave exactly like the zero-thickness version
+  // shipped through Phase 6). On top of it we add THREE sibling meshes
+  // per wall: an inner face, a top cap, and a bottom cap. The inner
+  // face carries the same hole-punched ShapeGeometry but no child
+  // opening meshes — openings stay zero-depth per Sam's Commit 2 brief
+  // (reveal-depth door tunnels are Phase 8). End caps at the wall ends
+  // are omitted: adjacent walls' shells cover the convex-corner gap and
+  // a concave corner buries the gap behind the next wall.
+  //
+  // Geometry comes from wallInsetPolygon(room) — the canonical inset is
+  // computed ONCE per rebuild and passed in here. State-frame coords
+  // throughout; the existing scene.scale.x = -1 mirror handles the X
+  // flip for the entire scene graph.
+  //
+  // SAM PARITY FIXTURE: thickness arithmetic must NOT happen in this
+  // file. We read inset.thicknesses[i] and outer[i]/inner[i] only. Raw
+  // `thickness_m / 2` style math lives behind wall-inset.js — that's
+  // where the cross-surface fixture greps.
+  //
+  // All shell meshes carry the SAME surface_id and acoustic_material as
+  // the outer wall — clicks on the inner face still route to the wall's
+  // panel row, and the walk collider sees one logical wall. The shells
+  // are tagged `wall_shell` so future filtered raycasts can exclude
+  // them if needed.
+  const addWallThicknessShells = ({
+    outerV1, outerV2, innerV1, innerV2,
+    materialId, surfaceId, openings, wallH,
+  }) => {
+    // Outer edge geometry (length + midpoint + direction) in state-frame.
+    const oex = outerV2.x - outerV1.x;
+    const oey = outerV2.y - outerV1.y;
+    const outerLen = Math.sqrt(oex * oex + oey * oey);
+    if (outerLen < 1e-6) return;
+    const ouDx = oex / outerLen, ouDy = oey / outerLen;
+
+    // Inner edge — may differ in length from outer when adjacent wall
+    // thicknesses vary, so compute from the inset polygon directly.
+    const iex = innerV2.x - innerV1.x;
+    const iey = innerV2.y - innerV1.y;
+    const innerLen = Math.sqrt(iex * iex + iey * iey);
+
+    // The inset polygon already collapsed to centroid on degenerate
+    // input — innerLen close to zero means the wall has no inside face
+    // to render. Skip shells; outer face is enough of a signal.
+    if (innerLen < 1e-3) return;
+
+    // Inward normal of the outer edge (CCW polygon convention). The
+    // inset module winds the polygon CCW by construction, so the same
+    // formula matches what wall-inset.js used to offset the edge.
+    const inwardNx = -ouDy, inwardNy = ouDx;
+
+    // ---------- Inner face -----------------------------------------------
+    // Same buildWallGeoWithHoles helper for hole consistency. Holes are
+    // shifted along the wall axis by the offset between outer-edge-v1
+    // and inner-edge-v1, projected onto the outer-edge direction. For
+    // uniform thicknesses this is exactly the adjacent wall's thickness
+    // (so a door centred on the outer face is still centred on the
+    // inner face). For non-uniform thicknesses the shift tracks the
+    // geometric truth.
+    const startShift =
+      (innerV1.x - outerV1.x) * ouDx + (innerV1.y - outerV1.y) * ouDy;
+    const innerOpenings = (openings || [])
+      .filter(op => op && !op.system)   // system openings handled by outer face
+      .map(op => ({
+        ...op,
+        x_m: (Number(op.x_m) || 0) - startShift,
+      }))
+      // Drop openings whose shifted footprint slides off the (shorter)
+      // inner edge — a door that hugs the corner on the outer face may
+      // not fit on the inner side once the side walls eat their share.
+      .filter(op => {
+        const ow = Number(op.width_m) || 0;
+        return op.x_m >= -0.001 && (op.x_m + ow) <= innerLen + 0.001;
+      });
+    const innerGeo = buildWallGeoWithHoles(innerLen, wallH, innerOpenings);
+    // Inner face uses the same material as the outer — clicks on the
+    // inside of the room see the same texture / colour as outside.
+    const innerMat = buildSurfaceMat(materialId, innerLen, wallH, { opacity: 0.55 });
+    const innerMesh = new THREE.Mesh(innerGeo, innerMat);
+    const innerMidX = (innerV1.x + innerV2.x) / 2;
+    const innerMidY = (innerV1.y + innerV2.y) / 2;
+    // Place inner-face plane at the inner-edge midpoint. The plane's
+    // local +X = wall-along-axis, local +Y = world up. basisZ MUST equal
+    // basisX × basisY so the resulting matrix is right-handed (det +1).
+    // Setting basisZ to the OUTWARD direction (which is the NEGATIVE of
+    // basisX × basisY for CCW polygons) makes the basis a reflection,
+    // and Three.js's setFromRotationMatrix returns garbage on reflections
+    // — the inner mesh ends up wildly skewed, producing horizontal "fins"
+    // in iso/side views (top view hides it because the skew is in the
+    // vertical plane). DoubleSide material means the actual normal
+    // direction is cosmetic; right-handedness is what matters.
+    {
+      const basisX = new THREE.Vector3(ouDx, 0, ouDy);    // wall axis
+      const basisY = new THREE.Vector3(0, 1, 0);
+      const basisZ = new THREE.Vector3().crossVectors(basisX, basisY);  // always right-handed
+      const m = new THREE.Matrix4().makeBasis(basisX, basisY, basisZ);
+      innerMesh.quaternion.setFromRotationMatrix(m);
+    }
+    innerMesh.position.set(innerMidX, wallH / 2, innerMidY);
+    innerMesh.userData.acoustic_material = materialId;
+    innerMesh.userData.surface_id = surfaceId;
+    innerMesh.userData.tag = 'wall_shell_inner';
+    // Avatar walk collision should NOT double-fire on the inner shell —
+    // the outer wall already participates in the third-person controller
+    // collision filter. Mark the shell as no_walk_collide so the
+    // collider's `_structuralHits` accumulator only counts one face per
+    // wall (see feedback_team_size_vs_ceremony — collider guard creep).
+    innerMesh.userData.no_walk_collide = true;
+    if (materialId === 'open-air') innerMesh.userData.no_walk_collide = true;
+    roomGroup.add(innerMesh);
+
+    // ---------- Top + bottom caps ---------------------------------------
+    // Each cap is the quadrilateral (outerV1, outerV2, innerV2, innerV1)
+    // sitting at z = wallH (top) or z = 0 (bottom). The four world-
+    // space vertices are explicit so non-rectangular corners (caused by
+    // adjacent thicknesses differing) close exactly — no T-junction
+    // cracks between walls.
+    const buildCap = (z) => {
+      const geo = new THREE.BufferGeometry();
+      const pos = new Float32Array([
+        outerV1.x, z, outerV1.y,
+        outerV2.x, z, outerV2.y,
+        innerV2.x, z, innerV2.y,
+        innerV1.x, z, innerV1.y,
+      ]);
+      // Two triangles, CCW from above for top cap. Bottom cap normal
+      // would be opposite, but DoubleSide rendering keeps it visible
+      // from any angle, so we skip the index flip and accept the
+      // bottom's normal pointing up — visually identical with the lit
+      // ambient + IBL setup the scene uses.
+      const idx = new Uint16Array([0, 1, 2, 0, 2, 3]);
+      const uv = new Float32Array([
+        0, 0,
+        1, 0,
+        1, 1,
+        0, 1,
+      ]);
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      geo.computeVertexNormals();
+      return geo;
+    };
+    const capMat = buildSurfaceMat(materialId, outerLen, 1, { opacity: 0.55 });
+    const topCap = new THREE.Mesh(buildCap(wallH), capMat);
+    topCap.userData.acoustic_material = materialId;
+    topCap.userData.surface_id = surfaceId;
+    topCap.userData.tag = 'wall_shell_top';
+    topCap.userData.no_walk_collide = true;
+    roomGroup.add(topCap);
+    const botCap = new THREE.Mesh(buildCap(0), capMat);
+    botCap.userData.acoustic_material = materialId;
+    botCap.userData.surface_id = surfaceId;
+    botCap.userData.tag = 'wall_shell_bottom';
+    botCap.userData.no_walk_collide = true;
+    roomGroup.add(botCap);
+  };
+
+  // Compute the inset polygon ONCE per rebuild. wallInsetPolygon returns
+  // outer + inner vertex arrays in state-frame, CCW. For rectangular
+  // rooms outer === [(0,0),(w,0),(w,d),(0,d)] (4 verts). For polygon /
+  // round / custom rooms it matches roomPlanVertices's vertex count.
+  // The thicknesses[] index aligns with the edge index (edge i runs
+  // outer[i] → outer[i+1]).
+  const inset = wallInsetPolygon(room);
+
   if (shape === 'rectangular') {
     // Floor + ceiling as rectangular planes
     const floorGeo = new THREE.PlaneGeometry(w, d);
@@ -2765,15 +2936,19 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       roomGroup.add(ceiling);
     }
 
-    // 4 walls (per-material).
+    // 4 walls (per-material). The edgeIndex column ties each wall to the
+    // CCW edge in the inset polygon — wall_north = edge 0 (y=0 face),
+    // wall_east = edge 1 (x=W face), wall_south = edge 2 (y=D face),
+    // wall_west = edge 3 (x=0 face). Matches the slot lookup in
+    // wall-inset.js → rectEdgeSlotKey.
     const wallOpts = [
-      // [ww, wh, pos, rot, slot, surfaceKey]
-      [w, h, [cx, h/2, 0],   [0, Math.PI, 0],    surfaces.wall_north, 'wall_north'],
-      [w, h, [cx, h/2, d],   [0, 0, 0],          surfaces.wall_south, 'wall_south'],
-      [d, h, [w,  h/2, cz],  [0, -Math.PI/2, 0], surfaces.wall_east,  'wall_east'],
-      [d, h, [0,  h/2, cz],  [0, Math.PI/2, 0],  surfaces.wall_west,  'wall_west'],
+      // [ww, wh, pos, rot, slot, surfaceKey, edgeIndex]
+      [w, h, [cx, h/2, 0],   [0, Math.PI, 0],    surfaces.wall_north, 'wall_north', 0],
+      [w, h, [cx, h/2, d],   [0, 0, 0],          surfaces.wall_south, 'wall_south', 2],
+      [d, h, [w,  h/2, cz],  [0, -Math.PI/2, 0], surfaces.wall_east,  'wall_east',  1],
+      [d, h, [0,  h/2, cz],  [0, Math.PI/2, 0],  surfaces.wall_west,  'wall_west',  3],
     ];
-    for (const [ww, wh, pos, rot, slot, surfaceKey] of wallOpts) {
+    for (const [ww, wh, pos, rot, slot, surfaceKey, edgeIndex] of wallOpts) {
       // surauStructure entrances + south-partition doors are merged into
       // the wall slot's openings[] here so the same buildWallGeoWithHoles
       // pipeline punches the holes (PR2 path) AND attachOpeningMesh
@@ -2797,6 +2972,25 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       roomGroup.add(m);
       for (let oi = 0; oi < openings.length; oi++) {
         attachOpeningMesh(m, openings[oi], ww, wh, oi, surfaceKey);
+      }
+
+      // Phase 7 C2 — extrude this wall inward to give it real depth.
+      // Inset vertices come from wallInsetPolygon(room); the outer edge
+      // index for this wall is the wallOpts row's edgeIndex (mapped to
+      // CCW polygon order: N=0, E=1, S=2, W=3).
+      if (inset && inset.outer.length === 4 && surfId !== 'open-air') {
+        const i = edgeIndex;
+        const j = (i + 1) % inset.outer.length;
+        addWallThicknessShells({
+          outerV1: inset.outer[i],
+          outerV2: inset.outer[j],
+          innerV1: inset.inner[i],
+          innerV2: inset.inner[j],
+          materialId: surfId,
+          surfaceId: surfaceKey,
+          openings,
+          wallH: wh,
+        });
       }
     }
 
@@ -2925,6 +3119,23 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
         roomGroup.add(m);
         for (let oi = 0; oi < openings.length; oi++) {
           attachOpeningMesh(m, openings[oi], edgeLen, h, oi, `edge_${i}`);
+        }
+
+        // Phase 7 C2 — inset shell. Uses the polygon-edge inset built by
+        // wallInsetPolygon (CCW state-frame). Skipped for open-air walls
+        // (no material to render and the avatar should pass through).
+        if (inset && inset.outer.length === n && edgeSurfId !== 'open-air') {
+          const j = (i + 1) % n;
+          addWallThicknessShells({
+            outerV1: inset.outer[i],
+            outerV2: inset.outer[j],
+            innerV1: inset.inner[i],
+            innerV2: inset.inner[j],
+            materialId: edgeSurfId,
+            surfaceId: `edge_${i}`,
+            openings,
+            wallH: h,
+          });
         }
       }
       const bottom = verts.map(v => new THREE.Vector3(v.x, 0, v.y));

@@ -116,20 +116,26 @@ const spl_behind = computeMultiSourceSPL({ ...args, listenerPos: lst_behind });
 assertBetween(spl_behind, 20, 50,
   '(2) Flag OFF: behind qibla wall = through-wall TL only (20-50 dB), NOT the Tier 1a diffraction lift');
 
-// (3) Lateral probes — pre-Tier-1a these were all near-identical
-// because TL is a step function (binary inside/outside). With flag
-// off they should agree to within a couple dB (small distance/angle
-// effects only).
+// (3) Lateral probes — outdoor cells past the south wall at progressively
+// larger lateral offsets from the source. Pre-Phase-7 the reverb-leak term
+// (incorrectly) added the building's interior reverberant tail to outdoor
+// listeners — that lifted the floor uniformly ~43 dB and flattened the
+// three probes to within ~few dB. Phase 7 (Dr. Chen audit 2026-05-24)
+// fixed this in computeMultiSourceSPL: outdoor listeners (outside parent
+// inner polygon) now correctly skip the reverb-leak term. The probes now
+// reflect direct-path-only variance with distance + directivity, which is
+// physically correct.
+//
+// Range now ~10-15 dB (direct path drops ~6 dB per doubling of distance,
+// plus directivity off-axis). Assertion updated to gate < 20 dB so a real
+// regression (e.g. Tier 1a accidentally firing flag-off) still trips.
 const probes = [
   computeMultiSourceSPL({ ...args, listenerPos: { x: 9,    y: 12.3, z: 1.7 } }),
   computeMultiSourceSPL({ ...args, listenerPos: { x: 14,   y: 12.3, z: 1.7 } }),
   computeMultiSourceSPL({ ...args, listenerPos: { x: 17.5, y: 12.3, z: 1.7 } }),
 ];
 const range = Math.max(...probes) - Math.min(...probes);
-// Pre-Tier-1a behaviour: all three listeners get the same -53 dB TL
-// applied; the only variation is from 1/r² + directivity, which is
-// modest at these distances. Range should be < 10 dB.
-if (range < 10) pass(`(3) Flag OFF: lateral probe variance < 10 dB (was a hard rectangle pre-Tier-1a)`);
+if (range < 20) pass(`(3) Flag OFF: lateral probe variance ${range.toFixed(2)} dB (direct-path-only outdoor, < 20 dB tolerance — Phase 7 outdoor reverb-leak fix landed)`);
 else fail(`(3) Flag OFF: lateral probe range ${range.toFixed(2)} dB unexpectedly large`,
   `probes: ${probes.map(p => p.toFixed(1)).join(', ')}`);
 

@@ -1443,10 +1443,16 @@ function regenerateActiveTemplate() {
   emit('scene:reset');
 }
 
-// Wall slots accept two forms: a bare string (legacy: material id only)
-// or { materialId, openings } (PR2). These helpers read/write either form
+// Wall slots accept three forms: a bare string (legacy: material id only),
+// { materialId, openings } (PR2), or { materialId, openings, thickness_m }
+// (Phase 7 — per-wall thickness). These helpers read/write all three forms
 // transparently — the panel always shows the user the same controls
 // regardless of which form storage is currently in.
+//
+// DEFAULT_WALL_THICKNESS_M = 0.10 (lives in js/physics/room-shape.js); kept
+// numerically inline here to avoid a circular import — Phase 7 C3.
+const DEFAULT_WALL_THICKNESS_M_UI = 0.10;
+
 function readSlotMatId(slot, fallback = 'gypsum-board') {
   if (typeof slot === 'string') return slot;
   if (slot && typeof slot === 'object' && typeof slot.materialId === 'string') return slot.materialId;
@@ -1456,16 +1462,36 @@ function readSlotOpenings(slot) {
   if (slot && typeof slot === 'object' && Array.isArray(slot.openings)) return slot.openings;
   return [];
 }
+function readSlotThickness(slot) {
+  if (slot && typeof slot === 'object') {
+    const t = Number(slot.thickness_m);
+    if (Number.isFinite(t) && t > 0) return t;
+  }
+  return DEFAULT_WALL_THICKNESS_M_UI;
+}
 // Always returns an object — caller may freely mutate it. If the original
 // was a string, returns a fresh object that the caller should write back.
 function readSlotAsObject(slot, fallback = 'gypsum-board') {
-  return { materialId: readSlotMatId(slot, fallback), openings: readSlotOpenings(slot) };
+  return {
+    materialId: readSlotMatId(slot, fallback),
+    thickness_m: readSlotThickness(slot),
+    openings: readSlotOpenings(slot),
+  };
 }
-// If the slot has no openings, write back the bare string form (preserves
-// legacy save shape). Otherwise write the object form.
+// If the slot has no openings AND thickness is the default, write back the
+// bare string form (preserves legacy save shape). Otherwise write the
+// object form, but DROP the thickness_m field when it equals the default
+// so the saved scene stays compact when the user never touched thickness.
 function compactSlot(slot) {
-  if (slot && typeof slot === 'object' && Array.isArray(slot.openings) && slot.openings.length === 0) {
-    return slot.materialId;
+  if (!slot || typeof slot !== 'object') return slot;
+  const noOpenings = Array.isArray(slot.openings) && slot.openings.length === 0;
+  const t = Number(slot.thickness_m);
+  const isDefaultThickness = !Number.isFinite(t) || Math.abs(t - DEFAULT_WALL_THICKNESS_M_UI) < 1e-6;
+  if (noOpenings && isDefaultThickness) return slot.materialId;
+  if (isDefaultThickness) {
+    // Drop the thickness field to keep the save shape minimal.
+    const { thickness_m: _drop, ...rest } = slot;
+    return rest;
   }
   return slot;
 }
@@ -1590,6 +1616,12 @@ function renderSurfaceMaterials() {
     attachSurfaceHover(matRow, surfaceId);
     wrap.appendChild(matRow);
     if (withOpenings) {
+      // Per-wall thickness control — Phase 7 C3. Walls only (floor / ceiling
+      // skip this — they don't carry a polygon-edge thickness). Input is in
+      // millimetres for usability (matches the WallLAB workbench slider);
+      // state stores metres. Range 25-600 mm covers studwall through heavy
+      // double-leaf masonry.
+      wrap.appendChild(renderThicknessRow(surfaceId, getSlot, setSlot));
       wrap.appendChild(renderOpeningsBlock(surfaceId, getSlot, setSlot));
     }
     parent.appendChild(wrap);
@@ -1853,6 +1885,55 @@ function renderEnclosureMaterialSections(root, renderWallRow) {
 // this wall plus "+ Door" / "+ Window" buttons. Each opening row has all
 // fields inline (kind/state/material/x/z/w/h) + a delete button. Adding
 // or deleting an opening rebuilds just this block via the parent's setter.
+// Per-wall thickness input. Sits between the material select and the
+// openings sub-section so it's right next to "+ Door" / "+ Window". The
+// input takes millimetres (whole numbers) — matches the WallLAB workbench
+// thickness slider convention; state writeback converts to metres.
+//
+// Sensible range 25-600 mm: 25 mm = thin partition skin; 600 mm = heavy
+// double-leaf concrete. Outside this range we clamp on commit, so a typo
+// can't break the inset geometry (wall-inset.js degenerate-case fallback
+// would catch it, but the user shouldn't have to discover that).
+function renderThicknessRow(surfaceId, getSlot, setSlot) {
+  const row = document.createElement('div');
+  row.className = 'wall-thickness-row';
+  row.dataset.surfaceId = surfaceId;
+  const label = document.createElement('span');
+  label.className = 'wall-thickness-label';
+  label.textContent = 'Thickness:';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.className = 'wall-thickness-input';
+  input.min = '25';
+  input.max = '600';
+  input.step = '5';
+  const currentMm = Math.round(readSlotThickness(getSlot()) * 1000);
+  input.value = String(currentMm);
+  input.title = 'Wall thickness in millimetres. Affects 3D rendering today; will feed inter-zone SPL math in Phase 8 (ISO 12354-2).';
+  const unit = document.createElement('span');
+  unit.className = 'wall-thickness-unit';
+  unit.textContent = 'mm';
+  const commit = () => {
+    const raw = Number(input.value);
+    if (!Number.isFinite(raw)) {
+      input.value = String(Math.round(readSlotThickness(getSlot()) * 1000));
+      return;
+    }
+    const clamped = Math.max(25, Math.min(600, Math.round(raw)));
+    if (clamped !== raw) input.value = String(clamped);
+    const slot = readSlotAsObject(getSlot());
+    slot.thickness_m = clamped / 1000;
+    setSlot(compactSlot(slot));
+    emit('room:changed');
+  };
+  input.addEventListener('change', commit);
+  // Blur also commits — covers the user editing then clicking outside
+  // without pressing Enter.
+  input.addEventListener('blur', commit);
+  row.append(label, input, unit);
+  return row;
+}
+
 function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
   const block = document.createElement('div');
   block.className = 'openings-block';
@@ -2221,6 +2302,14 @@ on('surface:picked', ({ surface_id } = {}) => {
     // column highlights the shared row.
     if (!wrap && surface_id.startsWith('surau_arcade_column_')) {
       wrap = root.querySelector(`label[data-surface-id="surau_arcade_column"]`);
+    }
+    // Same shape for the arcade roofs — each side carries a per-side
+    // surface_id (surau_arcade_roof_south / _east / _west) but the UI
+    // exposes ONE shared row 'surau_arcade_roof'. Without this fallback,
+    // clicking any of the three corridor roofs in 3D was a no-op
+    // (user-reported 2026-05-24).
+    if (!wrap && surface_id.startsWith('surau_arcade_roof_')) {
+      wrap = root.querySelector(`label[data-surface-id="surau_arcade_roof"]`);
     }
     if (!wrap) return;
     wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });

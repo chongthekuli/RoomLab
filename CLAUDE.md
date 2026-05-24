@@ -157,10 +157,12 @@ When a task touches one of these, route to the matching agent (see
 | Cross-system feature, "which agent?", architecture | tech-lead                   | Hannes Brauer      |
 | 3D viewport, Three.js, walk-mode, post-FX, shaders | 3d-rendering-expert         | Viktor Lindqvist   |
 | Acoustics physics correctness, standards (ISO/IEC) | acoustics-engineer          | Dr. Lena Chen      |
+| Building acoustics — partition TL, flanking, barrier IL (ISO 717-1 / 10140 / 16283 / 12354 / 9613-2 §7.4) | acoustics-engineer (sub-hat, added 2026-05-23) | Dr. Lena Chen |
 | PA spec, racking, amps, Dante/AES67, compliance    | pa-integrator               | Felix Brandt       |
 | Walk-mode auralization, IR convolution, WebAudio   | audio-engine-specialist     | Sora Akiyama       |
 | Panel UX, copy, accessibility, onboarding          | ux-designer                 | Maya Okafor        |
 | Glossary, README, release notes, user-facing copy  | docs-writer                 | Lin Sato           |
+| Product-catalogue rows (materials.json, wall-catalogue.js, future wall-products.json) — names, citations, schema discipline | docs-writer (sub-hat, added 2026-05-23) | Lin Sato |
 | Competitor research (EASE/Odeon/Treble/ArrayCalc)  | market-strategist           | Carmen Vasquez     |
 | Test design, fixtures, regression sweeps; cross-surface convention owner (axis, north arrow, scale bar, units, label sizing across 2D viewport / 3D viewport / print plan SVG / print heatmap SVG) | qa-engineer | Sam Reyes |
 | Bug-→-test index, same-PR rule enforcement         | regression-curator          | Theo Halvorsen     |

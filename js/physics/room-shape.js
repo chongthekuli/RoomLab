@@ -4,13 +4,20 @@ function getShape(room) {
 
 // Wall-slot schema. Each slot in `room.surfaces` (wall_north/south/east/west,
 // edges[i], or the shared 'walls') is either:
-//   - a STRING (legacy): just the material ID, no openings.
-//   - an OBJECT (new):   { materialId, openings: [{ kind, x_m, z_m,
-//                          width_m, height_m, materialId, state }, ... ] }
-// Both are accepted at every read site so old saved scenes / preset
+//   - a STRING (legacy):   just the material ID, no openings, no thickness.
+//   - an OBJECT v1:        { materialId, openings: [...] }
+//   - an OBJECT v2 (new):  { materialId, thickness_m, openings: [...] }
+// All three are accepted at every read site so old saved scenes / preset
 // authoring code keep working with no migration step. Writers (UI,
 // panel-room, scene save) use whichever form they generated; the
 // normaliser smooths over the difference.
+//
+// Phase 7 Commit 1 (Hannes 2026-05-23): added `thickness_m` to flow
+// WallLAB's per-wall thickness into RoomLAB rendering + (Phase 8)
+// inter-zone SPL math. Default 0.10 m (100 mm — gypsum-board single-leaf
+// reference). The normaliser injects the default when missing so legacy
+// scenes render unchanged. Thickness grows INWARD from the polygon edge
+// (the polygon edge is the OUTER face) so baseArea() math stays correct.
 //
 // Openings:
 //   kind:       'door' | 'window'
@@ -21,17 +28,21 @@ function getShape(room) {
 //               wood, glass-window). Ignored when state === 'open' — the
 //               opening reads as α = 1.0 (open boundary).
 //   state:      'open' | 'closed'
+export const DEFAULT_WALL_THICKNESS_M = 0.10;
+
 export function normalizeWallSlot(slot, fallbackMaterialId = 'gypsum-board') {
   if (typeof slot === 'string') {
-    return { materialId: slot, openings: [] };
+    return { materialId: slot, thickness_m: DEFAULT_WALL_THICKNESS_M, openings: [] };
   }
   if (slot && typeof slot === 'object') {
+    const t = Number(slot.thickness_m);
     return {
       materialId: typeof slot.materialId === 'string' ? slot.materialId : fallbackMaterialId,
+      thickness_m: Number.isFinite(t) && t > 0 ? t : DEFAULT_WALL_THICKNESS_M,
       openings: Array.isArray(slot.openings) ? slot.openings : [],
     };
   }
-  return { materialId: fallbackMaterialId, openings: [] };
+  return { materialId: fallbackMaterialId, thickness_m: DEFAULT_WALL_THICKNESS_M, openings: [] };
 }
 
 // Total area of openings on a single wall (m²). Skips openings missing or
@@ -804,6 +815,7 @@ export function applySurauOpeningsToSlot(slot, room, sceneWallKey) {
   const norm = normalizeWallSlot(slot);
   return {
     materialId: norm.materialId,
+    thickness_m: norm.thickness_m,
     openings: [...norm.openings, ...synth],
   };
 }

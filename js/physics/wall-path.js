@@ -43,6 +43,7 @@
 import {
   roomPlanVertices, normalizeWallSlot, applySurauOpeningsToSlot,
 } from './room-shape.js';
+import { extractOverheadReflectors } from './overhead-geometry.js';
 
 // Canonical wall specs for a rectangular room — MUST match the
 // (v1, v2) orientation used by triangulate-scene.js wallSpecs and
@@ -246,6 +247,31 @@ export function wallsCrossedByPath(src, listener, room) {
         surfaces.floor, surfaces.ceiling, 'parent',
       );
     }
+  }
+
+  // Phase 8 Step 1 (Dr. Chen audit 2026-05-24): overhead surauStructure
+  // roofs (arcade soffit + portico cap) participate as horizontal
+  // transmissive surfaces. Without this, a source ABOVE the arcade roof
+  // (e.g. azan horn at z = 6.5 m on a gallery) → listener UNDER the
+  // arcade (z = 1.7 m) shows a path that crosses NO surface in the
+  // analytical model, so the roof material has zero effect on the SPL.
+  // testHorizontalPlanes treats each polygon as a finite plane at z_top;
+  // a crossing emits a transmission-loss event with the roof's material
+  // exactly like a wall slot. Pairs with overhead-reflection.js's
+  // image-source reflection for the source-BELOW-roof case.
+  const overheadReflectors = extractOverheadReflectors(room);
+  for (let i = 0; i < overheadReflectors.length; i++) {
+    const refl = overheadReflectors[i];
+    // We synthesise a single-plane test by passing the polygon vertices
+    // as the parent footprint and z_top as ceiling, with no floor and
+    // height = 0 so only the ceiling plane fires. idPrefix carries the
+    // kind + side for downstream debugging.
+    testHorizontalPlanes(
+      out, src, listener, refl.vertices,
+      refl.z_top, 0,    // elev + height = degenerate (only ceiling plane lives at elev + 0 = z_top)
+      null, refl.materialId,
+      `${refl.kind}_${refl.side}`,
+    );
   }
 
   // Standalone enclosures — each one is an independent polygon with its
