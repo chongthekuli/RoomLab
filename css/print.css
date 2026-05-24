@@ -572,13 +572,13 @@ body.is-pdf-export .vp-tabs {
     position: absolute;
     right: 3mm;
     bottom: 3mm;
-    width: 48mm;
+    width: 54mm;
     opacity: 0.90;
     z-index: 2;
     pointer-events: none;
   }
   #print-report .pr-cover-spec-overlay-title {
-    font-size: 5.5pt;
+    font-size: 6.5pt;
     font-weight: 600;
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -596,7 +596,7 @@ body.is-pdf-export .vp-tabs {
     padding: 0.5mm 0;
     text-align: left;
     vertical-align: baseline;
-    font-size: 6.5pt;
+    font-size: 7.5pt;
     line-height: 1.2;
   }
   #print-report .pr-cover-spec-overlay-table th {
@@ -605,7 +605,7 @@ body.is-pdf-export .vp-tabs {
     color: var(--muted);
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    font-size: 5.5pt;
+    font-size: 6.5pt;
   }
   #print-report .pr-cover-spec-overlay-table td {
     font-family: var(--font-mono);
