@@ -31,8 +31,12 @@ function ok(cond, label, extra = '') {
   if (!cond) failed++;
 }
 
-ok(data.schema_version === '1.4',
-  'schema_version is 1.4', `actual=${data.schema_version}`);
+// Phase 5 Step 3 (v=618) migrated data/materials.json to schema 1.5,
+// adding wall-isolation fields (transmission_loss_db per band,
+// thickness_m, density_kg_m3, surface_mass_kg_m2). The schema pin here
+// tracks the catalogue's current revision.
+ok(data.schema_version === '1.5',
+  'schema_version is 1.5', `actual=${data.schema_version}`);
 ok(Array.isArray(data.frequency_bands_hz) && data.frequency_bands_hz.length === 7,
   'frequency_bands_hz has 7 octave bands');
 const expectedBands = [125, 250, 500, 1000, 2000, 4000, 8000];

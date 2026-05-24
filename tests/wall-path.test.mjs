@@ -257,7 +257,17 @@ function makeRectRoom(extras = {}) {
   const edgeHits = walls.filter(w => w.wallId.startsWith('parent_edge_'));
   assertEq(edgeHits.length, 2, '(g) line through hex room crosses 2 edges');
   const tl = transmissionLossDb(walls, materials, bandIndexForFreq(materials, 1000));
-  assertEq(tl, 33 + 33, '(g) TL = sum of 2 gypsum walls = 66 dB at 1 kHz');
+  // Phase B3 (2026-05-24, Dr. Chen audit E6): series-TL is now
+  // ISO 12354-1 §B.5: TL_total = TL_max + 10·log10(N), NOT the additive
+  // sum. For 2 identical 33 dB gypsum walls in series:
+  //   33 + 10·log10(2) ≈ 36.01 dB.
+  // The pre-B3 additive sum (66 dB) was physically impossible — it
+  // implied better-than-mass-law transmission for series leaves, which
+  // is not how series TL composes. See the rationale in
+  // js/physics/wall-path.js transmissionLossDb.
+  const expected = 33 + 10 * Math.log10(2);
+  assertEq(Math.round(tl * 100) / 100, Math.round(expected * 100) / 100,
+    '(g) TL = ISO 12354-1 series of 2 gypsum walls ≈ 36.01 dB at 1 kHz');
 }
 
 // ---- (h) Corner-grazing path — deterministic single hit ---------------
