@@ -44,6 +44,7 @@ import {
   roomPlanVertices, normalizeWallSlot, applySurauOpeningsToSlot,
 } from './room-shape.js';
 import { extractOverheadReflectors } from './overhead-geometry.js';
+import { formatWallId } from './wall-id.js';   // Phase A4 — tag + string in lockstep
 
 // Canonical wall specs for a rectangular room — MUST match the
 // (v1, v2) orientation used by triangulate-scene.js wallSpecs and
@@ -123,10 +124,11 @@ function pointInOpening(xLocal, zLocal, openings) {
 }
 
 // Test a single wall segment against the source-listener path and push
-// any hit onto `out`. `slot` already has openings merged (via
-// applySurauOpeningsToSlot for rectangular rooms or normalizeWallSlot
-// for polygon edges).
-function testWall(out, src, listener, v1, v2, elev_m, height_m, slot, wallId) {
+// any hit onto `out`. `slot` already has openings merged. `wallTag` is
+// the structured identifier (Phase A4); `wallId` is the legacy string
+// derived from it. Both are emitted on each crossing so consumers can
+// migrate incrementally — see js/physics/wall-id.js for the schema.
+function testWall(out, src, listener, v1, v2, elev_m, height_m, slot, wallTag) {
   const hit = segmentIntersect2D(src, listener, v1, v2);
   if (!hit) return;
   // Vertical coordinate of the 2D-XY intersection — interpolate
@@ -146,7 +148,8 @@ function testWall(out, src, listener, v1, v2, elev_m, height_m, slot, wallId) {
   const xLocal = hit.u * wallLen;
   const throughOpening = pointInOpening(xLocal, Math.max(0, zLocal), slot.openings);
   out.push({
-    wallId,
+    wallId: formatWallId(wallTag),
+    wallTag,
     materialId: throughOpening ? 'open-air' : slot.materialId,
     throughOpening,
     hitPoint: { x: hit.x, y: hit.y, z },
@@ -157,7 +160,12 @@ function testWall(out, src, listener, v1, v2, elev_m, height_m, slot, wallId) {
 // when src.z and listener.z straddle the plane. A ceiling crossing reads
 // the room's ceiling material (gypsum tile, plaster, etc.); a floor
 // crossing reads the floor material (slab, wood, etc.).
-function testHorizontalPlanes(out, src, listener, polyVerts, elev_m, height_m, floorMat, ceilingMat, idPrefix) {
+// Plane crossings carry a base tag the caller supplies; kind is appended
+// per plane ('floor' or 'ceiling'). For arcade / portico roofs the caller
+// passes scope='arcade_roof' / 'portico_roof' + side; for the parent
+// polygon (or enclosure polygons) the caller passes scope='parent' /
+// 'enclosure' (with enclosureIdx).
+function testHorizontalPlanes(out, src, listener, polyVerts, elev_m, height_m, floorMat, ceilingMat, baseTag) {
   const planes = [];
   if (floorMat)   planes.push({ z: elev_m,            mat: floorMat,   id: 'floor'   });
   if (ceilingMat) planes.push({ z: elev_m + height_m, mat: ceilingMat, id: 'ceiling' });
@@ -166,15 +174,15 @@ function testHorizontalPlanes(out, src, listener, polyVerts, elev_m, height_m, f
   for (const p of planes) {
     const t = (p.z - src.z) / dz;
     // Strict interior: a source exactly on the plane or listener exactly
-    // on the plane is NOT considered a crossing. Without this strict
-    // bound, a ceiling-mounted speaker at z = ceiling_height would
-    // self-trigger a ceiling crossing on every direct path.
+    // on the plane is NOT considered a crossing.
     if (t <= 1e-9 || t >= 1 - 1e-9) continue;
     const x = src.x + t * (listener.x - src.x);
     const y = src.y + t * (listener.y - src.y);
     if (!pointInPolygon2D(x, y, polyVerts)) continue;
+    const wallTag = { ...baseTag, kind: p.id };
     out.push({
-      wallId: `${idPrefix}_${p.id}`,
+      wallId: formatWallId(wallTag),
+      wallTag,
       materialId: p.mat,
       throughOpening: false,
       hitPoint: { x, y, z: p.z },
@@ -186,13 +194,26 @@ function testHorizontalPlanes(out, src, listener, polyVerts, elev_m, height_m, f
 // onto `out`. `walls` is the wall-spec list — for rectangular rooms it
 // is `rectangularWalls(room)` (with the canonical v1/v2 orientation);
 // for polygon / custom / enclosures it is built from CCW polygon edges.
-function collectPolygonCrossings(out, src, listener, walls, polyVerts, elev_m, height_m, slotFor, floorMat, ceilingMat, idPrefix) {
+//
+// Phase A4: `baseTag` carries the polygon scope (parent / enclosure +
+// enclosureIdx). Per-wall tags are derived from `w.key` (rectangular —
+// `wall_<side>` → side='north'|...) or the index `i` (polygon edge).
+function collectPolygonCrossings(out, src, listener, walls, polyVerts, elev_m, height_m, slotFor, floorMat, ceilingMat, baseTag) {
   for (let i = 0; i < walls.length; i++) {
     const w = walls[i];
     const slot = slotFor(w, i);
-    testWall(out, src, listener, w.v1, w.v2, elev_m, height_m, slot, `${idPrefix}_${w.key ?? `edge_${i}`}`);
+    let wallTag;
+    if (typeof w.key === 'string' && w.key.startsWith('wall_')) {
+      // Rectangular face — extract the side from the key.
+      const side = w.key.slice(5);   // 'wall_north' → 'north'
+      wallTag = { ...baseTag, side, kind: 'wall' };
+    } else {
+      // Polygon / enclosure edge.
+      wallTag = { ...baseTag, kind: 'edge', edgeIdx: i };
+    }
+    testWall(out, src, listener, w.v1, w.v2, elev_m, height_m, slot, wallTag);
   }
-  testHorizontalPlanes(out, src, listener, polyVerts, elev_m, height_m, floorMat, ceilingMat, idPrefix);
+  testHorizontalPlanes(out, src, listener, polyVerts, elev_m, height_m, floorMat, ceilingMat, baseTag);
 }
 
 // Per-edge wall slot for polygon / custom shapes. `surfaces.edges[i]`
@@ -225,6 +246,7 @@ export function wallsCrossedByPath(src, listener, room) {
     const surfaces = room.surfaces || {};
     const shape = room?.shape;
     const isRect = !shape || shape === 'rectangular';
+    const parentBaseTag = { scope: 'parent' };
     if (isRect) {
       const walls = rectangularWalls(room);
       collectPolygonCrossings(
@@ -234,7 +256,7 @@ export function wallsCrossedByPath(src, listener, room) {
         // is the legacy bare-string form (e.g. 'concrete-painted')
         // we need to normalize so slot.materialId is defined.
         (w /*, _idx*/) => normalizeWallSlot(applySurauOpeningsToSlot(surfaces[w.key], room, w.key)),
-        surfaces.floor, surfaces.ceiling, 'parent',
+        surfaces.floor, surfaces.ceiling, parentBaseTag,
       );
     } else {
       const walls = [];
@@ -244,7 +266,7 @@ export function wallsCrossedByPath(src, listener, room) {
       collectPolygonCrossings(
         out, src, listener, walls, verts, elev, height,
         (_w, idx) => polygonEdgeSlot(surfaces, idx),
-        surfaces.floor, surfaces.ceiling, 'parent',
+        surfaces.floor, surfaces.ceiling, parentBaseTag,
       );
     }
   }
@@ -264,13 +286,14 @@ export function wallsCrossedByPath(src, listener, room) {
     const refl = overheadReflectors[i];
     // We synthesise a single-plane test by passing the polygon vertices
     // as the parent footprint and z_top as ceiling, with no floor and
-    // height = 0 so only the ceiling plane fires. idPrefix carries the
-    // kind + side for downstream debugging.
+    // height = 0 so only the ceiling plane fires. baseTag identifies
+    // the overhead roof scope + side; kind ('ceiling') is appended by
+    // testHorizontalPlanes.
     testHorizontalPlanes(
       out, src, listener, refl.vertices,
       refl.z_top, 0,    // elev + height = degenerate (only ceiling plane lives at elev + 0 = z_top)
       null, refl.materialId,
-      `${refl.kind}_${refl.side}`,
+      { scope: refl.kind, side: refl.side },  // refl.kind = 'arcade_roof' | 'portico_roof'
     );
   }
 
@@ -291,7 +314,7 @@ export function wallsCrossedByPath(src, listener, room) {
       collectPolygonCrossings(
         out, src, listener, walls, enc.polygon, elev, height,
         (_w, idx) => polygonEdgeSlot(surf, idx),
-        surf.floor, surf.ceiling, `enc${ei}`,
+        surf.floor, surf.ceiling, { scope: 'enclosure', enclosureIdx: ei },
       );
     }
   }
@@ -330,11 +353,9 @@ let _warnedMultiWall = false;
 
 export function transmissionLossDb(wallsCrossed, materials, bandIdx) {
   if (!wallsCrossed || wallsCrossed.length === 0) return 0;
-  let totalTL = 0;
-  let solidCount = 0;
+  const tls = [];
   for (const w of wallsCrossed) {
     if (w.throughOpening) continue;
-    solidCount++;
     const mat = materials?.byId?.[w.materialId];
     let tl;
     if (Array.isArray(mat?.transmission_loss_db) && Number.isFinite(mat.transmission_loss_db[bandIdx])) {
@@ -346,11 +367,30 @@ export function transmissionLossDb(wallsCrossed, materials, bandIdx) {
         console.warn(`[wall-path] material '${w.materialId}' has no transmission_loss_db — using engine floor of ${ENGINE_FLOOR_TL_DB} dB. Add transmission_loss_db[7] to data/materials.json to silence.`);
       }
     }
-    totalTL += tl;
+    tls.push(tl);
   }
+  if (tls.length === 0) return 0;
+  // Phase B3 (2026-05-24, Dr. Chen audit E6): series-TL fix.
+  // ISO 12354-1 §B.5 — multiple solid leaves IN SERIES on the same
+  // transmission path do NOT add their TLs linearly. The correct form is
+  //   TL_total = TL_max + 10·log10(N)
+  // where N is the number of leaves and TL_max is the most-attenuating
+  // single leaf. For 3 concrete walls at 53 dB each, additive gave 159 dB
+  // (physically impossible — exceeds the typical mass-law transmission
+  // limit by 80+ dB); the ISO form gives 53 + 4.77 = 57.77 dB, which
+  // matches Beranek §11.3 + measured composite TL data for series-leaf
+  // assemblies.
+  //
+  // Pre-B3 the additive over-prediction was MASKED by the parallel-edge-
+  // sum diffraction over-prediction (B1) — direct was killed to silence,
+  // diffraction inflated by an offsetting amount. Both fixes have to land
+  // together; B1 alone would under-predict direct paths through multi-
+  // wall stacks.
+  const tlMax = tls[0] === undefined ? 0 : Math.max(...tls);
+  const totalTL = tls.length === 1 ? tlMax : (tlMax + 10 * Math.log10(tls.length));
   if (totalTL > MULTI_WALL_SANITY_DB && !_warnedMultiWall) {
     _warnedMultiWall = true;
-    console.warn(`[wall-path] path crosses ${solidCount} solid walls totalling ${totalTL.toFixed(0)} dB TL (> ${MULTI_WALL_SANITY_DB} dB sanity floor) — geometry sanity check recommended. (Future warnings of this kind suppressed.)`);
+    console.warn(`[wall-path] path crosses ${tls.length} solid walls totalling ${totalTL.toFixed(0)} dB TL (> ${MULTI_WALL_SANITY_DB} dB sanity floor) — geometry sanity check recommended. (Future warnings of this kind suppressed.)`);
   }
   return totalTL;
 }

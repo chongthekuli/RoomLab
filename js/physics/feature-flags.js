@@ -142,3 +142,59 @@ export function clearStoredPhysicsP15() {
     return false;
   }
 }
+
+// ---------------------------------------------------------------------------
+// INTERIM SAFETY OVERRIDE (added 2026-05-24) — disables Tier 1a contributions
+// (Maekawa diffraction, Kuttruff wall re-radiation, image-source overhead,
+// porch enclosure) FOR OUTDOOR MODE ONLY. Indoor heatmap is unaffected.
+//
+// Why this exists: the 2026-05-24 tri-agent audit (Dr. Chen + Martina + Sam)
+// identified an architectural bug in the diffraction module — `for crossing of
+// wallsCrossed` energy-sums Maekawa bypass over every edge of every crossed
+// wall, treating series barriers as parallel bypass channels. ISO 9613-2
+// §7.4.2 says single-dominant-screen, not parallel sum. The fix is a 5-6 day
+// rewrite (Phase A substrate + Phase B physics rework — see
+// docs/HEATMAP_AUDIT_SYNTHESIS_2026-05-24.md). During that window, demos and
+// screenshots of the surau preset (or any outdoor preset) over-predict
+// shadowed-cell SPL by 3-8 dB. This override gives the user a clean
+// direct+reverb fallback for the outdoor heatmap until the rewrite lands.
+//
+// READ AT RUNTIME, not at module load — so the toggle takes effect on the
+// next heatmap render without a page reload. localStorage is read once per
+// SPL context build (once per heatmap frame), not per cell.
+//
+// Default: NOT disabled (current Tier 1a behaviour preserved). The user
+// opts INTO the safety override when they need it.
+//
+// GRADUATION: this entire block + the consumer call in
+// `js/physics/spl-calculator.js` is DELETED in the Phase B commit that
+// makes the diffraction physics correct.
+
+export const PHYSICS_TIER1A_OUTDOOR_OVERRIDE_KEY = 'PHYSICS_TIER1A_OUTDOOR_OVERRIDE';
+
+// True iff the user has explicitly opted into the interim safety override.
+// '1' = disable outdoor Tier 1a. Anything else (including '0', null, missing,
+// or storage-blocked) = leave Tier 1a active. Runtime read; no module-load
+// caching so the toggle is live.
+export function isTier1aOutdoorOverrideDisabled() {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem(PHYSICS_TIER1A_OUTDOOR_OVERRIDE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+// Write the override preference. true → '1', false → remove the key entirely
+// so a future toggle of the global PHYSICS_P1_5 doesn't get hidden behind a
+// stale override. Returns true on success (false when storage is blocked).
+export function setTier1aOutdoorOverrideDisabled(on) {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    if (on) localStorage.setItem(PHYSICS_TIER1A_OUTDOOR_OVERRIDE_KEY, '1');
+    else    localStorage.removeItem(PHYSICS_TIER1A_OUTDOOR_OVERRIDE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}

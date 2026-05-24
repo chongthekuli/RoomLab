@@ -1,12 +1,18 @@
-// js/physics/diffraction.js  [v=647 — interior-loudness inversion fixed]
+// js/physics/diffraction.js  [v=649 — Phase B1 per-path-shortest-detour]
 //
 // Diagnostic: one-shot log on module load so the user can verify in
-// DevTools that they're actually running the v=645 build (ES module
-// URLs aren't individually ?v=-busted in this project; a stale browser
-// cache can serve the v<645 file even after main.js?v=645 loads fresh).
-// Look for "[diffraction v=647]" in the console after a hard refresh.
+// DevTools that they're actually running the v=649 Phase B build (ES
+// module URLs aren't individually ?v=-busted in this project; a stale
+// browser cache can serve the v<649 file even after main.js?v=649
+// loads fresh). Look for "[diffraction v=649]" in the console.
+//
+// Phase B1 (2026-05-24) replaced the parallel-edge-sum diffraction
+// algorithm with per-path shortest-detour + bent-path validation +
+// arcade-edge-when-receiver-inside-arcade enumeration. The 16 dB IL
+// floors are RETAINED here as an interim thick-barrier proxy until
+// Phase C wires materials.json thickness_m (Dr. Chen E7).
 if (typeof console !== 'undefined') {
-  console.log('[diffraction v=647] loaded — vertical-edge IL floor = 16 dB');
+  console.log('[diffraction v=649] Phase B1 per-path shortest-detour active');
 }
 
 // Maekawa-Tachibana single-edge barrier diffraction. Models sound
@@ -61,7 +67,22 @@ if (typeof console !== 'undefined') {
 
 import { airAbsorptionDbPerM } from './air-absorption.js';
 import { PHYSICS_P1_5_ENABLED } from './feature-flags.js';
-import { extractOverheadReflectors } from './overhead-geometry.js';
+import { extractOverheadReflectors, pointInPolygon2D } from './overhead-geometry.js';
+import {
+  resolveWallGeometry,
+  resolveOverheadGeometry,
+  signedDistanceToLine2D,
+  wallFootprintLine,
+} from './wall-geometry.js';
+import { isParentWall, parseWallId } from './wall-id.js';   // Phase A4
+// Phase B1 (2026-05-24, Dr. Chen audit E1+E2): bent-path validation.
+// The new per-path-shortest-detour algorithm tests each candidate bent
+// path S→E→R against the room geometry, adding the TL of any walls the
+// bent ray itself crosses (a wall ON the bent path is a secondary
+// blockage, not bypassed). Requires importing wallsCrossedByPath +
+// transmissionLossDb. No dependency cycle: wall-path.js doesn't import
+// diffraction.
+import { wallsCrossedByPath, transmissionLossDb, bandIndexForFreq } from './wall-path.js';
 
 // Speed of sound at temperature T (°C). Inlined to avoid a circular
 // import with spl-calculator.js (which itself imports diffraction
@@ -326,16 +347,7 @@ function groundReflectedDiffraction(src, listener, edge, lambda_m, groundPlaneZ,
 // 'portico_roof'; side from sideSpec: 'south'/'east'/'west'/'north').
 // Returns null when no match — caller falls back to the standard wall
 // geometry path.
-function resolveOverheadGeometry(room, wallId) {
-  const match = /^(arcade_roof|portico_roof)_([a-z]+)_ceiling$/.exec(wallId);
-  if (!match) return null;
-  const kind = match[1];
-  const side = match[2];
-  const reflectors = extractOverheadReflectors(room);
-  if (!Array.isArray(reflectors)) return null;
-  const refl = reflectors.find(r => r.kind === kind && r.side === side);
-  return refl || null;   // { vertices, z_top, materialId, kind, side }
-}
+// resolveOverheadGeometry moved to js/physics/wall-geometry.js (Phase A1).
 
 // Enumerate the perimeter edges of a horizontal roof polygon. Each
 // edge runs at z=z_top (so they're horizontal lines like the wall
@@ -397,56 +409,7 @@ function enumerateRoofPerimeterEdges(refl, room) {
   return out;
 }
 
-// Resolve a wallId (from wallsCrossedByPath) back to its geometric
-// definition. Mirrors the canonical wallSpecs ordering in wall-path.js.
-function resolveWallGeometry(room, wallId) {
-  if (!room) return null;
-  const W = Number(room.width_m) || 0;
-  const D = Number(room.depth_m) || 0;
-  const H = Number(room.height_m) || 0;
-  // Parent rectangular walls follow the same (v1, v2) order as
-  // wall-path.js rectangularWalls + triangulate-scene.js wallSpecs.
-  // Two are deliberately reversed from naive CCW; don't "fix" without
-  // also updating wall-path.js.
-  if (wallId === 'parent_wall_north') return { v1: { x: W, y: 0 }, v2: { x: 0, y: 0 }, elev_m: 0, height_m: H };
-  if (wallId === 'parent_wall_south') return { v1: { x: 0, y: D }, v2: { x: W, y: D }, elev_m: 0, height_m: H };
-  if (wallId === 'parent_wall_east')  return { v1: { x: W, y: 0 }, v2: { x: W, y: D }, elev_m: 0, height_m: H };
-  if (wallId === 'parent_wall_west')  return { v1: { x: 0, y: D }, v2: { x: 0, y: 0 }, elev_m: 0, height_m: H };
-  // Parent floor / ceiling: diffraction not applied for the building's
-  // own ceiling — its perimeter edges coincide with the wall TOP edges
-  // (the eave line), which are already integrated via the wall-side
-  // enumerateFreeEdges path (dedupe catches the duplicate).
-  if (wallId === 'parent_floor' || wallId === 'parent_ceiling') return null;
-  // Phase 8 Step 5 (Dr. Chen audit 2026-05-24): arcade / portico roof
-  // crossings get a SEPARATE roof-polygon geometry resolved below via
-  // resolveOverheadGeometry, NOT a wall-style v1/v2. Return null here
-  // so the caller falls through to the overhead-geometry branch.
-  if (wallId.startsWith('arcade_roof_') || wallId.startsWith('portico_roof_')) return null;
-  // Polygon edge: parent_edge_<i>
-  const polyMatch = /^parent_edge_(\d+)$/.exec(wallId);
-  if (polyMatch && Array.isArray(room.custom_vertices)) {
-    const i = Number(polyMatch[1]);
-    const v = room.custom_vertices;
-    if (v[i] && v[(i + 1) % v.length]) {
-      return { v1: v[i], v2: v[(i + 1) % v.length], elev_m: 0, height_m: H };
-    }
-  }
-  // Standalone enclosure edge: enc<ei>_edge_<i>
-  const encMatch = /^enc(\d+)_edge_(\d+)$/.exec(wallId);
-  if (encMatch && Array.isArray(room.standaloneEnclosures)) {
-    const enc = room.standaloneEnclosures[Number(encMatch[1])];
-    const i = Number(encMatch[2]);
-    if (enc?.polygon && enc.polygon[i] && enc.polygon[(i + 1) % enc.polygon.length]) {
-      return {
-        v1: enc.polygon[i],
-        v2: enc.polygon[(i + 1) % enc.polygon.length],
-        elev_m: Number.isFinite(enc.elevation_m) ? enc.elevation_m : 0,
-        height_m: Number.isFinite(enc.height_m) ? enc.height_m : 3,
-      };
-    }
-  }
-  return null;
-}
+// resolveWallGeometry moved to js/physics/wall-geometry.js (Phase A1).
 
 // Compute total diffracted-path power contribution at the listener
 // across every free edge of every wall the direct path crosses.
@@ -477,13 +440,18 @@ export function computeDiffractionContributions({
   airAbsorption = true,
   groundG = 0,                  // NEW (h): ground absorption [0,1]; 0 = hard
   groundPlaneZ = 0,             // NEW (h): mirror plane for image source
-  // Outdoor mode (Phase 2d) needs the interior→field boundary to be a
-  // gradient regardless of the public-deploy PHYSICS_P1_5 flag. An
-  // explicit `enable: true` activates this contribution even when the
-  // module-level flag is off. When omitted, behaviour is identical to
-  // the historical flag-gated path. Indoor public deploys never pass it.
-  enable = PHYSICS_P1_5_ENABLED,
+  // Phase A5 (2026-05-24, Martina audit §1.7 + §2.B): `enable` is now
+  // REQUIRED — no default. The pre-A5 default (`PHYSICS_P1_5_ENABLED`)
+  // was load-bearing for any caller that omitted it, and the audit
+  // flagged this as a silent-skip hazard (a caller could think Tier 1a
+  // is on but the module-level flag at IMPORT TIME was off, producing
+  // a zero contribution with no error). Forcing the caller to be
+  // explicit eliminates the bug class.
+  enable,
 }) {
+  if (enable === undefined) {
+    throw new Error('computeDiffractionContributions: `enable` is required (was undefined). Pass enable: true/false explicitly.');
+  }
   if (!enable) return { paths: [], totalPower: 0 };
   if (!Array.isArray(wallsCrossed) || wallsCrossed.length === 0) {
     return { paths: [], totalPower: 0 };
@@ -544,15 +512,45 @@ export function computeDiffractionContributions({
   const VERTICAL_EDGE_IL_FLOOR_DB = 16.0;
   const TOP_EDGE_IL_FLOOR_DB = 16.0;
 
-  let totalPower = 0;
-  const paths = [];
+  // -------------------------------------------------------------------------
+  // Phase B1 (2026-05-24, Dr. Chen audit E1+E2): per-path shortest-detour.
+  //
+  // Pre-B1 algorithm: iterate every crossed surface, enumerate every edge of
+  // each, energy-sum Maekawa contributions in parallel. For paths crossing
+  // N walls of the same building this gave N parallel bypass channels —
+  // more obstacles meant MORE energy reaching the listener (the I4
+  // inversion).
+  //
+  // Post-B1 algorithm: enumerate every candidate edge across ALL crossings,
+  // dedupe (corner-group), evaluate each as ONE candidate. For each:
+  //   (a) Maekawa IL based on detour around the edge.
+  //   (b) Validate the bent path S→E→R against the room — if it crosses
+  //       any OTHER walls, accumulate their TL on top of the edge's IL.
+  //   (c) Sum direct + ground-reflected as parallel propagation paths
+  //       AROUND THE SAME edge (these are physically real parallel paths).
+  // Keep the SINGLE candidate with the highest delivered power. Return
+  // its contribution only; the caller energy-sums with direct-after-TL.
+  //
+  // ISO 9613-2 §7.4.2 + Maekawa 1968 §IV + Beranek §5.5 Table 5.7 all say
+  // the same thing: for multiple screens in series, use the single
+  // most-effective screen (= dominant bypass = loudest delivered path).
+  //
+  // The 16 dB IL floors (VERTICAL_EDGE_IL_FLOOR_DB, TOP_EDGE_IL_FLOOR_DB)
+  // are RETAINED here as an interim thick-barrier proxy. Real construction
+  // walls have 100-300 mm thickness; the knife-edge Maekawa formula under-
+  // counts the additional edge attenuation. Phase C will replace the
+  // floors with thickBarrierIL(delta, lambda, thickness_m) once
+  // materials.json carries thickness_m (Dr. Chen audit E7, deferred to
+  // Phase C pending Lin's catalogue work).
+
+  // Cache the per-band TL formula (Phase B3 series-TL on the bent path).
+  const bandIdx = materials ? bandIndexForFreq(materials, freq_hz) : 0;
+
+  // 1. Enumerate every candidate edge across all crossed surfaces.
+  //    Dedup via seenEdges so a shared corner (e.g. SW vertical shared
+  //    between west.right and south.left) is counted once.
+  const candidates = [];
   for (const crossing of solid) {
-    // Phase 8 Step 5 — arcade / portico roof crossings get their own
-    // enumeration path (4 horizontal perimeter edges at z=roof_height).
-    // Sound bending around the OUTER edge of an arcade roof is a real
-    // diffraction path for paths that transit through the roof from
-    // above-roof sources to below-roof listeners (the user's surau
-    // azan-horn case at z=7 → arcade corridor at z=1.7).
     let edges;
     let isOverheadEdge = false;
     const overheadRefl = resolveOverheadGeometry(room, crossing.wallId);
@@ -568,91 +566,169 @@ export function computeDiffractionContributions({
       const key = edgeKey(edge.e1, edge.e2);
       if (seenEdges.has(key)) continue;
       seenEdges.add(key);
-      const opt = diffractionPointOnEdge(src.position, listener, edge.e1, edge.e2);
-      if (!opt) continue;
-      let il_db = maekawaIL(opt.delta, lambda);
-      if (il_db <= 0) continue;     // lit zone for this edge — no contribution
-      // Thick-barrier floors per edge type, applied to parent building
-      // walls AND to arcade / portico roof perimeter edges. Both are
-      // thick concrete surfaces in real surau-style construction; the
-      // knife-edge Maekawa formula under-counts the additional edge
-      // absorption. Standalone barriers + custom polygons remain at
-      // pure Maekawa.
-      //
-      // Arcade roof INNER perimeter edge (adjacent to the building
-      // wall) is essentially the SAME physical eave as the building
-      // wall's TOP edge — both get the TOP-edge floor so the
-      // duplicate contributions cap at the same level, preventing
-      // double-counted eave concentration that pushed interior cells
-      // to 90+ dB pre-fix (user-reported 2026-05-24 follow-up).
-      const isParentBuildingWall = crossing.wallId.startsWith('parent_wall_');
-      const isOverheadRoof = isOverheadEdge;
-      if (isParentBuildingWall) {
-        if ((edge.id === 'left' || edge.id === 'right') && il_db < VERTICAL_EDGE_IL_FLOOR_DB) {
-          il_db = VERTICAL_EDGE_IL_FLOOR_DB;
-        } else if (edge.id === 'top' && il_db < TOP_EDGE_IL_FLOOR_DB) {
-          il_db = TOP_EDGE_IL_FLOOR_DB;
-        }
-      } else if (isOverheadRoof) {
-        // All 4 arcade/portico roof perimeter edges are horizontal
-        // and thick-concrete-edge in practice; use the top-edge floor.
-        if (il_db < TOP_EDGE_IL_FLOOR_DB) il_db = TOP_EDGE_IL_FLOOR_DB;
-      }
-      // Free-field at the detour length, plus IL, plus air abs on detour.
-      const detourAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * opt.detour : 0;
-      const Lp_detour = Lp_1m - 20 * Math.log10(opt.detour) - detourAirAbs - il_db;
-      if (Number.isFinite(Lp_detour)) {
-        const power = Math.pow(10, Lp_detour / 10);
-        totalPower += power;
-        paths.push({
-          wallId: crossing.wallId,
-          edgeId: edge.id,
-          pathType: 'direct',
-          delta_m: opt.delta,
-          detour_m: opt.detour,
-          il_db,
-          spl_db: Lp_detour,
-        });
-      }
-      // Ground-reflected diffraction path (ISO 9613-2 §7.3 + §7.4).
-      // Image-source mirror through groundPlaneZ; same Maekawa formula
-      // on the imaged geometry; attenuated by (1 - G). For hard ground
-      // (G=0) this doubles the diffracted contribution → +3.01 dB lift
-      // in symmetric geometries. Curves the shadow boundary.
-      const reflected = groundReflectedDiffraction(
-        src.position, listener, edge, lambda, groundPlaneZ, groundG,
-      );
-      if (reflected && reflected.attenuationFactor > 0) {
-        let il_refl = reflected.il_db;
-        const isParentBuildingWallRefl = crossing.wallId.startsWith('parent_wall_');
-        if (isParentBuildingWallRefl) {
-          if ((edge.id === 'left' || edge.id === 'right') && il_refl < VERTICAL_EDGE_IL_FLOOR_DB) {
-            il_refl = VERTICAL_EDGE_IL_FLOOR_DB;
-          } else if (edge.id === 'top' && il_refl < TOP_EDGE_IL_FLOOR_DB) {
-            il_refl = TOP_EDGE_IL_FLOOR_DB;
-          }
-        } else if (isOverheadEdge && il_refl < TOP_EDGE_IL_FLOOR_DB) {
-          il_refl = TOP_EDGE_IL_FLOOR_DB;
-        }
-        const reflectedAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * reflected.detour_m : 0;
-        const Lp_reflected = Lp_1m - 20 * Math.log10(reflected.detour_m) - reflectedAirAbs - il_refl;
-        if (Number.isFinite(Lp_reflected)) {
-          const power = Math.pow(10, Lp_reflected / 10) * reflected.attenuationFactor;
-          totalPower += power;
-          paths.push({
-            wallId: crossing.wallId,
-            edgeId: edge.id,
-            pathType: 'ground',
-            delta_m: reflected.delta_m,
-            detour_m: reflected.detour_m,
-            il_db: il_refl,
-            spl_db: Lp_reflected + 10 * Math.log10(reflected.attenuationFactor),
-          });
-        }
-      }
+      candidates.push({ crossing, edge, isOverheadEdge });
     }
   }
-  return { paths, totalPower };
+
+  // Phase B1 (2026-05-24): for a listener UNDER an arcade or portico
+  // roof (i.e. inside an overhead polygon at z < roof_height), the
+  // dominant bypass is typically around the roof's OUTER perimeter
+  // edge — but the direct source→listener line doesn't cross that
+  // arcade roof, so the loop above doesn't enumerate its edges. Add
+  // them explicitly. Same logic applies symmetrically when the SOURCE
+  // is under an arcade firing outward.
+  //
+  // Implementation: scan all overhead reflectors; for any whose polygon
+  // contains the listener (or source) in xy AND whose z_top is above
+  // the listener (or source) z, treat as if its perimeter is on the
+  // candidate set. Without this, mid-arcade listeners get only the
+  // "transmit-through-soffit" bypass and read ~25 dB instead of ~85.
+  const allOverheads = room ? extractOverheadReflectors(room) : [];
+  for (const refl of allOverheads) {
+    const inListener = listener.z < refl.z_top && pointInPolygon2D(listener.x, listener.y, refl.vertices);
+    const inSource   = src.position.z < refl.z_top && pointInPolygon2D(src.position.x, src.position.y, refl.vertices);
+    if (!inListener && !inSource) continue;
+    const edges = enumerateRoofPerimeterEdges(refl, room);
+    for (const edge of edges) {
+      const key = edgeKey(edge.e1, edge.e2);
+      if (seenEdges.has(key)) continue;
+      seenEdges.add(key);
+      // Synthesize a crossing-like record so the floor + dedupe logic
+      // downstream works uniformly. wallId follows the scope-side-
+      // ceiling format that resolveOverheadGeometry expects.
+      const wallId = `${refl.kind}_${refl.side}_ceiling`;
+      candidates.push({
+        crossing: { wallId, materialId: refl.materialId, throughOpening: false,
+          wallTag: { scope: refl.kind, side: refl.side, kind: 'ceiling' } },
+        edge,
+        isOverheadEdge: true,
+      });
+    }
+  }
+
+  if (candidates.length === 0) return { paths: [], totalPower: 0 };
+
+  // Helper: secondary-wall TL on a bent-path segment. Filters out the
+  // primary wall (the one whose edge we're diffracting around) and any
+  // through-opening crossings; returns the series-TL of any remaining
+  // solid walls the segment passes through.
+  function bentSegmentSecondaryTL(segStart, segEnd, primaryWallId) {
+    const crossings = wallsCrossedByPath(segStart, segEnd, room);
+    const seen = new Set();
+    const others = [];
+    for (const c of crossings) {
+      if (c.wallId === primaryWallId) continue;
+      if (c.throughOpening) continue;
+      if (seen.has(c.wallId)) continue;
+      seen.add(c.wallId);
+      others.push(c);
+    }
+    if (others.length === 0) return 0;
+    return transmissionLossDb(others, materials, bandIdx);
+  }
+
+  // Helper: apply the thick-barrier IL floor to a knife-edge Maekawa
+  // result, based on edge type (top/left/right/roof_perim). Identical
+  // policy to the pre-B1 code; kept here so the algorithm is one piece.
+  function applyIlFloor(il, edge, wallTag, isOverheadEdge) {
+    if (isParentWall(wallTag)) {
+      if ((edge.id === 'left' || edge.id === 'right') && il < VERTICAL_EDGE_IL_FLOOR_DB) return VERTICAL_EDGE_IL_FLOOR_DB;
+      if (edge.id === 'top' && il < TOP_EDGE_IL_FLOOR_DB) return TOP_EDGE_IL_FLOOR_DB;
+    } else if (isOverheadEdge && il < TOP_EDGE_IL_FLOOR_DB) {
+      return TOP_EDGE_IL_FLOOR_DB;
+    }
+    return il;
+  }
+
+  // 2. Evaluate each candidate. Per edge: compute direct + ground-reflected
+  //    sub-paths (parallel propagation around the same bend), sum to a
+  //    per-edge power. Track the highest-power candidate.
+  let best = null;
+  const allEvaluated = [];   // for the per-listener breakdown UI
+  for (const { crossing, edge, isOverheadEdge } of candidates) {
+    const opt = diffractionPointOnEdge(src.position, listener, edge.e1, edge.e2);
+    if (!opt) continue;
+    let il_db = maekawaIL(opt.delta, lambda);
+    if (il_db <= 0) continue;   // lit zone for this edge — no shadow bypass needed
+    const wallTag = crossing.wallTag ?? parseWallId(crossing.wallId);
+    il_db = applyIlFloor(il_db, edge, wallTag, isOverheadEdge);
+
+    // Bent-path secondary TL: walls the bent ray itself crosses.
+    // Use the OPTIMAL diffraction point opt.E (the actual bend that
+    // minimizes detour), NOT the edge centroid — for long edges (e.g.
+    // a 15 m arcade-roof south edge) the optimum may sit at one
+    // endpoint, well away from the centroid, and using the centroid
+    // would put the bent ray through walls the real bent path clears.
+    const segATL = bentSegmentSecondaryTL(src.position, opt.E, crossing.wallId);
+    const segBTL = bentSegmentSecondaryTL(opt.E, listener, crossing.wallId);
+    const bentPathTL = segATL + segBTL;
+
+    // Direct bent path through this edge.
+    const detourAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * opt.detour : 0;
+    const Lp_direct = Lp_1m - 20 * Math.log10(opt.detour) - detourAirAbs - il_db - bentPathTL;
+    const power_direct = Number.isFinite(Lp_direct) ? Math.pow(10, Lp_direct / 10) : 0;
+    const directPath = Number.isFinite(Lp_direct) ? {
+      wallId: crossing.wallId,
+      edgeId: edge.id,
+      pathType: 'direct',
+      delta_m: opt.delta,
+      detour_m: opt.detour,
+      il_db,
+      bent_path_tl_db: bentPathTL,
+      spl_db: Lp_direct,
+    } : null;
+
+    // Ground-reflected sub-path AROUND THE SAME edge.
+    const reflected = groundReflectedDiffraction(
+      src.position, listener, edge, lambda, groundPlaneZ, groundG,
+    );
+    let power_ground = 0;
+    let groundPath = null;
+    if (reflected && reflected.attenuationFactor > 0) {
+      const il_refl = applyIlFloor(reflected.il_db, edge, wallTag, isOverheadEdge);
+      const reflectedAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * reflected.detour_m : 0;
+      const Lp_reflected = Lp_1m - 20 * Math.log10(reflected.detour_m) - reflectedAirAbs - il_refl - bentPathTL;
+      if (Number.isFinite(Lp_reflected)) {
+        power_ground = Math.pow(10, Lp_reflected / 10) * reflected.attenuationFactor;
+        groundPath = {
+          wallId: crossing.wallId,
+          edgeId: edge.id,
+          pathType: 'ground',
+          delta_m: reflected.delta_m,
+          detour_m: reflected.detour_m,
+          il_db: il_refl,
+          bent_path_tl_db: bentPathTL,
+          spl_db: Lp_reflected + 10 * Math.log10(reflected.attenuationFactor),
+        };
+      }
+    }
+
+    // Per-edge total power = direct + ground (parallel propagation around
+    // SAME edge — these are physically real parallel paths, both valid).
+    const power_edge = power_direct + power_ground;
+    if (power_edge <= 0) continue;
+
+    const evaluated = {
+      power: power_edge,
+      directPath,
+      groundPath,
+      wallId: crossing.wallId,
+      edgeId: edge.id,
+    };
+    allEvaluated.push(evaluated);
+    if (!best || power_edge > best.power) best = evaluated;
+  }
+
+  if (!best) return { paths: [], totalPower: 0 };
+
+  // 3. Return only the SINGLE best candidate. Per Dr. Chen + ISO 9613-2
+  //    §7.4.2: nature picks one bypass, not nine. The other evaluated
+  //    candidates are not summed; they're surfaced in `paths` only when
+  //    the consumer wants the breakdown (e.g. per-listener UI).
+  const paths = [];
+  if (best.directPath) paths.push(best.directPath);
+  if (best.groundPath) paths.push(best.groundPath);
+  return { paths, totalPower: best.power };
 }
 
 // ============================================================================
@@ -709,27 +785,7 @@ export function enumerateRoomCorners(room) {
   ];
 }
 
-// Signed perpendicular distance from `point` to the infinite line through
-// `(v1, v2)` in the XY plane. Sign follows the standard 2D cross product
-// convention: positive when `point` lies to the LEFT of the directed line
-// v1 → v2. For the canonical wall_<side> orientations this puts the room
-// interior on the +Z-cross side; we don't need to know which side is
-// "inside" — we only need to compare two signs to test if S and R are
-// on opposite sides of the same face.
-function signedDistanceToLine2D(point, v1, v2) {
-  const ex = v2.x - v1.x, ey = v2.y - v1.y;
-  const px = point.x - v1.x, py = point.y - v1.y;
-  return ex * py - ey * px;
-}
-
-// Resolve a wall id to its (v1, v2) endpoints. Cheap helper for the
-// shadow-path gate — we don't need the full wall geometry, just the
-// 2D footprint line.
-function wallFootprintLine(wallId, room) {
-  const w = resolveWallGeometry(room, wallId);
-  if (!w) return null;
-  return { v1: w.v1, v2: w.v2 };
-}
+// signedDistanceToLine2D + wallFootprintLine moved to wall-geometry.js (Phase A1).
 
 // Does the corner's wedge actually shadow the listener from the source?
 // The two faces meeting at the corner define two half-planes; sound can
@@ -822,8 +878,14 @@ export function computeCornerDiffractionContributions({
 
 // Test-only export so the unit test can verify enumerateFreeEdges
 // behaviour without exporting it to the public API surface.
+//
+// resolveWallGeometry + signedDistanceToLine2D are re-exported here for
+// backwards-compat with the pre-Phase-A1 test imports — their canonical
+// home is now wall-geometry.js. New tests should import directly from
+// there.
 export const _testing = { enumerateFreeEdges, resolveWallGeometry, signedDistanceToLine2D };
 
-// Public re-export — reradiation.js needs the same wall-id → geometry
-// resolution, no point duplicating it in two modules.
-export { resolveWallGeometry };
+// Public re-export — back-compat for reradiation.js + any external caller
+// imported during the Phase-A1 substrate move. The canonical import path
+// is now `./wall-geometry.js`.
+export { resolveWallGeometry } from './wall-geometry.js';

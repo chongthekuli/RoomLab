@@ -223,6 +223,9 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
           materials, freq_hz: fhz, sourceLpFreeField_db,
           airAbsorption: true,
           groundG, groundPlaneZ: 0,
+          // Phase A5: `enable` is now required; preserve the pre-A5 behaviour
+          // (deferred to the module-level flag) by passing it explicitly.
+          enable: PHYSICS_P1_5_ENABLED,
         });
         directPower += diff.totalPower;
         if (Number.isFinite(L_p_rev_band)) {
@@ -232,6 +235,7 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
             materials, freq_hz: fhz,
             L_p_rev_inside_band_db: L_p_rev_band,
             airAbsorption: true,
+            enable: PHYSICS_P1_5_ENABLED,
           });
           reverbPower += rerad.totalPower;
         }
@@ -319,6 +323,7 @@ export function computeSTIPA({
           materials, freq_hz: fhz, sourceLpFreeField_db,
           airAbsorption: true,
           groundG, groundPlaneZ: 0,
+          enable: PHYSICS_P1_5_ENABLED,   // Phase A5 — explicit
         });
         D += diff.totalPower;
         if (Number.isFinite(L_p_rev_band)) {
@@ -328,6 +333,7 @@ export function computeSTIPA({
             materials, freq_hz: fhz,
             L_p_rev_inside_band_db: L_p_rev_band,
             airAbsorption: true,
+            enable: PHYSICS_P1_5_ENABLED,
           });
           R_p += rerad.totalPower;
         }

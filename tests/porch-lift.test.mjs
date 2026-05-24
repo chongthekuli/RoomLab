@@ -298,22 +298,39 @@ function check(name, cond, detail = '') {
   // The drive-enhancement is verified by the BROWSER UAT — Node test
   // ESM caching means we can't easily re-import spl-calculator with the
   // new flag without restructuring all module imports above. Instead,
-  // we pin the SOURCE pattern that proves the enhancement is wired:
-  //   the porch-lift driver closure in spl-calculator.js MUST call
-  //   computeDiffractionContributions when useP15 && wallsCrossed > 0.
+  // we pin the SOURCE pattern that proves the enhancement is wired.
+  //
+  // Phase A3 (2026-05-24): the drive computation was hoisted from the
+  // per-cell loop into precomputeSPLContext (Martina audit §1.5 — avoid
+  // running the full physics stack per cell when the porch midpoint is
+  // listener-independent). The per-cell loop now uses cached drives
+  // when ctx.porchDrives is present, falling back to an inline closure
+  // for the per-listener computeMultiSourceSPL path.
+  //
+  // So the diffraction + re-radiation calls for the porch drive now live
+  // in TWO places: the precompute (`porchDrives = sourceCtx.map(...)`)
+  // AND the per-cell fallback closure. Either location proves the
+  // enhancement is wired; we look in BOTH.
   const splSrc = readFileSync('./js/physics/spl-calculator.js', 'utf8');
-  // Grep within the file for the patterns that prove the drive includes
-  // diffraction + re-rad. Scope-limited via a string slice from the
-  // closure start through end-of-file is enough — there are no other
-  // computeDiffractionContributions / pSum tokens after the closure.
-  const startIdx = splSrc.indexOf('getDirectSplDb: (srcLike, pos)');
-  const region = startIdx >= 0 ? splSrc.slice(startIdx) : '';
-  check('(G) porch-lift closure invokes computeDiffractionContributions for the drive',
-    region.length > 0 && /computeDiffractionContributions\(/.test(region));
-  check('(G) porch-lift closure invokes computeReradiationContributions for the drive',
-    region.length > 0 && /computeReradiationContributions\(/.test(region));
-  check('(G) porch-lift drive energy-sums direct + diffraction in pressure²',
-    region.length > 0 && /pSum \+= diffDrive\.totalPower/.test(region));
+  // Scope: look inside the porchDrives precompute block + the fallback
+  // closure. Both branches must call diffraction + reradiation.
+  const precomputeStartIdx = splSrc.indexOf('porchDrives = sourceCtx.map');
+  const fallbackStartIdx = splSrc.indexOf('precomputed ? null : (srcLike, pos)');
+  const regions = [];
+  if (precomputeStartIdx >= 0) {
+    // Slice ~3000 chars covers the per-porch drive computation body.
+    regions.push(splSrc.slice(precomputeStartIdx, precomputeStartIdx + 3000));
+  }
+  if (fallbackStartIdx >= 0) {
+    regions.push(splSrc.slice(fallbackStartIdx, fallbackStartIdx + 3000));
+  }
+  const everyRegion = (re) => regions.length > 0 && regions.every(r => re.test(r));
+  check('(G) porch-lift drive (BOTH hoisted precompute AND fallback closure) invokes computeDiffractionContributions',
+    everyRegion(/computeDiffractionContributions\(/));
+  check('(G) porch-lift drive (BOTH hoisted precompute AND fallback closure) invokes computeReradiationContributions',
+    everyRegion(/computeReradiationContributions\(/));
+  check('(G) porch-lift drive energy-sums direct + diffraction in pressure² (BOTH locations)',
+    everyRegion(/pSum \+= diffDrive\.totalPower/));
 }
 
 console.log(`\n${failed === 0 ? 'OK' : 'FAIL'}  ${passed} passed, ${failed} failed`);

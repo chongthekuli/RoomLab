@@ -15,7 +15,7 @@ import {
 import {
   extractOutdoorObstacles, outdoorObstacleLossDb,
 } from './outdoor-obstacles.js';
-import { PHYSICS_P1_5_ENABLED } from './feature-flags.js';
+import { PHYSICS_P1_5_ENABLED, isTier1aOutdoorOverrideDisabled } from './feature-flags.js';
 import { wallInsetPolygon } from './wall-inset.js';
 import { extractOverheadReflectors, computeOverheadReflectionPower } from './overhead-reflection.js';
 import { extractPorches, computePorchReverbPower } from './porch-enclosure.js';
@@ -89,8 +89,12 @@ export function speedOfSound(T_C = DEFAULT_TEMPERATURE_C) {
 // deliberate caller (physics-toggle UI) that also disabled 4mV in RT60.
 export function computeRoomConstant(room, materials, freq_hz, zones = [], { airAbsorption = true, treatments = [] } = {}) {
   if (!materials?.frequency_bands_hz) return 0;
-  const bandIdx = materials.frequency_bands_hz.indexOf(freq_hz);
-  if (bandIdx < 0) return 0;
+  // Phase A2: was indexOf-exact-match; now snaps to nearest band. In
+  // practice the UI emits exact band centres from the picker, so this is
+  // a no-op for production calls; synthetic / test frequencies between
+  // centres now resolve to the nearest band instead of silently
+  // returning 0 (no reverb at all).
+  const bandIdx = bandIndexForFreq(materials, freq_hz);
   const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, treatments, airAbsorption });
   const S = rt.totalArea_m2;
   if (S <= 0) return 0;
@@ -290,6 +294,20 @@ export function precomputeSPLContext({
                             // active regardless of the public-deploy flag, so
                             // the interior→field boundary is a gradient.
                             // Defaults to the historical flag for indoor.
+  // ---- Phase A3 (2026-05-24, Martina audit §1.4 + §1.5) ----
+  // Geometry + porch-drive pre-computation hoisted from the per-cell loop.
+  // When room + materials are provided, the ctx pre-extracts outdoor
+  // obstacles, overhead reflectors, and porches ONCE per frame (was once
+  // per cell — 10k cells × 5 extractions = wasted alloc). When porches AND
+  // sources are both present, the per-source drive level at each porch
+  // midpoint is also pre-computed (was re-running the full physics stack
+  // per source per cell — 80k physics evals × 4 sources × N cells = real
+  // burn). When omitted (e.g. tests / per-listener computeMultiSourceSPL
+  // call), the per-cell loop falls back to inline extraction + drive eval.
+  room = null, materials = null,
+  temperature_C = DEFAULT_TEMPERATURE_C,
+  airAbsorption = true,
+  airAbsorptionFn = null,   // optional T/RH-parametric closure (outdoor)
 }) {
   const reverbActive = roomConstantR > 0;
   const revConst_db = reverbActive ? 10 * Math.log10(4 / roomConstantR) : 0;
@@ -323,10 +341,85 @@ export function precomputeSPLContext({
       isSourceInside: isSourceInside || (() => true),
     });
   }
+  // ---- Phase A3 geometry + porch-drive hoist ----
+  const outdoorObstacles = room ? extractOutdoorObstacles(room) : [];
+  const overheadReflectors = room ? extractOverheadReflectors(room) : [];
+  const porches = room ? extractPorches(room) : [];
+  // porchDrives[srcIdx][porchIdx] = drive level in dB at the porch
+  // midpoint, energy-summing direct (post-TL) + diffraction + re-radiation.
+  // Computed once per frame; per-cell porch reverb is then a pure
+  // arithmetic lookup. Null when no porches OR no materials.
+  let porchDrives = null;
+  if (porches.length > 0 && materials && sourceCtx.length > 0) {
+    const useP15 = enableTier1a && room;
+    const bandIdx = useP15 ? bandIndexForFreq(materials, freq_hz) : -1;
+    const L_p_rev_inside_band_db = (useP15 && L_p_rev_inside_per_band)
+      ? L_p_rev_inside_per_band[bandIdx]
+      : -Infinity;
+    porchDrives = sourceCtx.map(({ src, def }) =>
+      porches.map(porch => {
+        const cx = (porch.bounds.minX + porch.bounds.maxX) / 2;
+        const cy = (porch.bounds.minY + porch.bounds.maxY) / 2;
+        const cz = porch.z_ceil / 2;
+        const drivePoint = { x: cx, y: cy, z: cz };
+        const dd = computeDirectSPL({
+          speakerDef: def, speakerState: src, listenerPos: drivePoint,
+          freq_hz, room, materials, airAbsorption, eqGainDb,
+          outdoorObstacles, airAbsorptionFn,
+        });
+        let pSum = Number.isFinite(dd.spl_db) ? Math.pow(10, dd.spl_db / 10) : 0;
+        if (useP15 && dd.wallsCrossed?.length > 0 && Number.isFinite(dd.spl_db)) {
+          const drive_free_db = dd.spl_db + dd.tl_db_applied;
+          const floorMatId = room?.surfaces?.floor;
+          const groundG = (floorMatId && materials?.byId?.[floorMatId]?.ground_absorption_G) ?? 0;
+          const diffDrive = computeDiffractionContributions({
+            src, listener: drivePoint, room, wallsCrossed: dd.wallsCrossed,
+            materials, freq_hz, sourceLpFreeField_db: drive_free_db,
+            temperature_C, airAbsorption, groundG, groundPlaneZ: 0,
+            enable: enableTier1a,
+          });
+          pSum += diffDrive.totalPower;
+          if (Number.isFinite(L_p_rev_inside_band_db)) {
+            const reradDrive = computeReradiationContributions({
+              src, listener: drivePoint, room, wallsCrossed: dd.wallsCrossed,
+              materials, freq_hz,
+              L_p_rev_inside_band_db,
+              airAbsorption, enable: enableTier1a,
+            });
+            pSum += reradDrive.totalPower;
+          }
+        }
+        return pSum > 0 ? 10 * Math.log10(pSum) : -Infinity;
+      })
+    );
+  }
   return {
     sourceCtx, freq_hz, roomConstantR, reverbActive, revConst_db, eqGainDb,
     L_p_rev_inside_per_band, enableTier1a,
+    // Phase A3 geometry + drives
+    outdoorObstacles, overheadReflectors, porches, porchDrives,
   };
+}
+
+// Phase A5: validate a ctx object at the consumer boundary. Throws when
+// a required field is missing — the audit (Martina §2.B) flagged the
+// pre-A5 `??` fallback as a silent-failure carrier ("a test that builds
+// a ctx by hand and forgets a field reverts to the module-level flag").
+// Every fresh ctx from precomputeSPLContext now carries these fields;
+// callers building one inline (rare, mainly tests) must supply them too.
+function assertSPLContext(ctx) {
+  if (!ctx || typeof ctx !== 'object') {
+    throw new Error('SPL context: ctx is required (got: ' + ctx + ')');
+  }
+  if (!Array.isArray(ctx.sourceCtx)) {
+    throw new Error('SPL context: ctx.sourceCtx must be an array');
+  }
+  if (!Number.isFinite(ctx.freq_hz)) {
+    throw new Error('SPL context: ctx.freq_hz must be a finite number');
+  }
+  if (typeof ctx.enableTier1a !== 'boolean') {
+    throw new Error(`SPL context: ctx.enableTier1a must be boolean (got ${typeof ctx.enableTier1a}: ${ctx.enableTier1a}). Build the ctx via precomputeSPLContext() to set this field.`);
+  }
 }
 
 /**
@@ -344,27 +437,27 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
                               // T/RH-parametric ISO 9613-1. Null → indoor table.
 } = {}) {
   const { sourceCtx, freq_hz, reverbActive, revConst_db, eqGainDb, L_p_rev_inside_per_band } = ctx;
-  // Tier 1a opt-in: ctx.enableTier1a (Phase 2d outdoor) overrides the
-  // module-level flag. Falls back to the flag for older ctx objects that
-  // predate the field (defensive — every fresh ctx now carries it).
-  const tier1aEnabled = ctx.enableTier1a ?? PHYSICS_P1_5_ENABLED;
-  // Lazily extract outdoor obstacles ONCE per call. Non-surau presets
-  // (and rooms without a surauStructure block) return an empty array so
-  // the per-source check below short-circuits with a single length test.
-  const obstacles = outdoorObstacles ?? (room ? extractOutdoorObstacles(room) : []);
-  // Phase 8 Step 1 — overhead reflectors (arcade roof, portico cap base).
-  // Extracted once per call; non-surau presets yield an empty list and the
-  // per-source loop short-circuits. Indoor room ceiling is NOT included
-  // here (already captured by ctx.reverbActive's room constant R).
-  const overheadReflectors = room ? extractOverheadReflectors(room) : [];
-  // Phase 8 Step 4 — porch partial-enclosure reverberant lift. Empty list
-  // when no arcade is defined (non-surau presets). When the listener is
-  // inside a porch polygon, each source contributes an extra reverberant
-  // term whose lift comes from the porch's Sabine room constant. This is
-  // what makes the arcade roof material matter REGARDLESS of whether the
-  // source path crosses the roof — addresses the v=639 user-reported
-  // "still the same" case.
-  const porches = room ? extractPorches(room) : [];
+  // Phase A5 (2026-05-24, Martina audit §2.B): ctx fields are now
+  // REQUIRED — no `??` fallback. precomputeSPLContext always sets
+  // ctx.enableTier1a; the only way it could be undefined is if a caller
+  // built a ctx by hand without going through the constructor, which is
+  // bug-territory. Throw loudly so the misbuilt ctx surfaces at the
+  // boundary instead of silently routing through the module-level flag.
+  assertSPLContext(ctx);
+  const tier1aEnabled = ctx.enableTier1a;
+  // Phase A3: geometry hoisted into precomputeSPLContext. Read from ctx
+  // when present; fall back to inline extraction when the caller built a
+  // ctx without room/materials (per-listener computeMultiSourceSPL path,
+  // tests). The inline fallback keeps tests + the per-listener panel
+  // working unchanged.
+  const obstacles = outdoorObstacles
+    ?? ctx.outdoorObstacles
+    ?? (room ? extractOutdoorObstacles(room) : []);
+  const overheadReflectors = ctx.overheadReflectors
+    ?? (room ? extractOverheadReflectors(room) : []);
+  const porches = ctx.porches
+    ?? (room ? extractPorches(room) : []);
+  const porchDrivesCache = ctx.porchDrives;   // null when not pre-computed
   let directPressureSum = 0;
   let Re = 0, Im = 0;
   const c = coherent ? speedOfSound(temperature_C) : 0;
@@ -483,9 +576,15 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     // four-path stack the listener cell already uses, computed once per
     // source per porch BEFORE the cell evaluation.
     if (porches.length > 0) {
+      // Phase A3: prefer the per-frame pre-computed drives on ctx. Falls
+      // back to the inline closure when ctx.porchDrives is null (per-
+      // listener computeMultiSourceSPL caller, tests). The closure path is
+      // unchanged from pre-Phase-A3.
+      const precomputed = porchDrivesCache?.[i];   // [porchIdx] → drive_dB, or undefined
       const porchP = computePorchReverbPower({
         src, listenerPos, freq_hz, room, materials, porches,
-        getDirectSplDb: (srcLike, pos) => {
+        precomputedDrives_dB: precomputed,
+        getDirectSplDb: precomputed ? null : (srcLike, pos) => {
           // Direct path to the drive point — includes per-band wall TL
           // because we want to know the actual sound energy arriving.
           const dd = computeDirectSPL({
@@ -494,9 +593,6 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
             outdoorObstacles: obstacles, airAbsorptionFn,
           });
           let pSum = Number.isFinite(dd.spl_db) ? Math.pow(10, dd.spl_db / 10) : 0;
-          // Diffraction over each crossed wall — same machinery as the
-          // listener-cell evaluation. Skipped when Tier 1a is off OR
-          // when the path doesn't cross any wall.
           if (useP15 && dd.wallsCrossed?.length > 0 && Number.isFinite(dd.spl_db)) {
             const drive_free_db = dd.spl_db + dd.tl_db_applied;
             const floorMatId = room?.surfaces?.floor;
@@ -508,9 +604,6 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
               enable: tier1aEnabled,
             });
             pSum += diffDrive.totalPower;
-            // Wall re-radiation at the porch entry — only when the
-            // listener-side reverb context is meaningful (otherwise
-            // the L_p_rev_inside_band_db term is -Infinity).
             if (Number.isFinite(L_p_rev_inside_band_db)) {
               const reradDrive = computeReradiationContributions({
                 src: srcLike, listener: pos, room, wallsCrossed: dd.wallsCrossed,
@@ -606,13 +699,28 @@ export function computeMultiSourceSPL({
   const inInterior = isListenerInsideBuildingInterior(listenerPos, room);
   const effR = (inInterior === false) ? 0 : roomConstantR;
   const effRBands = (inInterior === false) ? null : roomR_per_band;
+  // INTERIM SAFETY OVERRIDE (2026-05-24): mirror the gate at line 836 so the
+  // per-listener readout matches the heatmap when the user has flipped the
+  // outdoor-Tier-1a override ON. Outdoor rooms only; indoor unaffected.
+  // Removed in Phase B.
+  const isOutdoor = (room?.enclosure === 'outdoor');
+  const effEnableTier1a = (isOutdoor && isTier1aOutdoorOverrideDisabled())
+    ? false
+    : enableTier1a;
   // One-shot helper: build a context and evaluate at this listener.
   // Callers with many listeners against the same source set should use
   // `precomputeSPLContext` + `computeMultiSourceSPLFromContext` directly
   // to avoid redoing the per-source resolution on every vertex.
   const ctx = precomputeSPLContext({
     sources, getSpeakerDef, freq_hz, roomConstantR: effR,
-    roomR_per_band: effRBands, isSourceInside, eqGainDb, enableTier1a,
+    roomR_per_band: effRBands, isSourceInside, eqGainDb,
+    enableTier1a: effEnableTier1a,
+    // Phase A3: pass geometry params so porch drives are pre-computed
+    // ONCE per call. Per-listener callers (tests, panel readings) only
+    // pay this once anyway, but the cached result keeps the inline
+    // closure path from running per source (the inline closure had its
+    // own copy of the parallel-bypass bug — see Martina audit §1.5).
+    room, materials, temperature_C, airAbsorption, airAbsorptionFn,
   });
   return computeMultiSourceSPLFromContext(ctx, listenerPos, {
     room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn,
@@ -833,7 +941,16 @@ export function computeSPLGrid({
   // OUTDOOR: smooth the interior→field wall cliff. Maekawa diffraction +
   // Kuttruff re-radiation must be active at the boundary regardless of the
   // public-deploy PHYSICS_P1_5 flag (Phase 2d). Indoor keeps the flag.
-  const enableTier1a = outdoor ? true : PHYSICS_P1_5_ENABLED;
+  //
+  // INTERIM SAFETY OVERRIDE (2026-05-24, see HEATMAP_AUDIT_SYNTHESIS): when
+  // the user has flipped the WallLAB "outdoor diffraction" override ON, force
+  // Tier 1a OFF for outdoor — exposes clean direct+reverb only, hiding the
+  // parallel-bypass over-prediction until the Phase B rewrite lands. Indoor
+  // path unaffected. Override defaults to NOT-disabled so existing scenes
+  // render identically.
+  const enableTier1a = outdoor
+    ? !isTier1aOutdoorOverrideDisabled()
+    : PHYSICS_P1_5_ENABLED;
 
   // OUTDOOR ONLY: the dominant interior→field leakage through a solid wall
   // mid-span is Kuttruff RE-RADIATION of the building's interior reverberant
@@ -874,16 +991,26 @@ export function computeSPLGrid({
   // only by R, so the cost is two cheap context builds, not per-cell. Both
   // carry roomR_per_band so wall re-radiation (the cliff-smoother) is fed
   // for receivers on EITHER side of the wall.
+  // Phase A3: pass room+materials+T/RH params so precomputeSPLContext
+  // can hoist outdoor-obstacle + overhead-reflector + porch extraction
+  // AND pre-compute porch drives ONCE per frame (was per cell — 10k cells
+  // × 12 drives per cell = 120k physics-stack evals per heatmap; now 12
+  // per heatmap).
   const ctxInside = useSTI ? null : precomputeSPLContext({
     sources, getSpeakerDef, freq_hz, roomConstantR, enableTier1a,
     roomR_per_band, isSourceInside,
+    room, materials, temperature_C, airAbsorption, airAbsorptionFn,
   });
   // Field cells (outside the footprint) have no enclosing room → no diffuse
   // reverberant lift → R=0. They DO still receive wall re-radiation, so they
   // keep roomR_per_band. Reuse ctxInside when R is already 0.
   const ctxOutside = useSTI ? null
     : (roomConstantR > 0
-        ? precomputeSPLContext({ sources, getSpeakerDef, freq_hz, roomConstantR: 0, enableTier1a, roomR_per_band, isSourceInside })
+        ? precomputeSPLContext({
+            sources, getSpeakerDef, freq_hz, roomConstantR: 0, enableTier1a,
+            roomR_per_band, isSourceInside,
+            room, materials, temperature_C, airAbsorption, airAbsorptionFn,
+          })
         : ctxInside);
 
   const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn };

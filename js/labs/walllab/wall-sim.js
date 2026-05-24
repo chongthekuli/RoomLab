@@ -23,6 +23,8 @@ import {
   getStoredPhysicsP15,
   getEffectivePhysicsP15,
   setStoredPhysicsP15,
+  isTier1aOutdoorOverrideDisabled,
+  setTier1aOutdoorOverrideDisabled,
 } from '../../physics/feature-flags.js';
 import { loadMaterials } from '../../physics/materials.js';
 import { massLawTLBandsAtThickness, densityFromCatalogue, surfaceDensity, massLawTL, massLawTLBands } from '../../physics/wall-tl.js';
@@ -78,8 +80,11 @@ export function mountWallSim() {
     const sessionState = PHYSICS_P1_5_ENABLED;
     const effectiveIntent = getEffectivePhysicsP15();
     const stored = getStoredPhysicsP15();
-    physicsBody.innerHTML = toggleHTML(stored, sessionState, effectiveIntent, autoOrigin);
+    const outdoorOverrideOn = isTier1aOutdoorOverrideDisabled();
+    physicsBody.innerHTML = toggleHTML(stored, sessionState, effectiveIntent, autoOrigin)
+      + outdoorOverrideHTML(outdoorOverrideOn);
     wireToggle(physicsBody, { sessionState, autoOrigin });
+    wireOutdoorOverride(physicsBody);
   }
 
   buildSimulator(view).catch(err => {
@@ -142,6 +147,67 @@ function wireToggle(scope, { sessionState, autoOrigin }) {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); applyToggle(); }
   });
   scope.querySelector('#wall-reload-btn')?.addEventListener('click', () => location.reload());
+}
+
+// ---------------------------------------------------------------------------
+// INTERIM SAFETY OVERRIDE (2026-05-24) — outdoor-mode Tier 1a disable.
+//
+// See `js/physics/feature-flags.js` for the why. This toggle is LIVE: no
+// reload required. Flipping it ON forces enableTier1a=false in outdoor mode
+// on the NEXT heatmap render; indoor path is unaffected. The whole block
+// gets deleted in the Phase B commit that fixes the underlying physics.
+// ---------------------------------------------------------------------------
+function outdoorOverrideHTML(on) {
+  return `
+    <div class="wall-toggle-head wall-toggle-divider">
+      <span class="wall-toggle-name">Outdoor diffraction override <span class="wall-beta-chip" style="background:#a44;">SAFETY</span></span>
+      <button id="wall-tier1a-outdoor-toggle" class="wall-switch" type="button" role="switch"
+        aria-checked="${on ? 'true' : 'false'}" aria-describedby="wall-outdoor-override-status"
+        aria-label="Disable Tier 1a contributions in outdoor mode (interim safety override)">
+        <span class="wall-switch-track"><span class="wall-switch-thumb"></span></span>
+        <span class="wall-switch-state">${on ? 'On' : 'Off'}</span>
+      </button>
+    </div>
+    <p class="wall-toggle-desc">
+      <strong>Temporary.</strong> When ON, disables Tier 1a contributions
+      (Maekawa diffraction, Kuttruff wall re-radiation, image-source overhead,
+      porch enclosure) for outdoor presets — surau, auditorium-outdoor, etc.
+      The heatmap falls back to direct field + diffuse reverb only.
+      Use this when previewing the PA system to stakeholders while the
+      Phase B physics rework is in flight (estimated 5-6 days from 2026-05-24).
+      Indoor heatmap is unaffected by this toggle.
+      <span class="wall-validation">Override removed after Phase B physics rework lands.</span>
+    </p>
+    <div class="wall-toggle-status" id="wall-outdoor-override-status">
+      ${on
+        ? 'Currently <strong>active</strong> — outdoor Tier 1a is disabled, heatmap shows direct + reverb only.'
+        : 'Currently <strong>off</strong> — outdoor heatmap uses Tier 1a (may over-predict shadowed cells).'}
+    </div>
+  `;
+}
+
+function wireOutdoorOverride(scope) {
+  const toggle = scope.querySelector('#wall-tier1a-outdoor-toggle');
+  if (!toggle) return;
+  const stateLabel = toggle.querySelector('.wall-switch-state');
+  const statusEl = scope.querySelector('#wall-outdoor-override-status');
+
+  function applyOverride() {
+    const next = toggle.getAttribute('aria-checked') !== 'true';
+    if (!setTier1aOutdoorOverrideDisabled(next)) {
+      statusEl.innerHTML = `<span class="wall-status-warn">Couldn't save the setting — storage is blocked (private window?).</span>`;
+      return;
+    }
+    toggle.setAttribute('aria-checked', next ? 'true' : 'false');
+    stateLabel.textContent = next ? 'On' : 'Off';
+    statusEl.innerHTML = next
+      ? 'Currently <strong>active</strong> — outdoor Tier 1a is disabled, heatmap shows direct + reverb only. <span class="wall-status-auto">Rebuild the heatmap (move a source, change a material, or re-open the room) to see the change.</span>'
+      : 'Currently <strong>off</strong> — outdoor heatmap uses Tier 1a (may over-predict shadowed cells). <span class="wall-status-auto">Rebuild the heatmap to see the change.</span>';
+  }
+  toggle.addEventListener('click', applyOverride);
+  toggle.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); applyOverride(); }
+  });
 }
 
 function statusLine(stored, sessionState, effectiveIntent, autoOrigin) {

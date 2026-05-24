@@ -47,6 +47,7 @@
 //   Per-cell variation comes from the direct path only.
 
 import { extractOverheadReflectors, pointInPolygon2D } from './overhead-geometry.js';
+import { bandIndexForFreq } from './wall-path.js';   // Phase A2 — was an inline duplicate
 
 // ---------------------------------------------------------------------------
 // Resolve a material's per-band absorption from materials.json. Same
@@ -279,41 +280,46 @@ export function listenerInPorch(porch, listenerPos) {
 export function computePorchReverbPower({
   src, listenerPos, freq_hz, room, materials, porches = null,
   getDirectSplDb,
+  // Phase A3: optional per-frame pre-computed drives for THIS source —
+  // [porchIdx] → drive_dB. When provided, getDirectSplDb is not called.
+  // Caller (precomputeSPLContext) computes drives once per frame using
+  // the same physics stack the closure used.
+  precomputedDrives_dB = null,
 }) {
   const list = porches || extractPorches(room);
   if (list.length === 0) return 0;
-  if (typeof getDirectSplDb !== 'function') return 0;
+  // Either a pre-computed drive array OR a live closure is required.
+  if (!precomputedDrives_dB && typeof getDirectSplDb !== 'function') return 0;
 
-  // Identify the bandIdx for the requested frequency. Snap to nearest
-  // band on a log axis (same convention as wall-path bandIndexForFreq).
-  const bands = materials?.frequency_bands_hz;
-  if (!Array.isArray(bands) || bands.length === 0) return 0;
-  let bandIdx = 0, bestDelta = Infinity;
-  for (let i = 0; i < bands.length; i++) {
-    const d = Math.abs(Math.log2(bands[i] / freq_hz));
-    if (d < bestDelta) { bestDelta = d; bandIdx = i; }
-  }
+  // Phase A2: use the canonical bandIndexForFreq.
+  if (!Array.isArray(materials?.frequency_bands_hz) || materials.frequency_bands_hz.length === 0) return 0;
+  const bandIdx = bandIndexForFreq(materials, freq_hz);
 
   let pressureSum = 0;
-  for (const porch of list) {
+  for (let pIdx = 0; pIdx < list.length; pIdx++) {
+    const porch = list[pIdx];
     if (!listenerInPorch(porch, listenerPos)) continue;
     const bandsInfo = ensurePorchBands(porch, materials);
     if (!bandsInfo || !bandsInfo.active) continue;
     const lift_dB = bandsInfo.per[bandIdx]?.lift_dB;
     if (!Number.isFinite(lift_dB)) continue;
 
-    // Compute the porch ENTRY midpoint — Dr. Chen Q4(b) — as the centroid
-    // of the open front face (centre of polygon shifted outward to the
-    // outer arcade line). For a rectangular arcade we can take the polygon
-    // centroid projected to the outer edge, but the simpler centroid IS
-    // close to the outer edge for thin arcade depths. Using polygon
-    // centroid at z = roof/2 gives a stable "porch midpoint" that's
-    // robust to source position.
-    const cx = (porch.bounds.minX + porch.bounds.maxX) / 2;
-    const cy = (porch.bounds.minY + porch.bounds.maxY) / 2;
-    const cz = porch.z_ceil / 2;
-    const drivePoint = { x: cx, y: cy, z: cz };
-    const L_drive = getDirectSplDb(src, drivePoint);
+    let L_drive;
+    if (precomputedDrives_dB && Number.isFinite(precomputedDrives_dB[pIdx])) {
+      // Fast path — drive already computed by precomputeSPLContext.
+      L_drive = precomputedDrives_dB[pIdx];
+    } else {
+      // Fallback — compute drive inline via the closure. Caller hasn't
+      // pre-computed (per-listener computeMultiSourceSPL path, tests).
+      // Porch ENTRY midpoint — Dr. Chen Q4(b) — polygon centroid at
+      // z = roof/2 gives a stable "porch midpoint" that's robust to
+      // source position.
+      const cx = (porch.bounds.minX + porch.bounds.maxX) / 2;
+      const cy = (porch.bounds.minY + porch.bounds.maxY) / 2;
+      const cz = porch.z_ceil / 2;
+      const drivePoint = { x: cx, y: cy, z: cz };
+      L_drive = getDirectSplDb(src, drivePoint);
+    }
     if (!Number.isFinite(L_drive)) continue;
     const L_porch_rev = L_drive + lift_dB;
     pressureSum += Math.pow(10, L_porch_rev / 10);

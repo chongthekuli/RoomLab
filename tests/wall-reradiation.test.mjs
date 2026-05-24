@@ -253,6 +253,7 @@ assertEq(PHYSICS_P1_5_ENABLED, true, 'PHYSICS_P1_5 flag is ON for this test');
     freq_hz: 1000,
     L_p_rev_inside_band_db: 80,
     airAbsorption: true,
+    enable: true,
   });
   assertTrue(res.perWall.length === 1, 'rerad: one wall in perWall breakdown');
   assertTrue(res.totalPower > 0, 'rerad: totalPower > 0');
@@ -274,6 +275,9 @@ assertEq(PHYSICS_P1_5_ENABLED, true, 'PHYSICS_P1_5 flag is ON for this test');
     listener: { x: 9, y: 12.3, z: 1.5 },
     room: {}, wallsCrossed: [{ wallId: 'parent_wall_south', materialId: 'concrete-painted', throughOpening: false }],
     materials, freq_hz: 1000, L_p_rev_inside_band_db: 80,
+    // Phase A5: enable is now required. Pass the module-level flag value
+    // explicitly to keep this test's parity-vs-flag semantic.
+    enable: flagsModule.PHYSICS_P1_5_ENABLED,
   });
   assertEq(res.totalPower, 0, '(flag OFF) rerad totalPower = 0');
   assertEq(res.perWall.length, 0, '(flag OFF) rerad perWall = []');

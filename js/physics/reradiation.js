@@ -49,7 +49,8 @@
 
 import { airAbsorptionDbPerM } from './air-absorption.js';
 import { PHYSICS_P1_5_ENABLED } from './feature-flags.js';
-import { resolveWallGeometry } from './diffraction.js';
+import { resolveWallGeometry } from './wall-geometry.js';   // Phase A1 — was via diffraction.js (wrong dep direction)
+import { bandIndexForFreq } from './wall-path.js';          // Phase A2 — was an indexOf-exact-match early-exit
 
 // C¹-continuous smoothstep (Hermite). Used for the near/far blend so
 // the transition between planar and point-source regimes doesn't
@@ -148,12 +149,13 @@ export function computeReradiationContributions({
   src, listener, room, wallsCrossed, materials, freq_hz,
   L_p_rev_inside_band_db,
   airAbsorption = true,
-  // Outdoor mode (Phase 2d) opt-in — see computeDiffractionContributions.
-  // Explicit `enable: true` activates the Kuttruff wall re-radiation term
-  // regardless of the module-level PHYSICS_P1_5 flag. Omitting it preserves
-  // the historical flag-gated behaviour for indoor public deploys.
-  enable = PHYSICS_P1_5_ENABLED,
+  // Phase A5 (2026-05-24): `enable` is now REQUIRED. See the matching
+  // change in computeDiffractionContributions for the rationale.
+  enable,
 }) {
+  if (enable === undefined) {
+    throw new Error('computeReradiationContributions: `enable` is required (was undefined). Pass enable: true/false explicitly.');
+  }
   if (!enable) return { perWall: [], totalPower: 0 };
   if (!Array.isArray(wallsCrossed) || wallsCrossed.length === 0) {
     return { perWall: [], totalPower: 0 };
@@ -161,8 +163,13 @@ export function computeReradiationContributions({
   if (!Number.isFinite(L_p_rev_inside_band_db)) return { perWall: [], totalPower: 0 };
   const solid = wallsCrossed.filter(w => !w.throughOpening);
   if (solid.length === 0) return { perWall: [], totalPower: 0 };
-  const bandIdx = materials?.frequency_bands_hz?.indexOf?.(freq_hz);
-  if (bandIdx == null || bandIdx < 0) return { perWall: [], totalPower: 0 };
+  // Phase A2: was indexOf-exact-match returning -1 on miss; now snaps to
+  // nearest band via the canonical bandIndexForFreq. Practically a no-op
+  // because callers pass exact band centres from state.physics.freq_hz.
+  if (!Array.isArray(materials?.frequency_bands_hz) || materials.frequency_bands_hz.length === 0) {
+    return { perWall: [], totalPower: 0 };
+  }
+  const bandIdx = bandIndexForFreq(materials, freq_hz);
 
   let totalPower = 0;
   const perWall = [];
