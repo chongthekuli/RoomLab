@@ -900,6 +900,29 @@ body.is-pdf-export .vp-tabs {
     height: 9pt;
     border-radius: 1pt;
     border: 0.4pt solid var(--rule);
+    position: relative;
+  }
+  /* Data-extent bracket (Phase 11a, 2026-05-25).
+     Faint translucent band INSIDE the bar marking the actual data
+     extent (e.g. 72–106 dB). Legend caption ends remain the ramp
+     domain (30–110 dB) so the colour-to-value mapping is invariant
+     across indoor/outdoor modes. */
+  #print-report .pr-heatmap-legend-data-bracket {
+    position: absolute;
+    top: -1pt;
+    bottom: -1pt;
+    border: 0.5pt solid rgba(0, 0, 0, 0.55);
+    border-radius: 1pt;
+    background: rgba(255, 255, 255, 0.0);
+    pointer-events: none;
+  }
+  #print-report .pr-heatmap-legend-data-caption {
+    font-size: 6.8pt;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 1.5pt;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
   }
   #print-report .pr-heatmap-legend-ticks {
     position: relative;

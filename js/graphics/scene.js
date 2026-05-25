@@ -25,7 +25,7 @@ import { showWalkTouchHUD, hideWalkTouchHUD } from '../ui/walk-touch-hud.js';
 import { splColorRGB, stiColorRGB } from './colour-ramps.js';
 import { buildHeatmapShaderMaterial } from './heatmap-shader.js';
 import { PHYSICS_P1_5_ENABLED } from '../physics/feature-flags.js';
-import { computeTicks, computeMinorTicks, formatTickLabel } from './legend-ticks.js';
+import { computeTicks, computeMinorTicks, formatTickLabel, getRampDomain, formatDataBracket, dataBracketPosition } from './legend-ticks.js';
 import {
   makeTreatmentEntry, projectOntoNearestWall, projectOntoWall,
   wallYawDeg, rescueOrphanedTreatments,
@@ -489,27 +489,34 @@ export async function mount3DViewport({ materials }) {
   // no-op cost. Accept that for simplicity.
   on('ambient:changed', () => queueRebuild(REBUILD_HEATMAP));
 
-  // OUTDOOR SIMULATION MODE (Phase 3). The UI (panel, later phase) flips
+  // OUTDOOR SIMULATION MODE (Phase 3 + 11b). The UI flips
   // state.outdoor.{enabled,field_size_m,temperature_C,humidity_pct} and emits
   // 'outdoor:changed' with an optional { reframe } hint. We read state, never
   // the payload values, so the panel and the engine never disagree:
-  //   - enabled true  → enter the wide camera/fog rig (once) + frame-to-field
-  //                     if the transition just turned ON (or reframe:true).
-  //   - enabled false → exit the rig (restore room-scale far/near/fog) and
-  //                     re-frame to the room.
+  //   - enabled true  → enter the wide camera/fog rig (idempotent). The
+  //                     camera does NOT auto-reframe (Phase 11b — "outdoor
+  //                     is indoor + extension, not a different view"). The
+  //                     panel's "Fit field" button calls frameCameraToField()
+  //                     directly, or callers can pass reframe:true to request
+  //                     an explicit programmatic frame-to-field.
+  //   - enabled false → exit the rig (restore room-scale far/near/fog). Camera
+  //                     position is NOT auto-re-framed — same lock as enable
+  //                     (Phase 11b, 2026-05-25 follow-up: user reported the
+  //                     disable path's reframeToRoom() caused a visible camera
+  //                     jiggle on toggle-off). Callers can pass reframe:true
+  //                     to explicitly snap back to the room.
   // Either way rebuild the heatmap so the field plane appears / disappears.
   // Field-size-only changes (enabled stays true) rebuild + re-enter (to widen
-  // far/fog for the new span) but do NOT auto-snap the camera — per the brief.
+  // far/fog for the new span) but never auto-snap the camera.
   on('outdoor:changed', (payload = {}) => {
     const nowEnabled = !!(state.outdoor && state.outdoor.enabled);
-    const justEnabled = nowEnabled && !_outdoorWasEnabled;
     const justDisabled = !nowEnabled && _outdoorWasEnabled;
     if (nowEnabled) {
       _enterOutdoorCamera();   // idempotent; widens far/fog for the current span
-      if (justEnabled || payload.reframe) frameCameraToField();
+      if (payload.reframe) frameCameraToField();   // explicit-only (programmatic)
     } else if (justDisabled) {
       _exitOutdoorCamera();
-      frameCameraToRoom();
+      if (payload.reframe) frameCameraToRoom();    // explicit-only (programmatic)
     }
     _outdoorWasEnabled = nowEnabled;
     queueRebuild(REBUILD_HEATMAP);
@@ -617,7 +624,9 @@ function initScene() {
   legend.innerHTML = `
     <div class="legend-title">SPL</div>
     <div class="legend-scale">
-      <div class="legend-bar"></div>
+      <div class="legend-bar">
+        <div class="legend-data-bracket" style="display:none"></div>
+      </div>
       <div class="legend-ticks"></div>
     </div>
     <div class="legend-range">
@@ -625,6 +634,7 @@ function initScene() {
       <span class="legend-sep">–</span>
       <span class="legend-max">—</span>
     </div>
+    <div class="legend-data-caption" style="display:none"></div>
   `;
   container.appendChild(legend);
 
@@ -10933,6 +10943,8 @@ function updateSPLLegend() {
   const ticksEl = legend.querySelector('.legend-ticks');
   const maxL = legend.querySelector('.legend-max');
   const minL = legend.querySelector('.legend-min');
+  const bracketEl = legend.querySelector('.legend-data-bracket');
+  const dataCapEl = legend.querySelector('.legend-data-caption');
   if (ticksEl) ticksEl.replaceChildren();
 
   // Helper: append one tick at `pctFromBottom` % up the bar. When
@@ -10959,9 +10971,17 @@ function updateSPLLegend() {
   // — see js/graphics/legend-ticks.js. Cap of 7 majors lives there. Minor
   // graduations (unlabeled) are added underneath so the gradient bar
   // reads like a ruler.
+  //
+  // Phase 11a (2026-05-25, Maya): ticks span the RAMP DOMAIN (30..110 dB
+  // for SPL, 0..1 for STI), NOT the data extent (minVal..maxVal). The
+  // colour-to-value mapping is fixed-domain, so the legend caption ends
+  // must match — otherwise toggling outdoor-mode (which widens the data
+  // range) reads as "the scale changed". The data extent is shown as a
+  // faint bracket inside the bar + sub-caption "data: 72–106 dB".
   const tickMode = mode === 'stipa' ? 'sti' : 'spl';
-  const ticks = computeTicks(minVal, maxVal, tickMode);
-  const minorTicks = computeMinorTicks(minVal, maxVal, tickMode, ticks);
+  const rampDom = getRampDomain(tickMode);
+  const ticks = computeTicks(rampDom.min, rampDom.max, tickMode);
+  const minorTicks = computeMinorTicks(rampDom.min, rampDom.max, tickMode, ticks);
   // Render minors first so majors layer on top (z-order via DOM order).
   for (const t of minorTicks) {
     const pct = Math.max(0, Math.min(100, t.position01 * 100));
@@ -10977,8 +10997,8 @@ function updateSPLLegend() {
       const pct = Math.max(0, Math.min(100, t.position01 * 100));
       addTick(pct, formatTickLabel(t.value, 'sti'));
     }
-    if (maxL) maxL.textContent = maxVal.toFixed(2);
-    if (minL) minL.textContent = minVal.toFixed(2);
+    if (maxL) maxL.textContent = rampDom.max.toFixed(2);
+    if (minL) minL.textContent = rampDom.min.toFixed(2);
   } else {
     if (title) title.textContent = 'SPL';
     if (bar) bar.style.background = 'linear-gradient(to top, ' +
@@ -10987,8 +11007,32 @@ function updateSPLLegend() {
       const pct = Math.max(0, Math.min(100, t.position01 * 100));
       addTick(pct, formatTickLabel(t.value, 'spl'));
     }
-    if (maxL) maxL.textContent = maxVal.toFixed(0) + ' dB';
-    if (minL) minL.textContent = minVal.toFixed(0) + ' dB';
+    if (maxL) maxL.textContent = `${Math.round(rampDom.max)} dB`;
+    if (minL) minL.textContent = `${Math.round(rampDom.min)} dB`;
+  }
+
+  // Data bracket inside the bar (faint translucent band) + sub-caption
+  // under the range row. Hidden if the data range is degenerate.
+  const bracket = dataBracketPosition(minVal, maxVal, tickMode);
+  if (bracketEl) {
+    if (bracket) {
+      // Vertical bar: y=0 at the bottom. `start01` = dataMin position,
+      // `end01` = dataMax position. Translate to bottom%/top% CSS.
+      bracketEl.style.display = '';
+      bracketEl.style.bottom = `${(bracket.start01 * 100).toFixed(2)}%`;
+      bracketEl.style.top    = `${((1 - bracket.end01) * 100).toFixed(2)}%`;
+    } else {
+      bracketEl.style.display = 'none';
+    }
+  }
+  if (dataCapEl) {
+    const txt = formatDataBracket(minVal, maxVal, tickMode);
+    if (txt) {
+      dataCapEl.style.display = '';
+      dataCapEl.textContent = txt;
+    } else {
+      dataCapEl.style.display = 'none';
+    }
   }
 }
 

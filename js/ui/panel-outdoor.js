@@ -1,5 +1,6 @@
 import { state } from '../app-state.js';
 import { emit, on } from './events.js';
+import { frameCameraToField } from '../graphics/scene.js';
 
 // Outdoor field panel — enable long-throw exterior coverage over an open
 // field, set its size, and the ISO 9613-1 air-absorption inputs (T/RH).
@@ -17,11 +18,19 @@ import { emit, on } from './events.js';
 // Honest labelling per Dr. Chen: ISO 9613-1 free-field; ground effect
 // (A_gr) is NOT modelled — the field reads up to 3–10 dB hot at 250–500 Hz
 // over soft ground. Stated in the panel so it's never mistaken for 9613-2.
+//
+// Phase 11b: enabling outdoor mode no longer auto-snaps the 3D camera —
+// the user keeps their current view (Maya's principle: "outdoor is indoor
+// + extension, not a different view"). The "Fit field" button below is
+// the explicit affordance for users who want to see the whole field at
+// once. First-of-session enable carries a subtle accent on the button so
+// new users discover the affordance; the accent clears on first click.
 
 const MIN_M = 50, MAX_M = 1000;
 const MIN_T = -20, MAX_T = 50;
 const MIN_RH = 0, MAX_RH = 100;
 const clampSize = v => Math.max(MIN_M, Math.min(MAX_M, Math.round(v)));
+const FIT_HINT_SEEN_KEY = 'roomlab.outdoor.fitFieldHintSeen';
 
 export function mountOutdoorPanel() {
   const root = document.getElementById('panel-outdoor');
@@ -40,6 +49,14 @@ export function mountOutdoorPanel() {
     </div>
 
     <div id="outdoor-controls" aria-describedby="outdoor-note">
+      <div class="field-group outdoor-fit-row">
+        <button type="button" id="outdoor-fit-field" class="btn-outdoor-fit"
+                title="Frame the 3D camera so the whole outdoor field fits in view">
+          Fit field in view
+        </button>
+        <span class="sub outdoor-fit-hint">Enabling outdoor keeps your current 3D view. Click to see the full field.</span>
+      </div>
+
       <div class="field-group outdoor-size-group">
         <label for="outdoor-size-range">Field size</label>
         <input type="range" id="outdoor-size-range" class="outdoor-size-range"
@@ -86,11 +103,24 @@ export function mountOutdoorPanel() {
   const numEl     = root.querySelector('#outdoor-size-num');
   const tempEl    = root.querySelector('#outdoor-temp');
   const rhEl      = root.querySelector('#outdoor-rh');
+  const fitBtn    = root.querySelector('#outdoor-fit-field');
 
   enabledEl.addEventListener('change', e => {
     state.outdoor.enabled = !!e.target.checked;
     syncDisabledState();
     emit('outdoor:changed');
+    // First-of-session enable: pulse the Fit-field button so new users
+    // discover the affordance (camera no longer auto-snaps in Phase 11b).
+    if (state.outdoor.enabled) maybeShowFitFieldHint();
+  });
+
+  // Fit field — explicit camera reframe to the full outdoor square.
+  // Imports frameCameraToField directly (it's already an export of
+  // js/graphics/scene.js); no event bus indirection because the panel
+  // and the scene live in the same SPA bundle.
+  fitBtn.addEventListener('click', () => {
+    frameCameraToField();
+    clearFitFieldHint();
   });
 
   // Field size: live number + radius readout while dragging (input), heavy
@@ -137,6 +167,31 @@ export function mountOutdoorPanel() {
   on('scene:reset', render);
 }
 
+// First-of-session hint state for the Fit-field button. Backed by
+// sessionStorage (matches welcome-card.js pattern — resets each tab
+// session, so a returning user who's been away for a day rediscovers
+// the affordance). Auto-hides after 6 s OR on first click, whichever
+// comes first. localStorage would have been silently noisy for power
+// users; sessionStorage is the right scope.
+function maybeShowFitFieldHint() {
+  let seen = false;
+  try { seen = sessionStorage.getItem(FIT_HINT_SEEN_KEY) === '1'; } catch (_) {}
+  if (seen) return;
+  const root = document.getElementById('panel-outdoor');
+  const fitRow = root?.querySelector('.outdoor-fit-row');
+  if (!fitRow) return;
+  fitRow.classList.add('outdoor-fit-row-hinted');
+  // Auto-hide after a beat. The hint mark is non-blocking, but lingering
+  // accents become visual noise — clear it whether or not the user clicks.
+  setTimeout(() => fitRow.classList.remove('outdoor-fit-row-hinted'), 6000);
+}
+function clearFitFieldHint() {
+  try { sessionStorage.setItem(FIT_HINT_SEEN_KEY, '1'); } catch (_) {}
+  const root = document.getElementById('panel-outdoor');
+  const fitRow = root?.querySelector('.outdoor-fit-row');
+  if (fitRow) fitRow.classList.remove('outdoor-fit-row-hinted');
+}
+
 // Live "N m across · ~N m from the room centre" caption. The field is a
 // square N m on a side centred on the room, so the centre-to-edge reach is
 // half the side. Helps the user reason about the 600 m azan demo: a 1000 m
@@ -158,7 +213,9 @@ function syncDisabledState() {
   const off = !state.outdoor.enabled;
   const controls = root.querySelector('#outdoor-controls');
   if (controls) controls.classList.toggle('is-disabled', off);
-  for (const el of root.querySelectorAll('#outdoor-controls input')) {
+  // Inputs AND the Fit-field button — both meaningless when outdoor is off.
+  // `disabled` (not pointer-events:none) keeps screen readers in the loop.
+  for (const el of root.querySelectorAll('#outdoor-controls input, #outdoor-fit-field')) {
     el.disabled = off;
   }
 }

@@ -28,6 +28,7 @@
 import * as THREE from 'three';
 import { splColorRGB, stiColorRGB } from './colour-ramps.js';
 import { dilateGridForDisplay, buildSilhouetteMask } from '../physics/grid-display.js';
+import { SPL_RAMP_MIN_DB, SPL_RAMP_MAX_DB } from './legend-ticks.js';
 
 // Sub-cell boundary precision target for the hi-res silhouette mask
 // (room-level path only). 0.1 m is below any room's audible SPL gradient
@@ -37,12 +38,13 @@ import { dilateGridForDisplay, buildSilhouetteMask } from '../physics/grid-displ
 const MASK_TARGET_M = 0.1;
 let _hiResStamped = false;   // one-time build-stamp guard (cache verify)
 
-// SPL palette domain (matches splColorRGB + splColor in room-2d.js).
-// Domain [30, 110] dB so outside-room SPL with Tier 1a diffraction
-// physics (~58-71 dB behind a wall) shows visible gradient instead
-// of clamping to deep navy. Keep in lock-step with the 3 sites.
-const SPL_MIN_DB = 30;
-const SPL_MAX_DB = 110;
+// SPL palette domain — single source of truth lives in legend-ticks.js
+// (Phase 11a, 2026-05-25). Aliased locally so the existing palette
+// builder code reads unchanged. Domain [30, 110] dB so outside-room SPL
+// with Tier 1a diffraction physics (~58-71 dB behind a wall) shows
+// visible gradient instead of clamping to deep navy.
+const SPL_MIN_DB = SPL_RAMP_MIN_DB;
+const SPL_MAX_DB = SPL_RAMP_MAX_DB;
 
 // Build a 256-entry palette LUT as a 256×1 RGBA DataTexture for the
 // given metric. The shader samples this with the normalised SPL/STI

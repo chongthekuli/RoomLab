@@ -15,6 +15,73 @@
 //     than 7 ticks fall inside the range — double the step until ≤ 7.
 //   • STI: fixed at 0.30 / 0.45 / 0.60 / 0.75 (IEC 60268-16 rating
 //     tier boundaries). Plus 0.00 and 1.00 endpoints — total 6.
+//
+// ---------------------------------------------------------------------
+// Ramp-domain constants (Phase 11a, Maya design — 2026-05-25).
+//
+// The cell colour ramp is fixed-domain (SPL [30, 110] dB, STI [0, 1]).
+// Legends MUST caption the RAMP DOMAIN, not the data extent — otherwise
+// toggling outdoor-mode (which widens the data range) reads as
+// "the scale changed" even though every cell's colour-to-dB mapping is
+// invariant. The data extent gets shown INSIDE the bar as a faint
+// bracket plus a sub-caption underneath (`data: 72–106 dB`).
+//
+// Lifted from js/graphics/heatmap-shader.js so all four sites (2D
+// legend, 3D legend, print heatmap legend, the shader palette builder)
+// pull from ONE source. Anti-leak grep in
+// tests/cross-surface-conventions.test.mjs.
+// ---------------------------------------------------------------------
+
+export const SPL_RAMP_MIN_DB = 30;
+export const SPL_RAMP_MAX_DB = 110;
+export const STI_RAMP_MIN = 0;
+export const STI_RAMP_MAX = 1;
+
+// Resolve the ramp domain for a metric. Returns { min, max }.
+// Mode 'sti' or 'stipa' → STI range; anything else → SPL range.
+export function getRampDomain(mode) {
+  if (mode === 'sti' || mode === 'stipa') {
+    return { min: STI_RAMP_MIN, max: STI_RAMP_MAX };
+  }
+  return { min: SPL_RAMP_MIN_DB, max: SPL_RAMP_MAX_DB };
+}
+
+// Format the data-extent sub-caption rendered UNDER the gradient bar.
+// Returns the canonical copy string (Maya v11a, 2026-05-25):
+//   SPL → "data: 72–106 dB"
+//   STI → "data: 0.42–0.78"
+// Returns '' if the data range is degenerate / unknown (caller hides
+// the sub-caption entirely in that case — no "data: —–—" placeholder).
+//
+// En-dash (U+2013) between numbers, not hyphen-minus — typographic
+// consistency with the rest of the report and Lin's copy in the
+// glossary. The "data:" lowercase prefix is intentional — Maya wants
+// it to read as a quiet annotation, not a heading.
+export function formatDataBracket(dataMin, dataMax, mode) {
+  if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax) || dataMax < dataMin) return '';
+  if (mode === 'sti' || mode === 'stipa') {
+    return `data: ${dataMin.toFixed(2)}–${dataMax.toFixed(2)}`;
+  }
+  return `data: ${Math.round(dataMin)}–${Math.round(dataMax)} dB`;
+}
+
+// Position the data bracket along the legend axis (0..1 fraction of
+// the bar's length). Clamped to [0, 1] so a data extent that
+// undershoots / overshoots the ramp domain still renders as a band at
+// the appropriate end of the bar.
+//
+// Returns { start01, end01 } or null if the inputs are unusable.
+// Caller paints a translucent band spanning that fraction.
+export function dataBracketPosition(dataMin, dataMax, mode) {
+  const dom = getRampDomain(mode);
+  const span = dom.max - dom.min;
+  if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax) || dataMax < dataMin || span <= 0) {
+    return null;
+  }
+  const start01 = Math.max(0, Math.min(1, (dataMin - dom.min) / span));
+  const end01   = Math.max(0, Math.min(1, (dataMax - dom.min) / span));
+  return { start01, end01 };
+}
 
 export function computeTicks(min, max, mode) {
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return [];
@@ -41,6 +108,22 @@ export function computeTicks(min, max, mode) {
     for (let v = first; v <= last + 1e-6; v += step) {
       out.push({ value: v, position01: (v - min) / span });
     }
+  }
+  // Phase 11a (2026-05-25): ensure the EXACT ramp endpoints are
+  // labelled. When the helper is called over the ramp domain (e.g.
+  // 30..110 dB) and the chosen step misses one or both endpoints
+  // (step-doubled to 20 dB → 40, 60, 80, 100 → no 30, no 110),
+  // Maya's design requires the bar's caption ends to read "30 dB"
+  // and "110 dB". Pin those endpoints unless they're already in
+  // the tick set OR within a third-step of an existing tick (avoid
+  // label collision).
+  const minGap = step / 3;
+  const hasNear = (v) => out.some(t => Math.abs(t.value - v) < minGap);
+  if (!hasNear(min)) {
+    out.unshift({ value: min, position01: 0 });
+  }
+  if (!hasNear(max)) {
+    out.push({ value: max, position01: 1 });
   }
   return out;
 }

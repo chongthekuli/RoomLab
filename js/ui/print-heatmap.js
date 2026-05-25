@@ -19,7 +19,7 @@
 // page is layout-compatible with the cover plan.
 
 import { colorForMetric, splColorRGB } from '../graphics/colour-ramps.js';
-import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from '../graphics/legend-ticks.js';
+import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader, getRampDomain, formatDataBracket, dataBracketPosition } from '../graphics/legend-ticks.js';
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
 import { dilateGridForDisplay } from '../physics/grid-display.js';
 
@@ -462,8 +462,15 @@ export function buildHeatmapLegend(splGrid) {
   const max = splGrid.maxSPL_db;
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return '';
   const tickMode = metric === 'sti' ? 'sti' : 'spl';
-  const ticks = computeTicks(min, max, tickMode);
-  const minorTicks = computeMinorTicks(min, max, tickMode, ticks);
+  // Phase 11a (2026-05-25, Maya): legend extents = ramp domain (not data
+  // extent). Sub-bracket inside the bar marks the data range; sub-caption
+  // under the bar shows "data: 72–106 dB". Toggling outdoor-mode (which
+  // widens the data range) no longer reads as "the scale changed".
+  // Same convention enforced across all three heatmap legends —
+  // tests/cross-surface-conventions.test.mjs.
+  const rampDom = getRampDomain(tickMode);
+  const ticks = computeTicks(rampDom.min, rampDom.max, tickMode);
+  const minorTicks = computeMinorTicks(rampDom.min, rampDom.max, tickMode, ticks);
   const minorRows = minorTicks.map(t => {
     const pct = Math.max(0, Math.min(100, t.position01 * 100)).toFixed(2);
     return `<div class="pr-heatmap-legend-tick minor" style="left:${pct}%">
@@ -477,20 +484,29 @@ export function buildHeatmapLegend(splGrid) {
       <span class="pr-heatmap-legend-tick-label">${formatTickLabel(t.value, tickMode)}</span>
     </div>`;
   }).join('');
-  // Sample the actual cell ramp across the visible [min,max] so the bar
+  // Sample the actual cell ramp across the FULL ramp domain so the bar
   // colour at any position matches the cell colour for that value. The
-  // ramp is fixed-domain (SPL 30–110 dB, STI 0–1), so a 2-stop gradient
-  // would only be correct if min/max happened to equal the ramp endpoints.
+  // ramp is fixed-domain (SPL 30–110 dB, STI 0–1).
   const NSTOPS = 11;
-  const span = max - min;
+  const span = rampDom.max - rampDom.min;
   const stops = [];
   for (let i = 0; i < NSTOPS; i++) {
     const t = i / (NSTOPS - 1);
-    const value = min + t * span;
+    const value = rampDom.min + t * span;
     const [r, g, b] = colorForMetric(value, metric);
     stops.push(`rgb(${r},${g},${b}) ${(t * 100).toFixed(2)}%`);
   }
   const gradient = `linear-gradient(to right, ${stops.join(', ')})`;
+  // Data-extent bracket (horizontal): translucent band stretching from
+  // dataMin% to dataMax% across the bar. Sub-caption under the bar.
+  const bracket = dataBracketPosition(min, max, tickMode);
+  const bracketHtml = bracket
+    ? `<div class="pr-heatmap-legend-data-bracket" style="left:${(bracket.start01 * 100).toFixed(2)}%;right:${((1 - bracket.end01) * 100).toFixed(2)}%"></div>`
+    : '';
+  const dataCap = formatDataBracket(min, max, tickMode);
+  const dataCapHtml = dataCap
+    ? `<div class="pr-heatmap-legend-data-caption">${dataCap}</div>`
+    : '';
   // Honest-disclosure footnote (Dr. Chen, 2026-05-21): the colour field is
   // extrapolated the last half-cell to the wall from the nearest computed
   // sample (render-only fill, see grid-display.js). Owning the limitation
@@ -501,8 +517,9 @@ export function buildHeatmapLegend(splGrid) {
     <div class="pr-heatmap-legend">
       <div class="pr-heatmap-legend-header">${legendHeader(tickMode)}</div>
       <div class="pr-heatmap-legend-stage">
-        <div class="pr-heatmap-legend-bar" style="background:${gradient}"></div>
+        <div class="pr-heatmap-legend-bar" style="background:${gradient}">${bracketHtml}</div>
         <div class="pr-heatmap-legend-ticks">${minorRows}${tickRows}</div>
+        ${dataCapHtml}
       </div>
       <div class="pr-heatmap-legend-note" style="font-size:0.62em;opacity:0.6;margin-top:0.35em;line-height:1.3">Field extrapolated to room boundary from nearest grid sample.</div>
     </div>`;

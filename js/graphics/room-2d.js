@@ -7,7 +7,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
 import { roomPlanVertices, isInsideRoom3D, roomEffectiveBounds } from '../physics/room-shape.js';
 import { dilateGridForDisplay } from '../physics/grid-display.js';
-import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader } from './legend-ticks.js';
+import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader, getRampDomain, formatDataBracket, dataBracketPosition } from './legend-ticks.js';
 import { computePerListenerMetrics, formatListenerMetricsLabel } from '../physics/per-listener-metrics.js';
 import { wallInsetPolygon, wallLabelAnchor, WALL_LABEL_MAX_CHARS } from '../physics/wall-inset.js';
 import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
@@ -3058,11 +3058,18 @@ function renderLegend(splResult) {
     // context above the bar; tick values include unit suffix on each
     // line; reference footnote ("re 20 µPa") below — gives the dB its
     // physical meaning. Drops the orphaned standalone "DB" label.
+    //
+    // Phase 11a (2026-05-25, Maya): ticks now span the RAMP DOMAIN
+    // (30..110 dB), not the data extent. The data extent is shown as a
+    // faint bracket inside the bar + sub-caption "data: 72–106 dB".
+    // Same convention enforced across all three heatmap legends —
+    // tests/cross-surface-conventions.test.mjs.
     const minVal = splResult.minSPL_db;
     const maxVal = splResult.maxSPL_db;
     const freqHz = state.physics?.freq_hz ?? 1000;
-    const ticks = computeTicks(minVal, maxVal, 'spl');
-    const minorTicks = computeMinorTicks(minVal, maxVal, 'spl', ticks);
+    const rampDom = getRampDomain('spl');
+    const ticks = computeTicks(rampDom.min, rampDom.max, 'spl');
+    const minorTicks = computeMinorTicks(rampDom.min, rampDom.max, 'spl', ticks);
     const minorRows = minorTicks.map(t => {
       const pct = Math.max(0, Math.min(100, (1 - t.position01) * 100)).toFixed(2);
       return `<div class="spl-legend-tick minor" style="top:${pct}%">
@@ -3076,12 +3083,23 @@ function renderLegend(splResult) {
         <span class="spl-legend-tick-label">${formatTickLabel(t.value, 'spl')}</span>
       </div>`;
     }).join('');
+    // Data bracket (faint translucent band inside the bar) + sub-caption.
+    // Hidden when the data range is degenerate.
+    const bracket = dataBracketPosition(minVal, maxVal, 'spl');
+    const bracketHtml = bracket
+      ? `<div class="spl-legend-data-bracket" style="top:${((1 - bracket.end01) * 100).toFixed(2)}%;bottom:${(bracket.start01 * 100).toFixed(2)}%"></div>`
+      : '';
+    const dataCap = formatDataBracket(minVal, maxVal, 'spl');
+    const dataCapHtml = dataCap
+      ? `<span class="spl-legend-data-caption">${dataCap}</span>`
+      : '';
     return `<div class="vp-legend spl-legend spl-legend-v">
       <span class="legend-header">${legendHeader('spl', freqHz)}</span>
       <div class="spl-legend-stage">
-        <div class="legend-bar"></div>
+        <div class="legend-bar">${bracketHtml}</div>
         <div class="spl-legend-ticks">${minorRows}${tickRows}</div>
       </div>
+      ${dataCapHtml}
       <span class="legend-footnote">re 20 µPa</span>
     </div>`;
   }

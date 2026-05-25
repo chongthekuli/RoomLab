@@ -1606,15 +1606,34 @@ function renderSurfaceMaterials() {
     if (tooltip) matRow.title = tooltip;
     const sel = buildMatSelect(surfaceId, readSlotMatId(getSlot()));
     sel.dataset.surfaceId = surfaceId;
+    // Ceiling + open-air gotcha hint. The roof's transmission loss vanishes
+    // when ceiling is set to open-air, so any source mounted above the
+    // ceiling height (gallery horns, flown PA on a minaret, tower-mounted
+    // emergency speakers) gains direct line-of-sight into the room and
+    // interior SPL can RISE despite the absorption increase. Surfaced under
+    // the picker (not as a title=) so users see it without hovering.
+    // Triggered for the parent room's ceiling and every broken-out
+    // enclosure's ceiling; wall and floor slots are unaffected.
+    const isCeilingSlot = surfaceId === 'ceiling'
+      || /^enclosure_\d+_ceiling$/.test(surfaceId);
+    let openAirHint = null;
+    if (isCeilingSlot) {
+      openAirHint = document.createElement('div');
+      openAirHint.className = 'mat-row-hint mat-row-hint-warn';
+      openAirHint.textContent = 'Removes the roof — sources above this height (gallery horns, flown PA) hit the room directly, so interior SPL may rise.';
+      openAirHint.hidden = readSlotMatId(getSlot()) !== 'open-air';
+    }
     sel.addEventListener('change', e => {
       const slot = readSlotAsObject(getSlot());
       slot.materialId = e.target.value;
       setSlot(compactSlot(slot));
+      if (openAirHint) openAirHint.hidden = e.target.value !== 'open-air';
       emit('room:changed');
     });
     matRow.append(label + ' ', sel);
     attachSurfaceHover(matRow, surfaceId);
     wrap.appendChild(matRow);
+    if (openAirHint) wrap.appendChild(openAirHint);
     if (withOpenings) {
       // Per-wall thickness control — Phase 7 C3. Walls only (floor / ceiling
       // skip this — they don't carry a polygon-edge thickness). Input is in

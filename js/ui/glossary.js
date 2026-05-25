@@ -48,6 +48,9 @@ export const GLOSSARY = {
   nc35:
     'NC-35 — Noise Criterion 35. A per-band background-noise spec corresponding to a typical office with HVAC. Used as the default ambient noise floor for STIPA calculations.',
 
+  open_ceiling:
+    'Open ceiling — the ceiling material is set to "open wall (no boundary)," so the roof contributes zero transmission loss and zero absorption. Use for open courtyards, arcades, and partly-roofed prayer halls. Whether interior SPL drops or rises depends on where the sources sit. Sources mounted INSIDE the room (ceiling speakers, floor monitors) lose energy upward — SPL drops and reverberation falls toward zero. Sources mounted ABOVE the roof line (minaret horns, tower-mounted PA, flown speakers on an external gallery) gain direct line-of-sight into every interior cell; the removed roof TL (~30 dB for concrete, ~15 dB for metal deck) can outweigh the lost reverberant lift, raising interior SPL by several dB. Always check source z relative to room.height_m before declaring the result a bug.',
+
   absorption_alpha:
     'α — absorption coefficient. Fraction of sound energy a surface absorbs (0 = perfect reflector, 1 = perfect absorber). Per octave band.',
 
