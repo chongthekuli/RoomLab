@@ -56,7 +56,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { state } from '../js/app-state.js';
 import { buildFloorPlanSVG } from '../js/ui/print-plan-svg.js';
-import { buildHeatmapPageSVG } from '../js/ui/print-heatmap.js';
+import { buildHeatmapPageSVG, buildHeatmapLegend } from '../js/ui/print-heatmap.js';
 import { dilateGridForDisplay, buildSilhouetteMask } from '../js/physics/grid-display.js';
 
 // --------------------------------------------------------------------
@@ -991,6 +991,227 @@ function assertPhase7WallThickness() {
 }
 
 assertPhase7WallThickness();
+
+// ---------------------------------------------------------------------------
+// Phase 4 (Sam, 2026-05-25) — EXTERIOR-source classifier gate.
+//
+// Background. The indoor exterior-source coupling fix routes every source
+// through js/physics/source-classification.js::classifySource before
+// adding its L_w to the Hopkins-Stryker 4/R aggregate. Three surfaces
+// (per-listener label, listener breakdown, indoor heatmap) had separate
+// reverb-leak loops. A refactor that drops `classifySource` from any one
+// of those three silently re-introduces the 3–5 dB inflation on
+// minaret-horn / exterior-PA scenes — and the value tests in
+// tests/exterior-source-classification.test.mjs would all keep passing
+// against the surface that DOES wire it.
+//
+// This grep gate guards the three surfaces in spl-calculator.js: any
+// reverb-leak path MUST consult `_buildSourceClassifications` so the
+// EXTERIOR coupling table is in scope. Same shape as the
+// scene.scale.x = -1 anti-leak grep in scene-x-mirror.test.mjs.
+// ---------------------------------------------------------------------------
+function assertPhase4ClassifierGate() {
+  let src = '';
+  try {
+    src = readFileSync('js/physics/spl-calculator.js', 'utf8');
+  } catch (e) {
+    fail('phase4 classifier-gate: js/physics/spl-calculator.js unreadable', String(e));
+    return;
+  }
+  ok(/import\s*\{[^}]*\bclassifySource\b[^}]*\}\s*from\s*['"][^'"]*source-classification(?:\.js)?['"]/.test(src),
+     'phase4: spl-calculator.js imports classifySource from source-classification.js');
+  // The _buildSourceClassifications helper is the canonical entry point —
+  // every reverb-leak surface must call it.
+  ok(/function\s+_buildSourceClassifications\s*\(/.test(src),
+     'phase4: spl-calculator.js defines _buildSourceClassifications helper');
+  // computeMultiSourceSPL (the per-listener label path) must call it.
+  // Match the function body up to the next top-level `export function` so
+  // the assertion can't be fooled by a call living in some unrelated body.
+  const cmsBlock = src.match(/export\s+function\s+computeMultiSourceSPL\s*\([\s\S]*?(?=\n(?:export\s+function|function\s+\w+\s*\([^)]*\)\s*\{))/);
+  ok(cmsBlock && /_buildSourceClassifications\s*\(/.test(cmsBlock[0]),
+     'phase4: computeMultiSourceSPL calls _buildSourceClassifications');
+  // computeListenerBreakdown (the panel-results path) must call it.
+  const clbBlock = src.match(/export\s+function\s+computeListenerBreakdown\s*\([\s\S]*?(?=\n(?:export\s+function|function\s+\w+\s*\([^)]*\)\s*\{))/);
+  ok(clbBlock && /_buildSourceClassifications\s*\(/.test(clbBlock[0]),
+     'phase4: computeListenerBreakdown calls _buildSourceClassifications');
+  // computeSPLGrid (the indoor heatmap path) must call it. computeSPLGrid
+  // is the LAST exported function in the file; match to end-of-file rather
+  // than to the next export marker.
+  const cgBlock = src.match(/export\s+function\s+computeSPLGrid\s*\([\s\S]*$/);
+  ok(cgBlock && /_buildSourceClassifications\s*\(/.test(cgBlock[0]),
+     'phase4: computeSPLGrid calls _buildSourceClassifications');
+  // And the consumer in the hot loop must thread exteriorCouplings through
+  // so the per-EXTERIOR-source C_couple table actually reaches the reverb
+  // term. Without this, a future refactor could drop the parameter while
+  // leaving the helper call in place.
+  ok(/exteriorCouplings\s*=\s*null/.test(src),
+     'phase4: precomputeSPLContext accepts an exteriorCouplings parameter (default null)');
+  ok(/coupling_per_band/.test(src),
+     'phase4: spl-calculator.js wires coupling_per_band into the per-source ctx record');
+}
+
+assertPhase4ClassifierGate();
+
+// ---------------------------------------------------------------------------
+// Phase 11a (Sam, 2026-05-25) — heatmap-legend ramp/data convention.
+//
+// The cell colour ramp is FIXED-DOMAIN: SPL [30, 110] dB, STI [0, 1].
+// Before Phase 11a, the three legend surfaces (2D viewport, 3D viewport,
+// print heatmap) all captioned the DATA extent (e.g. "59 dB – 104 dB"
+// outdoor vs "72 dB – 106 dB" indoor) — toggling outdoor-mode read as
+// "the scale changed" even though the colour-to-value mapping is
+// invariant. Maya's fix: caption the RAMP DOMAIN; show data extent as a
+// faint bracket inside the bar plus a sub-caption "data: 72–106 dB".
+//
+// This gate ensures all 4 sites (3 legends + the shader palette builder)
+// pull from one source — js/graphics/legend-ticks.js exports the
+// ramp-domain constants AND the formatDataBracket / dataBracketPosition
+// helpers. A drive-by edit that hardcodes 30/110 in a fifth place trips
+// the grep.
+// ---------------------------------------------------------------------------
+
+function assertPhase11aLegendConvention() {
+  // (1) Single source of truth — legend-ticks.js exports the constants
+  //     and the data-bracket helpers.
+  let legendSrc = '';
+  try {
+    legendSrc = readFileSync('js/graphics/legend-ticks.js', 'utf8');
+  } catch (e) {
+    fail('phase11a: js/graphics/legend-ticks.js unreadable', String(e));
+    return;
+  }
+  ok(/export\s+const\s+SPL_RAMP_MIN_DB\s*=\s*30\b/.test(legendSrc),
+     'phase11a: legend-ticks.js exports SPL_RAMP_MIN_DB = 30');
+  ok(/export\s+const\s+SPL_RAMP_MAX_DB\s*=\s*110\b/.test(legendSrc),
+     'phase11a: legend-ticks.js exports SPL_RAMP_MAX_DB = 110');
+  ok(/export\s+const\s+STI_RAMP_MIN\s*=\s*0\b/.test(legendSrc),
+     'phase11a: legend-ticks.js exports STI_RAMP_MIN = 0');
+  ok(/export\s+const\s+STI_RAMP_MAX\s*=\s*1\b/.test(legendSrc),
+     'phase11a: legend-ticks.js exports STI_RAMP_MAX = 1');
+  ok(/export\s+function\s+getRampDomain\b/.test(legendSrc),
+     'phase11a: legend-ticks.js exports getRampDomain');
+  ok(/export\s+function\s+formatDataBracket\b/.test(legendSrc),
+     'phase11a: legend-ticks.js exports formatDataBracket');
+  ok(/export\s+function\s+dataBracketPosition\b/.test(legendSrc),
+     'phase11a: legend-ticks.js exports dataBracketPosition');
+
+  // (2) All three legend sites import the ramp-domain helper. Catches a
+  //     refactor that drops the import and falls back to data min/max.
+  const LEGEND_SITES = [
+    ['2d-viewport',   'js/graphics/room-2d.js'],
+    ['3d-viewport',   'js/graphics/scene.js'],
+    ['print-heatmap', 'js/ui/print-heatmap.js'],
+  ];
+  for (const [id, file] of LEGEND_SITES) {
+    let src = '';
+    try { src = readFileSync(file, 'utf8'); } catch (e) {
+      fail(`phase11a: ${id} unreadable (${file})`, String(e));
+      continue;
+    }
+    ok(/from\s+['"][^'"]*legend-ticks(?:\.js)?['"]/.test(src),
+       `phase11a: ${id} imports from legend-ticks.js`);
+    ok(/\bgetRampDomain\b/.test(src),
+       `phase11a: ${id} consumes getRampDomain (legend caption ends = ramp domain)`);
+    ok(/\bformatDataBracket\b/.test(src),
+       `phase11a: ${id} consumes formatDataBracket (renders the data sub-caption)`);
+    ok(/\bdataBracketPosition\b/.test(src),
+       `phase11a: ${id} consumes dataBracketPosition (paints the data bracket inside the bar)`);
+  }
+
+  // (3) The shader palette also pulls from legend-ticks (was the
+  //     historical "second source of truth" — now aliases the legend
+  //     constants). Anti-leak.
+  const shaderSrc = readFileSync('js/graphics/heatmap-shader.js', 'utf8');
+  ok(/from\s+['"][^'"]*legend-ticks(?:\.js)?['"]/.test(shaderSrc),
+     'phase11a: heatmap-shader.js imports SPL_RAMP_MIN_DB/MAX_DB from legend-ticks.js');
+  ok(/SPL_RAMP_MIN_DB|SPL_RAMP_MAX_DB/.test(shaderSrc),
+     'phase11a: heatmap-shader.js references the shared ramp constants');
+
+  // (4) Anti-leak grep — the literals 30 and 110 should NOT appear as a
+  //     ramp-domain pair anywhere outside legend-ticks.js + the shader's
+  //     aliasing block. We grep for the suspicious co-occurrence
+  //     pattern `30` + `110` within 4 lines (rough heuristic — accepts
+  //     unrelated 30/110 in surrounding files).
+  //
+  //     The legend bar + tick rendering code is the historical leak
+  //     site. If a future legend implementation re-hardcodes the ramp
+  //     domain there, this gate trips.
+  const RAMP_LEAK_FILES = [
+    'js/graphics/room-2d.js',
+    'js/graphics/scene.js',
+    'js/ui/print-heatmap.js',
+  ];
+  for (const f of RAMP_LEAK_FILES) {
+    let src = '';
+    try { src = readFileSync(f, 'utf8'); } catch { continue; }
+    // Strip comments so a docstring "the ramp is 30..110 dB" doesn't trip.
+    const stripped = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+      .replace(/[ \t]+\/\/.*$/gm, '');
+    // Specific anti-pattern: an array / pair literal carrying both 30 and 110
+    // with no surrounding helper call. Matches `[30, 110]`, `(30, 110)`,
+    // `30, 110` as adjacent number-literals in a small window.
+    const leakPattern = /\b30\s*,\s*110\b|\b110\s*,\s*30\b|min:\s*30[\s\S]{0,40}max:\s*110|SPL_MIN_DB\s*=\s*30[\s\S]{0,40}SPL_MAX_DB\s*=\s*110/;
+    const m = stripped.match(leakPattern);
+    ok(!m, `phase11a anti-leak: ${f} does not hardcode the ramp domain (30, 110)`,
+       m ? `found "${m[0]}" — import SPL_RAMP_MIN_DB / SPL_RAMP_MAX_DB from legend-ticks.js` : '');
+  }
+
+  // (5) End-to-end: buildHeatmapLegend() — the HTML block rendered under
+  //     the heatmap raster in the print report — must carry BOTH the
+  //     ramp-end tick labels AND the data sub-caption. Direct render
+  //     path; legend lives outside the SVG content (it's an HTML stage
+  //     in the print page layout).
+  installCanvasShim();
+  buildFixtureState();
+  // Construct a grid whose data extent (72..106 dB) is well INSIDE the
+  // ramp (30..110 dB) — so the ramp ends and data caption are
+  // unambiguously distinguishable.
+  const grid = {
+    grid: [[72, 90], [80, 106]],
+    cellsX: 2, cellsY: 2,
+    originX_m: 0, originY_m: 0,
+    cellW_m: state.room.width_m / 2,
+    cellD_m: state.room.depth_m / 2,
+    metric: 'spl',
+    minSPL_db: 72, maxSPL_db: 106, avgSPL_db: 89,
+    sourceCount: 1,
+  };
+  const legendHtml = buildHeatmapLegend(grid);
+  ok(legendHtml && legendHtml.length > 0,
+     'phase11a print-heatmap: buildHeatmapLegend returns non-empty HTML for a valid grid');
+  // Ramp-end tick labels: the bar spans [30, 110], computeTicks at step
+  // 10 dB → 30, 40, …, 110. Both endpoints emit "30 dB" / "110 dB".
+  ok(/>30 dB</.test(legendHtml),
+     'phase11a print-heatmap legend: ramp-min tick label "30 dB" present (caption end = ramp domain)');
+  ok(/>110 dB</.test(legendHtml),
+     'phase11a print-heatmap legend: ramp-max tick label "110 dB" present (caption end = ramp domain)');
+  // Data sub-caption — exactly "data: 72–106 dB" (en-dash U+2013).
+  ok(/data:\s*72–106\s*dB/.test(legendHtml),
+     'phase11a print-heatmap legend: data sub-caption "data: 72–106 dB" present',
+     `legend snippet: ${(legendHtml.match(/data:[^<]*/) || ['(no match)'])[0]}`);
+  // Data bracket div: positioned with left%/right% matching the data range
+  // within [30, 110]. (72 - 30) / 80 = 52.5 %; (110 - 106) / 80 = 5 %.
+  const bracketM = legendHtml.match(/pr-heatmap-legend-data-bracket[^>]*style="left:([0-9.]+)%;right:([0-9.]+)%"/);
+  ok(bracketM, 'phase11a print-heatmap legend: data bracket element present with left/right %');
+  if (bracketM) {
+    const left = parseFloat(bracketM[1]);
+    const right = parseFloat(bracketM[2]);
+    ok(Math.abs(left - 52.5) < 0.5,
+       `phase11a print-heatmap legend: bracket left% ≈ 52.5 (got ${left}) — maps data min 72 dB into ramp [30,110]`);
+    ok(Math.abs(right - 5.0) < 0.5,
+       `phase11a print-heatmap legend: bracket right% ≈ 5.0 (got ${right}) — maps data max 106 dB into ramp [30,110]`);
+  }
+  // Negative case: degenerate data range (min === max) hides bracket + caption.
+  const degenerateLegend = buildHeatmapLegend({
+    ...grid, minSPL_db: 80, maxSPL_db: 80,
+  });
+  ok(degenerateLegend === '',
+     'phase11a print-heatmap legend: degenerate range (min == max) returns empty string (no caption)');
+}
+
+assertPhase11aLegendConvention();
 
 // Diagnostic dump — printed before exit so failures carry context.
 if (failed > 0) {

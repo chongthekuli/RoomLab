@@ -30,6 +30,17 @@ function getShape(room) {
 //   state:      'open' | 'closed'
 export const DEFAULT_WALL_THICKNESS_M = 0.10;
 
+// Maximum z (m) at which a position outside the room walls but within the
+// surau podium extent is still considered "inside" by isInsideRoom3D.
+// Generous over the arcade flat roof (~4.4 m) so podium-mounted sources
+// or speakers on the arcade roof itself render on the SPL grid. Phase 3
+// of the indoor exterior-source coupling fix (2026-05-25) factored this
+// out of an inline 5.0 so downstream callers (source-classification.js,
+// the upcoming reverb-aggregate gate) can reason about it explicitly.
+// A physically-grounded `arcade.roof_height_m + safety_margin` is the
+// natural follow-up but ships as a separate behavior change.
+export const PODIUM_MAX_Z_M = 5.0;
+
 export function normalizeWallSlot(slot, fallbackMaterialId = 'gypsum-board') {
   if (typeof slot === 'string') {
     return { materialId: slot, thickness_m: DEFAULT_WALL_THICKNESS_M, openings: [] };
@@ -513,7 +524,7 @@ export function isInsideRoom3D(pos, room) {
   // the podium extent) at any reasonable height so the SPL heatmap
   // covers the arcade and the surrounding raised concrete base. The
   // arcade flat roof is at ~4.4 m so cap the height check generously.
-  if (isOnSurauPodium(pos.x, pos.y, room) && pos.z >= 0 && pos.z <= 5.0) {
+  if (isOnSurauPodium(pos.x, pos.y, room) && pos.z >= 0 && pos.z <= PODIUM_MAX_Z_M) {
     return true;
   }
   return false;

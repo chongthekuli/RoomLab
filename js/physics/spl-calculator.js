@@ -19,6 +19,56 @@ import { PHYSICS_P1_5_ENABLED, isTier1aOutdoorOverrideDisabled } from './feature
 import { wallInsetPolygon } from './wall-inset.js';
 import { extractOverheadReflectors, computeOverheadReflectionPower } from './overhead-reflection.js';
 import { extractPorches, computePorchReverbPower } from './porch-enclosure.js';
+import { classifySource, listWallFacets } from './source-classification.js';
+import {
+  computeCouplingForAllBands,
+  COUPLING_BANDS_HZ,
+  NUM_BANDS as COUPLING_NUM_BANDS,
+} from './exterior-coupling.js';
+
+// Per-call helper: classify every source in `sources`, lazily compute the
+// per-band coupling coefficient for EXTERIOR ones, and derive the
+// `isSourceInside` predicate downstream callers (computeReverberantInsideSPL,
+// the reverb-leak hot loop) consume.
+//
+// Phase 3 wiring (Hannes plan 2026-05-25, Dr. Chen math):
+//   • INTERIOR / FLUSH_INWARD → predicate returns TRUE; no coupling
+//     adjustment applied to the Hopkins-Stryker 4/R leak. FLUSH_INWARD's
+//     boundary-loading boost is a v2 item.
+//   • EXTERIOR → predicate returns FALSE (source excluded from the
+//     per-band INSIDE aggregate that drives wall re-radiation), AND a
+//     Float32Array(COUPLING_NUM_BANDS) of C_couple is built so the
+//     reverb-leak loop can subtract |C_couple| from L_w before
+//     energy-summing the source's contribution to the per-listener
+//     diffuse-field lift.
+//
+// Returns null when room is missing — caller falls back to historical
+// "all sources are interior" behaviour (back-compat for tests / scripts
+// that pass no room). Cache scope is PER-CALL — no module-level memo
+// (Hannes brief §5: "no memoization at module level").
+function _buildSourceClassifications(sources, room, materials) {
+  if (!Array.isArray(sources) || sources.length === 0) return null;
+  if (!room) return null;
+  const classifications = sources.map(src => classifySource(src, room));
+  // Lazy: only build coupling arrays for EXTERIOR sources, and only when
+  // materials are in scope (no τ → no coupling math).
+  let facets = null;
+  const couplings = new Map();
+  if (materials) {
+    for (let i = 0; i < sources.length; i++) {
+      if (classifications[i].kind !== 'EXTERIOR') continue;
+      if (!facets) facets = listWallFacets(room);
+      if (facets.length === 0) break;
+      couplings.set(sources[i], computeCouplingForAllBands(sources[i], facets, materials));
+    }
+  }
+  const isSourceInside = (src) => {
+    const idx = sources.indexOf(src);
+    if (idx < 0) return true;  // unknown src → default interior (back-compat)
+    return classifications[idx].kind !== 'EXTERIOR';
+  };
+  return { classifications, couplings, isSourceInside };
+}
 
 // Re-exports for backward compatibility with existing callers (tests, scene.js).
 export const AIR_ABSORPTION_DB_PER_M = AIR_ABS_TABLE;
@@ -288,6 +338,13 @@ export function precomputeSPLContext({
                             // When omitted, re-radiation is silently skipped.
   isSourceInside = null,    // optional (src) => bool — excludes outdoor sources
                             // from the interior reverberant aggregate.
+  exteriorCouplings = null, // optional Map<src, Float32Array(COUPLING_NUM_BANDS)>
+                            // — per-EXTERIOR-source C_couple[k] (dB, ≤ 0). When
+                            // present, the reverb-leak hot loop subtracts |C_couple|
+                            // from L_w before energy-summing into reverbPowerSum.
+                            // Built by _buildSourceClassifications when caller
+                            // doesn't supply one. Phase 3 of the indoor exterior-
+                            // source coupling fix (Dr. Chen, 2026-05-25).
   eqGainDb = 0,
   enableTier1a = PHYSICS_P1_5_ENABLED,  // Phase 2d outdoor opt-in. When true,
                             // Maekawa diffraction + Kuttruff re-radiation are
@@ -320,7 +377,13 @@ export function precomputeSPLContext({
     // needs L_w even when the listener is in a free-field zone) but
     // the active-listener reverb leak still gates on reverbActive.
     const L_w_with_eq = approxSoundPowerLevel(def, src.power_watts) + eqGainDb;
-    sourceCtx.push({ src, def, L_w_with_eq });
+    // Phase 3: attach the per-band coupling coefficient when this source
+    // was classified EXTERIOR. INTERIOR / FLUSH_INWARD sources carry
+    // `coupling_per_band: null` and the reverb-leak loop adds 0 dB (no
+    // coupling adjustment). EXTERIOR sources carry the Float32Array
+    // built by computeCouplingForAllBands.
+    const coupling_per_band = exteriorCouplings ? (exteriorCouplings.get(src) ?? null) : null;
+    sourceCtx.push({ src, def, L_w_with_eq, coupling_per_band });
   }
   // Per-band reverberant SPL inside the room — listener-independent,
   // computed once per frame. Drives the Kuttruff wall re-radiation
@@ -472,13 +535,31 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   const L_p_rev_inside_band_db = (useP15 && L_p_rev_inside_per_band)
     ? L_p_rev_inside_per_band[bandIdx]
     : -Infinity;
+  // Phase 3 (Dr. Chen, 2026-05-25): coupling-band index for the active
+  // frequency. COUPLING_BANDS_HZ = [125, 250, 500, 1k, 2k, 4k] — the
+  // first 6 entries of materials.frequency_bands_hz. Computed
+  // INDEPENDENTLY of useP15 / bandIdx — coupling is an indoor concern
+  // that fires whenever a source is classified EXTERIOR, regardless of
+  // whether Tier 1a wall re-radiation is also active. (bandIdx above
+  // is gated on useP15 and stays at -1 on the indoor non-Tier-1a path,
+  // so we cannot reuse it here.) For 8 kHz (or any band missing from
+  // COUPLING_BANDS_HZ) the coupling adjustment is skipped — sources
+  // stay full-power at that band, MVP-acceptable per Hannes brief.
+  let couplingBandIdx = -1;
+  if (materials && Array.isArray(materials.frequency_bands_hz)) {
+    const cbIdx = bandIndexForFreq(materials, freq_hz);
+    if (cbIdx >= 0 && cbIdx < COUPLING_NUM_BANDS) couplingBandIdx = cbIdx;
+  } else if (Number.isFinite(freq_hz)) {
+    const exact = COUPLING_BANDS_HZ.indexOf(freq_hz);
+    if (exact >= 0) couplingBandIdx = exact;
+  }
   let diffractionPowerSum = 0;
   let reradiationPowerSum = 0;
   let overheadReflPowerSum = 0;
   let porchReverbPowerSum = 0;
 
   for (let i = 0; i < sourceCtx.length; i++) {
-    const { src, def, L_w_with_eq } = sourceCtx[i];
+    const { src, def, L_w_with_eq, coupling_per_band } = sourceCtx[i];
     const d = computeDirectSPL({
       speakerDef: def, speakerState: src, listenerPos,
       freq_hz, room, materials, airAbsorption, eqGainDb,
@@ -502,9 +583,37 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
       // but it tracks the band-specific concrete vs. gypsum vs. open-
       // door behaviour the user paid for. Falls back to the legacy
       // flat 30 dB via pathWallLossDb when `materials` is missing.
-      const L_w = L_w_with_eq - d.tl_db_applied;
-      const L_rev = L_w + revConst_db;
-      reverbPowerSum += Math.pow(10, L_rev / 10);
+      //
+      // Phase 3 (Dr. Chen 2026-05-25): when this source is EXTERIOR
+      // (coupling_per_band attached), the Hopkins-Stryker diffuse-
+      // field assumption breaks — the source's W only excites the
+      // room via the fraction that geometrically + materially
+      // couples through the envelope. Subtract |C_couple[k]| dB
+      // from L_w before energy-summing. INTERIOR / FLUSH_INWARD
+      // sources carry coupling_per_band=null and stay full-power.
+      // Skip the source's reverb contribution when C_couple is
+      // −Infinity (no facet contributed) or below −120 dB
+      // (numerically zero — avoid 10^(-200/10) underflow noise).
+      let coupling_db = 0;
+      if (coupling_per_band) {
+        if (couplingBandIdx < 0) {
+          coupling_db = 0;  // off-band (8 kHz / missing materials) — no adjustment
+        } else {
+          coupling_db = coupling_per_band[couplingBandIdx];
+          if (!Number.isFinite(coupling_db) || coupling_db < -120) {
+            // Effectively no coupling at this band — skip the source's
+            // reverb contribution entirely. (Without this guard the
+            // 10^(L_w + C/10) term still adds a vanishing-but-nonzero
+            // bias that the energy sum dutifully accumulates.)
+            coupling_db = null;
+          }
+        }
+      }
+      if (coupling_db !== null) {
+        const L_w = L_w_with_eq - d.tl_db_applied + coupling_db;
+        const L_rev = L_w + revConst_db;
+        reverbPowerSum += Math.pow(10, L_rev / 10);
+      }
     }
     // Tier 1a — energy-sum diffraction over wall edges and Kuttruff
     // wall re-radiation alongside the direct (through-wall TL) path.
@@ -707,13 +816,28 @@ export function computeMultiSourceSPL({
   const effEnableTier1a = (isOutdoor && isTier1aOutdoorOverrideDisabled())
     ? false
     : enableTier1a;
+  // Phase 3 (Dr. Chen 2026-05-25): when caller doesn't override
+  // isSourceInside, derive it (and the per-EXTERIOR-source coupling
+  // map) from the classifier. Caller's explicit isSourceInside still
+  // wins for back-compat — but tests passing one without a materials
+  // catalogue get the historical "no coupling adjustment" behaviour.
+  let exteriorCouplings = null;
+  let effIsSourceInside = isSourceInside;
+  if (!effIsSourceInside) {
+    const cls = _buildSourceClassifications(sources, room, materials);
+    if (cls) {
+      effIsSourceInside = cls.isSourceInside;
+      exteriorCouplings = cls.couplings;
+    }
+  }
   // One-shot helper: build a context and evaluate at this listener.
   // Callers with many listeners against the same source set should use
   // `precomputeSPLContext` + `computeMultiSourceSPLFromContext` directly
   // to avoid redoing the per-source resolution on every vertex.
   const ctx = precomputeSPLContext({
     sources, getSpeakerDef, freq_hz, roomConstantR: effR,
-    roomR_per_band: effRBands, isSourceInside, eqGainDb,
+    roomR_per_band: effRBands, isSourceInside: effIsSourceInside,
+    exteriorCouplings, eqGainDb,
     enableTier1a: effEnableTier1a,
     // Phase A3: pass geometry params so porch drives are pre-computed
     // ONCE per call. Per-listener callers (tests, panel readings) only
@@ -762,15 +886,46 @@ export function computeListenerBreakdown({
   // Reverb leak uses the SAME per-band TL the direct path computed,
   // mirroring the multi-source hot loop. The legacy back-compat
   // (materials missing → flat 30 dB) flows through pathWallLossDb.
+  //
+  // Phase 3 (Dr. Chen 2026-05-25): mirror the EXTERIOR-source coupling
+  // gate from computeMultiSourceSPLFromContext. Sources classified
+  // EXTERIOR have their L_w_reverb reduced by |C_couple[k]| before
+  // energy-summing; those whose coupling at this band is −Infinity or
+  // < −120 dB are skipped entirely. Same _buildSourceClassifications
+  // helper, same C_couple table, same band index → identical numerical
+  // gate as the heatmap path. Without this the per-listener readout
+  // and the heatmap would silently disagree by 3–5 dB on the surau.
   let reverb_db = -Infinity;
   if (roomConstantR > 0) {
+    const cls = _buildSourceClassifications(sources, room, materials);
+    const couplings = cls?.couplings ?? null;
+    const couplingBandIdx = (materials && Array.isArray(materials.frequency_bands_hz))
+      ? (() => {
+          const bIdx = bandIndexForFreq(materials, freq_hz);
+          return (bIdx >= 0 && bIdx < COUPLING_NUM_BANDS) ? bIdx : -1;
+        })()
+      : -1;
     let reverbSum = 0;
     for (let i = 0; i < sources.length; i++) {
       const src = sources[i];
       const def = getSpeakerDef(src.modelUrl);
       if (!def) continue;
       const tl = pathWallLossDb(src.position, listenerPos, room, materials, freq_hz);
-      const L_w = approxSoundPowerLevel(def, src.power_watts) - tl.tl_db;
+      // Coupling adjustment: 0 dB for INTERIOR / FLUSH_INWARD / no-coupling-
+      // map; non-positive dB for EXTERIOR. null sentinel = "no meaningful
+      // coupling at this band, skip the source's reverb contribution".
+      let coupling_db = 0;
+      const couplingArr = couplings?.get(src);
+      if (couplingArr) {
+        if (couplingBandIdx < 0) {
+          coupling_db = 0;
+        } else {
+          coupling_db = couplingArr[couplingBandIdx];
+          if (!Number.isFinite(coupling_db) || coupling_db < -120) coupling_db = null;
+        }
+      }
+      if (coupling_db === null) continue;
+      const L_w = approxSoundPowerLevel(def, src.power_watts) - tl.tl_db + coupling_db;
       const L_rev = L_w + 10 * Math.log10(4 / roomConstantR);
       reverbSum += Math.pow(10, L_rev / 10);
     }
@@ -967,7 +1122,6 @@ export function computeSPLGrid({
   // re-radiation to indoor would break it. Indoor re-radiation, if ever
   // wanted, is a separate decision wired by the indoor caller.
   let roomR_per_band = null;
-  let isSourceInside = null;
   if (outdoor && materials && room && Array.isArray(materials.frequency_bands_hz)) {
     const bands = materials.frequency_bands_hz;
     roomR_per_band = bands.map(fb => computeRoomConstant(room, materials, fb, []));
@@ -977,11 +1131,19 @@ export function computeSPLGrid({
       for (let k = 0; k < Math.min(7, roomR_per_band.length); k++) padded[k] = roomR_per_band[k];
       roomR_per_band = padded;
     }
-    // Classify outdoor-mounted sources (e.g. azan horns on a podium) as
-    // OUTSIDE the building so they don't inflate the interior reverberant
-    // aggregate that feeds wall re-radiation. Indoor sources stay inside.
-    isSourceInside = (src) => isInsideRoom3D(src.position, room);
   }
+  // Phase 3 (Dr. Chen 2026-05-25): classify every source ONCE per
+  // heatmap rebuild and build the coupling table for EXTERIOR ones.
+  // Replaces the outdoor-only inline `isSourceInside = src =>
+  // isInsideRoom3D(src.position, room)` predicate — the classifier is
+  // now the single source of truth for source membership AND it gives
+  // the per-band C_couple table the reverb-leak loop needs. INDOOR
+  // gets the same plumbing (Dr. Chen's whole point — symmetric
+  // treatment of the surau-style geometry whether the user is in
+  // outdoor or indoor mode). Pass-through when room is missing.
+  const cls = _buildSourceClassifications(sources, room, materials);
+  const isSourceInside = cls?.isSourceInside ?? null;
+  const exteriorCouplings = cls?.couplings ?? null;
 
   // Hoist the SPL context OUT of the cell loop (was rebuilt per cell via
   // computeMultiSourceSPL — violated the "build context once per frame"
@@ -998,7 +1160,7 @@ export function computeSPLGrid({
   // per heatmap).
   const ctxInside = useSTI ? null : precomputeSPLContext({
     sources, getSpeakerDef, freq_hz, roomConstantR, enableTier1a,
-    roomR_per_band, isSourceInside,
+    roomR_per_band, isSourceInside, exteriorCouplings,
     room, materials, temperature_C, airAbsorption, airAbsorptionFn,
   });
   // Field cells (outside the footprint) have no enclosing room → no diffuse
@@ -1008,7 +1170,7 @@ export function computeSPLGrid({
     : (roomConstantR > 0
         ? precomputeSPLContext({
             sources, getSpeakerDef, freq_hz, roomConstantR: 0, enableTier1a,
-            roomR_per_band, isSourceInside,
+            roomR_per_band, isSourceInside, exteriorCouplings,
             room, materials, temperature_C, airAbsorption, airAbsorptionFn,
           })
         : ctxInside);
