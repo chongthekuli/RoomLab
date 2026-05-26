@@ -117,7 +117,10 @@ function renderMiniCard(item) {
 
 function renderPlacedRow(f, idx, catalogue) {
   const row = catalogue.get(f.catalogueId);
-  const name = f.label || row?.name || f.catalogueId;
+  // Use the catalogue's short_name in the placed-list so the rail
+  // panel column doesn't overflow on long catalogue names; the full
+  // name still appears in the detail pane / report.
+  const name = f.label || row?.short_name || row?.name || f.catalogueId;
   const broken = !row;
   const isSel = state.selectedFurnitureId === f.id;
   return `

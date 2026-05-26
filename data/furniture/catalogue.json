@@ -1,32 +1,20 @@
 {
-  "schema_version": 1,
-  "schema_notes": "FurnitureLAB catalogue. Each entry: an in-room object (non-electrical, non-signal-bearing) that contributes equivalent absorption area A_obj into the room's Sabine/Eyring/ray-trace physics. Schema authored by Lin (docs-writer, catalogue sub-hat) and reviewed by Dr. Chen against ISO 354 measurement discipline. Reliability tag is non-negotiable: 'measured' (cited ISO 354 lab or peer-reviewed lab), 'derived' (calculated from a parent A_obj or surface-area×alpha mapping with a documented derivation), 'estimated' (engineering judgement; UI badges amber, report flags 'low-confidence'). citation.estimated mirrors reliability for serializer convenience.",
+  "schema_version": 2,
+  "schema_notes": "FurnitureLAB catalogue. Each entry: an in-room object (non-electrical, non-signal-bearing) that contributes equivalent absorption area A_obj into the room's Sabine/Eyring/ray-trace physics. Schema authored by Lin (docs-writer, catalogue sub-hat) and reviewed by Dr. Chen against ISO 354 measurement discipline. Reliability tag is non-negotiable: 'measured' (cited ISO 354 lab or peer-reviewed lab), 'derived' (calculated from a parent A_obj or surface-area×alpha mapping with a documented derivation), 'estimated' (engineering judgement; UI badges amber, report flags 'low-confidence'). citation.estimated mirrors reliability for serializer convenience. Schema v2 (2026-05-26): adds short_name (compact 2D / HUD label) and visual.family (3D + iso-glyph dispatch key, one of 'seat' | 'slab-on-legs' | 'vertical-box' | 'flat-pad'); both required on every row.",
   "items": [
     {
       "id": "theater-seat-upholstered-occupied",
       "name": "Theater seat, upholstered (occupied)",
+      "short_name": "Seat (occ)",
       "category": "seating",
       "subcategory": "audience",
-      "footprint": {
-        "shape": "rectangle",
-        "width_m": 0.55,
-        "depth_m": 0.60,
-        "height_m": 1.20
-      },
-      "placement": {
-        "mounts_on": "floor",
-        "stackable": false,
-        "default_spacing_m": 0.05
-      },
+      "footprint": { "shape": "rectangle", "width_m": 0.55, "depth_m": 0.60, "height_m": 1.20 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.05 },
+      "visual": { "family": "seat" },
       "acoustics": {
         "model": "equivalent_absorption_area",
         "A_obj_m2_sab_per_band": {
-          "125": 0.15,
-          "250": 0.19,
-          "500": 0.23,
-          "1000": 0.25,
-          "2000": 0.23,
-          "4000": 0.22
+          "125": 0.15, "250": 0.19, "500": 0.23, "1000": 0.25, "2000": 0.23, "4000": 0.22
         },
         "scattering_per_band": null,
         "occupancy_state": "occupied",
@@ -36,13 +24,321 @@
         "source": "Beranek & Hidaka (1998), derived",
         "reference": "Beranek L L, Hidaka T. Acoustical absorption by audiences and seats. JASA 104(6) 3169-3177. Per-seat A_obj derived from area-based alpha (medium upholstered audience, occupied) times nominal seat footprint 0.275 m^2.",
         "doi": "10.1121/1.423957",
-        "measurement_method": "ISO 354 reverberation-room method (source publication); per-seat A_obj is a derivation, not a direct measurement.",
+        "measurement_method": "ISO 354 reverberation-room (source publication); per-seat A_obj is a derivation, not a direct measurement.",
         "estimated": true,
-        "notes": "Phase 0 placeholder. Phase 1 substitutes direct per-seat ISO 354 numbers from Beranek 2nd ed. (2004) Table 7.2 row 1 once verified against the original printed table."
+        "notes": "Phase 0 placeholder. Phase 1 substitutes direct per-seat ISO 354 numbers from Beranek 2nd ed. (2004) Table 7.2 once verified against the original printed table."
       },
       "reliability": "derived",
       "linked_device_id": null,
-      "schema_version": 1,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "theater-seat-upholstered-empty",
+      "name": "Theater seat, upholstered (empty)",
+      "short_name": "Seat (empty)",
+      "category": "seating",
+      "subcategory": "audience",
+      "footprint": { "shape": "rectangle", "width_m": 0.55, "depth_m": 0.60, "height_m": 1.20 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.05 },
+      "visual": { "family": "seat" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.11, "250": 0.15, "500": 0.18, "1000": 0.19, "2000": 0.18, "4000": 0.15
+        },
+        "scattering_per_band": null,
+        "occupancy_state": "empty",
+        "paired_state_id": "theater-seat-upholstered-occupied"
+      },
+      "citation": {
+        "source": "Beranek & Hidaka (1998), derived",
+        "reference": "Beranek L L, Hidaka T. Acoustical absorption by audiences and seats. JASA 104(6) 3169-3177. Per-seat A_obj derived from area-based alpha for medium upholstered audience, UNOCCUPIED, times nominal seat footprint 0.275 m^2. Empty/occupied differ by ~3x at mids per Beranek 2e Table 7.1 vs 7.2.",
+        "doi": "10.1121/1.423957",
+        "measurement_method": "ISO 354 reverberation-room (source publication); per-seat A_obj is a derivation, not a direct measurement.",
+        "estimated": true,
+        "notes": "Pair-state companion to theater-seat-upholstered-occupied. Phase 1.5 will add a UI toggle so the user flips a placed seat between empty and occupied without re-placing."
+      },
+      "reliability": "derived",
+      "linked_device_id": null,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "audience-block-per-m2-occupied",
+      "name": "Audience block (occupied, per m²)",
+      "short_name": "Audience 1 m²",
+      "category": "audience",
+      "subcategory": "block",
+      "footprint": { "shape": "rectangle", "width_m": 1.00, "depth_m": 1.00, "height_m": 1.20 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.00 },
+      "visual": { "family": "flat-pad" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.55, "250": 0.75, "500": 0.85, "1000": 0.92, "2000": 0.88, "4000": 0.85
+        },
+        "scattering_per_band": null,
+        "occupancy_state": "occupied",
+        "paired_state_id": null
+      },
+      "citation": {
+        "source": "Beranek, Concert Halls and Opera Houses 2nd ed. (2004)",
+        "reference": "Beranek L L. Concert Halls and Opera Houses, 2nd ed., Springer 2004, Table 7.3 — occupied medium upholstered audience, per-m² absorption coefficient. Reported as area-based alpha; here we encode the same number as per-m² A_obj because each placed block represents 1 m² of seating area.",
+        "doi": null,
+        "measurement_method": "ISO 354 reverberation-room (source publication aggregates multiple concert-hall measurements).",
+        "estimated": false,
+        "notes": "Use this row when modelling dense seating where the discrete-chair sum would overstate (audience absorbs collectively, not as the sum of individual seats). Beranek 2e §7.3 explicitly recommends the area-based form for audiences >50 seats deep."
+      },
+      "reliability": "derived",
+      "linked_device_id": null,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "office-chair-padded-occupied",
+      "name": "Office chair, padded (occupied)",
+      "short_name": "Office (occ)",
+      "category": "seating",
+      "subcategory": "office",
+      "footprint": { "shape": "rectangle", "width_m": 0.60, "depth_m": 0.60, "height_m": 1.10 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.10 },
+      "visual": { "family": "seat" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.30, "250": 0.45, "500": 0.55, "1000": 0.60, "2000": 0.55, "4000": 0.50
+        },
+        "scattering_per_band": null,
+        "occupancy_state": "occupied",
+        "paired_state_id": "office-chair-padded-empty"
+      },
+      "citation": {
+        "source": "Bistafa & Bradley (2000), derived",
+        "reference": "Bistafa S R, Bradley J S. Reverberation time and maximum background-noise level for classrooms. JASA 108(4) 1721-1731 (2000), Table 2 — student desk + occupant. Adapted here for a generic padded office chair occupied by an adult.",
+        "doi": "10.1121/1.1310235",
+        "measurement_method": "ISO 354 reverberation-room.",
+        "estimated": true,
+        "notes": "Adapted from classroom-furniture measurements; office-chair-specific ISO 354 lab data is rare. Numbers should be in the right neighbourhood (occupied office vs. student chair differ <0.05 m² Sa at mids per Hodgson 1999)."
+      },
+      "reliability": "derived",
+      "linked_device_id": null,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "office-chair-padded-empty",
+      "name": "Office chair, padded (empty)",
+      "short_name": "Office (empty)",
+      "category": "seating",
+      "subcategory": "office",
+      "footprint": { "shape": "rectangle", "width_m": 0.60, "depth_m": 0.60, "height_m": 1.10 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.10 },
+      "visual": { "family": "seat" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.10, "250": 0.15, "500": 0.20, "1000": 0.25, "2000": 0.30, "4000": 0.30
+        },
+        "scattering_per_band": null,
+        "occupancy_state": "empty",
+        "paired_state_id": "office-chair-padded-occupied"
+      },
+      "citation": {
+        "source": "Bistafa & Bradley (2000), derived",
+        "reference": "Bistafa S R, Bradley J S. Reverberation time and maximum background-noise level for classrooms. JASA 108(4) 1721-1731 (2000), Table 2 — student chair unoccupied. Adapted here for a generic padded office chair empty.",
+        "doi": "10.1121/1.1310235",
+        "measurement_method": "ISO 354 reverberation-room.",
+        "estimated": true,
+        "notes": "Empty office chairs absorb ~3× less than occupied per Bistafa & Bradley; numbers reflect that ratio."
+      },
+      "reliability": "derived",
+      "linked_device_id": null,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "conference-table-wood-2400",
+      "name": "Conference table, solid wood, 2.4 m",
+      "short_name": "Conf table",
+      "category": "table",
+      "subcategory": "conference",
+      "footprint": { "shape": "rectangle", "width_m": 2.40, "depth_m": 1.00, "height_m": 0.74 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.30 },
+      "visual": { "family": "slab-on-legs" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.12, "250": 0.12, "500": 0.12, "1000": 0.14, "2000": 0.19, "4000": 0.24
+        },
+        "scattering_per_band": null,
+        "occupancy_state": null,
+        "paired_state_id": null
+      },
+      "citation": {
+        "source": "Cox & D'Antonio (2nd ed., 2009), engineering estimate",
+        "reference": "Cox T J, D'Antonio P. Acoustic Absorbers and Diffusers, 2nd ed. (2009), §3.6 — wood-on-frame office furniture is essentially specular at LF, with mild edge-scattering rising at HF. A_obj = footprint area (2.4 m²) × estimated alpha {0.05, 0.05, 0.05, 0.06, 0.08, 0.10}.",
+        "doi": null,
+        "measurement_method": "Not directly measured; derived from material-class behaviour.",
+        "estimated": true,
+        "notes": "Tables are near-inert acoustically — placing one barely moves RT60. Included for visual completeness and so the BoM reports the right object count, not because it changes the room sound."
+      },
+      "reliability": "estimated",
+      "linked_device_id": null,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "lectern-wood",
+      "name": "Lectern, wood (free-standing)",
+      "short_name": "Lectern",
+      "category": "table",
+      "subcategory": "lectern",
+      "footprint": { "shape": "rectangle", "width_m": 0.60, "depth_m": 0.45, "height_m": 1.15 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.10 },
+      "visual": { "family": "slab-on-legs" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.02, "250": 0.02, "500": 0.02, "1000": 0.03, "2000": 0.04, "4000": 0.05
+        },
+        "scattering_per_band": null,
+        "occupancy_state": null,
+        "paired_state_id": null
+      },
+      "citation": {
+        "source": "Engineering estimate",
+        "reference": "No published ISO 354 row for free-standing lecterns. A_obj derived from footprint area (0.27 m²) × wood-finish alpha {0.07, 0.08, 0.08, 0.11, 0.15, 0.19} per Cox & D'Antonio §3.6 generic wood values.",
+        "doi": null,
+        "measurement_method": "Not directly measured; back-of-envelope derivation from material alpha and footprint.",
+        "estimated": true,
+        "notes": "Acoustically negligible. Placed lecterns won't move RT60. Tagged estimated; if you have a measured lectern row from a vendor cert, swap in and bump reliability."
+      },
+      "reliability": "estimated",
+      "linked_device_id": null,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "bookshelf-loaded-1x2",
+      "name": "Bookshelf, loaded, 1 m wide × 2 m tall",
+      "short_name": "Bookshelf",
+      "category": "storage",
+      "subcategory": "shelf",
+      "footprint": { "shape": "rectangle", "width_m": 1.00, "depth_m": 0.30, "height_m": 2.00 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.05 },
+      "visual": { "family": "vertical-box" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.60, "250": 0.60, "500": 0.80, "1000": 1.00, "2000": 1.20, "4000": 1.30
+        },
+        "scattering_per_band": {
+          "125": 0.20, "250": 0.30, "500": 0.45, "1000": 0.55, "2000": 0.65, "4000": 0.70
+        },
+        "occupancy_state": null,
+        "paired_state_id": null
+      },
+      "citation": {
+        "source": "Cox & D'Antonio (2nd ed., 2009), derived",
+        "reference": "Cox T J, D'Antonio P. Acoustic Absorbers and Diffusers, 2nd ed. (2009), §3.6 irregular-surface absorbers + §6 scattering data. A_obj = face area (1 m × 2 m = 2 m²) × loaded-bookshelf alpha {0.30, 0.30, 0.40, 0.50, 0.60, 0.65}. Scattering coefficients estimated from §6.4 generic irregular-surface envelope.",
+        "doi": null,
+        "measurement_method": "Not directly measured; alpha derived from material-class measurements.",
+        "estimated": true,
+        "notes": "Loaded bookshelves are surprisingly effective mid/HF absorbers AND diffusers (mix of book covers, depths, spines breaks specular reflection). Both alpha and scattering are populated here; the precision ray tracer (Phase 2) will consume the scattering. Sabine + Eyring only read alpha."
+      },
+      "reliability": "estimated",
+      "linked_device_id": null,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "prayer-mat-unrolled-per-m2",
+      "name": "Prayer mat, unrolled (per m²)",
+      "short_name": "Prayer mat",
+      "category": "decorative",
+      "subcategory": "floor-covering",
+      "footprint": { "shape": "rectangle", "width_m": 1.00, "depth_m": 1.00, "height_m": 0.02 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.00 },
+      "visual": { "family": "flat-pad" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.05, "250": 0.10, "500": 0.15, "1000": 0.25, "2000": 0.35, "4000": 0.45
+        },
+        "scattering_per_band": null,
+        "occupancy_state": null,
+        "paired_state_id": null
+      },
+      "citation": {
+        "source": "Beranek 2nd ed. (2004) Table 6.2, derived",
+        "reference": "Beranek L L. Concert Halls and Opera Houses, 2nd ed. (2004), Table 6.2 — thin carpet on concrete. A_obj per m² of mat = published per-m² alpha {0.05, 0.10, 0.15, 0.25, 0.35, 0.45}. A prayer mat is acoustically equivalent to a thin tufted carpet over a hard floor.",
+        "doi": null,
+        "measurement_method": "ISO 354 reverberation-room (source publication).",
+        "estimated": false,
+        "notes": "Floor coverage has a sharp HF-dominant absorption signature (HF wavelengths interact with fibres; LF passes through). Use multiple placed mats to cover the actual praying area; each unit represents 1 m² of coverage."
+      },
+      "reliability": "derived",
+      "linked_device_id": null,
+      "schema_version": 2,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    },
+    {
+      "id": "server-rack-42u-perforated",
+      "name": "Server rack, 42U, perforated front",
+      "short_name": "Rack 42U",
+      "category": "tech",
+      "subcategory": "rack",
+      "footprint": { "shape": "rectangle", "width_m": 0.60, "depth_m": 1.00, "height_m": 2.00 },
+      "placement": { "mounts_on": "floor", "stackable": false, "default_spacing_m": 0.10 },
+      "visual": { "family": "vertical-box" },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.08, "250": 0.15, "500": 0.25, "1000": 0.35, "2000": 0.30, "4000": 0.25
+        },
+        "scattering_per_band": null,
+        "occupancy_state": null,
+        "paired_state_id": null
+      },
+      "citation": {
+        "source": "Engineering estimate",
+        "reference": "Estimated from perforated-panel absorber data (Beranek 2e Table 6.8 — perforated steel over absorptive cavity) scaled to a 42U cabinet with ~63% open front door. Cavity-tuned mid-frequency peak typical of perforated absorbers.",
+        "doi": null,
+        "measurement_method": "Not directly measured; back-of-envelope derivation.",
+        "estimated": true,
+        "notes": "MARKED FOR DeviceLAB BOUNDARY MIGRATION. Phase 2: this row's acoustic block migrates onto the DeviceLAB rack catalogue entry (Felix's Option-A surrogate-link mitigation per feedback_preset_plumbing). linked_device_id stays null until DeviceLAB rack ids are stabilised."
+      },
+      "reliability": "estimated",
+      "linked_device_id": null,
+      "schema_version": 2,
       "added": "2026-05-26",
       "revised": null,
       "revised_by": null,

@@ -6789,6 +6789,131 @@ function reanchorTreatmentsOnRoomChange() {
 
 let furnitureGroup = null;
 
+// Shared palette across all family builders — Viktor's brief (one
+// visual system for every object so the room reads as one room).
+const FURN_PAPER_LIGHT = 0xF2EDE3;
+const FURN_PAPER_MID   = 0xE5DDCB;
+const FURN_PAPER_DARK  = 0xD6CBB3;
+const FURN_ACCENT      = 0x9A3F2A;
+const FURN_METAL       = 0x4A4F58;
+const FURN_BROKEN      = 0x8A8A8A;
+
+function _furnMat(color, roughness = 0.80, metalness = 0.0) {
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness });
+}
+
+function _selectionRingFor(mesh) {
+  if (!mesh?.geometry) return null;
+  const ring = new THREE.LineSegments(
+    new THREE.EdgesGeometry(mesh.geometry, 12),
+    new THREE.LineBasicMaterial({ color: 0x00d4ff }),
+  );
+  ring.position.copy(mesh.position);
+  ring.scale.multiplyScalar(1.02);
+  return ring;
+}
+
+function _addMesh(group, geometry, material, x, y, z) {
+  const m = new THREE.Mesh(geometry, material);
+  m.position.set(x, y, z);
+  m.castShadow = true; m.receiveShadow = true;
+  group.add(m);
+  return m;
+}
+
+// --- Family builders. All work in OBJECT-LOCAL coords with the footprint
+// centred at x=0 (state.x); +y is depth INTO the room (state.y at +z in
+// world frame); +z (here) is height UP. Caller positions + rotates the
+// returned group. -------------------------------------------------------
+
+// Seat family — chairs, theater seats, office chairs. Base slab + cushion
+// (accent terracotta = active acoustic surface) + back + optional armrests.
+function _build_seat(w, d, h, broken) {
+  const group = new THREE.Group();
+  const matBase = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_DARK,  0.85);
+  const matCush = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT,      0.65);
+  const matBack = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_MID,   0.80);
+  const matArm  = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_LIGHT, 0.80);
+
+  const seatTop_z = Math.min(0.50, h * 0.42);
+  const cushHi_z  = Math.min(0.55, h * 0.46);
+  const armHi_z   = Math.min(0.72, h * 0.55);
+
+  _addMesh(group, new THREE.BoxGeometry(w * 0.92, 0.10, d * 0.92), matBase, 0, 0.05, d / 2);
+  const cushion = _addMesh(group, new THREE.BoxGeometry(w * 0.86, cushHi_z - seatTop_z, d * 0.84), matCush, 0, (seatTop_z + cushHi_z) / 2, d * 0.46);
+  _addMesh(group, new THREE.BoxGeometry(w * 0.86, h - cushHi_z, 0.08), matBack, 0, (cushHi_z + h) / 2, d - 0.08);
+  if (w >= 0.45) {
+    for (const sx of [-1, 1]) {
+      _addMesh(group, new THREE.BoxGeometry(0.08, armHi_z - seatTop_z, d * 0.78), matArm, sx * (w / 2 - 0.05), (seatTop_z + armHi_z) / 2, d * 0.49);
+    }
+  }
+  return { group, activeMesh: cushion };
+}
+
+// Slab-on-legs family — conference tables, desks, lecterns. Top wood slab
+// (the visible "table") on four legs. Leg inset 0.05 m from each corner.
+function _build_slabOnLegs(w, d, h, broken) {
+  const group = new THREE.Group();
+  const matSlab = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_MID,   0.55); // wood-ish
+  const matLeg  = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_DARK,  0.70);
+  const slabThk = Math.min(0.05, h * 0.08);
+  const legR    = Math.min(0.04, w * 0.04, d * 0.04);
+  const slabZ   = h - slabThk / 2;
+  const slab = _addMesh(group, new THREE.BoxGeometry(w, slabThk, d), matSlab, 0, slabZ, d / 2);
+  // 4 legs — cylinder geometry for a softer silhouette than box legs.
+  const legGeo = new THREE.CylinderGeometry(legR, legR, h - slabThk, 12);
+  for (const sx of [-1, 1]) {
+    for (const sy of [0, 1]) {
+      const inset = 0.05;
+      _addMesh(group, legGeo, matLeg,
+        sx * (w / 2 - inset),
+        (h - slabThk) / 2,
+        sy === 0 ? inset : d - inset);
+    }
+  }
+  return { group, activeMesh: slab };
+}
+
+// Vertical-box family — bookshelves, server racks. Tall box with a few
+// horizontal divider lines that read as shelves / U-spaces. Front face is
+// the accent because that's where the acoustics happens (loaded books,
+// perforated front door).
+function _build_verticalBox(w, d, h, broken) {
+  const group = new THREE.Group();
+  const matBody  = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_DARK, 0.75);
+  const matFront = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT,     0.55);
+  const matDivider = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_LIGHT, 0.80);
+  // Main body — full footprint × height, slight inset.
+  const body = _addMesh(group, new THREE.BoxGeometry(w * 0.98, h, d * 0.95), matBody, 0, h / 2, d / 2);
+  // Front face accent — thin slab on the front (y near 0)
+  _addMesh(group, new THREE.BoxGeometry(w * 0.92, h * 0.96, 0.02), matFront, 0, h / 2, 0.02);
+  // 4 horizontal dividers spanning the front
+  for (let i = 1; i <= 4; i++) {
+    const yz = (i / 5) * h;
+    _addMesh(group, new THREE.BoxGeometry(w * 0.92, 0.02, 0.025), matDivider, 0, yz, 0.01);
+  }
+  return { group, activeMesh: body };
+}
+
+// Flat-pad family — audience block, prayer mat, rug, drape (free-standing
+// proxy). Thin horizontal slab hugging the floor, accent-coloured top
+// surface = the active acoustic surface. Very low height so the placed
+// mark reads as a footprint, not a piece of furniture.
+function _build_flatPad(w, d, h, broken) {
+  const group = new THREE.Group();
+  const padThk = Math.min(0.04, Math.max(0.02, h));
+  const matPad = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.95);
+  const pad = _addMesh(group, new THREE.BoxGeometry(w * 0.98, padThk, d * 0.98), matPad, 0, padThk / 2, d / 2);
+  return { group, activeMesh: pad };
+}
+
+const FAMILY_BUILDERS = {
+  'seat': _build_seat,
+  'slab-on-legs': _build_slabOnLegs,
+  'vertical-box': _build_verticalBox,
+  'flat-pad': _build_flatPad,
+};
+
 function _buildFurnitureMesh(f, row) {
   // Footprint dimensions from the catalogue row; sane defaults if the
   // row is missing (broken catalogueId — same graceful-degrade pattern
@@ -6798,81 +6923,21 @@ function _buildFurnitureMesh(f, row) {
   const h = Math.max(0.1, row?.footprint?.height_m ?? 1.20);
   const broken = !row;
 
-  const group = new THREE.Group();
+  const family = row?.visual?.family || 'seat';
+  const builder = FAMILY_BUILDERS[family] || FAMILY_BUILDERS['seat'];
+  const { group, activeMesh } = builder(w, d, h, broken);
+
   group.name = `furniture:${f.id}`;
   group.userData.furnitureId = f.id;
   group.userData.catalogueId = f.catalogueId;
 
-  // Phase 0 generic seat-shape composite. Three boxes: base slab, seat
-  // cushion (the accent surface), and a thin back panel rising to the
-  // full catalogue height. Caller positions the group; this builder
-  // works in OBJECT-LOCAL coords with the footprint centred at origin
-  // (x: -w/2..w/2, y: 0..d, z: 0..h).
-  const PAPER_LIGHT = 0xF2EDE3;
-  const PAPER_MID   = 0xE5DDCB;
-  const PAPER_DARK  = 0xD6CBB3;
-  const ACCENT      = 0x9A3F2A;
-  const matBase   = new THREE.MeshStandardMaterial({ color: broken ? 0x8a8a8a : PAPER_DARK,  roughness: 0.85, metalness: 0.0 });
-  const matCush   = new THREE.MeshStandardMaterial({ color: broken ? 0x8a8a8a : ACCENT,      roughness: 0.65, metalness: 0.0 });
-  const matBack   = new THREE.MeshStandardMaterial({ color: broken ? 0x8a8a8a : PAPER_MID,   roughness: 0.80, metalness: 0.0 });
-  const matArm    = new THREE.MeshStandardMaterial({ color: broken ? 0x8a8a8a : PAPER_LIGHT, roughness: 0.80, metalness: 0.0 });
-
-  const seatTop_z  = Math.min(0.50, h * 0.42);
-  const cushHi_z   = Math.min(0.55, h * 0.46);
-  const armHi_z    = Math.min(0.72, h * 0.55);
-
-  // Base slab (0..0.10 z, slight inset from footprint edges so legs
-  // read as legs).
-  {
-    const g = new THREE.BoxGeometry(w * 0.92, 0.10, d * 0.92);
-    const m = new THREE.Mesh(g, matBase);
-    m.position.set(0, 0.05, d / 2);
-    m.castShadow = true; m.receiveShadow = true;
-    group.add(m);
-  }
-  // Seat cushion (accent terracotta, the active surface)
-  {
-    const g = new THREE.BoxGeometry(w * 0.86, cushHi_z - seatTop_z, d * 0.84);
-    const m = new THREE.Mesh(g, matCush);
-    m.position.set(0, (seatTop_z + cushHi_z) / 2, d * 0.46);
-    m.castShadow = true; m.receiveShadow = true;
-    group.add(m);
-  }
-  // Back panel (rises from cushion top to full height; thickness 0.08 m)
-  {
-    const g = new THREE.BoxGeometry(w * 0.86, h - cushHi_z, 0.08);
-    const m = new THREE.Mesh(g, matBack);
-    m.position.set(0, (cushHi_z + h) / 2, d - 0.08);
-    m.castShadow = true; m.receiveShadow = true;
-    group.add(m);
-  }
-  // Two armrests (only if there's reasonable width).
-  if (w >= 0.45) {
-    for (const sx of [-1, 1]) {
-      const g = new THREE.BoxGeometry(0.08, armHi_z - seatTop_z, d * 0.78);
-      const m = new THREE.Mesh(g, matArm);
-      m.position.set(sx * (w / 2 - 0.05), (seatTop_z + armHi_z) / 2, d * 0.49);
-      m.castShadow = true; m.receiveShadow = true;
-      group.add(m);
-    }
-  }
-
-  // Selection highlight — emissive ring on the cushion when this is the
-  // currently-selected piece. Implementation: clone the cushion mesh,
-  // scale slightly, swap to a wireframe-emissive material.
+  // Selection highlight — cyan edge ring on the active mesh (the
+  // accent surface for each family). Uniform across all builders so
+  // selection reads consistently regardless of category.
   if (state.selectedFurnitureId === f.id) {
-    const cushion = group.children[1];
-    if (cushion?.geometry) {
-      const ring = new THREE.LineSegments(
-        new THREE.EdgesGeometry(cushion.geometry, 12),
-        new THREE.LineBasicMaterial({ color: 0x00d4ff }),
-      );
-      ring.position.copy(cushion.position);
-      ring.scale.multiplyScalar(1.02);
-      group.add(ring);
-    }
+    const ring = _selectionRingFor(activeMesh);
+    if (ring) group.add(ring);
   }
-
   return group;
 }
 

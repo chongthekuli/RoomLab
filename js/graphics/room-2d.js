@@ -3121,7 +3121,12 @@ function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room) {
     const rot = f.rotation_deg ?? 0;
     const isSel = f.id === selectedId;
     const isBroken = !row;
-    const lblText = f.label || row?.name || f.catalogueId || f.id;
+    // Compact label for the top-down plan — full catalogue names like
+    // "Theater seat, upholstered (occupied)" overflow the footprint
+    // rectangle. Prefer the user's f.label override, then the
+    // catalogue's short_name (1-16 chars), only fall back to the long
+    // name / id if the row is malformed or missing.
+    const lblText = f.label || row?.short_name || row?.name || f.catalogueId || f.id;
 
     s += `<g class="r2d-furniture ${isSel ? 'selected' : ''} ${isBroken ? 'broken' : ''}"
             data-furniture-id="${f.id}"

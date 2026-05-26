@@ -128,14 +128,98 @@ function glyph_theaterSeat({ scale = 70, cx = 55, cy = 110, paper = false } = {}
     </g>`;
 }
 
+// --- Family-aware iso builders ---------------------------------------
+// Each family produces an iso illustration sized from the catalogue
+// footprint. Families match the 3D builders in scene.js so the card
+// preview matches the in-scene mesh silhouette.
+
+// Slab-on-legs (tables, lecterns). Top slab gets the accent stroke
+// (top surface is what the room "sees").
+function glyph_slabOnLegs(item, { scale = 70, cx = 55, cy = 110 } = {}) {
+  const W = Math.max(0.1, item?.footprint?.width_m  ?? 1.0);
+  const D = Math.max(0.1, item?.footprint?.depth_m  ?? 0.5);
+  const H = Math.max(0.1, item?.footprint?.height_m ?? 0.74);
+  const slabThk = Math.min(0.04, H * 0.08);
+  const slabHi  = H;
+  const slabLo  = H - slabThk;
+  const slab    = boxFaces(0, 0, slabLo, W, D, slabHi, scale, cx, cy);
+  // Four legs as thin vertical boxes (inset 0.05 m from corners).
+  const inset = 0.05;
+  const legR  = 0.03;
+  const leg = (x, y) => boxFaces(x - legR, y - legR, 0, x + legR, y + legR, slabLo, scale, cx, cy);
+  const legs = [leg(inset, inset), leg(W - inset, inset), leg(inset, D - inset), leg(W - inset, D - inset)];
+  return `
+    <g class="fl-glyph fl-glyph-slab" stroke="${INK}" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      ${legs.map(l => `
+        <path d="${l.right}" fill="${PAPER_SHADE_DARK}" />
+        <path d="${l.front}" fill="${PAPER_SHADE_DARK}" />
+        <path d="${l.top}"   fill="${PAPER_SHADE_DARK}" />
+      `).join('')}
+      <path d="${slab.right}" fill="${PAPER_SHADE_MID}" />
+      <path d="${slab.front}" fill="${PAPER_SHADE_MID}" />
+      <path d="${slab.top}"   fill="${PAPER_SHADE_LIGHT}" stroke="${ACCENT}" stroke-width="1.6" />
+    </g>`;
+}
+
+// Vertical box (bookshelves, server racks). Front face accent +
+// horizontal dividers that read as shelves / U-rows.
+function glyph_verticalBox(item, { scale = 70, cx = 55, cy = 110 } = {}) {
+  const W = Math.max(0.1, item?.footprint?.width_m  ?? 0.6);
+  const D = Math.max(0.1, item?.footprint?.depth_m  ?? 0.3);
+  const H = Math.max(0.1, item?.footprint?.height_m ?? 2.0);
+  const body = boxFaces(0, 0, 0, W, D, H, scale, cx, cy);
+  // 4 divider lines on the front face. Project each as two iso points.
+  const proj = (x, y, z) => {
+    const [px, py] = iso(x, y, z, scale, cx, cy);
+    return `${px.toFixed(2)},${py.toFixed(2)}`;
+  };
+  const dividers = [];
+  for (let i = 1; i <= 4; i++) {
+    const z = (i / 5) * H;
+    dividers.push(`M${proj(0.02, 0, z)} L${proj(W - 0.02, 0, z)}`);
+  }
+  return `
+    <g class="fl-glyph fl-glyph-vbox" stroke="${INK}" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="${body.right}" fill="${PAPER_SHADE_DARK}" />
+      <path d="${body.front}" fill="${PAPER_SHADE_LIGHT}" stroke="${ACCENT}" stroke-width="1.6" />
+      <path d="${body.top}"   fill="${PAPER_SHADE_MID}" />
+      ${dividers.map(d => `<path d="${d}" stroke="${ACCENT}" stroke-width="0.9" />`).join('')}
+    </g>`;
+}
+
+// Flat pad (audience block, prayer mat, rug). Low slab hugging the
+// floor — small height in iso reads as "carpet, not furniture".
+function glyph_flatPad(item, { scale = 70, cx = 55, cy = 110 } = {}) {
+  const W = Math.max(0.1, item?.footprint?.width_m ?? 1.0);
+  const D = Math.max(0.1, item?.footprint?.depth_m ?? 1.0);
+  const H = Math.max(0.02, Math.min(0.06, item?.footprint?.height_m ?? 0.03));
+  const pad = boxFaces(0, 0, 0, W, D, H, scale, cx, cy);
+  return `
+    <g class="fl-glyph fl-glyph-pad" stroke="${INK}" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="${pad.right}" fill="${PAPER_SHADE_MID}" />
+      <path d="${pad.front}" fill="${PAPER_SHADE_MID}" />
+      <path d="${pad.top}"   fill="${PAPER_SHADE_LIGHT}" stroke="${ACCENT}" stroke-width="1.6" />
+    </g>`;
+}
+
+// Seat family is parameterised by the existing detailed builder above;
+// wrap it so the dispatcher can call all families the same way.
+function glyph_seat(item, opts = {}) {
+  return glyph_theaterSeat(opts);
+}
+
+const FAMILY_GLYPHS = {
+  'seat': glyph_seat,
+  'slab-on-legs': glyph_slabOnLegs,
+  'vertical-box': glyph_verticalBox,
+  'flat-pad': glyph_flatPad,
+};
+
 // --- Public registry -------------------------------------------------
-// Maps catalogueId → glyph builder. New catalogue entries register
-// their glyph here. When a catalogue id has no registered glyph we
-// fall back to a labelled wireframe box (the procedural primitive
-// builder below).
-const GLYPHS = new Map([
-  ['theater-seat-upholstered-occupied', glyph_theaterSeat],
-]);
+// Per-id overrides (use when an item deserves a hand-drawn glyph that
+// trumps its family default). Empty for now; the family dispatch below
+// covers every Phase-1A row.
+const GLYPHS = new Map([]);
 
 /**
  * Build a glyph for the catalogue item. Returns an SVG `<g>` group
@@ -146,9 +230,14 @@ const GLYPHS = new Map([
  * @param {object} opts   override scale / origin / paper-mode
  */
 export function buildGlyph(item, opts = {}) {
-  const builder = GLYPHS.get(item?.id);
-  if (typeof builder === 'function') return builder(opts);
-  // Fallback — procedural wireframe box keyed off the footprint.
+  // 1. Per-id override has highest priority (hand-drawn glyphs).
+  const byId = GLYPHS.get(item?.id);
+  if (typeof byId === 'function') return byId(item, opts);
+  // 2. Family dispatch — every catalogue row carries visual.family.
+  const family = item?.visual?.family;
+  const byFamily = FAMILY_GLYPHS[family];
+  if (typeof byFamily === 'function') return byFamily(item, opts);
+  // 3. Last resort — wireframe box keyed off the footprint.
   return glyph_fallbackBox(item, opts);
 }
 

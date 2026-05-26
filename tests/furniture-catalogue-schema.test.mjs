@@ -52,6 +52,12 @@ const ALLOWED_CATEGORIES = new Set([
   'seating', 'table', 'storage', 'tech', 'decorative', 'architectural', 'audience',
 ]);
 const ALLOWED_MOUNTS = new Set(['floor', 'wall', 'ceiling', 'free-hanging']);
+// Schema v2 (2026-05-26): visual.family drives both the 3D builder
+// (scene.js _buildFurnitureMesh dispatch) and the iso-ink glyph
+// (glyphs.js dispatch). Categories without a dedicated builder fall
+// back to the generic box, but the FIELD is still required so the
+// dispatcher always has something to read.
+const ALLOWED_VISUAL_FAMILIES = new Set(['seat', 'slab-on-legs', 'vertical-box', 'flat-pad']);
 
 for (const item of catalogue.items) {
   const tag = `[${item.id ?? '<no-id>'}]`;
@@ -61,8 +67,12 @@ for (const item of catalogue.items) {
     `${tag} id is a non-empty string`);
   check(typeof item.name === 'string' && item.name.length > 0,
     `${tag} name is a non-empty string (drives card + BoM display)`);
+  check(typeof item.short_name === 'string' && item.short_name.length > 0 && item.short_name.length <= 16,
+    `${tag} short_name is a 1-16 char compact label (drives 2D plan + 3D HUD; long names overflow)`);
   check(typeof item.category === 'string' && ALLOWED_CATEGORIES.has(item.category),
     `${tag} category is one of {${[...ALLOWED_CATEGORIES].join(', ')}}`);
+  check(item.visual && ALLOWED_VISUAL_FAMILIES.has(item.visual.family),
+    `${tag} visual.family is one of {${[...ALLOWED_VISUAL_FAMILIES].join(', ')}} (drives 3D + iso-glyph dispatch)`);
 
   // Footprint — drives the 2D top-down render + 3D bbox
   check(item.footprint && typeof item.footprint === 'object',
