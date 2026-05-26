@@ -328,12 +328,15 @@ presentCss('.pr-page-appendix > .pr-running-header + *',
   'comfort spacing below the running-header rule on the appendix page (BILL OF MATERIALS not cramped against the line, v=572)');
 assert(/\.pg-methodology\s+\.pg-intro\s*\{[^}]*margin-top:\s*7mm/.test(css),
   'methodology intro carries margin-top so it clears the running-header rule (v=573 — beats the .pg-prose margin:0 reset)');
-// Wide methodology/disclaimer/acceptance prose is justified for a neat
-// block edge (v=576); the narrow 4-col method grid stays left (rivers).
+// Methodology page prose is fully justified end-to-end (v=656, user
+// request): wide blocks (intro / disclaimers / acceptance / reviewer)
+// AND the narrow 4-col method-grid entry bodies all justify. The
+// narrow columns can show some word-space gaps; hyphens:auto on
+// .pg-prose (inherited) softens that.
 assert(/\.pg-methodology\s+\.pg-prose\s*\{[^}]*text-align:\s*justify/.test(css),
   'methodology wide prose is justified (neat block edge)');
-assert(/\.pg-methodology\s+\.pg-method-entry\s+\.pg-prose\s*\{[^}]*text-align:\s*left/.test(css),
-  'narrow 4-col method-grid bodies stay left-aligned (justify there flows ugly river-gaps)');
+assert(/\.pg-methodology\s+\.pg-method-entry\s+\.pg-prose\s*\{[^}]*text-align:\s*justify/.test(css),
+  'narrow 4-col method-grid bodies are also justified (v=656 user request — full-justify body prose across the report)');
 
 if (failed > 0) {
   console.log(`\n${failed} test(s) FAILED`);
