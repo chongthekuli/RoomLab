@@ -6969,7 +6969,18 @@ function rebuildFurniture() {
     // mirror (see CLAUDE.md §6 "Open bugs / convention mismatches")
     // handles the X-axis convention automatically — use state.x
     // directly here, same pattern as treatments/sources/listeners.
-    mesh.position.set(f.position.x, 0, f.position.y);
+    //
+    // BBox-vs-visual alignment (v=669, 2026-05-27): the family builders
+    // place meshes from local z=0..d (NOT centred at local z=0). The
+    // scene-snapshot bbox is CENTRED at (cx, cy) extending cy-d/2..cy+d/2
+    // — matching the 2D viewport footprint render. To align the visible
+    // 3D mesh with the bbox the precision tracer / wall-BVH uses, shift
+    // the group by -d/2 in world z. Without this shift the user sees
+    // rays bouncing off the invisible bbox plane that sits half-depth
+    // IN FRONT of the visible mesh (UAT report — "rays reflect before
+    // even hitting the surface of the bookshelf").
+    const d = Math.max(0.01, row?.footprint?.depth_m ?? 0.60);
+    mesh.position.set(f.position.x, 0, f.position.y - d / 2);
     mesh.rotation.y = ((f.rotation_deg || 0) * Math.PI) / 180;
     furnitureGroup.add(mesh);
   }
