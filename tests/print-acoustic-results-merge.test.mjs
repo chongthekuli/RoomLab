@@ -213,8 +213,8 @@ absent('<tr><th>Ceiling</th>',
 // ---- Block 4: joined listener × precision table -----------------------
 present('Listener positions × ray-traced results',
   'joined-table heading (the user-flagged consolidation)');
-present('<th>Listener</th><th>X</th><th>Y</th><th>Elev</th><th>T30</th><th>C50</th><th>C80</th><th>D/R</th><th>STI</th>',
-  'joined-table 9-column header — Maya spec (dropped ID, posture, ear-height)');
+present('<th>Listener</th><th>X</th><th>Y</th><th>Elev</th><th>T30</th><th>C50</th><th>C80</th><th>D/R</th><th>SPL</th><th>STI</th>',
+  'joined-table 10-column header — Maya spec (dropped ID, posture, ear-height) + SPL sitting next to STI on the right (v=657 user request — pair the two headline per-listener metrics)');
 present('pr-listener-precision',
   'joined-table class hook for CSS targeting');
 present('pr-listener-posture',

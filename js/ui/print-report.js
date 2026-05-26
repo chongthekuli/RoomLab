@@ -951,6 +951,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     const p = precision?.receivers?.[i] ?? null;
     const labelText = (l.label && l.label.length > 0) ? l.label : '—';
     const postureText = l.posture ? ` (${l.posture.toLowerCase()})` : '';
+    const spl = model.listenerMetrics?.[i]?.spl_db;
     const t30 = p?.broadband?.t30_s;
     const c50 = p?.broadband?.c50_db;
     const c80 = p?.broadband?.c80_db;
@@ -966,6 +967,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         <td>${Number.isFinite(c50) ? `${fmt(c50, 1)} dB` : '—'}</td>
         <td>${Number.isFinite(c80) ? `${fmt(c80, 1)} dB` : '—'}</td>
         <td>${Number.isFinite(dr)  ? `${fmt(dr,  1)} dB` : '—'}</td>
+        <td>${Number.isFinite(spl) ? `${fmt(spl, 0)} dB` : '—'}</td>
         <td>${Number.isFinite(sti) ? fmt(sti, 2)         : '—'}</td>
       </tr>`;
   }).join('');
@@ -1116,10 +1118,10 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         ${model.listeners.length === 0
           ? '<p class="pr-empty-state">No listeners placed. Listener positions drive the per-receiver STI calculation.</p>'
           : `<table class="pr-table pr-zebra pr-listener-precision">
-              <thead><tr><th>Listener</th><th>X</th><th>Y</th><th>Elev</th><th>T30</th><th>C50</th><th>C80</th><th>D/R</th><th>STI</th></tr></thead>
+              <thead><tr><th>Listener</th><th>X</th><th>Y</th><th>Elev</th><th>T30</th><th>C50</th><th>C80</th><th>D/R</th><th>SPL</th><th>STI</th></tr></thead>
               <tbody>${joinedRows}</tbody>
             </table>`}
-        <p class="pr-note">Posture shown in parentheses on the listener label. Ear height = elev + 1.60 m standing / 1.15 m sitting in chair / 0.85 m sitting on floor (custom override allowed). Broadband per-receiver values from Schroeder backward integration of the ray-traced energy histogram (ISO 3382-1 §A.2.2). Em-dash "—" indicates the precision render did not cover this listener — distinct from STI = 0, which is undefined.</p>
+        <p class="pr-note">Posture shown in parentheses on the listener label. Ear height = elev + 1.60 m standing / 1.15 m sitting in chair / 0.85 m sitting on floor (custom override allowed). SPL is the analytic 1 kHz total at the listener — direct field from all sources plus reverberant field per the current physics settings (matches the value on the live 2D viewport and the heatmap dot labels). T30, C50, C80, D/R, and STI are broadband per-receiver values from Schroeder backward integration of the ray-traced energy histogram (ISO 3382-1 §A.2.2). Em-dash "—" indicates the precision render did not cover this listener — distinct from STI = 0, which is undefined.</p>
       </section>
 
       <section class="pr-section pr-band-section">
