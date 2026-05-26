@@ -24,6 +24,7 @@ import { mountSourcesPanel } from '../../ui/panel-sources.js';
 import { mountListenersPanel } from '../../ui/panel-listeners.js';
 import { mountZonesPanel } from '../../ui/panel-zones.js';
 import { mountTreatmentsPanel } from '../../ui/panel-treatments.js';
+import { mountFurniturePanel } from '../../ui/panel-furniture.js';
 import { mountAmbientPanel } from '../../ui/panel-ambient.js';
 import { mountOutdoorPanel } from '../../ui/panel-outdoor.js';
 import { mountResultsPanel } from '../../ui/panel-results.js';
@@ -457,6 +458,11 @@ export async function mountRoomLab() {
   // the catalogue resolves.
   mountTreatmentsPanel({ materials }).catch(err =>
     console.warn('[roomlab] treatments panel mount failed:', err));
+  // FurnitureLAB sidebar — embedded mini-catalogue + placed-items
+  // manager. Async because it awaits the furniture catalogue fetch
+  // (same idempotent loader as the lab page; cache is shared).
+  mountFurniturePanel().catch(err =>
+    console.warn('[roomlab] furniture panel mount failed:', err));
   mountAmbientPanel();
   mountOutdoorPanel();
   mountResultsPanel({ materials });

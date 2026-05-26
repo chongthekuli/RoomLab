@@ -860,6 +860,8 @@ export function mount2DViewport({ materials }) {
   on('listener:changed', render);
   on('listener:selected', render);
   on('treatment:changed', render);
+  on('furniture:changed', render);
+  on('furniture:selected', render);
   on('treatment:selected', render);
   on('scene:reset', render);
   // OUTDOOR SIMULATION MODE (Phase 3b) — the UI panel mutates
@@ -2318,12 +2320,14 @@ function placeFurnitureAt(catalogueId, pos) {
     rotation_deg: 0,
   });
   state.selectedFurnitureId = `F${n}`;
-  // scene:reset is the existing "scene contents changed" broadcast —
-  // panel-results, room-2d, scene.js, and the print path all listen
-  // and rebuild. Re-using it (vs. coining a new 'furniture:changed')
-  // means the new entry flows through the same recompute pipeline that
-  // sources/listeners/treatments use, with zero new subscriptions.
-  emit('scene:reset');
+  // Targeted broadcasts: scene.js rebuilds just the furniture group
+  // (REBUILD_FURNITURE), panel-results recomputes RT60 (parallel-A
+  // term picks up the new chair), room-2d redraws to show the new
+  // glyph. scene:reset would also work but rebuilds everything — too
+  // heavy for a single-chair placement, and would re-trigger the 3D
+  // viewport's "nuclear disposal" pass.
+  emit('furniture:changed', { id: state.selectedFurnitureId });
+  emit('furniture:selected', { id: state.selectedFurnitureId });
 }
 
 // Reflect state.furnitureArmed onto the viewport DOM — crosshair
@@ -2364,6 +2368,25 @@ if (typeof document !== 'undefined') {
   document.addEventListener('route:change', applyArmedCursorState);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') cancelFurnitureArming();
+    // Delete / Backspace removes the currently-selected furniture
+    // entry. Guarded so a delete keystroke while a text input has
+    // focus (room-name field, listener-label, etc.) doesn't accidentally
+    // delete a placed chair from beneath the user.
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      const tag = e.target?.tagName?.toLowerCase();
+      const editable = e.target?.isContentEditable;
+      if (tag === 'input' || tag === 'textarea' || editable) return;
+      if (state.selectedFurnitureId && location.hash === '#/room') {
+        const id = state.selectedFurnitureId;
+        const idx = state.furniture.findIndex(x => x.id === id);
+        if (idx >= 0) {
+          state.furniture.splice(idx, 1);
+          state.selectedFurnitureId = null;
+          emit('furniture:changed', { removed: id });
+          e.preventDefault();
+        }
+      }
+    }
   });
 }
 
@@ -2397,6 +2420,12 @@ function findPickableFromEvent(e) {
   if (treatEl) {
     const id = treatEl.dataset.treatmentId;
     if (id) return { kind: 'treatment', el: treatEl, treatmentId: id };
+  }
+  // FurnitureLAB placements — same priority bucket as treatments.
+  const furnEl = target.closest('.r2d-furniture');
+  if (furnEl) {
+    const id = furnEl.dataset.furnitureId;
+    if (id) return { kind: 'furniture', el: furnEl, furnitureId: id };
   }
   return null;
 }
@@ -2564,6 +2593,23 @@ function onPickablePointerDown(e) {
       startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
       pointerId: e.pointerId, didMove: false,
     };
+  } else if (pick.kind === 'furniture') {
+    const f = state.furniture?.find(x => x.id === pick.furnitureId);
+    if (!f) return;
+    try { openPanel('left', 'furniture'); } catch (_) {}
+    if (state.selectedFurnitureId !== pick.furnitureId) {
+      state.selectedFurnitureId = pick.furnitureId;
+      emit('furniture:selected', { id: pick.furnitureId });
+    }
+    startWorldX = f.position.x;
+    startWorldY = f.position.y;
+    pickableDrag = {
+      kind: 'furniture',
+      furnitureId: pick.furnitureId,
+      startClientX: e.clientX, startClientY: e.clientY,
+      startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
+      pointerId: e.pointerId, didMove: false,
+    };
   } else { // 'vertex'
     // Resolve the vertex's CURRENT world position from whatever shape
     // the room is in right now. If/when the user actually drags, the
@@ -2622,6 +2668,7 @@ function onPickablePointerMove(e) {
     const firstEvt = pickableDrag.kind === 'listener' ? 'listener:changed'
                    : pickableDrag.kind === 'vertex'   ? 'room:changed'
                    : pickableDrag.kind === 'treatment' ? 'treatment:changed'
+                   : pickableDrag.kind === 'furniture' ? 'furniture:changed'
                    : 'source:changed';
     emit(firstEvt);
   }
@@ -2685,6 +2732,18 @@ function onPickablePointerMove(e) {
       // so a drag doesn't yank focus from inputs the user might be
       // editing on another listener card.
       emit('listener:position', { id: pickableDrag.listenerId, x: nx, y: ny });
+    }
+  } else if (pickableDrag.kind === 'furniture') {
+    // Floor-mounted objects — free X/Y drag inside room bounds, no
+    // surface re-projection. Uses the SNAPPED target (chairs / tables
+    // benefit from the same SOURCE_SNAP_M grid the speakers use; small
+    // drift while precision-placing reads as polish, not slop).
+    const f = state.furniture?.find(x => x.id === pickableDrag.furnitureId);
+    if (!f) return;
+    if (f.position.x !== nx || f.position.y !== ny) {
+      f.position.x = nx;
+      f.position.y = ny;
+      emit('furniture:changed');
     }
   } else if (pickableDrag.kind === 'treatment') {
     // Treatments are constrained to their anchored surface plane —

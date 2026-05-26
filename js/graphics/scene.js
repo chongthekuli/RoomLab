@@ -32,6 +32,7 @@ import {
 } from '../ui/panel-treatments.js';
 import { findCatalogueEntry, loadSurfaceCatalogue } from '../labs/surfacelab/catalog.js';
 import { buildSampleGroup } from '../labs/surfacelab/surface-3d-preview.js';
+import { getFurnitureCatalogue as getFurnitureCatalogueMap } from '../labs/furniturelab/catalog.js';
 
 let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
@@ -378,6 +379,7 @@ export async function mount3DViewport({ materials }) {
   const REBUILD_ROOM_FULL = 1 << 6;
   const REBUILD_RACKS = 1 << 7;
   const REBUILD_TREATMENTS = 1 << 8;
+  const REBUILD_FURNITURE  = 1 << 9;
   const queueRebuild = (flags) => {
     _pendingRebuild = (_pendingRebuild ?? 0) | flags;
     if (_rebuildRAF) return;
@@ -394,6 +396,7 @@ export async function mount3DViewport({ materials }) {
       if (f & REBUILD_AIM) rebuildAimLines();
       if (f & REBUILD_RACKS) rebuildRacks();
       if (f & REBUILD_TREATMENTS) rebuildTreatments();
+      if (f & REBUILD_FURNITURE) rebuildFurniture();
     });
   };
 
@@ -414,6 +417,10 @@ export async function mount3DViewport({ materials }) {
   on('source:model_changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
   on('treatment:changed', () => queueRebuild(REBUILD_TREATMENTS));
   on('treatment:selected', () => queueRebuild(REBUILD_TREATMENTS));
+  // FurnitureLAB placed objects — rebuild on placement, selection,
+  // and on scene:reset (handled by the broader rebuild below).
+  on('furniture:changed', () => queueRebuild(REBUILD_FURNITURE));
+  on('furniture:selected', () => queueRebuild(REBUILD_FURNITURE));
   // Treatments panel asks the 3D viewport to arm placement mode — the
   // next click on a wall or the ceiling will drop a new entry of the
   // chosen productId at the hit point.
@@ -475,7 +482,7 @@ export async function mount3DViewport({ materials }) {
     // calling synchronously here is correct — the camera lands the same
     // frame the rebuild renders.
     frameCameraToRoom();
-    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_RACKS | REBUILD_TREATMENTS);
+    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_RACKS | REBUILD_TREATMENTS | REBUILD_FURNITURE);
   });
   // Rack-builder edits — user added/removed an amp or moved a rack.
   on('rack:changed', () => queueRebuild(REBUILD_RACKS));
@@ -530,6 +537,7 @@ export async function mount3DViewport({ materials }) {
   rebuildZones();
   rebuildHeatmap();
   rebuildTreatments();
+  rebuildFurniture();
   animate();
 
   window.addEventListener('resize', onResize);
@@ -6763,6 +6771,137 @@ function reanchorTreatmentsOnRoomChange() {
       t.position.x = proj.position.x;
       t.position.y = proj.position.y;
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FurnitureLAB rendering — placed catalogue objects (chairs, sofas, tables,
+// drapes, prayer mats, etc.) appear in the 3D viewport as low-poly meshes
+// derived from the catalogue row's footprint + height. Phase 0 ships a
+// generic seat-shaped composite (base slab + cushion + back) sized to the
+// catalogue's footprint; Phase 1 will swap in per-category builders or
+// GLTF assets per Viktor's brief.
+//
+// Selection: clicking the mesh in 3D sets state.selectedFurnitureId (Phase 1).
+// Right now placement happens only in 2D (per the v=659 design call), and
+// the 3D view is read-only-display.
+// ---------------------------------------------------------------------------
+
+let furnitureGroup = null;
+
+function _buildFurnitureMesh(f, row) {
+  // Footprint dimensions from the catalogue row; sane defaults if the
+  // row is missing (broken catalogueId — same graceful-degrade pattern
+  // as 2D, where a broken row renders dashed-grey).
+  const w = Math.max(0.1, row?.footprint?.width_m  ?? 0.55);
+  const d = Math.max(0.1, row?.footprint?.depth_m  ?? 0.60);
+  const h = Math.max(0.1, row?.footprint?.height_m ?? 1.20);
+  const broken = !row;
+
+  const group = new THREE.Group();
+  group.name = `furniture:${f.id}`;
+  group.userData.furnitureId = f.id;
+  group.userData.catalogueId = f.catalogueId;
+
+  // Phase 0 generic seat-shape composite. Three boxes: base slab, seat
+  // cushion (the accent surface), and a thin back panel rising to the
+  // full catalogue height. Caller positions the group; this builder
+  // works in OBJECT-LOCAL coords with the footprint centred at origin
+  // (x: -w/2..w/2, y: 0..d, z: 0..h).
+  const PAPER_LIGHT = 0xF2EDE3;
+  const PAPER_MID   = 0xE5DDCB;
+  const PAPER_DARK  = 0xD6CBB3;
+  const ACCENT      = 0x9A3F2A;
+  const matBase   = new THREE.MeshStandardMaterial({ color: broken ? 0x8a8a8a : PAPER_DARK,  roughness: 0.85, metalness: 0.0 });
+  const matCush   = new THREE.MeshStandardMaterial({ color: broken ? 0x8a8a8a : ACCENT,      roughness: 0.65, metalness: 0.0 });
+  const matBack   = new THREE.MeshStandardMaterial({ color: broken ? 0x8a8a8a : PAPER_MID,   roughness: 0.80, metalness: 0.0 });
+  const matArm    = new THREE.MeshStandardMaterial({ color: broken ? 0x8a8a8a : PAPER_LIGHT, roughness: 0.80, metalness: 0.0 });
+
+  const seatTop_z  = Math.min(0.50, h * 0.42);
+  const cushHi_z   = Math.min(0.55, h * 0.46);
+  const armHi_z    = Math.min(0.72, h * 0.55);
+
+  // Base slab (0..0.10 z, slight inset from footprint edges so legs
+  // read as legs).
+  {
+    const g = new THREE.BoxGeometry(w * 0.92, 0.10, d * 0.92);
+    const m = new THREE.Mesh(g, matBase);
+    m.position.set(0, 0.05, d / 2);
+    m.castShadow = true; m.receiveShadow = true;
+    group.add(m);
+  }
+  // Seat cushion (accent terracotta, the active surface)
+  {
+    const g = new THREE.BoxGeometry(w * 0.86, cushHi_z - seatTop_z, d * 0.84);
+    const m = new THREE.Mesh(g, matCush);
+    m.position.set(0, (seatTop_z + cushHi_z) / 2, d * 0.46);
+    m.castShadow = true; m.receiveShadow = true;
+    group.add(m);
+  }
+  // Back panel (rises from cushion top to full height; thickness 0.08 m)
+  {
+    const g = new THREE.BoxGeometry(w * 0.86, h - cushHi_z, 0.08);
+    const m = new THREE.Mesh(g, matBack);
+    m.position.set(0, (cushHi_z + h) / 2, d - 0.08);
+    m.castShadow = true; m.receiveShadow = true;
+    group.add(m);
+  }
+  // Two armrests (only if there's reasonable width).
+  if (w >= 0.45) {
+    for (const sx of [-1, 1]) {
+      const g = new THREE.BoxGeometry(0.08, armHi_z - seatTop_z, d * 0.78);
+      const m = new THREE.Mesh(g, matArm);
+      m.position.set(sx * (w / 2 - 0.05), (seatTop_z + armHi_z) / 2, d * 0.49);
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+    }
+  }
+
+  // Selection highlight — emissive ring on the cushion when this is the
+  // currently-selected piece. Implementation: clone the cushion mesh,
+  // scale slightly, swap to a wireframe-emissive material.
+  if (state.selectedFurnitureId === f.id) {
+    const cushion = group.children[1];
+    if (cushion?.geometry) {
+      const ring = new THREE.LineSegments(
+        new THREE.EdgesGeometry(cushion.geometry, 12),
+        new THREE.LineBasicMaterial({ color: 0x00d4ff }),
+      );
+      ring.position.copy(cushion.position);
+      ring.scale.multiplyScalar(1.02);
+      group.add(ring);
+    }
+  }
+
+  return group;
+}
+
+function rebuildFurniture() {
+  shadowsNeedRefresh = true;
+  if (!scene) return;
+  if (!furnitureGroup) {
+    furnitureGroup = new THREE.Group();
+    furnitureGroup.name = 'furniture';
+    scene.add(furnitureGroup);
+  } else {
+    disposeGroup(furnitureGroup);
+  }
+  const furniture = Array.isArray(state.furniture) ? state.furniture : [];
+  if (furniture.length === 0) return;
+  const catalogue = getFurnitureCatalogueMap();
+  for (const f of furniture) {
+    if (!f || !f.position) continue;
+    const row = catalogue?.get(f.catalogueId) ?? null;
+    if (row) f._cachedSpec = row;
+    const mesh = _buildFurnitureMesh(f, row);
+    // Position in WORLD coords. State-frame +y maps to Three.js +z;
+    // state +z (height) is Three +y. The scene-level scale.x = -1
+    // mirror (see CLAUDE.md §6 "Open bugs / convention mismatches")
+    // handles the X-axis convention automatically — use state.x
+    // directly here, same pattern as treatments/sources/listeners.
+    mesh.position.set(f.position.x, 0, f.position.y);
+    mesh.rotation.y = ((f.rotation_deg || 0) * Math.PI) / 180;
+    furnitureGroup.add(mesh);
   }
 }
 

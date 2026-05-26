@@ -178,6 +178,13 @@ function renderDetail(pane, item) {
  *
  * Cancel: ESC, or clicking outside the 2D viewport.
  */
+// Exported for reuse by the in-RoomLAB sidebar panel (panel-furniture.js).
+// Same protocol either way: set state.furnitureArmed, broadcast the event,
+// flip RoomLAB to 2D, route to #/room if not already there.
+export function armFurniturePlacement(catalogueId) {
+  return armForPlacement(catalogueId);
+}
+
 function armForPlacement(catalogueId) {
   state.furnitureArmed = { catalogueId };
   emit('furniture:armed', { catalogueId });
@@ -185,6 +192,15 @@ function armForPlacement(catalogueId) {
   if (location.hash !== '#/room') {
     location.hash = '#/room';
   }
+  // Force the 2D top-down view — placement only resolves in 2D for
+  // Phase 0 (3D raycaster placement is Phase 1). Without this flip,
+  // a user landing on the 3D tab gets a crosshair cursor with nothing
+  // to click. Run after the hash change settles so #route-room is
+  // visible and the click hits a mounted .vp-tab.
+  setTimeout(() => {
+    const tab2d = document.querySelector('#route-room .vp-tab[data-view="2d"]');
+    if (tab2d && !tab2d.classList.contains('active')) tab2d.click();
+  }, 0);
 }
 
 function escapeHtml(s) {

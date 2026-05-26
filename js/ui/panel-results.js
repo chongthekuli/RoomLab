@@ -58,6 +58,10 @@ export function mountResultsPanel({ materials }) {
   on('listener:changed', render);
   on('listener:selected', render);
   on('scene:reset', render);
+  // FurnitureLAB placements affect RT60 via the parallel-A term — so
+  // a new chair / drape / sofa must re-trigger the rt60 + Hopkins-Stryker
+  // recompute the same way a source or treatment change does.
+  on('furniture:changed', render);
   // Precision engine completed / invalidated / cleared — re-render so
   // the Precision column tracks the latest state.
   on('precision:changed', render);
