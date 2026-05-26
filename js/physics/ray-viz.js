@@ -186,8 +186,11 @@ export function recordRayPaths({
   }
 
   // Pre-size the buffers conservatively. Worst case = N paths × (maxBounces + 1)
-  // vertices each. We trim the unused tail at the end.
-  const maxVerts = totalPaths * (maxBounces + 1);
+  // vertices each, doubled to accommodate the FurnitureLAB "step-at-bbox-
+  // entry" vertices (one per crossed bbox per segment) added Phase 2.1.
+  // We trim the unused tail at the end.
+  const VERTS_PER_BOUNCE_BUDGET = 3;   // 1 wall hit + up to 2 furniture step-vertices per segment
+  const maxVerts = totalPaths * (maxBounces + 1) * VERTS_PER_BOUNCE_BUDGET;
   const pathData = new Float32Array(maxVerts * 3);
   const colorData = new Float32Array(maxVerts * 3);
   const pathOffsets = new Uint32Array(totalPaths + 1);
@@ -209,8 +212,8 @@ export function recordRayPaths({
   // Scratch buffers for one candidate path. We trace into these, and
   // copy into the main pathData/colorData buffers ONLY if the path
   // qualifies (crossed a listener, or bias='uniform').
-  const candXYZ = new Float32Array((maxBounces + 1) * 3);
-  const candRGB = new Float32Array((maxBounces + 1) * 3);
+  const candXYZ = new Float32Array((maxBounces + 1) * VERTS_PER_BOUNCE_BUDGET * 3);
+  const candRGB = new Float32Array((maxBounces + 1) * VERTS_PER_BOUNCE_BUDGET * 3);
   let writeVert = 0;
   let pathCount = 0;
   let totalBouncesRecorded = 0;
@@ -341,15 +344,28 @@ export function recordRayPaths({
           if (!hitListener && bounce === 0) hitListener = true;
         }
 
-        // FurnitureLAB absorber-volume sink — apply BEFORE advancing
+        // FurnitureLAB absorber-volume sink — applied BEFORE advancing
         // so the segment origin (ox, oy, oz) is still the start of the
-        // segment. Mid-band Beer-Lambert: E *= exp(-Σ μ_mid · L_in).
-        // Skipped when no furniture is placed (hasFurniture=false) or
-        // when the BVH query returns nothing.
+        // segment. Phase 2.1 visual upgrade (2026-05-27): the previous
+        // version multiplied `energy` by exp(-furniExp) which dimmed
+        // only the SEGMENT-END vertex; LineSegments interpolate vertex
+        // colour, so the line drew as a smooth gradient and the user
+        // couldn't see WHERE the absorption happened ("rays still
+        // shoot through" UAT). Fix: record a PAIR of vertices at the
+        // first bbox entry — first vertex with PRE-absorption colour,
+        // second vertex at the same XYZ with POST-absorption colour.
+        // That makes the colour STEP at the chair edge visible.
+        //
+        // Physical attenuation matches the precision tracer exactly;
+        // however, we apply a 3× visual gain to make the small per-
+        // chair losses (12% physical) read as the dim-then-stop story
+        // the user expects. The precision tracer (panel results)
+        // remains at the unmodified physics value.
         if (hasFurniture) {
           const nFurni = intersectRay_collectAabbs(furnitureBvh, ox, oy, oz, dx, dy, dz, hit.t, furniHits);
           if (nFurni > 0) {
             let furniExp = 0;
+            let firstEnter = Infinity;
             for (let h = 0; h < nFurni; h++) {
               const aabbIdx = furniHits[h * 3 + 0];
               const tEnter  = furniHits[h * 3 + 1];
@@ -357,14 +373,50 @@ export function recordRayPaths({
               const L_in = tExit - tEnter;
               if (L_in <= 0) continue;
               furniExp += muMid[aabbIdx] * L_in;
+              if (tEnter < firstEnter) firstEnter = tEnter;
             }
             if (furniExp > 0) {
-              // Floor at 0.01 — when furniExp is very large the line
-              // would draw with zero RGB (invisible); 0.01 keeps the
-              // segment faintly visible so the user can still see the
-              // ray entered an absorber even if it would be ~fully
-              // absorbed in physics terms.
-              energy *= Math.max(0.01, Math.exp(-furniExp));
+              const VIZ_FURNI_GAIN = 3;
+              const energyPre = energy;
+              const visualLoss = Math.max(0.03, Math.exp(-VIZ_FURNI_GAIN * furniExp));
+              const energyPost = energy * visualLoss;
+              // Insert the bbox-entry vertex pair ONLY when the entry is
+              // strictly within the segment (not at the origin where it
+              // would overlap the source vertex, not past the wall).
+              if (firstEnter > EPS && firstEnter < hit.t - EPS && candVerts + 2 <= candXYZ.length / 3) {
+                const ex = ox + dx * firstEnter;
+                const ey = oy + dy * firstEnter;
+                const ez = oz + dz * firstEnter;
+                // Vertex A: at entry point, PRE-absorption brightness.
+                // The line FROM the previous vertex TO this one draws at
+                // full pre-furniture brightness (gradient from previous-
+                // vertex fade to this PRE fade — both bright if no prior
+                // attenuation).
+                const fadePre = Math.max(0.03, energyPre);
+                candXYZ[candVerts * 3 + 0] = ex;
+                candXYZ[candVerts * 3 + 1] = ey;
+                candXYZ[candVerts * 3 + 2] = ez;
+                candRGB[candVerts * 3 + 0] = r0 * fadePre;
+                candRGB[candVerts * 3 + 1] = g0 * fadePre;
+                candRGB[candVerts * 3 + 2] = b0 * fadePre;
+                candVerts++;
+                // Vertex B: at the SAME entry point, POST-absorption
+                // brightness. The line FROM vertex A TO this one is
+                // zero-length (degenerate) but produces a hard colour
+                // step in the LineSegments index. The line FROM this
+                // vertex TO the wall-hit vertex draws at post-furniture
+                // brightness — visible "step then dim" the user reads
+                // as "ray was absorbed here."
+                const fadePost = Math.max(0.03, energyPost);
+                candXYZ[candVerts * 3 + 0] = ex;
+                candXYZ[candVerts * 3 + 1] = ey;
+                candXYZ[candVerts * 3 + 2] = ez;
+                candRGB[candVerts * 3 + 0] = r0 * fadePost;
+                candRGB[candVerts * 3 + 1] = g0 * fadePost;
+                candRGB[candVerts * 3 + 2] = b0 * fadePost;
+                candVerts++;
+              }
+              energy = energyPost;
             }
           }
         }
@@ -393,7 +445,9 @@ export function recordRayPaths({
           candXYZ[candVerts * 3 + 0] = ox;
           candXYZ[candVerts * 3 + 1] = oy;
           candXYZ[candVerts * 3 + 2] = oz;
-          const fadePass = Math.max(0.15, 0.15 + 0.85 * (Math.log10(energy + 0.01) + 2) / 2);
+          // Linear fade (Phase 2.1): visible energy = energy. Was log-
+          // compressed which made 12%/chair absorption look like nothing.
+          const fadePass = Math.max(0.03, energy);
           candRGB[candVerts * 3 + 0] = r0 * fadePass;
           candRGB[candVerts * 3 + 1] = g0 * fadePass;
           candRGB[candVerts * 3 + 2] = b0 * fadePass;
@@ -412,7 +466,8 @@ export function recordRayPaths({
         energy *= Math.max(0.05, 1 - alphaMid);
 
         // Record vertex with energy-faded colour.
-        const fade = Math.max(0.15, 0.15 + 0.85 * (Math.log10(energy + 0.01) + 2) / 2);
+        // Linear fade (Phase 2.1) — see note at the opening fadePass site.
+        const fade = Math.max(0.03, energy);
         candXYZ[candVerts * 3 + 0] = ox;
         candXYZ[candVerts * 3 + 1] = oy;
         candXYZ[candVerts * 3 + 2] = oz;
