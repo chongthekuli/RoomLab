@@ -1307,6 +1307,126 @@ body.is-pdf-export .vp-tabs {
     font-size: 8pt;
   }
 
+  /* ----- FurnitureLAB schedule (v=670, 2026-05-27) -------------------
+     Layout mirrors the appendix BoM (compact 8 pt body) so the page
+     reads like a continuation of the equipment schedule. Reliability
+     badge + interaction-mode chip carry the colour palette already
+     established by reliability-colors.js and the in-app sidebar. */
+  #print-report .pr-page-furniture {
+    page-break-inside: auto;
+  }
+  #print-report .pr-page-furniture h2 {
+    font-size: 14pt;
+    font-weight: 600;
+    margin: 0 0 2pt 0;
+  }
+  #print-report .pr-fbom-table {
+    font-size: 8pt;
+    margin-top: 4pt;
+  }
+  #print-report .pr-fbom-table th {
+    font-size: 7.5pt;
+    text-align: left;
+    border-bottom: 0.4pt solid var(--rule);
+    padding: 3pt 4pt;
+    vertical-align: bottom;
+  }
+  #print-report .pr-fbom-table td {
+    padding: 3pt 4pt;
+    vertical-align: middle;
+  }
+  #print-report .pr-fbom-th-sub {
+    display: block;
+    font-size: 6.5pt;
+    font-weight: 400;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    text-transform: none;
+  }
+  #print-report .pr-fbom-name {
+    font-weight: 600;
+  }
+  #print-report .pr-fbom-sub {
+    display: block;
+    font-size: 6.8pt;
+    font-weight: 400;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 1pt;
+  }
+  #print-report .pr-fbom-mode {
+    display: inline-block;
+    padding: 1pt 5pt;
+    border-radius: 2pt;
+    font-size: 6.5pt;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  #print-report .pr-fbom-mode-porous {
+    color: #4A3A22;
+    background: #F3EBDA;
+    border: 0.3pt solid #C8B68F;
+  }
+  #print-report .pr-fbom-mode-reflective {
+    color: #2F4757;
+    background: #DEE8EF;
+    border: 0.3pt solid #94B0C0;
+  }
+  #print-report .pr-fbom-rel {
+    display: inline-block;
+    padding: 1pt 5pt;
+    border-radius: 2pt;
+    font-size: 6.5pt;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  #print-report .pr-fbom-rel-measured  { color: #1B6E37; background: #E3F1E7; border: 0.3pt solid #A6CDB1; }
+  #print-report .pr-fbom-rel-derived   { color: #8A6A1F; background: #F5EEDD; border: 0.3pt solid #C9B786; }
+  #print-report .pr-fbom-rel-estimated { color: #7A2018; background: #F2DDDA; border: 0.3pt solid #C99A95; }
+  #print-report .pr-fbom-cite {
+    margin-left: 3pt;
+    font-size: 6pt;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  #print-report .pr-fbom-spark {
+    display: block;
+    width: 60pt;
+    height: 14pt;
+  }
+  #print-report .pr-fbom-totals td {
+    border-top: 0.4pt solid var(--ink);
+    padding-top: 4pt;
+  }
+  #print-report .pr-fbom-citations {
+    list-style: none;
+    padding-left: 0;
+    margin: 6pt 0 0 0;
+    font-size: 7.5pt;
+    color: var(--ink);
+  }
+  #print-report .pr-fbom-cite-li {
+    display: grid;
+    grid-template-columns: 20pt 1fr;
+    gap: 4pt;
+    margin-bottom: 5pt;
+    page-break-inside: avoid;
+  }
+  #print-report .pr-fbom-cite-n {
+    font-weight: 700;
+    color: var(--muted);
+  }
+  #print-report .pr-fbom-cite-ref,
+  #print-report .pr-fbom-cite-method,
+  #print-report .pr-fbom-cite-notes {
+    color: var(--muted);
+    font-size: 7pt;
+    line-height: 1.4;
+  }
+
   /* Ambient noise as a band-strip fingerprint, not a table */
   #print-report .pr-bandstrip {
     display: grid;

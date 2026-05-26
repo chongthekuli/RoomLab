@@ -35,6 +35,8 @@ import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend } from './print-heatmap.js';
 import { buildFloorPlanSVG } from './print-plan-svg.js';
 import { computePerListenerMetrics } from '../physics/per-listener-metrics.js';
+import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
+import { sumFurnitureAbsorption } from '../physics/furniture-absorption.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
 import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
 
@@ -106,7 +108,18 @@ function buildRoomSummary(room) {
 // on state.results.precision.
 // ---------------------------------------------------------------------------
 export function buildPrintModel({ materials, nameHint } = {}) {
-  const rt60Bands = computeAllBands({ room: state.room, materials, zones: state.zones, treatments: state.treatments });
+  const rt60Bands = computeAllBands({
+    room: state.room,
+    materials,
+    zones: state.zones,
+    treatments: state.treatments,
+    // v=670 — fold placed furniture into the rt60 sum so the % of
+    // room absorption denominator in the Furnishing schedule reflects
+    // the WITH-furniture state, not the bare room. Otherwise a 100%
+    // contribution to the bare-room absorption sometimes reads >100%.
+    furniture: state.furniture,
+    furnitureCatalogue: getFurnitureCatalogue(),
+  });
   const totalArea = rt60Bands[0]?.totalArea_m2 ?? 0;
   const volume = roomVolume(state.room);
   const flatSources = expandSources(state.sources ?? []);
@@ -197,6 +210,11 @@ export function buildPrintModel({ materials, nameHint } = {}) {
     bom: aggregateBOM(state.sources ?? []),
     treatmentsBom: aggregateTreatmentsBOM(state.treatments ?? []),
     treatmentsSchedule: buildTreatmentSchedule(state.treatments ?? [], state.room),
+    // v=670 — Furnishing schedule. null when no furniture is placed
+    // or the catalogue hasn't resolved; renderer treats null as "omit
+    // the section." Each row groups identical catalogue items by qty
+    // and exposes per-band A_obj contribution + % of room absorption.
+    furnitureBom: aggregateFurnitureBOM(state.furniture ?? [], materials, materials.frequency_bands_hz, rt60Bands),
     treatmentCompare: buildTreatmentCompareModel({
       room: state.room,
       materials,
@@ -394,6 +412,82 @@ function aggregateTreatmentsBOM(treatments) {
     if (row.hasWeight) row.totalWeight_kg += unitWeight_kg ?? 0;
   }
   return Array.from(byPid.values()).sort((a, b) => b.count - a.count);
+}
+
+// Aggregate FurnitureLAB placements into a Furnishing schedule grouped
+// by catalogueId × count. Each row carries: catalogue row, qty, per-
+// band A_obj contribution (one chair's A_obj × qty), % of total room
+// absorption at 1 kHz, the interaction mode (porous/reflective), and
+// the reliability tier. Returns null when no furniture placed OR when
+// the catalogue hasn't resolved yet (Node test paths). The renderer
+// treats null as "omit the section."
+//
+// "% of room absorption" — denominator is the room's surface
+// absorption + Σ A_obj (the same total used by Sabine). Reflective
+// and porous items count identically here (they're both A_obj in
+// the catalogue, just routed differently in the precision tracer).
+function aggregateFurnitureBOM(furniture, materials, bands_hz, rt60Bands) {
+  if (!Array.isArray(furniture) || furniture.length === 0) return null;
+  const cat = getFurnitureCatalogue();
+  if (!cat || cat.size === 0) return null;
+
+  const byId = new Map();
+  for (const f of furniture) {
+    if (!f || typeof f.catalogueId !== 'string') continue;
+    const row = cat.get(f.catalogueId);
+    if (!row) continue;
+    let entry = byId.get(f.catalogueId);
+    if (!entry) {
+      entry = {
+        catalogueId: f.catalogueId,
+        name: row.name ?? f.catalogueId,
+        short_name: row.short_name ?? row.name ?? f.catalogueId,
+        category: row.category ?? '—',
+        subcategory: row.subcategory ?? null,
+        interaction_mode: row.acoustics?.interaction_mode ?? 'porous',
+        reliability: row.reliability ?? 'estimated',
+        citation: row.citation ?? null,
+        A_obj_per_band: row.acoustics?.A_obj_m2_sab_per_band ?? {},
+        count: 0,
+        ids: [],
+      };
+      byId.set(f.catalogueId, entry);
+    }
+    entry.count += 1;
+    entry.ids.push(f.id);
+  }
+  const rows = Array.from(byId.values()).sort((a, b) => b.count - a.count);
+  if (rows.length === 0) return null;
+
+  // Per-band totals across ALL placed furniture (sum of qty × A_obj).
+  // rt60Bands carries totalAbsorption_sabins per band so we can compute
+  // each row's % of room absorption.
+  const B = bands_hz?.length ?? 7;
+  const totalA_per_band = new Float32Array(B);
+  for (const entry of rows) {
+    for (let k = 0; k < B; k++) {
+      const f = bands_hz[k];
+      const a = entry.A_obj_per_band[String(Math.round(f))];
+      if (Number.isFinite(a) && a > 0) totalA_per_band[k] += entry.count * a;
+    }
+  }
+  // Per-row contribution at 1 kHz as % of total room absorption (the
+  // headline number a non-engineer reads: 'this chair set adds X% to
+  // the room's absorption budget at 1 kHz').
+  const band1kIdx = bands_hz.indexOf(1000);
+  const roomTotal1k = (band1kIdx >= 0 && rt60Bands?.[band1kIdx]?.totalAbsorption_sabins) || 0;
+  for (const entry of rows) {
+    const a1k = entry.A_obj_per_band['1000'] ?? 0;
+    const contrib1k = entry.count * a1k;
+    entry.contribution_m2sa_1k = contrib1k;
+    entry.percent_of_room_1k = roomTotal1k > 0 ? (contrib1k / roomTotal1k) * 100 : null;
+  }
+  return {
+    rows,
+    total_A_per_band: Array.from(totalA_per_band),
+    bands_hz: [...bands_hz],
+    room_total_absorption_1k: roomTotal1k,
+  };
 }
 
 function getSpeakerLabel(url) {
@@ -1711,12 +1805,146 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <img class="pr-running-logo" src="assets/logo/RoomLAB-logo-1024.png"
            alt="" aria-hidden="true">
     </div>`;
+
+  // --- Furnishing schedule renderer (v=670) -----------------------------
+  // Returns '' when no furniture is placed (or catalogue unresolved) so
+  // the page disappears entirely instead of leaving an empty container.
+  // Each row groups identical catalogue items by qty + tabulates per-band
+  // Σ A_obj contribution + % of total room absorption at 1 kHz + citation
+  // chip + reliability badge. Unique citations collected into an appendix
+  // at the bottom (Dr. Chen six-rule physics-grade gate #6 — every value
+  // in the report must trace to its source so a reviewing engineer can
+  // verify the number against the original publication).
+  function renderFurniturePage(modelArg) {
+    const bom = modelArg.furnitureBom;
+    if (!bom || !Array.isArray(bom.rows) || bom.rows.length === 0) return '';
+    const bands = bom.bands_hz;
+    // Sparkline geometry — fixed pixel layout so every row reads identically.
+    const SPARK_W = 60, SPARK_H = 18, SPARK_GAP = 1.5;
+    const sparklineRow = (perBand) => {
+      const peak = Math.max(0.001, ...perBand);
+      const n = perBand.length;
+      const barW = (SPARK_W - SPARK_GAP * (n - 1)) / n;
+      const bars = perBand.map((v, i) => {
+        const h = (v / peak) * (SPARK_H - 2);
+        const x = i * (barW + SPARK_GAP);
+        const y = SPARK_H - h;
+        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barW.toFixed(2)}" height="${h.toFixed(2)}" fill="#1A1A1A" />`;
+      }).join('');
+      return `<svg class="pr-fbom-spark" viewBox="0 0 ${SPARK_W} ${SPARK_H}" xmlns="http://www.w3.org/2000/svg">${bars}</svg>`;
+    };
+    const reliabilityLabel = (tag) => {
+      if (tag === 'measured') return 'Measured';
+      if (tag === 'derived')  return 'Derived';
+      return 'Estimated';
+    };
+    const modeLabel = (m) => m === 'reflective' ? 'Reflective' : 'Porous';
+
+    // Citation index — deduplicate citations by source+reference so the
+    // appendix lists each lab/paper once even when many rows cite the
+    // same source (e.g. Beranek 1998 covers seats + audience).
+    const citationsById = new Map();
+    let citationCounter = 0;
+    const citationNum = (c) => {
+      if (!c) return null;
+      const key = `${c.source ?? ''}|${c.reference ?? ''}`;
+      if (citationsById.has(key)) return citationsById.get(key).n;
+      const n = ++citationCounter;
+      citationsById.set(key, { n, c });
+      return n;
+    };
+
+    const rows = bom.rows.map(r => {
+      const perBand = bands.map(f => {
+        const a = r.A_obj_per_band[String(Math.round(f))];
+        return (Number.isFinite(a) ? a : 0) * r.count;
+      });
+      const cn = citationNum(r.citation);
+      const pct = Number.isFinite(r.percent_of_room_1k) ? `${r.percent_of_room_1k.toFixed(1)} %` : '—';
+      return `
+        <tr>
+          <td class="pr-fbom-name">${escapeHtml(r.name)}<span class="pr-fbom-sub">${escapeHtml(r.category)}${r.subcategory ? ' / ' + escapeHtml(r.subcategory) : ''}</span></td>
+          <td class="pr-num">${r.count}</td>
+          <td><span class="pr-fbom-mode pr-fbom-mode-${escapeHtml(r.interaction_mode)}">${escapeHtml(modeLabel(r.interaction_mode))}</span></td>
+          <td>${sparklineRow(perBand)}</td>
+          <td class="pr-num">${r.contribution_m2sa_1k.toFixed(2)}</td>
+          <td class="pr-num">${pct}</td>
+          <td><span class="pr-fbom-rel pr-fbom-rel-${escapeHtml(r.reliability)}">${escapeHtml(reliabilityLabel(r.reliability))}</span>${cn ? `<sup class="pr-fbom-cite">[${cn}]</sup>` : ''}</td>
+        </tr>`;
+    }).join('');
+
+    // Totals row — sum across all placed items, per band.
+    const totalSparkline = sparklineRow(bom.total_A_per_band);
+    const totalQty = bom.rows.reduce((s, r) => s + r.count, 0);
+    const total1k = bom.rows.reduce((s, r) => s + (r.contribution_m2sa_1k ?? 0), 0);
+    const totalPct = bom.room_total_absorption_1k > 0
+      ? `${(total1k / bom.room_total_absorption_1k * 100).toFixed(1)} %`
+      : '—';
+
+    // Citation appendix — one entry per unique citation, with the
+    // bracketed [N] linking back to the rows above.
+    const citationsList = Array.from(citationsById.values()).map(({ n, c }) => `
+      <li class="pr-fbom-cite-li">
+        <span class="pr-fbom-cite-n">[${n}]</span>
+        <span class="pr-fbom-cite-body">
+          <strong>${escapeHtml(c.source ?? '—')}</strong>${c.doi ? ` &middot; DOI <a href="https://doi.org/${escapeHtml(c.doi)}">${escapeHtml(c.doi)}</a>` : ''}
+          ${c.reference ? `<br><span class="pr-fbom-cite-ref">${escapeHtml(c.reference)}</span>` : ''}
+          ${c.measurement_method ? `<br><em class="pr-fbom-cite-method">Method: ${escapeHtml(c.measurement_method)}</em>` : ''}
+          ${c.notes ? `<br><em class="pr-fbom-cite-notes">${escapeHtml(c.notes)}</em>` : ''}
+        </span>
+      </li>`).join('');
+
+    return `
+      <div class="pr-page pr-page-furniture" data-running-title="Furnishing schedule">
+        <div class="pr-chapter-opener">
+          <span class="pr-chapter-number-ghost">04</span>
+          <span class="pr-eyebrow">Furnishing schedule</span>
+          <h2>Room contents &mdash; placed furniture</h2>
+        </div>
+        <p class="pr-lead">${totalQty} placed object${totalQty === 1 ? '' : 's'} contributing ${total1k.toFixed(2)} m²&nbsp;Sa @ 1&nbsp;kHz (${totalPct} of total room absorption). Items tagged <em>reflective</em> bounce sound off their outer surfaces; items tagged <em>porous</em> absorb across the volume per Kuttruff §4.1. Both contribute identically to Sabine/Eyring via the parallel-A sum.</p>
+        <section class="pr-section">
+          <table class="pr-table pr-zebra pr-fbom-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th class="pr-num">Qty</th>
+                <th>Mode</th>
+                <th>A<sub>obj</sub>(f) <span class="pr-fbom-th-sub">125&nbsp;Hz&nbsp;&rarr;&nbsp;4&nbsp;kHz</span></th>
+                <th class="pr-num">&Sigma;A @ 1&nbsp;kHz<br><span class="pr-fbom-th-sub">m² Sa</span></th>
+                <th class="pr-num">% of room<br><span class="pr-fbom-th-sub">@ 1&nbsp;kHz</span></th>
+                <th>Reliability</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+            <tfoot>
+              <tr class="pr-fbom-totals">
+                <td><strong>Total</strong></td>
+                <td class="pr-num"><strong>${totalQty}</strong></td>
+                <td>&mdash;</td>
+                <td>${totalSparkline}</td>
+                <td class="pr-num"><strong>${total1k.toFixed(2)}</strong></td>
+                <td class="pr-num"><strong>${totalPct}</strong></td>
+                <td>&mdash;</td>
+              </tr>
+            </tfoot>
+          </table>
+          <p class="pr-note">Sparkline shows summed equivalent absorption area A<sub>obj</sub> across the six octave bands (125&nbsp;Hz, 250&nbsp;Hz, 500&nbsp;Hz, 1&nbsp;kHz, 2&nbsp;kHz, 4&nbsp;kHz; ISO 354 reverberation-room values where measured, derived or engineering-estimated otherwise per the reliability column). 8&nbsp;kHz contribution is zero by design &mdash; most published furniture data stops at 4&nbsp;kHz and the engine never extrapolates past the catalogue's measured range.</p>
+        </section>
+        ${citationsList ? `
+        <section class="pr-section">
+          <h3 class="pr-block-h3">Citations</h3>
+          <ol class="pr-fbom-citations">${citationsList}</ol>
+        </section>` : ''}
+      </div>`;
+  }
+
   const reportHtml = `
     ${cover}
     ${heatmapPage}
     ${acousticResultsPage}
     ${sourcePage}
     ${treatmentPages}
+    ${renderFurniturePage(model)}
     ${combinedPage}
     <!-- Footer band removed per user request (Edition 2026-05-14). The
          CSS-rendered page numbers in the @page bottom-right margin box
