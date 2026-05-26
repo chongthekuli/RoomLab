@@ -1,6 +1,7 @@
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, convertRoomToCustomPolygon } from '../app-state.js';
 import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
+import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
@@ -1588,6 +1589,9 @@ function renderNormal(vp) {
   const treatmentSvg = (state.treatments && state.treatments.length > 0)
     ? renderTreatmentsSVG(state.treatments, state.selectedTreatmentId, draggingTreatId, x0, y0, pxW, pxD, state.room)
     : '';
+  const furnitureSvg = (state.furniture && state.furniture.length > 0)
+    ? renderFurnitureSVG(state.furniture, state.selectedFurnitureId, x0, y0, pxW, pxD, state.room)
+    : '';
 
   // Room-corner vertex handles. Skipped for 'round' rooms (no
   // corners) and when room dims are zero. Shown only after the user
@@ -1639,6 +1643,7 @@ function renderNormal(vp) {
         ${wsegSvg}
         ${minaretSvg}
         ${treatmentSvg}
+        ${furnitureSvg}
         ${listenerSvg}
         ${speakerSvg}
         ${vertexSvg}
@@ -2289,6 +2294,77 @@ function wireSourceInteraction(vp) {
   if (!svg) return;
   svg.addEventListener('pointerdown', onPickablePointerDown);
   svg.addEventListener('contextmenu', onPickableContextMenu);
+  // If the viewport mounts AFTER the user already armed a placement
+  // (the more common ordering — FurnitureLAB → click "Place into room"
+  // → route to RoomLAB), sync the armed-cursor UI now.
+  applyArmedCursorState();
+}
+
+// Drop a new furniture instance at `pos` (world metres) referencing
+// `catalogueId`. Pushes onto state.furniture, emits scene:reset (the
+// canonical "scene contents changed" signal that every subscribed
+// panel listens to, including panel-results for RT60 recompute) and
+// scrolls the new entry into view in the eventual right-rail listing.
+function placeFurnitureAt(catalogueId, pos) {
+  if (!Array.isArray(state.furniture)) state.furniture = [];
+  const usedIds = new Set(state.furniture.map(f => f.id).filter(Boolean));
+  let n = state.furniture.length + 1;
+  while (usedIds.has(`F${n}`)) n++;
+  state.furniture.push({
+    id: `F${n}`,
+    catalogueId,
+    label: null,        // null → render uses catalogue row's name
+    position: { x: pos.x, y: pos.y },
+    rotation_deg: 0,
+  });
+  state.selectedFurnitureId = `F${n}`;
+  // scene:reset is the existing "scene contents changed" broadcast —
+  // panel-results, room-2d, scene.js, and the print path all listen
+  // and rebuild. Re-using it (vs. coining a new 'furniture:changed')
+  // means the new entry flows through the same recompute pipeline that
+  // sources/listeners/treatments use, with zero new subscriptions.
+  emit('scene:reset');
+}
+
+// Reflect state.furnitureArmed onto the viewport DOM — crosshair
+// cursor + a floating hint over the floor plan. Called at viewport
+// mount and on `furniture:armed` events (from FurnitureLAB).
+function applyArmedCursorState() {
+  const vp = document.querySelector('#view-2d');
+  if (!vp) return;
+  const armed = state.furnitureArmed && typeof state.furnitureArmed.catalogueId === 'string';
+  vp.classList.toggle('r2d-armed', armed);
+  vp.querySelector('.r2d-armed-hint')?.remove();
+  if (armed) {
+    const catalogue = getFurnitureCatalogue();
+    const row = catalogue.get(state.furnitureArmed.catalogueId);
+    const name = row?.name || state.furnitureArmed.catalogueId;
+    const hint = document.createElement('div');
+    hint.className = 'r2d-armed-hint';
+    hint.textContent = `Click in the room to place “${name}”  ·  ESC to cancel`;
+    vp.appendChild(hint);
+  }
+}
+
+// Cancel armed placement on ESC, anywhere in the app. Idempotent; safe
+// to call when nothing is armed.
+function cancelFurnitureArming() {
+  if (!state.furnitureArmed) return;
+  state.furnitureArmed = null;
+  applyArmedCursorState();
+}
+
+on('furniture:armed', applyArmedCursorState);
+// router.js emits `route:change` via document.dispatchEvent (not the
+// shared events bus) so the listener has to attach to document.
+// Guarded for Node-side test imports (tests/room-2d-*.test.mjs) where
+// `document` doesn't exist — the listeners are only meaningful in the
+// browser anyway.
+if (typeof document !== 'undefined') {
+  document.addEventListener('route:change', applyArmedCursorState);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') cancelFurnitureArming();
+  });
 }
 
 // Find a pickable target (speaker OR listener) from an event. Returns
@@ -2381,6 +2457,26 @@ function onPickablePointerDown(e) {
   // Left-click only — middle-click stays free for the existing pan
   // gesture (and isn't bound on the normal-mode SVG yet).
   if (e.button !== 0) return;
+
+  // FurnitureLAB armed-placement intercept — runs BEFORE the normal
+  // pick path so the user's first click drops the object instead of
+  // selecting whatever happens to sit under the cursor. State flag is
+  // set by js/labs/furniturelab/main.js armForPlacement(). Consume the
+  // click here regardless of whether the placement succeeded so a
+  // stray-click can't accidentally arm forever.
+  if (state.furnitureArmed && typeof state.furnitureArmed.catalogueId === 'string') {
+    const armedCatalogueId = state.furnitureArmed.catalogueId;
+    const world = clientToWorldXY(e.currentTarget, e.clientX, e.clientY);
+    state.furnitureArmed = null;
+    document.querySelector('#view-2d')?.classList.remove('r2d-armed');
+    document.querySelector('.r2d-armed-hint')?.remove();
+    if (world && Number.isFinite(world.x) && Number.isFinite(world.y)) {
+      placeFurnitureAt(armedCatalogueId, world);
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
 
   const pick = findPickableFromEvent(e);
   if (!pick) {
@@ -2908,6 +3004,49 @@ function escapeXml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+// Render placed FurnitureLAB objects as top-down footprint rectangles
+// with a label. Phase 0: simplified shape (oriented rectangle filled
+// with the accent terracotta tint). Phase 1 will swap in the same
+// isometric-ink glyph used on the catalogue card so card↔plan parity
+// is automatic. The catalogue resolves footprint dimensions; missing
+// rows render as a neutral grey box so a broken catalogueId doesn't
+// vanish silently.
+function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room) {
+  if (!Array.isArray(furniture) || furniture.length === 0) return '';
+  const catalogue = getFurnitureCatalogue();
+  const stateToSvgX = (x) => x0 + (x / room.width_m) * pxW;
+  const stateToSvgY = (y) => y0 - (y / room.depth_m) * pxD;
+  const px_per_m_x = pxW / Math.max(0.01, room.width_m);
+  const px_per_m_y = pxD / Math.max(0.01, room.depth_m);
+
+  let s = '';
+  for (const f of furniture) {
+    if (!f || !f.position) continue;
+    const row = catalogue.get(f.catalogueId);
+    const w = Math.max(0.1, row?.footprint?.width_m ?? 0.55);
+    const d = Math.max(0.1, row?.footprint?.depth_m ?? 0.60);
+    const cx = stateToSvgX(f.position.x);
+    const cy = stateToSvgY(f.position.y);
+    const wPx = w * px_per_m_x;
+    const dPx = d * px_per_m_y;
+    const rot = f.rotation_deg ?? 0;
+    const isSel = f.id === selectedId;
+    const isBroken = !row;
+    const lblText = f.label || row?.name || f.catalogueId || f.id;
+
+    s += `<g class="r2d-furniture ${isSel ? 'selected' : ''} ${isBroken ? 'broken' : ''}"
+            data-furniture-id="${f.id}"
+            transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)}) rotate(${rot.toFixed(1)})">
+            <rect class="r2d-furniture-footprint"
+                  x="${(-wPx/2).toFixed(1)}" y="${(-dPx/2).toFixed(1)}"
+                  width="${wPx.toFixed(1)}" height="${dPx.toFixed(1)}"
+                  ${isBroken ? 'style="fill:rgba(120,120,120,0.18);stroke:rgba(120,120,120,0.6);stroke-dasharray:3,2"' : ''} />
+            <text class="r2d-furniture-label" x="0" y="${(dPx/2 + 11).toFixed(1)}" text-anchor="middle">${escapeXml(lblText)}</text>
+          </g>`;
+  }
+  return s;
 }
 
 function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId, metrics = []) {

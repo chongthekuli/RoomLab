@@ -9,8 +9,16 @@ import { state } from './app-state.js';
 import { mountHeaderNav } from './shared/header-nav.js';
 import { startRouter } from './shared/router.js';
 import { mountTermsModal } from './ui/welcome-card.js';
+import { loadFurnitureCatalogue } from './labs/furniturelab/catalog.js';
 
 mountHeaderNav();
+
+// Pre-warm the FurnitureLAB catalogue so panel-results.js can fold
+// A_obj into RT60 even when the user has not yet visited #/furniture.
+// Idempotent + failure-safe: the loader caches the result and the
+// rt60 helper returns 0 when the cache is empty, so a slow / failed
+// fetch quietly degrades rather than crashing the panel.
+loadFurnitureCatalogue().catch(err => console.warn('[main] FurnitureLAB pre-warm failed', err));
 
 // Mandatory terms-of-use acceptance — shown on EVERY page load.
 // Lin (docs-writer) drafted the copy, Sofia (designer) spec'd the
@@ -35,11 +43,12 @@ const _vQ = _v ? `?v=${_v}` : '';
 // The router caches the mount Promise so a repeat visit is a no-op.
 startRouter({
   mounts: {
-    room:    () => import(`./labs/roomlab/main.js${_vQ}`).then(m => m.mountRoomLab()),
-    speaker: () => import(`./labs/speakerlab/main.js${_vQ}`).then(m => m.mountSpeakerLab()),
-    device:  () => import(`./labs/devicelab/main.js${_vQ}`).then(m => m.mountDeviceLab()),
-    surface: () => import(`./labs/surfacelab/main.js${_vQ}`).then(m => m.mountSurfaceLab()),
-    wall:    () => import(`./labs/walllab/main.js${_vQ}`).then(m => m.mountWallLab()),
+    room:      () => import(`./labs/roomlab/main.js${_vQ}`).then(m => m.mountRoomLab()),
+    speaker:   () => import(`./labs/speakerlab/main.js${_vQ}`).then(m => m.mountSpeakerLab()),
+    device:    () => import(`./labs/devicelab/main.js${_vQ}`).then(m => m.mountDeviceLab()),
+    surface:   () => import(`./labs/surfacelab/main.js${_vQ}`).then(m => m.mountSurfaceLab()),
+    wall:      () => import(`./labs/walllab/main.js${_vQ}`).then(m => m.mountWallLab()),
+    furniture: () => import(`./labs/furniturelab/main.js${_vQ}`).then(m => m.mountFurnitureLab()),
   },
 });
 

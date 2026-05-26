@@ -20,11 +20,12 @@ import { on, emit } from './events.js';
 import { listProjects, latestRoomInProject } from './custom-rooms.js';
 
 const LABS = [
-  { id: 'room',    label: 'RoomLAB',    href: '#/room',    sublabel: 'Acoustic simulator' },
-  { id: 'speaker', label: 'SpeakerLAB', href: '#/speaker', sublabel: 'Speaker library' },
-  { id: 'device',  label: 'DeviceLAB',  href: '#/device',  sublabel: 'PA equipment' },
-  { id: 'surface', label: 'SurfaceLAB', href: '#/surface', sublabel: 'Treatment & finishes' },
-  { id: 'wall',    label: 'WallLAB',    href: '#/wall',    sublabel: 'Wall isolation (beta)' },
+  { id: 'room',      label: 'RoomLAB',      href: '#/room',      sublabel: 'Acoustic simulator' },
+  { id: 'speaker',   label: 'SpeakerLAB',   href: '#/speaker',   sublabel: 'Speaker library' },
+  { id: 'device',    label: 'DeviceLAB',    href: '#/device',    sublabel: 'PA equipment' },
+  { id: 'surface',   label: 'SurfaceLAB',   href: '#/surface',   sublabel: 'Treatment & finishes' },
+  { id: 'wall',      label: 'WallLAB',      href: '#/wall',      sublabel: 'Wall isolation (beta)' },
+  { id: 'furniture', label: 'FurnitureLAB', href: '#/furniture', sublabel: 'Room contents (beta)' },
 ];
 
 export function mountHeaderNav({ activeLab } = {}) {

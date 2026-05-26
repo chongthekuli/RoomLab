@@ -56,6 +56,12 @@ export function resetSceneState({ state, defaultRoomState, deepClone, projectNam
   // from the previous scene.
   state.treatments = [];
   state.selectedTreatmentId = null;
+  // Furniture / room-contents placed by FurnitureLAB. One entry per
+  // catalogue-linked object — contributes A_obj into rt60 as a parallel
+  // term. Reset on every scene swap so preset/template/blank-custom
+  // never leak placed objects from the previous scene.
+  state.furniture = [];
+  state.selectedFurnitureId = null;
   state.selectedZoneId     = null;
   state.selectedListenerId = null;
   state.selectedSpeakerUrl = null;

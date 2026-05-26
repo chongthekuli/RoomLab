@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "schema_notes": "FurnitureLAB catalogue. Each entry: an in-room object (non-electrical, non-signal-bearing) that contributes equivalent absorption area A_obj into the room's Sabine/Eyring/ray-trace physics. Schema authored by Lin (docs-writer, catalogue sub-hat) and reviewed by Dr. Chen against ISO 354 measurement discipline. Reliability tag is non-negotiable: 'measured' (cited ISO 354 lab or peer-reviewed lab), 'derived' (calculated from a parent A_obj or surface-area×alpha mapping with a documented derivation), 'estimated' (engineering judgement; UI badges amber, report flags 'low-confidence'). citation.estimated mirrors reliability for serializer convenience.",
+  "items": [
+    {
+      "id": "theater-seat-upholstered-occupied",
+      "name": "Theater seat, upholstered (occupied)",
+      "category": "seating",
+      "subcategory": "audience",
+      "footprint": {
+        "shape": "rectangle",
+        "width_m": 0.55,
+        "depth_m": 0.60,
+        "height_m": 1.20
+      },
+      "placement": {
+        "mounts_on": "floor",
+        "stackable": false,
+        "default_spacing_m": 0.05
+      },
+      "acoustics": {
+        "model": "equivalent_absorption_area",
+        "A_obj_m2_sab_per_band": {
+          "125": 0.15,
+          "250": 0.19,
+          "500": 0.23,
+          "1000": 0.25,
+          "2000": 0.23,
+          "4000": 0.22
+        },
+        "scattering_per_band": null,
+        "occupancy_state": "occupied",
+        "paired_state_id": "theater-seat-upholstered-empty"
+      },
+      "citation": {
+        "source": "Beranek & Hidaka (1998), derived",
+        "reference": "Beranek L L, Hidaka T. Acoustical absorption by audiences and seats. JASA 104(6) 3169-3177. Per-seat A_obj derived from area-based alpha (medium upholstered audience, occupied) times nominal seat footprint 0.275 m^2.",
+        "doi": "10.1121/1.423957",
+        "measurement_method": "ISO 354 reverberation-room method (source publication); per-seat A_obj is a derivation, not a direct measurement.",
+        "estimated": true,
+        "notes": "Phase 0 placeholder. Phase 1 substitutes direct per-seat ISO 354 numbers from Beranek 2nd ed. (2004) Table 7.2 row 1 once verified against the original printed table."
+      },
+      "reliability": "derived",
+      "linked_device_id": null,
+      "schema_version": 1,
+      "added": "2026-05-26",
+      "revised": null,
+      "revised_by": null,
+      "revised_note": null
+    }
+  ]
+}

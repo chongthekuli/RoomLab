@@ -1,6 +1,7 @@
 import { roomSurfaces, roomEffectiveSurfaces, roomVolume } from './room-shape.js';
 import { airSabins } from './air-absorption.js';
 import { getTreatmentAbsorption } from '../labs/surfacelab/catalog.js';
+import { sumFurnitureAbsorption } from './furniture-absorption.js';
 
 const SABINE_CONSTANT = 0.161;
 
@@ -9,16 +10,24 @@ export function sabine({ volume_m3, totalAbsorption_sabins }) {
   return SABINE_CONSTANT * volume_m3 / totalAbsorption_sabins;
 }
 
-// Eyring with optional additive air-absorption term.
-//   Classical: T = 0.161·V / (−S·ln(1−α̅))
-//   With air:  T = 0.161·V / (−S·ln(1−α̅_surface) + 4mV)
-// Air absorption enters linearly as in Sabine — Kuttruff §5.3 keeps the
-// logarithm on SURFACE absorption only because air decay is inherently
-// exponential-in-time regardless of reflection count.
-export function eyring({ volume_m3, totalArea_m2, surfaceMeanAbsorption, airAbsSabins = 0 }) {
-  const denom = (-totalArea_m2 * Math.log(Math.max(1e-9, 1 - surfaceMeanAbsorption))) + airAbsSabins;
+// Eyring with optional additive air-absorption and object (furniture)
+// absorption terms.
+//   Classical:    T = 0.161·V / (−S·ln(1−α̅))
+//   With air:     T = 0.161·V / (−S·ln(1−α̅_surface) + 4mV)
+//   With objects: T = 0.161·V / (−S·ln(1−α̅_surface) + 4mV + ΣA_obj)
+//
+// Air absorption and discrete object absorption (chairs, drapes,
+// audience etc.) enter linearly as in Sabine — Kuttruff 5th ed. §5.3
+// and Beranek 2nd ed. §7.3 keep the logarithm on SURFACE absorption
+// only. Lumping ΣA_obj into ᾱ_surfaces inflates the log argument and
+// underestimates RT60 by ~8% in objects-heavy rooms; the parallel-A
+// formulation is the physically-correct one.
+export function eyring({ volume_m3, totalArea_m2, surfaceMeanAbsorption, airAbsSabins = 0, objectAbsSabins = 0 }) {
+  const denom = (-totalArea_m2 * Math.log(Math.max(1e-9, 1 - surfaceMeanAbsorption)))
+              + airAbsSabins
+              + objectAbsSabins;
   if (denom <= 0) return Infinity;
-  if (surfaceMeanAbsorption >= 1 && airAbsSabins <= 0) return 0;
+  if (surfaceMeanAbsorption >= 1 && airAbsSabins <= 0 && objectAbsSabins <= 0) return 0;
   return SABINE_CONSTANT * volume_m3 / denom;
 }
 
@@ -33,7 +42,7 @@ export function eyring({ volume_m3, totalArea_m2, surfaceMeanAbsorption, airAbsS
 // `airAbsorption` flag defaults to true. When a caller disables it here
 // it must also disable it in `computeRoomConstant` to keep the two
 // reverberant-field calculations consistent.
-export function computeRT60Band({ room, materials, bandIndex, zones = [], treatments = [], airAbsorption = true }) {
+export function computeRT60Band({ room, materials, bandIndex, zones = [], treatments = [], furniture = [], furnitureCatalogue = null, airAbsorption = true }) {
   // Include zone + treatment absorption so stadium bowl carpet + court
   // wood + placed acoustic panels actually contribute. Without zones the
   // arena preset reports ~16 s RT60; without treatments the user can
@@ -64,25 +73,35 @@ export function computeRT60Band({ room, materials, bandIndex, zones = [], treatm
   const volume_m3 = roomVolume(room);
   const freq_hz = materials.frequency_bands_hz[bandIndex];
   const airAbsorption_sabins = airSabins(freq_hz, volume_m3, airAbsorption);
-  const totalAbsorption_sabins = surfaceAbsorption_sabins + airAbsorption_sabins;
+  // Furniture (FurnitureLAB placements) contributes equivalent
+  // absorption area A_obj as a parallel term. Stays separate from
+  // surfaceAbsorption_sabins so it does NOT inflate α̅; gets folded into
+  // totalAbsorption_sabins for Sabine + into the Eyring denominator
+  // outside the log (Kuttruff §5.3, Beranek §7.3). When the caller has
+  // no FurnitureLAB catalogue yet (Node tests, Lab not visited), the
+  // helper returns 0 and rt60 reverts to the original surface+air model.
+  const objectAbsorption_sabins = sumFurnitureAbsorption(furniture, furnitureCatalogue, freq_hz);
+  const totalAbsorption_sabins = surfaceAbsorption_sabins + airAbsorption_sabins + objectAbsorption_sabins;
   // `meanAbsorption` stays surface-only — that's the α̅ a user expects to
-  // see in UI (property of the walls, not a function of air). The air
-  // sink is exposed as a separate `airAbsorption_sabins` field and is
+  // see in UI (property of the walls, not a function of air or contents).
+  // The air sink and object sink are exposed as separate fields and are
   // folded into `totalAbsorption_sabins` for Sabine / Hopkins-Stryker
   // calculations.
   const meanAbsorption = totalArea_m2 > 0 ? surfaceAbsorption_sabins / totalArea_m2 : 0;
   return {
     volume_m3,
     totalArea_m2,
-    totalAbsorption_sabins,          // surface + 4mV — drives Sabine + R
+    totalAbsorption_sabins,          // surface + 4mV + ΣA_obj — drives Sabine + R
     surfaceAbsorption_sabins,        // surface only
     airAbsorption_sabins,            // 4mV contribution
+    objectAbsorption_sabins,         // ΣA_obj from placed furniture
     meanAbsorption,                  // α̅ surfaces only (unchanged from before)
     sabine_s: sabine({ volume_m3, totalAbsorption_sabins }),
     eyring_s: eyring({
       volume_m3, totalArea_m2,
       surfaceMeanAbsorption: meanAbsorption,
       airAbsSabins: airAbsorption_sabins,
+      objectAbsSabins: objectAbsorption_sabins,
     }),
   };
 }
@@ -99,9 +118,9 @@ export function preferredRT60(band) {
   return band.sabine_s;
 }
 
-export function computeAllBands({ room, materials, zones = [], treatments = [], airAbsorption = true }) {
+export function computeAllBands({ room, materials, zones = [], treatments = [], furniture = [], furnitureCatalogue = null, airAbsorption = true }) {
   return materials.frequency_bands_hz.map((frequency_hz, i) => ({
     frequency_hz,
-    ...computeRT60Band({ room, materials, bandIndex: i, zones, treatments, airAbsorption }),
+    ...computeRT60Band({ room, materials, bandIndex: i, zones, treatments, furniture, furnitureCatalogue, airAbsorption }),
   }));
 }

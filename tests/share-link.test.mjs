@@ -173,6 +173,10 @@ applyPresetToState('auditorium');
     'rackSystem',  // PA equipment racks (Felix Brandt's RACK_BUILDER_DESIGN spec)
     'projectName', // user-set project label (Hospital Serdang, etc.)
     'treatments', 'selectedTreatmentId',   // acoustic treatments (PR-2 physics integration, May 2026)
+    'furniture', 'selectedFurnitureId',    // FurnitureLAB placements (Lab #6 Phase 0, 2026-05-26)
+                                            // — each entry has {id, catalogueId, position, rotation_deg, label?},
+                                            // contributes A_obj into rt60 as a parallel term per
+                                            // Kuttruff §5.3 / Beranek §7.3.
     'outdoor',     // outdoor-field config: {enabled, field_size_m, temperature_C,
                    // humidity_pct} — 4 small scalars, scene config like physics.
                    // serializeProject (app-state.js) emits it intentionally so a

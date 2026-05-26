@@ -1,6 +1,7 @@
 import { state, earHeightFor, getSelectedListener, POSTURE_LABELS, groupById, SPEAKER_GROUPS, expandSources } from '../app-state.js';
 import { on } from './events.js';
 import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
+import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { computeListenerBreakdown, computeRoomConstant } from '../physics/spl-calculator.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
@@ -188,7 +189,14 @@ function renderListenerSection() {
 }
 
 function renderRT60() {
-  const bands = computeAllBands({ room: state.room, materials: materialsRef, zones: state.zones, treatments: state.treatments });
+  const bands = computeAllBands({
+    room: state.room,
+    materials: materialsRef,
+    zones: state.zones,
+    treatments: state.treatments,
+    furniture: state.furniture,
+    furnitureCatalogue: getFurnitureCatalogue(),
+  });
   const f500 = bands.find(b => b.frequency_hz === 500);
   const f1k  = bands.find(b => b.frequency_hz === 1000);
   // Headline mid-band RT60 — prefer Eyring when α̅ > 0.2 (ISO 354 §B.2,

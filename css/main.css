@@ -7391,3 +7391,329 @@ section h3 {
   padding: 1px 5px;
   margin-right: 4px;
 }
+
+/* ===== FurnitureLAB — Lab #6 (Phase 0, 2026-05-26) ===========================
+   Two-pane layout: catalogue grid (left, fluid), citation-first detail pane
+   (right, fixed 420 px). Isometric-ink glyphs in card thumbs; same ink language
+   carries to the print plan SVG so Sam's cross-surface parity is one source
+   of glyph truth. Maya signed off the visual brief; this is the v0 implementation. */
+
+#furniturelab-root {
+  height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr 420px;
+  grid-template-areas:
+    "head head"
+    "grid detail";
+  gap: 0;
+  padding-top: 56px; /* clear the app header */
+  box-sizing: border-box;
+}
+.fl-header {
+  grid-area: head;
+  padding: 18px 28px 14px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.fl-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0 0 4px 0;
+  color: var(--fg-strong);
+}
+.fl-beta {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--data-amber);
+  background: rgba(255, 180, 84, 0.12);
+  border: 1px solid rgba(255, 180, 84, 0.40);
+  border-radius: var(--radius);
+  padding: 1px 5px;
+  margin-left: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fl-tagline {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 70ch;
+  line-height: 1.45;
+}
+
+/* Catalogue grid — auto-fill columns at 240 px min, gap 16 px, padded
+   from the page edges so cards don't bleed into the chrome rules. */
+.fl-grid {
+  grid-area: grid;
+  overflow-y: auto;
+  padding: 20px 24px 24px 28px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  align-content: start;
+}
+.fl-grid-loading, .fl-grid-empty, .fl-grid-error {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 24px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  grid-column: 1 / -1;
+}
+.fl-grid-error { color: var(--data-red); border-color: rgba(255, 107, 107, 0.4); }
+
+/* Card — paper background, ink-on-paper feel echoes the print-report
+   palette intentionally so report screenshots and the catalogue feel
+   like they belong to the same document family. */
+.fl-card {
+  background: #FAFAF7;
+  color: #1A1A1A;
+  border: 1px solid #D8D4CC;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out, transform 120ms ease-out;
+  display: flex;
+  flex-direction: column;
+}
+.fl-card:hover {
+  border-color: #1A1A1A;
+  background: #F5F1E8;
+}
+.fl-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.fl-card.selected {
+  border-color: #9A3F2A;
+  box-shadow: 0 0 0 2px rgba(154, 63, 42, 0.18);
+}
+.fl-card-art {
+  background: #F2EDE3;
+  padding: 8px 12px 0 12px;
+  display: flex;
+  justify-content: center;
+}
+.fl-card-art svg {
+  width: 100%;
+  height: 140px;
+  display: block;
+}
+.fl-card-body {
+  padding: 10px 14px 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+.fl-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  color: #1A1A1A;
+  line-height: 1.25;
+}
+.fl-card-meta {
+  font-size: 10.5px;
+  color: #555;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+}
+.fl-card-cat {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.fl-card-spark {
+  width: 70px;
+  height: 18px;
+}
+.fl-card-rel {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  display: inline-block;
+  width: max-content;
+}
+.fl-rel-measured  { color: #1B6E37; background: rgba(27, 110, 55, 0.10); border: 1px solid rgba(27, 110, 55, 0.30); }
+.fl-rel-derived   { color: #8A6A1F; background: rgba(138, 106, 31, 0.10); border: 1px solid rgba(138, 106, 31, 0.30); }
+.fl-rel-estimated { color: #7A2018; background: rgba(122, 32, 24, 0.10); border: 1px solid rgba(122, 32, 24, 0.30); }
+
+/* Detail pane — same dark slate as the rest of the chrome (the card is the
+   only paper surface, intentional). */
+.fl-detail {
+  grid-area: detail;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 20px 22px 24px 22px;
+}
+.fl-detail-empty {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+  padding: 24px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.fl-detail-head {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fl-detail-name {
+  font-size: 15px;
+  margin: 0;
+  color: var(--fg-strong);
+  line-height: 1.3;
+}
+.fl-detail-rel {
+  width: max-content;
+}
+.fl-detail-section {
+  margin-bottom: 16px;
+}
+.fl-detail-section h3 {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 8px 0;
+  font-weight: 600;
+}
+.fl-detail-A {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.fl-detail-A th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 3px 8px 3px 0;
+  border-bottom: 1px solid var(--border);
+  width: 36%;
+}
+.fl-detail-A td {
+  text-align: right;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+}
+.fl-detail-note {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 8px 0 0 0;
+  line-height: 1.5;
+}
+.fl-detail-spec {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+  margin: 0;
+}
+.fl-detail-spec dt {
+  color: var(--muted);
+  font-weight: 500;
+}
+.fl-detail-spec dd {
+  color: var(--fg);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.fl-citation {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.fl-cite-source {
+  font-size: 12px;
+  color: var(--fg);
+  margin: 0 0 4px 0;
+}
+.fl-cite-source a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.fl-cite-source a:hover { text-decoration: underline; }
+.fl-cite-ref, .fl-cite-method, .fl-cite-notes {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin: 0 0 4px 0;
+  line-height: 1.5;
+}
+.fl-detail-foot {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.fl-place-btn {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #FAFAF7;
+  background: #9A3F2A;
+  border: 1px solid #7A2F1F;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 100ms ease-out;
+}
+.fl-place-btn:hover { background: #B14A33; }
+.fl-place-btn:active { background: #842F1F; }
+
+/* Armed-placement affordance — when state.furnitureArmed is non-null,
+   the 2D viewport changes cursor + shows a hint at the top. */
+.r2d-armed { cursor: crosshair !important; }
+.r2d-armed-hint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(154, 63, 42, 0.92);
+  color: #FAFAF7;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  letter-spacing: 0.02em;
+}
+
+/* Placed furniture in the 2D viewport — footprint outline + glyph,
+   selected state mirrors the treatment-panel pattern. */
+.r2d-furniture {
+  cursor: pointer;
+}
+.r2d-furniture .r2d-furniture-footprint {
+  fill: rgba(154, 63, 42, 0.18);
+  stroke: rgba(154, 63, 42, 0.85);
+  stroke-width: 1.2;
+}
+.r2d-furniture.selected .r2d-furniture-footprint {
+  stroke: #00d4ff;
+  stroke-width: 2;
+  fill: rgba(0, 212, 255, 0.18);
+}
+.r2d-furniture-label {
+  fill: #cfd6df;
+  font-size: 10px;
+  pointer-events: none;
+}

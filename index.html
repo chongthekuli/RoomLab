@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=657" />
-  <link rel="stylesheet" href="css/theme.css?v=657" />
-  <link rel="stylesheet" href="css/print.css?v=657" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=658" />
+  <link rel="stylesheet" href="css/theme.css?v=658" />
+  <link rel="stylesheet" href="css/print.css?v=658" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -337,6 +337,28 @@
     </main>
   </div>
 
+  <!-- FURNITURELAB ROUTE — Lab #6 (2026-05-26). Room-contents browser
+       and placement workshop. Catalogue grid left, detail pane right,
+       isometric-ink card visuals (Maya spec). Beta — Phase 0 ships
+       skeleton + one reference object (theater seat occupied) wired
+       end-to-end through Sabine + Eyring with parallel-A physics per
+       Dr. Chen's brief (acoustics-engineer, 2026-05-26).
+       -->
+  <div class="lab-route" id="route-furniture" data-route="furniture">
+    <main id="furniturelab-root">
+      <header class="fl-header">
+        <h1 class="fl-title">FurnitureLAB <span class="fl-beta">beta</span></h1>
+        <p class="fl-tagline">Room contents with cited acoustic data &mdash; non-electrical, non-signal-bearing objects. Power-cord or signal-cable items belong in DeviceLAB.</p>
+      </header>
+      <section class="fl-grid" id="fl-catalogue-grid">
+        <div class="fl-grid-loading">Loading catalogue&hellip;</div>
+      </section>
+      <aside class="fl-detail" id="fl-detail-pane" aria-live="polite">
+        <div class="fl-detail-empty">Select an item from the catalogue to see specs, citations, and place it into the room.</div>
+      </aside>
+    </main>
+  </div>
+
   <div id="help-overlay" hidden>
     <div class="help-modal">
       <div class="help-head">
@@ -387,6 +409,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=657"></script>
+  <script type="module" src="js/main.js?v=658"></script>
 </body>
 </html>

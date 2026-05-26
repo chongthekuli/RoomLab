@@ -514,6 +514,27 @@ export const state = {
   // Currently-selected treatment id (parallel to selectedListenerId).
   // null = no treatment selected. Cleared by scene:reset and project load.
   selectedTreatmentId: null,
+  // Furniture / room-contents placed by FurnitureLAB. One entry = one
+  // catalogue-linked object (chair, sofa, table, prayer mat, etc.) with
+  // an in-room position. Each entry contributes equivalent absorption
+  // area A_obj into Sabine + Eyring as a parallel-A term outside the
+  // log (Kuttruff §5.3, Beranek §7.3) — see js/physics/rt60.js. Visual
+  // rendering: room-2d.js draws the glyph + label top-down; scene.js
+  // (Phase 1) adds a procedural 3D mesh.
+  //
+  // Shape per entry:
+  //   {
+  //     id: "F1",                      // unique within scene
+  //     catalogueId: "theater-seat-...", // lookup key into data/furniture/catalogue.json
+  //     label: string,                  // display name (defaults to catalogue name)
+  //     position: { x: m, y: m },       // state coords (state +y = north, matches all viewports)
+  //     rotation_deg: 0,                // yaw around vertical axis
+  //     _cachedSpec: object | undefined // session-only resolved catalogue entry — NOT serialized
+  //   }
+  furniture: [],
+  // Currently-selected furniture id (parallel to selectedTreatmentId).
+  // null = no item selected. Cleared by scene:reset and project load.
+  selectedFurnitureId: null,
   results: {
     // Draft-engine outputs (current Sabine / Hopkins-Stryker / STIPA) —
     // re-used names for backward compat; the entire block is conceptually
@@ -885,6 +906,13 @@ export function serializeProject(src = state) {
       return deepClone(persistent);
     }),
     selectedTreatmentId: src.selectedTreatmentId ?? null,
+    // Furniture placements. Strip the session-only _cachedSpec (resolved
+    // catalogue row — re-resolved on first render after load).
+    furniture: (src.furniture ?? []).map(f => {
+      const { _cachedSpec, ...persistent } = f;
+      return deepClone(persistent);
+    }),
+    selectedFurnitureId: src.selectedFurnitureId ?? null,
     physics: {
       reverberantField: !!src.physics?.reverberantField,
       coherent:         !!src.physics?.coherent,
@@ -1056,6 +1084,30 @@ export function deserializeProject(obj) {
     state.selectedTreatmentId = obj.selectedTreatmentId;
   } else {
     state.selectedTreatmentId = null;
+  }
+
+  // --- Furniture (FurnitureLAB placements) ----------------------------
+  // Filter malformed entries defensively: id + catalogueId + position
+  // are mandatory.
+  if (Array.isArray(obj.furniture)) {
+    state.furniture = obj.furniture
+      .filter(f => f && typeof f === 'object'
+        && typeof f.id === 'string'
+        && typeof f.catalogueId === 'string'
+        && f.position && Number.isFinite(f.position.x)
+        && Number.isFinite(f.position.y))
+      .map(f => {
+        const { _cachedSpec, ...persistent } = f;
+        return deepClone(persistent);
+      });
+  } else {
+    state.furniture = [];
+  }
+  if (typeof obj.selectedFurnitureId === 'string'
+      && state.furniture.some(f => f.id === obj.selectedFurnitureId)) {
+    state.selectedFurnitureId = obj.selectedFurnitureId;
+  } else {
+    state.selectedFurnitureId = null;
   }
 
   // --- Physics + ambient + EQ — overlay scalars; arrays full replace ---

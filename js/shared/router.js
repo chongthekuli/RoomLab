@@ -22,18 +22,19 @@
 
 import { showLoadingOverlay, hideLoadingOverlay } from './lab-loading-overlay.js';
 
-const ROUTES = ['room', 'speaker', 'device', 'surface', 'wall'];
+const ROUTES = ['room', 'speaker', 'device', 'surface', 'wall', 'furniture'];
 const DEFAULT_ROUTE = 'room';
 
 // Human-readable labels for the loading overlay. Match header-nav.js
 // so "Loading SpeakerLAB…" reads identically to the tab pill the user
 // just clicked.
 const ROUTE_LABELS = {
-  room:    'RoomLAB',
-  speaker: 'SpeakerLAB',
-  device:  'DeviceLAB',
-  surface: 'SurfaceLAB',
-  wall:    'WallLAB',
+  room:      'RoomLAB',
+  speaker:   'SpeakerLAB',
+  device:    'DeviceLAB',
+  surface:   'SurfaceLAB',
+  wall:      'WallLAB',
+  furniture: 'FurnitureLAB',
 };
 
 /**
