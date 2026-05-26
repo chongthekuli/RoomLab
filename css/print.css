@@ -964,6 +964,8 @@ body.is-pdf-export .vp-tabs {
     margin: 6pt 0 0 0;
     page-break-inside: avoid;
     break-inside: avoid;
+    text-align: justify;
+    hyphens: auto;
   }
 
   /* ----------- DRAWING 02 — OPERATING-RANGE STRIP -----------
@@ -1222,6 +1224,8 @@ body.is-pdf-export .vp-tabs {
     margin: 4pt 0 0 0;
     font-style: italic;
     line-height: 1.5;
+    text-align: justify;
+    hyphens: auto;
   }
 
   /* ----------- TABLES ----------- */
@@ -1921,10 +1925,12 @@ body.is-pdf-export .vp-tabs {
      keep its bottom margin tight inside the entry block. */
   #print-report .pg-methodology .pg-method-entry .pg-prose {
     margin: 0;
-    /* These bodies live in the NARROW 4-column grid where justify flows
-       ugly river-gaps — keep them left-aligned. The wide prose blocks
-       (intro, disclaimers, acceptance, reviewer) stay justified above. */
-    text-align: left;
+    /* User v=656: full-justify across the whole methodology page,
+       consistent with the wide prose blocks (intro, disclaimers,
+       acceptance, reviewer). The narrow 4-col grid can flow visible
+       word-space gaps on short lines; hyphens:auto (inherited from
+       .pg-prose) softens that. */
+    text-align: justify;
   }
 
   /* ----- SESSION SIGNATURE ROW — 5 captured fields ----- */
