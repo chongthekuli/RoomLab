@@ -2,6 +2,7 @@ import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, 
 import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
+import { colorForReliability, reliabilityLegendRows } from '../labs/furniturelab/reliability-colors.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
@@ -862,6 +863,7 @@ export function mount2DViewport({ materials }) {
   on('treatment:changed', render);
   on('furniture:changed', render);
   on('furniture:selected', render);
+  on('furniture-confidence:changed', render);
   on('treatment:selected', render);
   on('scene:reset', render);
   // OUTDOOR SIMULATION MODE (Phase 3b) — the UI panel mutates
@@ -1646,6 +1648,7 @@ function renderNormal(vp) {
         ${minaretSvg}
         ${treatmentSvg}
         ${furnitureSvg}
+        ${renderFurnitureConfidenceLegend(800, 500)}
         ${listenerSvg}
         ${speakerSvg}
         ${vertexSvg}
@@ -3107,6 +3110,10 @@ function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room) {
   const stateToSvgY = (y) => y0 - (y / room.depth_m) * pxD;
   const px_per_m_x = pxW / Math.max(0.01, room.width_m);
   const px_per_m_y = pxD / Math.max(0.01, room.depth_m);
+  // Carmen's confidence-overlay mode — when ON, the footprint fill /
+  // stroke are sourced from reliability-colors.js (green/amber/red
+  // per row.reliability) instead of the default accent CSS class.
+  const confidenceMode = !!state.display?.furnitureConfidenceMode;
 
   let s = '';
   for (const f of furniture) {
@@ -3128,17 +3135,62 @@ function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room) {
     // name / id if the row is malformed or missing.
     const lblText = f.label || row?.short_name || row?.name || f.catalogueId || f.id;
 
+    // Footprint style: confidence overlay wins, then broken fallback,
+    // then the default CSS-driven accent. Inline style only when we're
+    // overriding the CSS (keeps the default code path unchanged so
+    // CSS-only tweaks don't fight inline declarations).
+    let rectStyle = '';
+    if (confidenceMode) {
+      const tier = isBroken ? 'unknown' : row.reliability;
+      const c = colorForReliability(tier);
+      rectStyle = `style="fill:${c.fill};stroke:${c.stroke};stroke-width:1.4"`;
+    } else if (isBroken) {
+      rectStyle = 'style="fill:rgba(120,120,120,0.18);stroke:rgba(120,120,120,0.6);stroke-dasharray:3,2"';
+    }
+
     s += `<g class="r2d-furniture ${isSel ? 'selected' : ''} ${isBroken ? 'broken' : ''}"
             data-furniture-id="${f.id}"
             transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)}) rotate(${rot.toFixed(1)})">
             <rect class="r2d-furniture-footprint"
                   x="${(-wPx/2).toFixed(1)}" y="${(-dPx/2).toFixed(1)}"
                   width="${wPx.toFixed(1)}" height="${dPx.toFixed(1)}"
-                  ${isBroken ? 'style="fill:rgba(120,120,120,0.18);stroke:rgba(120,120,120,0.6);stroke-dasharray:3,2"' : ''} />
+                  ${rectStyle} />
             <text class="r2d-furniture-label" x="0" y="${(dPx/2 + 11).toFixed(1)}" text-anchor="middle">${escapeXml(lblText)}</text>
           </g>`;
   }
   return s;
+}
+
+// Small legend chip rendered when the confidence overlay is on. Lives
+// inside the floor-plan SVG (not as an HTML overlay) so it pans + zooms
+// naturally with the rest of the viewport content and doesn't get
+// caught in the click-outside-to-close-panel hit testing.
+function renderFurnitureConfidenceLegend(svgViewBoxW, svgViewBoxH) {
+  if (!state.display?.furnitureConfidenceMode) return '';
+  const rows = reliabilityLegendRows();
+  const padX = 8, padY = 6, rowH = 12, swatch = 9, gap = 6, charW = 5.2;
+  const longestLabelLen = Math.max(...rows.map(r => r.label.length));
+  const w = padX * 2 + swatch + gap + longestLabelLen * charW + 4;
+  const h = padY * 2 + rows.length * rowH;
+  // Bottom-left of the viewport, clear of the room outline most of the
+  // time. Pure SVG-coord layout (no transform) so it renders sharp.
+  const x = 12;
+  const y = svgViewBoxH - h - 12;
+  const rowsSvg = rows.map((r, i) => {
+    const ry = y + padY + i * rowH;
+    return `
+      <rect x="${x + padX}" y="${ry + (rowH - swatch) / 2}" width="${swatch}" height="${swatch}"
+            fill="${r.swatchHex}" stroke="none" />
+      <text x="${x + padX + swatch + gap}" y="${ry + rowH / 2 + 3.4}" class="r2d-furn-leg-label">${r.label}</text>
+    `;
+  }).join('');
+  return `
+    <g class="r2d-furn-confidence-legend" pointer-events="none">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3"
+            fill="rgba(20, 25, 32, 0.92)" stroke="rgba(255, 255, 255, 0.12)" stroke-width="0.6" />
+      <text x="${x + padX}" y="${y - 2}" class="r2d-furn-leg-title">Acoustic data confidence</text>
+      ${rowsSvg}
+    </g>`;
 }
 
 function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId, metrics = []) {

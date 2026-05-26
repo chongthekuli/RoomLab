@@ -7720,6 +7720,65 @@ section h3 {
 }
 .r2d-furniture.broken .r2d-furniture-label { fill: #ff9090; }
 
+/* Confidence-overlay legend chip inside the 2D viewport. Text styles
+   here only — geometry is laid out in SVG coords by renderFurnitureConfidenceLegend. */
+.r2d-furn-confidence-legend .r2d-furn-leg-title {
+  fill: #cfd6df;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.r2d-furn-confidence-legend .r2d-furn-leg-label {
+  fill: #e4e6ea;
+  font-size: 9.5px;
+  font-weight: 500;
+}
+
+/* Sidebar confidence-overlay toggle row */
+.pf-toggle-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "checkbox label"
+    "checkbox hint";
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 100ms, background 100ms;
+}
+.pf-toggle-row:hover { border-color: var(--border-strong); }
+.pf-toggle-row.on {
+  border-color: var(--accent);
+  background: rgba(74, 163, 255, 0.06);
+}
+.pf-toggle-row input[type="checkbox"] {
+  grid-area: checkbox;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.pf-toggle-label {
+  grid-area: label;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.pf-toggle-hint {
+  grid-area: hint;
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
 /* ===== panel-furniture (RoomLAB sidebar) ===== */
 #panel-furniture h2 {
   display: flex;

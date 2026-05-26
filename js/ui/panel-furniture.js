@@ -59,10 +59,16 @@ function render(root) {
     ? `<div class="pf-placed-empty">No furniture placed yet. Pick from the catalogue above, then click in the 2D plan.</div>`
     : placed.map((f, i) => renderPlacedRow(f, i, catalogue)).join('');
 
+  const confOn = !!state.display?.furnitureConfidenceMode;
   root.innerHTML = `
     <h2>Furniture <span class="fl-rail-beta">beta</span></h2>
     <div class="pf-body">
       <p class="pf-intro">Pick an item, then click in the floor plan to place. Click a placed item to select; <kbd>Del</kbd> removes it.</p>
+      <label class="pf-toggle-row ${confOn ? 'on' : ''}" title="Re-tint placed furniture in the 2D viewport by acoustic-data reliability (measured / derived / estimated). The competitive moat: every RT60 number knows whether it rests on a lab measurement or a guess.">
+        <input type="checkbox" id="pf-confidence-toggle" ${confOn ? 'checked' : ''} />
+        <span class="pf-toggle-label">Confidence overlay</span>
+        <span class="pf-toggle-hint">colour placed items by evidence tier</span>
+      </label>
       <div class="pf-grid">${cards}</div>
       <div class="pf-placed">
         <div class="pf-placed-head">Placed in this room <span class="pf-placed-count">${placed.length}</span></div>
@@ -70,6 +76,16 @@ function render(root) {
       </div>
     </div>
   `;
+
+  // Confidence-overlay toggle. Emitting a custom event (vs. a global
+  // re-render) lets room-2d redraw without rebuilding the panel — the
+  // panel itself never has to re-render when the user flips the
+  // checkbox, only the viewport.
+  root.querySelector('#pf-confidence-toggle')?.addEventListener('change', (ev) => {
+    state.display.furnitureConfidenceMode = !!ev.target.checked;
+    root.querySelector('.pf-toggle-row')?.classList.toggle('on', state.display.furnitureConfidenceMode);
+    emit('furniture-confidence:changed', { on: state.display.furnitureConfidenceMode });
+  });
 
   // Click-to-arm on catalogue cards.
   root.querySelectorAll('.pf-card').forEach(el => {

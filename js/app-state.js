@@ -609,6 +609,14 @@ export const state = {
   rackSystem: { racks: [] },
   display: {
     showHeatmaps: true, showAimLines: false, showIsobars: true, isobarStep_db: 3,
+    // FurnitureLAB confidence overlay (Phase 1B, 2026-05-26). When ON,
+    // every placed furniture row's 2D footprint is re-tinted by its
+    // catalogue reliability tier (measured / derived / estimated)
+    // instead of the standard terracotta accent. Off by default —
+    // the default render reads as "this is the room", the toggle
+    // says "show me where the evidence is thin." Carmen's competitive
+    // wedge — see js/labs/furniturelab/reliability-colors.js.
+    furnitureConfidenceMode: false,
     // Ray-path visualisation — debug overlay that traces ~200 sample
     // rays from the sources and renders their reflection paths as line
     // segments. Off by default (clutter); user toggles on demand. Cached
