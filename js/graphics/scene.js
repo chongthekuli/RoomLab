@@ -415,11 +415,16 @@ export async function mount3DViewport({ materials }) {
   });
   on('source:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
   on('source:model_changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
-  on('treatment:changed', () => queueRebuild(REBUILD_TREATMENTS));
+  on('treatment:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_TREATMENTS); });
   on('treatment:selected', () => queueRebuild(REBUILD_TREATMENTS));
   // FurnitureLAB placed objects — rebuild on placement, selection,
-  // and on scene:reset (handled by the broader rebuild below).
-  on('furniture:changed', () => queueRebuild(REBUILD_FURNITURE));
+  // and on scene:reset (handled by the broader rebuild below). The
+  // ray-viz overlay caches per-ray paths; without invalidation the
+  // pre-furniture rays keep drawing through newly-placed bboxes (the
+  // "I still see rays shoot through" UAT bug). Auto-disables the
+  // toggle so the user clicks-to-rebuild — matches how source/room
+  // changes invalidate the cache.
+  on('furniture:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_FURNITURE); });
   on('furniture:selected', () => queueRebuild(REBUILD_FURNITURE));
   // Treatments panel asks the 3D viewport to arm placement mode — the
   // next click on a wall or the ceiling will drop a new entry of the
