@@ -3,6 +3,7 @@ import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { colorForReliability, reliabilityLegendRows } from '../labs/furniturelab/reliability-colors.js';
+import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
@@ -1649,6 +1650,7 @@ function renderNormal(vp) {
         ${treatmentSvg}
         ${furnitureSvg}
         ${renderFurnitureConfidenceLegend(800, 500)}
+        <g id="r2d-furniture-ghost-layer"></g>
         ${listenerSvg}
         ${speakerSvg}
         ${vertexSvg}
@@ -2299,6 +2301,13 @@ function wireSourceInteraction(vp) {
   if (!svg) return;
   svg.addEventListener('pointerdown', onPickablePointerDown);
   svg.addEventListener('contextmenu', onPickableContextMenu);
+  // Acoustic-ghost preview — only fires when armed; bails fast otherwise.
+  // RAF-throttled so 60+ Hz mousemoves don't redo rt60 math every event.
+  svg.addEventListener('mousemove', (e) => {
+    if (!state.furnitureArmed) return;
+    scheduleFurnitureGhostUpdate(e.clientX, e.clientY);
+  });
+  svg.addEventListener('mouseleave', clearFurnitureGhost);
   // If the viewport mounts AFTER the user already armed a placement
   // (the more common ordering — FurnitureLAB → click "Place into room"
   // → route to RoomLAB), sync the armed-cursor UI now.
@@ -2348,8 +2357,11 @@ function applyArmedCursorState() {
     const name = row?.name || state.furnitureArmed.catalogueId;
     const hint = document.createElement('div');
     hint.className = 'r2d-armed-hint';
-    hint.textContent = `Click in the room to place “${name}”  ·  ESC to cancel`;
+    hint.textContent = `Click in the room to place “${name}”  ·  ESC to cancel  ·  hover for RT60 preview`;
     vp.appendChild(hint);
+  } else {
+    // Arm just dropped — clear any leftover ghost.
+    clearFurnitureGhost();
   }
 }
 
@@ -2359,6 +2371,142 @@ function cancelFurnitureArming() {
   if (!state.furnitureArmed) return;
   state.furnitureArmed = null;
   applyArmedCursorState();
+}
+
+// ---------------------------------------------------------------------------
+// Acoustic-ghost preview (Phase 1C, 2026-05-26).
+//
+// While the user has armed a placement and is hovering the 2D viewport,
+// show two things at the cursor: (1) a dashed footprint rect where the
+// object would land, (2) a chip with the RT60 delta the placement would
+// cause. The delta is honest — it computes a hypothetical rt60 with the
+// candidate added, against the current rt60. Position doesn't affect
+// rt60 (parallel-A is spatially uniform in Sabine/Eyring), but adding
+// "one more chair" does.
+//
+// Architectural note: mousemove fires faster than render() can run, so
+// the ghost lives in its own #r2d-furniture-ghost-layer element and is
+// DOM-mutated directly (innerHTML swap), NOT via the normal render
+// pipeline. Updates coalesce to one per animation frame.
+
+let _ghostRAF = 0;
+let _ghostLastClientXY = null;
+
+function scheduleFurnitureGhostUpdate(clientX, clientY) {
+  _ghostLastClientXY = { x: clientX, y: clientY };
+  if (_ghostRAF) return;
+  _ghostRAF = requestAnimationFrame(() => {
+    _ghostRAF = 0;
+    const svg = document.querySelector('#view-2d svg');
+    if (!svg || !_ghostLastClientXY) return;
+    if (!state.furnitureArmed) { clearFurnitureGhost(); return; }
+    const worldXY = clientToWorldXY(svg, _ghostLastClientXY.x, _ghostLastClientXY.y);
+    if (!worldXY) { clearFurnitureGhost(); return; }
+    renderFurnitureGhost(worldXY);
+  });
+}
+
+function clearFurnitureGhost() {
+  if (_ghostRAF) { cancelAnimationFrame(_ghostRAF); _ghostRAF = 0; }
+  _ghostLastClientXY = null;
+  const ghost = document.getElementById('r2d-furniture-ghost-layer');
+  if (ghost) ghost.innerHTML = '';
+}
+
+function renderFurnitureGhost(hoverWorldXY) {
+  const ghost = document.getElementById('r2d-furniture-ghost-layer');
+  if (!ghost) return;
+  const armed = state.furnitureArmed;
+  if (!armed || typeof armed.catalogueId !== 'string') {
+    ghost.innerHTML = '';
+    return;
+  }
+  const cat = getFurnitureCatalogue();
+  const row = cat.get(armed.catalogueId);
+  if (!row) { ghost.innerHTML = ''; return; }
+
+  // Hypothetical RT60 at 1 kHz with the candidate added. Compute both
+  // bands lazily — the rt60 module is pure / Node-fast, but we still
+  // bail before re-rendering the ghost if neither current nor hover
+  // yielded a finite number (degenerate room, no materials, etc.).
+  let delta_s = null;
+  if (materialsRef && state.room) {
+    try {
+      const ghostEntry = {
+        id: '__GHOST__', catalogueId: armed.catalogueId,
+        position: { x: hoverWorldXY.x, y: hoverWorldXY.y }, rotation_deg: 0,
+      };
+      const currBands = computeAllBands({
+        room: state.room, materials: materialsRef,
+        zones: state.zones, treatments: state.treatments,
+        furniture: state.furniture || [], furnitureCatalogue: cat,
+      });
+      const ghBands = computeAllBands({
+        room: state.room, materials: materialsRef,
+        zones: state.zones, treatments: state.treatments,
+        furniture: [...(state.furniture || []), ghostEntry], furnitureCatalogue: cat,
+      });
+      const curr1k = currBands.find(b => b.frequency_hz === 1000);
+      const gh1k   = ghBands.find(b => b.frequency_hz === 1000);
+      const a = preferredRT60(curr1k);
+      const b = preferredRT60(gh1k);
+      if (Number.isFinite(a) && Number.isFinite(b)) delta_s = b - a;
+    } catch (err) {
+      // Pure helper failure shouldn't break the cursor — silently no-op.
+      delta_s = null;
+    }
+  }
+
+  // Project hover XY to SVG pixels using the same geometry the main
+  // render path uses. currentRoomGeom() returns the cached x0/y0/pxW/pxD
+  // from the most recent full render.
+  const geom = currentRoomGeom();
+  if (!geom) { ghost.innerHTML = ''; return; }
+  const w_m = Math.max(0.1, row.footprint?.width_m ?? 0.55);
+  const d_m = Math.max(0.1, row.footprint?.depth_m ?? 0.60);
+  const cx = geom.x0 + (hoverWorldXY.x / state.room.width_m) * geom.pxW;
+  const cy = geom.y0 - (hoverWorldXY.y / state.room.depth_m) * geom.pxD;
+  const wPx = w_m * (geom.pxW / Math.max(0.01, state.room.width_m));
+  const dPx = d_m * (geom.pxD / Math.max(0.01, state.room.depth_m));
+
+  // Format the delta. Threshold below 5ms reads as "no audible change"
+  // (just-noticeable-difference for reverb is ~50 ms; below 5 ms is
+  // numerically zero for engineering purposes).
+  let deltaText;
+  if (delta_s == null) deltaText = 'RT60 — @ 1k';
+  else if (Math.abs(delta_s) < 0.005) deltaText = 'RT60 ~0.00 s @ 1k';
+  else {
+    const sign = delta_s < 0 ? '−' : '+';
+    deltaText = `RT60 ${sign}${Math.abs(delta_s).toFixed(2)} s @ 1k`;
+  }
+  // Chip is sized to text length so long deltas (e.g. -1.00 s) don't
+  // get clipped. Approx 5.5 SVG-units per char at 9 px font.
+  const chipW = Math.max(64, 6 * deltaText.length + 14);
+  const chipH = 14;
+  const chipY = (-dPx / 2) - 10 - chipH / 2;
+
+  // Tint the dashed border by the row's reliability tier so the user
+  // sees confidence WHILE previewing — consistent with the confidence
+  // overlay (Phase 1B). Falls back to terracotta accent if the row has
+  // no tier (defensive — every row should have one).
+  const tier = row.reliability;
+  const c = colorForReliability(tier);
+
+  ghost.innerHTML = `
+    <g class="r2d-furn-ghost" transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)})">
+      <rect x="${(-wPx/2).toFixed(1)}" y="${(-dPx/2).toFixed(1)}"
+            width="${wPx.toFixed(1)}" height="${dPx.toFixed(1)}"
+            fill="${c.fill}" stroke="${c.stroke}"
+            stroke-width="1.6" stroke-dasharray="4,3" />
+      <g class="r2d-furn-ghost-chip" transform="translate(0 ${chipY.toFixed(1)})">
+        <rect x="${(-chipW/2).toFixed(1)}" y="${(-chipH/2).toFixed(1)}"
+              width="${chipW.toFixed(1)}" height="${chipH.toFixed(1)}" rx="3"
+              fill="rgba(20,25,32,0.94)" stroke="${c.stroke}" stroke-width="0.7" />
+        <text x="0" y="3.4" text-anchor="middle" fill="#FAFAF7"
+              font-size="9" font-weight="600" font-variant-numeric="tabular-nums">${escapeXml(deltaText)}</text>
+      </g>
+    </g>
+  `;
 }
 
 on('furniture:armed', applyArmedCursorState);
@@ -2502,6 +2650,7 @@ function onPickablePointerDown(e) {
     state.furnitureArmed = null;
     document.querySelector('#view-2d')?.classList.remove('r2d-armed');
     document.querySelector('.r2d-armed-hint')?.remove();
+    clearFurnitureGhost();
     if (world && Number.isFinite(world.x) && Number.isFinite(world.y)) {
       placeFurnitureAt(armedCatalogueId, world);
     }
