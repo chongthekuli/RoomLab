@@ -58,6 +58,14 @@ const ALLOWED_MOUNTS = new Set(['floor', 'wall', 'ceiling', 'free-hanging']);
 // back to the generic box, but the FIELD is still required so the
 // dispatcher always has something to read.
 const ALLOWED_VISUAL_FAMILIES = new Set(['seat', 'slab-on-legs', 'vertical-box', 'flat-pad']);
+// Schema v3 (2026-05-27): acoustics.interaction_mode controls how the
+// precision ray-tracer treats the object. 'porous' = Beer-Lambert
+// volumetric absorber the ray passes through with energy loss (chairs,
+// sofas, drapes, audience blocks). 'reflective' = bbox triangulated
+// into the wall BVH; rays hit and bounce with α-absorption (tables,
+// lecterns, bookshelves, server racks). Both contribute identically to
+// rt60.js Sabine/Eyring via the parallel-A sum.
+const ALLOWED_INTERACTION_MODES = new Set(['porous', 'reflective']);
 
 for (const item of catalogue.items) {
   const tag = `[${item.id ?? '<no-id>'}]`;
@@ -91,6 +99,8 @@ for (const item of catalogue.items) {
   // Acoustics — the load-bearing block
   check(item.acoustics?.model === 'equivalent_absorption_area',
     `${tag} acoustics.model = 'equivalent_absorption_area' (only model supported in Phase 0)`);
+  check(ALLOWED_INTERACTION_MODES.has(item.acoustics?.interaction_mode),
+    `${tag} acoustics.interaction_mode is one of {${[...ALLOWED_INTERACTION_MODES].join(', ')}} (drives tracer pass: porous = Beer-Lambert sink, reflective = triangulated into wall BVH)`);
   const A = item.acoustics?.A_obj_m2_sab_per_band;
   check(A && typeof A === 'object',
     `${tag} acoustics.A_obj_m2_sab_per_band block is present`);

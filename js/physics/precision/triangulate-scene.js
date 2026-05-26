@@ -49,6 +49,7 @@ const TAG_WALL = 3;
 const TAG_ZONE = 4;
 const TAG_SCOREBOARD = 5;
 const TAG_TREATMENT = 6;
+const TAG_FURNITURE = 7;
 
 export const SURFACE_TAGS = {
   FLOOR: TAG_FLOOR,
@@ -57,6 +58,7 @@ export const SURFACE_TAGS = {
   ZONE: TAG_ZONE,
   SCOREBOARD: TAG_SCOREBOARD,
   TREATMENT: TAG_TREATMENT,
+  FURNITURE: TAG_FURNITURE,
 };
 
 // Treatment quads sit this many metres in FRONT of the host wall /
@@ -121,8 +123,64 @@ export function triangulateScene(scene, opts = {}) {
   triangulateStandaloneEnclosures(scene, tris);
   triangulateWallSegments(scene, tris);
   triangulateTreatments(scene, tris);
+  triangulateFurnitureReflective(scene, tris);
 
   return finalizeBuffer(tris);
+}
+
+// --- FurnitureLAB reflective items (Phase 2, 2026-05-27) --------------
+// Items with acoustics.interaction_mode='reflective' (wood tables,
+// lecterns, bookshelves, server racks) are NOT porous Beer-Lambert
+// absorbers — they're hard surfaces sound bounces off. Each placed
+// item becomes 12 box-face triangles in the wall BVH, materialIdx
+// pointing to a synthetic 'furniture:<catalogueId>' material registered
+// by scene-snapshot.js with α = A_obj / S_obj per band. The existing
+// wall-bounce machinery handles reflection + absorption with no
+// tracer-side change.
+//
+// Mehmet (perf brief 2026-05-26): 12 triangles × 600 items = 7,200 tris
+// on top of the typical 200-5,000-tri scene. BVH build is O(N log N),
+// so worst case ~3× build time, still <50 ms.
+function triangulateFurnitureReflective(scene, tris) {
+  const block = scene.furnitureReflective;
+  if (!block || block.count === 0) return;
+  const bboxes = block.bboxes;
+  const matIdxs = block.materialIdx;
+  for (let i = 0; i < block.count; i++) {
+    const minX = bboxes[i * 6 + 0], minY = bboxes[i * 6 + 1], minZ = bboxes[i * 6 + 2];
+    const maxX = bboxes[i * 6 + 3], maxY = bboxes[i * 6 + 4], maxZ = bboxes[i * 6 + 5];
+    const matIdx = matIdxs[i];
+    const tag = `furniture_${block.ids[i] ?? i}`;
+    // Six box faces, each emitted as two triangles (pushQuad). Outward
+    // normals point AWAY from the bbox interior so rays from outside
+    // hit the front face. Vertex winding chosen so the front face is
+    // CCW when viewed from the outward normal direction (Möller-
+    // Trumbore expects consistent winding for back-face culling).
+    //
+    // Verts of the box (8 corners):
+    const v000 = [minX, minY, minZ];
+    const v100 = [maxX, minY, minZ];
+    const v010 = [minX, maxY, minZ];
+    const v110 = [maxX, maxY, minZ];
+    const v001 = [minX, minY, maxZ];
+    const v101 = [maxX, minY, maxZ];
+    const v011 = [minX, maxY, maxZ];
+    const v111 = [maxX, maxY, maxZ];
+    // -Z face (floor side, normal pointing down). Ray from BELOW the
+    // bbox shouldn't hit it (bbox sits on floor) — keep it for
+    // consistency but the floor occludes it.
+    pushQuad(tris, v000, v010, v110, v100, [0, 0, -1], matIdx, TAG_FURNITURE, tag);
+    // +Z face (top). Normal up; sound from above hits here.
+    pushQuad(tris, v001, v101, v111, v011, [0, 0, +1], matIdx, TAG_FURNITURE, tag);
+    // -Y face (front, normal -y).
+    pushQuad(tris, v000, v100, v101, v001, [0, -1, 0], matIdx, TAG_FURNITURE, tag);
+    // +Y face (back, normal +y).
+    pushQuad(tris, v010, v011, v111, v110, [0, +1, 0], matIdx, TAG_FURNITURE, tag);
+    // -X face (left, normal -x).
+    pushQuad(tris, v000, v001, v011, v010, [-1, 0, 0], matIdx, TAG_FURNITURE, tag);
+    // +X face (right, normal +x).
+    pushQuad(tris, v100, v110, v111, v101, [+1, 0, 0], matIdx, TAG_FURNITURE, tag);
+  }
 }
 
 // --- Treatments (v3 — placed acoustic panels) -------------------------

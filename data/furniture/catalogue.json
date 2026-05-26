@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "schema_notes": "FurnitureLAB catalogue. Each entry: an in-room object (non-electrical, non-signal-bearing) that contributes equivalent absorption area A_obj into the room's Sabine/Eyring/ray-trace physics. Schema authored by Lin (docs-writer, catalogue sub-hat) and reviewed by Dr. Chen against ISO 354 measurement discipline. Reliability tag is non-negotiable: 'measured' (cited ISO 354 lab or peer-reviewed lab), 'derived' (calculated from a parent A_obj or surface-area×alpha mapping with a documented derivation), 'estimated' (engineering judgement; UI badges amber, report flags 'low-confidence'). citation.estimated mirrors reliability for serializer convenience. Schema v2 (2026-05-26): adds short_name (compact 2D / HUD label) and visual.family (3D + iso-glyph dispatch key, one of 'seat' | 'slab-on-legs' | 'vertical-box' | 'flat-pad'); both required on every row.",
+  "schema_version": 3,
+  "schema_notes": "FurnitureLAB catalogue. Each entry: an in-room object (non-electrical, non-signal-bearing) that contributes equivalent absorption area A_obj into the room's Sabine/Eyring/ray-trace physics. Schema authored by Lin (docs-writer, catalogue sub-hat) and reviewed by Dr. Chen against ISO 354 measurement discipline. Reliability tag is non-negotiable: 'measured' (cited ISO 354 lab or peer-reviewed lab), 'derived' (calculated from a parent A_obj or surface-area×alpha mapping with a documented derivation), 'estimated' (engineering judgement; UI badges amber, report flags 'low-confidence'). citation.estimated mirrors reliability for serializer convenience. Schema v2 (2026-05-26): adds short_name (compact 2D / HUD label) and visual.family (3D + iso-glyph dispatch key, one of 'seat' | 'slab-on-legs' | 'vertical-box' | 'flat-pad'); both required on every row. Schema v3 (2026-05-27): adds acoustics.interaction_mode ('porous' | 'reflective') — controls how the precision ray-tracer handles the object. 'porous' items are treated as Beer-Lambert volumetric absorbers (chairs, sofas, drapes, audience blocks — sound diffuses through the upholstery with energy loss per Kuttruff §4.1). 'reflective' items are triangulated into the wall BVH (tables, lecterns, bookshelves, server racks — sound bounces off the hard outer surface). Both contribute A_obj to Sabine/Eyring identically via the rt60 parallel-A sum (Kuttruff §5.3); the mode only changes how rays interact with the object in the precision engine.",
   "items": [
     {
       "id": "theater-seat-upholstered-occupied",
@@ -13,6 +13,7 @@
       "visual": { "family": "seat" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "porous",
         "A_obj_m2_sab_per_band": {
           "125": 0.15, "250": 0.19, "500": 0.23, "1000": 0.25, "2000": 0.23, "4000": 0.22
         },
@@ -47,6 +48,7 @@
       "visual": { "family": "seat" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "porous",
         "A_obj_m2_sab_per_band": {
           "125": 0.11, "250": 0.15, "500": 0.18, "1000": 0.19, "2000": 0.18, "4000": 0.15
         },
@@ -81,6 +83,7 @@
       "visual": { "family": "flat-pad" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "porous",
         "A_obj_m2_sab_per_band": {
           "125": 0.55, "250": 0.75, "500": 0.85, "1000": 0.92, "2000": 0.88, "4000": 0.85
         },
@@ -115,6 +118,7 @@
       "visual": { "family": "seat" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "porous",
         "A_obj_m2_sab_per_band": {
           "125": 0.30, "250": 0.45, "500": 0.55, "1000": 0.60, "2000": 0.55, "4000": 0.50
         },
@@ -149,6 +153,7 @@
       "visual": { "family": "seat" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "porous",
         "A_obj_m2_sab_per_band": {
           "125": 0.10, "250": 0.15, "500": 0.20, "1000": 0.25, "2000": 0.30, "4000": 0.30
         },
@@ -183,6 +188,7 @@
       "visual": { "family": "slab-on-legs" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "reflective",
         "A_obj_m2_sab_per_band": {
           "125": 0.12, "250": 0.12, "500": 0.12, "1000": 0.14, "2000": 0.19, "4000": 0.24
         },
@@ -217,6 +223,7 @@
       "visual": { "family": "slab-on-legs" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "reflective",
         "A_obj_m2_sab_per_band": {
           "125": 0.02, "250": 0.02, "500": 0.02, "1000": 0.03, "2000": 0.04, "4000": 0.05
         },
@@ -251,6 +258,7 @@
       "visual": { "family": "vertical-box" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "reflective",
         "A_obj_m2_sab_per_band": {
           "125": 0.60, "250": 0.60, "500": 0.80, "1000": 1.00, "2000": 1.20, "4000": 1.30
         },
@@ -287,6 +295,7 @@
       "visual": { "family": "flat-pad" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "porous",
         "A_obj_m2_sab_per_band": {
           "125": 0.05, "250": 0.10, "500": 0.15, "1000": 0.25, "2000": 0.35, "4000": 0.45
         },
@@ -321,6 +330,7 @@
       "visual": { "family": "vertical-box" },
       "acoustics": {
         "model": "equivalent_absorption_area",
+        "interaction_mode": "reflective",
         "A_obj_m2_sab_per_band": {
           "125": 0.08, "250": 0.15, "500": 0.25, "1000": 0.35, "2000": 0.30, "4000": 0.25
         },

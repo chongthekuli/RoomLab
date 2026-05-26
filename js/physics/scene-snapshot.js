@@ -350,6 +350,119 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     });
   });
 
+  // --- Pass 3 — synthetic furniture materials for REFLECTIVE items ----
+  // Phase 2 of FurnitureLAB (2026-05-27): items tagged
+  // acoustics.interaction_mode='reflective' (tables, lecterns,
+  // bookshelves, racks) get a synthetic catalogue material registered
+  // here with α = A_obj / S_obj per band (Sabine-equivalent surface
+  // absorption from total A_obj over the bbox's outer surface). The
+  // bbox is then triangulated as 12 box-face triangles in
+  // triangulate-scene.js, joining the wall BVH. Rays hit + bounce off
+  // the table top with α absorption, same as any wall surface — which
+  // is what the user expects ("table material can see ray hit and
+  // reflect"). Porous items (chairs / drapes / audience) stay on the
+  // Beer-Lambert sink path via scene.furniture.
+  const stateFurniture = Array.isArray(state.furniture) ? state.furniture : [];
+  const furnCatalogue = getFurnitureCatalogue();
+  const furnReflectiveMatByCatalogueId = new Map();
+  function registerFurnitureMaterial(catalogueId, row) {
+    const cached = furnReflectiveMatByCatalogueId.get(catalogueId);
+    if (cached !== undefined) return cached;
+    const A = row?.acoustics?.A_obj_m2_sab_per_band;
+    const fp = row?.footprint;
+    if (!A || !fp) { furnReflectiveMatByCatalogueId.set(catalogueId, -1); return -1; }
+    const w = fp.width_m, d = fp.depth_m, h = fp.height_m;
+    const S_obj = 2 * (w * d + d * h + w * h);
+    if (!(S_obj > 0)) { furnReflectiveMatByCatalogueId.set(catalogueId, -1); return -1; }
+    const absArr = new Float32Array(BANDS);
+    for (let k = 0; k < BANDS; k++) {
+      const a = A[String(Math.round(bands_hz[k]))];
+      if (Number.isFinite(a) && a > 0) {
+        // Clamp to [0, 0.95]; α≥0.95 is the precision tracer's
+        // "open-air opening" marker (tracer-core treats it as a
+        // transmissive opening, not an absorber) — wood / metal
+        // furniture must stay below that.
+        absArr[k] = Math.max(0, Math.min(0.95, a / S_obj));
+      }
+    }
+    const scaArr = new Float32Array(BANDS);
+    const sca = row?.acoustics?.scattering_per_band;
+    for (let k = 0; k < BANDS; k++) {
+      const s = sca?.[String(Math.round(bands_hz[k]))];
+      // Default scattering 0.20 — generic irregular surface per Cox &
+      // D'Antonio §6.4. Bookshelves carry an explicit scattering block
+      // and override this.
+      scaArr[k] = Number.isFinite(s) ? s : 0.20;
+    }
+    const idx = materialsTable.length;
+    materialsTable.push(Object.freeze({
+      index: idx,
+      id: `furniture:${catalogueId}`,
+      name: row.name ?? catalogueId,
+      absorption: absArr,
+      scattering: scaArr,
+    }));
+    furnReflectiveMatByCatalogueId.set(catalogueId, idx);
+    return idx;
+  }
+
+  // Split state.furniture by mode and build TWO blocks: scene.furniture
+  // (porous → Beer-Lambert sink) and scene.furnitureReflective (→
+  // triangulated wall faces). A given placed item is in EXACTLY ONE
+  // block so the tracer never double-counts.
+  const porousBboxes = [];
+  const porousMu = [];
+  const porousIds = [];
+  const porousCatalogueIds = [];
+  const reflectiveBboxes = [];
+  const reflectiveMaterialIdxList = [];
+  const reflectiveIds = [];
+  const reflectiveCatalogueIds = [];
+
+  if (furnCatalogue && furnCatalogue.size > 0 && stateFurniture.length > 0) {
+    const muTable = furnitureVolumetricCoeffs(furnCatalogue, bands_hz);
+    for (const f of stateFurniture) {
+      if (!f?.position || typeof f.catalogueId !== 'string') continue;
+      const row = furnCatalogue.get(f.catalogueId);
+      if (!row?.footprint) continue;
+      const w = Math.max(0.01, row.footprint.width_m ?? 0.5);
+      const d = Math.max(0.01, row.footprint.depth_m ?? 0.5);
+      const h = Math.max(0.01, row.footprint.height_m ?? 1.0);
+      const cx = f.position.x, cy = f.position.y;
+      const mode = row.acoustics?.interaction_mode ?? 'porous';
+      if (mode === 'reflective') {
+        const matIdx = registerFurnitureMaterial(f.catalogueId, row);
+        if (matIdx < 0) continue;
+        reflectiveBboxes.push(cx - w / 2, cy - d / 2, 0, cx + w / 2, cy + d / 2, h);
+        reflectiveMaterialIdxList.push(matIdx);
+        reflectiveIds.push(f.id);
+        reflectiveCatalogueIds.push(f.catalogueId);
+      } else {
+        const mu = muTable.get(f.catalogueId);
+        if (!mu) continue;
+        porousBboxes.push(cx - w / 2, cy - d / 2, 0, cx + w / 2, cy + d / 2, h);
+        for (let k = 0; k < BANDS; k++) porousMu.push(mu[k]);
+        porousIds.push(f.id);
+        porousCatalogueIds.push(f.catalogueId);
+      }
+    }
+  }
+
+  const furnitureBlock = Object.freeze({
+    count: porousIds.length,
+    bboxes: new Float32Array(porousBboxes),
+    mu: new Float32Array(porousMu),
+    ids: Object.freeze(porousIds),
+    catalogueIds: Object.freeze(porousCatalogueIds),
+  });
+  const furnitureReflectiveBlock = Object.freeze({
+    count: reflectiveIds.length,
+    bboxes: new Float32Array(reflectiveBboxes),
+    materialIdx: new Int32Array(reflectiveMaterialIdxList),
+    ids: Object.freeze(reflectiveIds),
+    catalogueIds: Object.freeze(reflectiveCatalogueIds),
+  });
+
   // --- Room — shallow-clone the fields physics cares about. -----------
   const srcRoom = state.room ?? {};
   const room = Object.freeze({
@@ -466,15 +579,23 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     // Empty array (frozen) when no treatments are placed or when the
     // SurfaceLAB catalogue hasn't loaded yet.
     treatments: Object.freeze(treatments),
-    // v4 (2026-05-26) — FurnitureLAB placements as Beer-Lambert
+    // v4 (2026-05-26) — FurnitureLAB POROUS placements as Beer-Lambert
     // absorber volumes per Dr. Chen's brief. Each placed item carries
     // an AABB (footprint × height in world coords) and a per-band
     // volumetric coefficient μ_b = A_obj / (4·V_bbox) [Np/m] derived
     // from Kuttruff §4.1. The precision tracer applies exp(−Σ μ_b·L_in)
     // to ray energy when a segment crosses the bbox. Empty / zero-count
-    // when no furniture is placed; tracer's furniture pass becomes a
-    // no-op then.
-    furniture: buildFurnitureSnapshotBlock(state, bands_hz),
+    // when no porous furniture is placed.
+    furniture: furnitureBlock,
+    // v5 (2026-05-27) — FurnitureLAB REFLECTIVE placements. Wood
+    // tables / lecterns / bookshelves / racks are hard reflectors, not
+    // porous absorbers — rays bounce off them. Each item carries its
+    // bbox plus the materialIdx of a synthetic 'furniture:<catalogueId>'
+    // material (appended to materialsTable above, with α = A_obj/S_obj
+    // per band). triangulate-scene.js emits 12 box-face triangles per
+    // item, joining the wall BVH; from there the existing wall-bounce
+    // machinery handles reflection + absorption with no tracer change.
+    furnitureReflective: furnitureReflectiveBlock,
 
     // Physics toggles + master EQ — built above at L419-434. Production
     // callers (tracer-core.js:230) used `scene.physics?.airAbsorption !==
@@ -488,82 +609,6 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     // messages can be statically typed against the final shape.
     triangles: null,
     bvh: null,
-  });
-}
-
-// FurnitureLAB snapshot block — builds typed-array bundles of placed
-// furniture for the precision ray-tracer's Beer-Lambert sink. Reads
-// state.furniture + the catalogue (cached at app startup) and produces
-// per-instance bboxes + per-instance per-band μ. Worker-transferable
-// shape so the worker pool can structured-clone it once and use it for
-// every render.
-//
-// AABB construction: footprint is centred at (f.position.x, f.position.y)
-// in state coords (state +y = north). State z is height. Rotation isn't
-// applied to the bbox — we use an axis-aligned over-approximation of
-// the rotated footprint (worst case for small rotations is ~5% larger
-// than tight AABB; acceptable since the bbox is already a coarse
-// stand-in for the object's mean-free-path region per Kuttruff §4.1).
-function buildFurnitureSnapshotBlock(state, bands_hz) {
-  const EMPTY = Object.freeze({
-    count: 0,
-    bboxes: new Float32Array(0),
-    mu: new Float32Array(0),
-    ids: Object.freeze([]),
-    catalogueIds: Object.freeze([]),
-  });
-  const items = Array.isArray(state.furniture) ? state.furniture : [];
-  if (items.length === 0) return EMPTY;
-  const catalogue = getFurnitureCatalogue();
-  if (!catalogue || catalogue.size === 0) return EMPTY;
-
-  // Pre-compute μ for every catalogue row once; instances index into it.
-  const muTable = furnitureVolumetricCoeffs(catalogue, bands_hz);
-  const B = bands_hz.length;
-  const N = items.length;
-  // First pass: count surviving entries (broken catalogueId / missing
-  // footprint excluded).
-  const valid = [];
-  for (const f of items) {
-    if (!f?.position || typeof f.catalogueId !== 'string') continue;
-    const row = catalogue.get(f.catalogueId);
-    if (!row?.footprint) continue;
-    const mu = muTable.get(f.catalogueId);
-    if (!mu) continue;
-    valid.push({ f, row, mu });
-  }
-  if (valid.length === 0) return EMPTY;
-
-  const bboxes = new Float32Array(valid.length * 6);
-  const mu = new Float32Array(valid.length * B);
-  const ids = [];
-  const catalogueIds = [];
-  for (let i = 0; i < valid.length; i++) {
-    const { f, row, mu: rowMu } = valid[i];
-    const w = Math.max(0.01, row.footprint.width_m  ?? 0.5);
-    const d = Math.max(0.01, row.footprint.depth_m  ?? 0.5);
-    const h = Math.max(0.01, row.footprint.height_m ?? 1.0);
-    const cx = f.position.x;
-    const cy = f.position.y;
-    // World-frame bbox. Snapshot's room frame: +y = north (state coord),
-    // +z = up. Match the precision tracer's coordinate convention used
-    // for sources / receivers / wall triangles. Object sits with its
-    // base on the floor (z=0); top at z = h.
-    bboxes[i * 6 + 0] = cx - w / 2;
-    bboxes[i * 6 + 1] = cy - d / 2;
-    bboxes[i * 6 + 2] = 0;
-    bboxes[i * 6 + 3] = cx + w / 2;
-    bboxes[i * 6 + 4] = cy + d / 2;
-    bboxes[i * 6 + 5] = h;
-    mu.set(rowMu, i * B);
-    ids.push(f.id);
-    catalogueIds.push(f.catalogueId);
-  }
-  return Object.freeze({
-    count: valid.length,
-    bboxes, mu,
-    ids: Object.freeze(ids),
-    catalogueIds: Object.freeze(catalogueIds),
   });
 }
 

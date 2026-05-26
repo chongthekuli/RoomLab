@@ -131,10 +131,17 @@ ok('receivers' in snap, "snapshot.receivers exists (listener spheres)");
 // treatments: frozen array — placed acoustic panels with resolved material indices.
 ok('treatments' in snap, "snapshot.treatments exists (placed acoustic panels)");
 
-// furniture: frozen object — placed FurnitureLAB items with bboxes +
-// per-band volumetric absorption coefficients. Added 2026-05-26 Phase 2
-// (precision ray-tracer Beer-Lambert absorber sink).
-ok('furniture' in snap, "snapshot.furniture exists (FurnitureLAB placements with bboxes + μ)");
+// furniture: frozen object — placed FurnitureLAB POROUS items with
+// bboxes + per-band volumetric absorption coefficients. Added 2026-05-26
+// Phase 2 (Beer-Lambert sink for chairs/sofas/drapes/audience).
+ok('furniture' in snap, "snapshot.furniture exists (FurnitureLAB POROUS placements with bboxes + μ)");
+
+// furnitureReflective: frozen object — placed FurnitureLAB REFLECTIVE
+// items (wood tables, lecterns, bookshelves, server racks). bboxes +
+// materialIdx per item. triangulate-scene emits 12 box-face triangles
+// per item, joining the wall BVH; existing wall-bounce machinery handles
+// reflection + absorption. Added 2026-05-27 Phase 2.2.
+ok('furnitureReflective' in snap, "snapshot.furnitureReflective exists (FurnitureLAB REFLECTIVE placements with bboxes + materialIdx)");
 
 // physics: frozen object — toggle state at build time.
 // THE FIELD THAT WAS DROPPED FOR WEEKS (d302d0d). Optional chaining in
@@ -163,7 +170,8 @@ ok('bvh' in snap, "snapshot.bvh exists (null placeholder for Phase B)");
 
 const EXPECTED_TOP_LEVEL_KEYS = new Set([
   'version', 'createdAt', 'bands_hz', 'materials', 'room', 'zones',
-  'sources', 'receivers', 'treatments', 'furniture', 'physics', 'eq',
+  'sources', 'receivers', 'treatments', 'furniture', 'furnitureReflective',
+  'physics', 'eq',
   'triangles', 'bvh',
 ]);
 const actualKeys = new Set(Object.keys(snap));
