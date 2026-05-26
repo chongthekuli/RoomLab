@@ -195,6 +195,53 @@ export function duplicateListener(id) {
   return copy.id;
 }
 
+// Duplicate a placed FurnitureLAB object. Same clamp-and-bump pattern
+// as duplicateListener — bump +0.5 m on x, mirror to -x if that hits
+// the right edge, step to +y if both x directions are blocked. Fresh
+// unique id ("F<n>" where n is the next free integer). _cachedSpec is
+// stripped so the resolver re-binds against the live catalogue (not
+// frozen against whatever was cached on the original).
+export function duplicateFurniture(id) {
+  if (!Array.isArray(state.furniture)) return null;
+  const idx = state.furniture.findIndex(f => f.id === id);
+  if (idx < 0) return null;
+  const original = state.furniture[idx];
+  const copy = JSON.parse(JSON.stringify(original));
+  if (copy._cachedSpec) delete copy._cachedSpec;
+
+  const usedIds = new Set(state.furniture.map(f => f.id).filter(Boolean));
+  let n = state.furniture.length + 1;
+  while (usedIds.has(`F${n}`)) n++;
+  copy.id = `F${n}`;
+  if (typeof copy.label === 'string' && copy.label.length > 0) {
+    copy.label = /\d+$/.test(copy.label)
+      ? copy.label.replace(/\d+$/, String(n))
+      : `${copy.label} copy`;
+  }
+
+  const STEP = 0.5;
+  const snap = v => Math.round(v / STEP) * STEP;
+  const w = Number.isFinite(state.room?.width_m) ? state.room.width_m : Infinity;
+  const d = Number.isFinite(state.room?.depth_m) ? state.room.depth_m : Infinity;
+  const margin = STEP;
+  const origX = snap(copy.position.x);
+  const origY = snap(copy.position.y);
+  let nx = origX + STEP;
+  let ny = origY;
+  if (nx > w - margin) {
+    nx = origX - STEP;
+    if (nx < margin) {
+      nx = origX;
+      ny = origY + STEP;
+      if (ny > d - margin) ny = origY - STEP;
+    }
+  }
+  copy.position.x = nx;
+  copy.position.y = ny;
+  state.furniture.push(copy);
+  return copy.id;
+}
+
 // Convert the current room into a free-form custom polygon and return
 // the vertex array. Idempotent: if shape is already 'custom' with a
 // valid vertex list, returns the existing list unchanged.

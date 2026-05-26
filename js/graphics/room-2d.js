@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, convertRoomToCustomPolygon } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, duplicateFurniture, convertRoomToCustomPolygon } from '../app-state.js';
 import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
@@ -2864,7 +2864,14 @@ function onPickableContextMenu(e) {
       emit('source:selected', { idx: pick.sourceIdx });
     }
     openSourceContextMenu(e.clientX, e.clientY, pick.sourceIdx);
-  } else {
+  } else if (pick.kind === 'furniture') {
+    try { openPanel('left', 'furniture'); } catch (_) {}
+    if (state.selectedFurnitureId !== pick.furnitureId) {
+      state.selectedFurnitureId = pick.furnitureId;
+      emit('furniture:selected', { id: pick.furnitureId });
+    }
+    openFurnitureContextMenu(e.clientX, e.clientY, pick.furnitureId);
+  } else if (pick.kind === 'listener') {
     try { openPanel('left', 'listeners'); } catch (_) {}
     if (state.selectedListenerId !== pick.listenerId) {
       state.selectedListenerId = pick.listenerId;
@@ -2904,6 +2911,27 @@ function openListenerContextMenu(clientX, clientY, listenerId) {
       state.selectedListenerId = newId;
       emit('listener:changed');
       emit('listener:selected', { id: newId });
+    }
+  });
+}
+
+function openFurnitureContextMenu(clientX, clientY, furnitureId) {
+  closeSourceContextMenu();
+  const f = state.furniture?.find(x => x.id === furnitureId);
+  if (!f) return;
+  // Prefer the human-facing catalogue name in the menu header; fall back
+  // to the instance id ("F1") when the catalogue hasn't resolved or the
+  // link is broken.
+  const cat = getFurnitureCatalogue();
+  const row = cat.get(f.catalogueId);
+  const label = f.label || row?.name || f.id || 'Furniture';
+  openPickableMenu(clientX, clientY, label, () => {
+    const newId = duplicateFurniture(furnitureId);
+    closeSourceContextMenu();
+    if (newId) {
+      state.selectedFurnitureId = newId;
+      emit('furniture:changed', { id: newId });
+      emit('furniture:selected', { id: newId });
     }
   });
 }
