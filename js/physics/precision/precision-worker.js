@@ -18,6 +18,7 @@ import { traceRays } from './tracer-core.js';
 
 let scene = null;
 let bvh = null;
+let furnitureBvh = null;
 
 self.onmessage = (e) => {
   const msg = e.data;
@@ -26,6 +27,7 @@ self.onmessage = (e) => {
       case 'init': {
         scene = msg.scene;
         bvh = msg.bvh;
+        furnitureBvh = msg.furnitureBvh ?? null;
         // Structured clone transferred `bvh` as a standalone object; its
         // `.soup` field was cloned separately as a sub-tree. Confirm the
         // tracer will find vertex data.
@@ -39,6 +41,7 @@ self.onmessage = (e) => {
         if (!scene || !bvh) throw new Error('trace called before init');
         const result = traceRays(scene, bvh, {
           ...msg.opts,
+          furnitureBvh,
           progress: (done, total) => {
             // Throttle: only every ~512 rays, not every ray. tracer-core's
             // own gate is 0x3FF = 1023; this runs about twice per gate.

@@ -57,3 +57,18 @@ export function getFurnitureCatalogue() {
 export function getFurnitureCatalogueJson() {
   return _cache?.json ?? null;
 }
+
+/**
+ * Seed the catalogue cache for Node tests. Mirrors the surfacelab
+ * `_setCachedCatalogueForTests` hook — lets `tests/precision-furniture-*`
+ * supply a hand-crafted catalogue without going through fetch(). Pass
+ * an array of catalogue rows; the helper indexes them and replaces the
+ * cache atomically. NOT for production code.
+ */
+export function _setFurnitureCatalogueForTests(rows) {
+  if (!Array.isArray(rows)) { _cache = null; _loadPromise = null; return; }
+  const items = rows.filter(r => r && typeof r.id === 'string');
+  const map = new Map(items.map(r => [r.id, r]));
+  _cache = { json: { schema_version: 2, items }, map };
+  _loadPromise = Promise.resolve(_cache);
+}

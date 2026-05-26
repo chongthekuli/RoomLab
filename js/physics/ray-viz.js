@@ -24,7 +24,7 @@
 
 import { buildPhysicsScene } from './scene-snapshot.js';
 import { triangulateScene } from './precision/triangulate-scene.js';
-import { buildBVH, intersectRay } from './precision/bvh.js';
+import { buildBVH, buildAabbBVH, intersectRay, intersectRay_collectAabbs } from './precision/bvh.js';
 import { colorForGroup } from '../app-state.js';
 
 const DEFAULT_TOTAL_PATHS = 200;
@@ -132,6 +132,31 @@ export function recordRayPaths({
 
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
+
+  // FurnitureLAB Beer-Lambert sink in the viz layer (Phase 2, 2026-05-26).
+  // Same algorithm the precision tracer uses (μ = A_obj/(4·V_bbox),
+  // Kuttruff §4.1) — applied here so the user SEES rays attenuating
+  // when they cross placed furniture. Without this, the viz would
+  // visually lie even after the physics is correct (rays would still
+  // draw straight through chairs). Mid-band only — viz already uses
+  // band[3] (1 kHz) for material absorption above; same band here for
+  // consistency. Cached muMid per instance so the per-segment loop
+  // doesn't dereference scene.furniture.mu indirectly.
+  const furnitureBvh = buildAabbBVH(scene.furniture?.bboxes ?? new Float32Array(0));
+  const hasFurniture = furnitureBvh.nodeCount > 0;
+  const VIZ_BAND = 3;       // 1 kHz — matches the material-absorption choice above
+  const B_BANDS = scene.bands_hz?.length ?? 7;
+  const muMid = hasFurniture
+    ? new Float32Array(scene.furniture.count)
+    : null;
+  if (muMid) {
+    for (let i = 0; i < scene.furniture.count; i++) {
+      muMid[i] = scene.furniture.mu[i * B_BANDS + VIZ_BAND] ?? 0;
+    }
+  }
+  // Reused scratch buffer for the collect-AABB query — same pattern
+  // tracer-core uses to avoid per-ray allocation.
+  const furniHits = [];
 
   // Distribute N across sources — at least 1 per source if S < N, else
   // round-down with the remainder going to the first sources. Avoids
@@ -314,6 +339,34 @@ export function recordRayPaths({
           // directions — the recognisable "speaker fires into the
           // room" radiation pattern.
           if (!hitListener && bounce === 0) hitListener = true;
+        }
+
+        // FurnitureLAB absorber-volume sink — apply BEFORE advancing
+        // so the segment origin (ox, oy, oz) is still the start of the
+        // segment. Mid-band Beer-Lambert: E *= exp(-Σ μ_mid · L_in).
+        // Skipped when no furniture is placed (hasFurniture=false) or
+        // when the BVH query returns nothing.
+        if (hasFurniture) {
+          const nFurni = intersectRay_collectAabbs(furnitureBvh, ox, oy, oz, dx, dy, dz, hit.t, furniHits);
+          if (nFurni > 0) {
+            let furniExp = 0;
+            for (let h = 0; h < nFurni; h++) {
+              const aabbIdx = furniHits[h * 3 + 0];
+              const tEnter  = furniHits[h * 3 + 1];
+              const tExit   = furniHits[h * 3 + 2];
+              const L_in = tExit - tEnter;
+              if (L_in <= 0) continue;
+              furniExp += muMid[aabbIdx] * L_in;
+            }
+            if (furniExp > 0) {
+              // Floor at 0.01 — when furniExp is very large the line
+              // would draw with zero RGB (invisible); 0.01 keeps the
+              // segment faintly visible so the user can still see the
+              // ray entered an absorber even if it would be ~fully
+              // absorbed in physics terms.
+              energy *= Math.max(0.01, Math.exp(-furniExp));
+            }
+          }
         }
 
         // Advance to surface hit + apply mid-band absorption.

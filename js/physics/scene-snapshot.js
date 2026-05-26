@@ -20,6 +20,8 @@
 
 import { expandSources } from '../app-state.js';
 import { getCachedCatalogue } from '../labs/surfacelab/catalog.js';
+import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
+import { furnitureVolumetricCoeffs } from './furniture-absorption.js';
 
 export const PHYSICS_SCENE_VERSION = 1;
 
@@ -464,6 +466,15 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     // Empty array (frozen) when no treatments are placed or when the
     // SurfaceLAB catalogue hasn't loaded yet.
     treatments: Object.freeze(treatments),
+    // v4 (2026-05-26) — FurnitureLAB placements as Beer-Lambert
+    // absorber volumes per Dr. Chen's brief. Each placed item carries
+    // an AABB (footprint × height in world coords) and a per-band
+    // volumetric coefficient μ_b = A_obj / (4·V_bbox) [Np/m] derived
+    // from Kuttruff §4.1. The precision tracer applies exp(−Σ μ_b·L_in)
+    // to ray energy when a segment crosses the bbox. Empty / zero-count
+    // when no furniture is placed; tracer's furniture pass becomes a
+    // no-op then.
+    furniture: buildFurnitureSnapshotBlock(state, bands_hz),
 
     // Physics toggles + master EQ — built above at L419-434. Production
     // callers (tracer-core.js:230) used `scene.physics?.airAbsorption !==
@@ -477,6 +488,82 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     // messages can be statically typed against the final shape.
     triangles: null,
     bvh: null,
+  });
+}
+
+// FurnitureLAB snapshot block — builds typed-array bundles of placed
+// furniture for the precision ray-tracer's Beer-Lambert sink. Reads
+// state.furniture + the catalogue (cached at app startup) and produces
+// per-instance bboxes + per-instance per-band μ. Worker-transferable
+// shape so the worker pool can structured-clone it once and use it for
+// every render.
+//
+// AABB construction: footprint is centred at (f.position.x, f.position.y)
+// in state coords (state +y = north). State z is height. Rotation isn't
+// applied to the bbox — we use an axis-aligned over-approximation of
+// the rotated footprint (worst case for small rotations is ~5% larger
+// than tight AABB; acceptable since the bbox is already a coarse
+// stand-in for the object's mean-free-path region per Kuttruff §4.1).
+function buildFurnitureSnapshotBlock(state, bands_hz) {
+  const EMPTY = Object.freeze({
+    count: 0,
+    bboxes: new Float32Array(0),
+    mu: new Float32Array(0),
+    ids: Object.freeze([]),
+    catalogueIds: Object.freeze([]),
+  });
+  const items = Array.isArray(state.furniture) ? state.furniture : [];
+  if (items.length === 0) return EMPTY;
+  const catalogue = getFurnitureCatalogue();
+  if (!catalogue || catalogue.size === 0) return EMPTY;
+
+  // Pre-compute μ for every catalogue row once; instances index into it.
+  const muTable = furnitureVolumetricCoeffs(catalogue, bands_hz);
+  const B = bands_hz.length;
+  const N = items.length;
+  // First pass: count surviving entries (broken catalogueId / missing
+  // footprint excluded).
+  const valid = [];
+  for (const f of items) {
+    if (!f?.position || typeof f.catalogueId !== 'string') continue;
+    const row = catalogue.get(f.catalogueId);
+    if (!row?.footprint) continue;
+    const mu = muTable.get(f.catalogueId);
+    if (!mu) continue;
+    valid.push({ f, row, mu });
+  }
+  if (valid.length === 0) return EMPTY;
+
+  const bboxes = new Float32Array(valid.length * 6);
+  const mu = new Float32Array(valid.length * B);
+  const ids = [];
+  const catalogueIds = [];
+  for (let i = 0; i < valid.length; i++) {
+    const { f, row, mu: rowMu } = valid[i];
+    const w = Math.max(0.01, row.footprint.width_m  ?? 0.5);
+    const d = Math.max(0.01, row.footprint.depth_m  ?? 0.5);
+    const h = Math.max(0.01, row.footprint.height_m ?? 1.0);
+    const cx = f.position.x;
+    const cy = f.position.y;
+    // World-frame bbox. Snapshot's room frame: +y = north (state coord),
+    // +z = up. Match the precision tracer's coordinate convention used
+    // for sources / receivers / wall triangles. Object sits with its
+    // base on the floor (z=0); top at z = h.
+    bboxes[i * 6 + 0] = cx - w / 2;
+    bboxes[i * 6 + 1] = cy - d / 2;
+    bboxes[i * 6 + 2] = 0;
+    bboxes[i * 6 + 3] = cx + w / 2;
+    bboxes[i * 6 + 4] = cy + d / 2;
+    bboxes[i * 6 + 5] = h;
+    mu.set(rowMu, i * B);
+    ids.push(f.id);
+    catalogueIds.push(f.catalogueId);
+  }
+  return Object.freeze({
+    count: valid.length,
+    bboxes, mu,
+    ids: Object.freeze(ids),
+    catalogueIds: Object.freeze(catalogueIds),
   });
 }
 

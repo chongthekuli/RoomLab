@@ -307,6 +307,209 @@ function rayTriangle(ox, oy, oz, dx, dy, dz, pos, o, tMax) {
   return t;
 }
 
+// =====================================================================
+// AABB-only BVH — for the FurnitureLAB Beer-Lambert absorber sink.
+//
+// Same node layout as the triangle BVH (10 floats), but each leaf
+// "triangle" is an axis-aligned bounding box. Build is cheaper (no
+// Möller-Trumbore at leaves), and the query is "collect ALL crossings
+// along the segment with their entry/exit t-values" — NOT closest-hit.
+// The collected list lets the tracer compute Σ μ·L_in for the
+// Beer-Lambert sink (Dr. Chen brief 2026-05-26 / Kuttruff §4.1).
+//
+// Architectural choice (Mehmet's perf brief 2026-05-26): a SEPARATE BVH
+// for furniture rather than mixing AABB-leaves into the wall BVH. Two
+// reasons: (1) wall intersect wants closest-hit; furniture intersect
+// wants collect-all — two different traversals; (2) skip-when-empty is
+// trivially free at the query call site when the furniture BVH count
+// is zero (no branch in the hot loop, just an early-return guard).
+// =====================================================================
+
+/**
+ * Build an AABB-only BVH from the per-instance bbox array on the scene
+ * snapshot (`scene.furniture.bboxes`, Float32Array(N*6) layout —
+ * minX,minY,minZ,maxX,maxY,maxZ per instance).
+ *
+ * @param {Float32Array} bboxes  flat AABB array, length = N*6
+ * @returns {AabbBVH} opaque handle for intersectRay_collectAabbs.
+ */
+export function buildAabbBVH(bboxes) {
+  const N = bboxes.length / 6;
+  if (N === 0) {
+    return Object.freeze({
+      nodes: new Float32Array(0),
+      aabbIndex: new Uint32Array(0),
+      nodeCount: 0,
+      FLOATS_PER_NODE: 10,
+      bboxes,
+    });
+  }
+
+  const centroid = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const o = i * 6;
+    centroid[i * 3 + 0] = (bboxes[o + 0] + bboxes[o + 3]) * 0.5;
+    centroid[i * 3 + 1] = (bboxes[o + 1] + bboxes[o + 4]) * 0.5;
+    centroid[i * 3 + 2] = (bboxes[o + 2] + bboxes[o + 5]) * 0.5;
+  }
+  const aabbIndex = new Uint32Array(N);
+  for (let i = 0; i < N; i++) aabbIndex[i] = i;
+
+  const nodes = [];
+
+  function nodeBounds(start, count) {
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < count; i++) {
+      const a = aabbIndex[start + i];
+      const o = a * 6;
+      if (bboxes[o + 0] < minX) minX = bboxes[o + 0];
+      if (bboxes[o + 1] < minY) minY = bboxes[o + 1];
+      if (bboxes[o + 2] < minZ) minZ = bboxes[o + 2];
+      if (bboxes[o + 3] > maxX) maxX = bboxes[o + 3];
+      if (bboxes[o + 4] > maxY) maxY = bboxes[o + 4];
+      if (bboxes[o + 5] > maxZ) maxZ = bboxes[o + 5];
+    }
+    return [minX, minY, minZ, maxX, maxY, maxZ];
+  }
+
+  function buildRecursive(start, count, depth) {
+    const nodeIdx = nodes.length;
+    const [minX, minY, minZ, maxX, maxY, maxZ] = nodeBounds(start, count);
+    const node = { min: [minX, minY, minZ], max: [maxX, maxY, maxZ], aabbStart: 0, aabbCount: 0, left: -1, right: -1 };
+    nodes.push(node);
+    if (count <= MAX_TRIS_PER_LEAF || depth >= MAX_DEPTH) {
+      node.aabbStart = start; node.aabbCount = count;
+      return nodeIdx;
+    }
+    let cMin = [Infinity, Infinity, Infinity], cMax = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < count; i++) {
+      const a = aabbIndex[start + i];
+      for (let ax = 0; ax < 3; ax++) {
+        const v = centroid[a * 3 + ax];
+        if (v < cMin[ax]) cMin[ax] = v;
+        if (v > cMax[ax]) cMax[ax] = v;
+      }
+    }
+    let axis = 0, extent = cMax[0] - cMin[0];
+    if (cMax[1] - cMin[1] > extent) { axis = 1; extent = cMax[1] - cMin[1]; }
+    if (cMax[2] - cMin[2] > extent) { axis = 2; extent = cMax[2] - cMin[2]; }
+    if (extent < EPS) {
+      node.aabbStart = start; node.aabbCount = count;
+      return nodeIdx;
+    }
+    const splitPos = (cMin[axis] + cMax[axis]) * 0.5;
+    let i = start, j = start + count - 1;
+    while (i <= j) {
+      if (centroid[aabbIndex[i] * 3 + axis] < splitPos) i++;
+      else { const tmp = aabbIndex[i]; aabbIndex[i] = aabbIndex[j]; aabbIndex[j] = tmp; j--; }
+    }
+    const leftCount = i - start;
+    const rightCount = count - leftCount;
+    if (leftCount === 0 || rightCount === 0) {
+      node.aabbStart = start; node.aabbCount = count;
+      return nodeIdx;
+    }
+    node.left  = buildRecursive(start, leftCount, depth + 1);
+    node.right = buildRecursive(start + leftCount, rightCount, depth + 1);
+    return nodeIdx;
+  }
+
+  buildRecursive(0, N, 0);
+
+  const FLOATS_PER_NODE = 10;
+  const flat = new Float32Array(nodes.length * FLOATS_PER_NODE);
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const o = i * FLOATS_PER_NODE;
+    flat[o + 0] = n.min[0]; flat[o + 1] = n.min[1]; flat[o + 2] = n.min[2];
+    flat[o + 3] = n.max[0]; flat[o + 4] = n.max[1]; flat[o + 5] = n.max[2];
+    flat[o + 6] = n.aabbStart;
+    flat[o + 7] = n.aabbCount;
+    flat[o + 8] = n.left;
+    flat[o + 9] = n.right;
+  }
+  return {
+    nodes: flat,
+    aabbIndex,
+    nodeCount: nodes.length,
+    FLOATS_PER_NODE,
+    bboxes,
+  };
+}
+
+/**
+ * Collect ALL AABB crossings on a finite ray segment [0, tMax].
+ *
+ * For each AABB the ray segment overlaps, writes { idx, tEnter, tExit }
+ * with both clamped to [0, tMax]. Pathlength inside the bbox is
+ * (tExit - tEnter) * |dir|; the caller supplies the scaling.
+ *
+ * `out` is a caller-supplied scratch array; written stride-3 (idx,
+ * tEnter, tExit per crossing). Returns the number of crossings.
+ *
+ * Sign-bug guard: tEnter clamps to Math.max(tEnter, 0) NOT abs(tEnter)
+ * — a grazing ray with tEnter slightly negative is INSIDE the bbox at
+ * the ray origin, so the in-bbox path starts at t=0, not at |tEnter|.
+ */
+export function intersectRay_collectAabbs(bvh, ox, oy, oz, dx, dy, dz, tMax, out) {
+  if (!bvh || bvh.nodeCount === 0) { out.length = 0; return 0; }
+  const invDx = 1 / (Math.abs(dx) > EPS ? dx : (dx >= 0 ? EPS : -EPS));
+  const invDy = 1 / (Math.abs(dy) > EPS ? dy : (dy >= 0 ? EPS : -EPS));
+  const invDz = 1 / (Math.abs(dz) > EPS ? dz : (dz >= 0 ? EPS : -EPS));
+  const nodes = bvh.nodes;
+  const STRIDE = bvh.FLOATS_PER_NODE;
+  const aabbIndex = bvh.aabbIndex;
+  const bboxes = bvh.bboxes;
+
+  let written = 0;
+  const stack = new Int32Array(MAX_DEPTH * 2);
+  let sp = 0;
+  stack[sp++] = 0;
+
+  while (sp > 0) {
+    const nodeIdx = stack[--sp];
+    const o = nodeIdx * STRIDE;
+    if (!rayAABB(ox, oy, oz, invDx, invDy, invDz,
+                 nodes[o], nodes[o + 1], nodes[o + 2],
+                 nodes[o + 3], nodes[o + 4], nodes[o + 5], tMax)) continue;
+    const left = nodes[o + 8];
+    if (left < 0) {
+      const start = nodes[o + 6];
+      const cnt = nodes[o + 7];
+      for (let i = 0; i < cnt; i++) {
+        const a = aabbIndex[start + i];
+        const ao = a * 6;
+        let t1 = (bboxes[ao + 0] - ox) * invDx;
+        let t2 = (bboxes[ao + 3] - ox) * invDx;
+        let tEnter = Math.min(t1, t2);
+        let tExit  = Math.max(t1, t2);
+        t1 = (bboxes[ao + 1] - oy) * invDy;
+        t2 = (bboxes[ao + 4] - oy) * invDy;
+        tEnter = Math.max(tEnter, Math.min(t1, t2));
+        tExit  = Math.min(tExit,  Math.max(t1, t2));
+        t1 = (bboxes[ao + 2] - oz) * invDz;
+        t2 = (bboxes[ao + 5] - oz) * invDz;
+        tEnter = Math.max(tEnter, Math.min(t1, t2));
+        tExit  = Math.min(tExit,  Math.max(t1, t2));
+        if (tEnter < 0) tEnter = 0;
+        if (tExit > tMax) tExit = tMax;
+        if (tExit <= tEnter) continue;
+        out[written * 3 + 0] = a;
+        out[written * 3 + 1] = tEnter;
+        out[written * 3 + 2] = tExit;
+        written++;
+      }
+    } else {
+      const right = nodes[o + 9];
+      stack[sp++] = left;
+      stack[sp++] = right;
+    }
+  }
+  out.length = written * 3;
+  return written;
+}
+
 // --- Naive brute-force intersector — for testing + sanity. -------------
 // Iterates every triangle; O(N). Used in tests to verify BVH agreement.
 export function intersectRayBrute(soup, ox, oy, oz, dx, dy, dz, tMax = Infinity) {

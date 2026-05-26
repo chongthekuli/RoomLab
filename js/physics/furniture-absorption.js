@@ -54,3 +54,63 @@ export function sumFurnitureAbsorption(furniture, catalogue, frequency_hz) {
 export function furnitureAbsorptionPerBand(furniture, catalogue, frequency_bands_hz) {
   return (frequency_bands_hz || []).map(f => sumFurnitureAbsorption(furniture, catalogue, f));
 }
+
+/**
+ * Per-row volumetric absorption coefficient μ_b (Nepers per metre) for
+ * the precision ray-tracer's Beer-Lambert furniture sink.
+ *
+ * Derivation (Dr. Chen, acoustics-engineer brief 2026-05-26 + Kuttruff
+ * 5th ed. §4.1 eq. 4.11):
+ *
+ *     μ_b = A_obj(b) / (4 · V_bbox)
+ *
+ * The factor of 4 is the Cauchy mean-chord theorem ratio for a convex
+ * region. Per-ray attenuation when a ray segment of pathlength L_in
+ * passes through the AABB:
+ *
+ *     E'(b) = E(b) · exp(−μ_b · L_in)
+ *
+ * The mapping depends ONLY on the object (A_obj, V_bbox), NOT on the
+ * room. This is the non-obvious result that makes furniture absorption
+ * a per-object property — the same way ΣA_obj enters the rt60 Sabine
+ * denominator linearly without a room-volume term.
+ *
+ * Returns Map<catalogueId, Float32Array(bands_hz.length)>. Bands with
+ * no A_obj entry in the catalogue contribute μ = 0 (Dr. Chen rule —
+ * never extrapolate published data past its measured range).
+ *
+ * @param {Map}   catalogue        Map<id, row> from loadFurnitureCatalogue()
+ * @param {number[]} frequency_bands_hz  e.g. [125, 250, 500, 1000, 2000, 4000, 8000]
+ * @returns {Map<string, Float32Array>}
+ */
+export function furnitureVolumetricCoeffs(catalogue, frequency_bands_hz) {
+  const out = new Map();
+  if (!catalogue || !Array.isArray(frequency_bands_hz)) return out;
+  const B = frequency_bands_hz.length;
+  for (const [id, row] of catalogue.entries()) {
+    const A = row?.acoustics?.A_obj_m2_sab_per_band;
+    const fp = row?.footprint;
+    if (!A || !fp) continue;
+    const w = Math.max(0.01, fp.width_m  ?? 0);
+    const d = Math.max(0.01, fp.depth_m  ?? 0);
+    const h = Math.max(0.01, fp.height_m ?? 0);
+    const V = w * d * h;
+    if (V <= 0) continue;
+    const mu = new Float32Array(B);
+    for (let k = 0; k < B; k++) {
+      const f = frequency_bands_hz[k];
+      const a = A[String(Math.round(f))];
+      if (Number.isFinite(a) && a > 0) {
+        // Beer-Lambert coefficient — Nepers per metre.
+        // Sanity-clamp at 5 Np/m (Dr. Chen edge case #6): a publication
+        // error giving A_obj > 4·V_bbox would otherwise propagate as a
+        // ray-absorbing wall. 5 Np/m corresponds to ~22 dB attenuation
+        // per metre of pathlength inside the bbox — already absurdly
+        // high for any real furniture absorber.
+        mu[k] = Math.min(5, a / (4 * V));
+      }
+    }
+    out.set(id, mu);
+  }
+  return out;
+}

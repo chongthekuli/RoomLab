@@ -43,10 +43,12 @@ export class PrecisionWorkerPool {
   }
 
   /**
-   * Spawn workers and deliver the initial (scene, bvh) payload.
-   * Resolves when every worker has acknowledged 'ready'.
+   * Spawn workers and deliver the initial (scene, bvh, furnitureBvh)
+   * payload. Resolves when every worker has acknowledged 'ready'.
+   * `furnitureBvh` may be null/omitted; tracer's furniture sink then
+   * skips via the early-return guard in intersectRay_collectAabbs.
    */
-  init(scene, bvh) {
+  init(scene, bvh, furnitureBvh = null) {
     if (this._initPromise) return this._initPromise;
     this._initPromise = new Promise((resolve, reject) => {
       this._initResolve = resolve;
@@ -60,7 +62,7 @@ export class PrecisionWorkerPool {
         }
         w.onmessage = (e) => this._onMessage(w, i, e.data);
         w.onerror = (e) => reject(new Error(`Worker ${i} error: ${e.message ?? e}`));
-        w.postMessage({ type: 'init', scene, bvh });
+        w.postMessage({ type: 'init', scene, bvh, furnitureBvh });
         this.workers.push(w);
       }
     });

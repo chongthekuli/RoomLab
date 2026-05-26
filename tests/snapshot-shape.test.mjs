@@ -131,6 +131,11 @@ ok('receivers' in snap, "snapshot.receivers exists (listener spheres)");
 // treatments: frozen array — placed acoustic panels with resolved material indices.
 ok('treatments' in snap, "snapshot.treatments exists (placed acoustic panels)");
 
+// furniture: frozen object — placed FurnitureLAB items with bboxes +
+// per-band volumetric absorption coefficients. Added 2026-05-26 Phase 2
+// (precision ray-tracer Beer-Lambert absorber sink).
+ok('furniture' in snap, "snapshot.furniture exists (FurnitureLAB placements with bboxes + μ)");
+
 // physics: frozen object — toggle state at build time.
 // THE FIELD THAT WAS DROPPED FOR WEEKS (d302d0d). Optional chaining in
 // tracer-core.js:230 (`scene.physics?.airAbsorption !== false`) masked
@@ -158,7 +163,7 @@ ok('bvh' in snap, "snapshot.bvh exists (null placeholder for Phase B)");
 
 const EXPECTED_TOP_LEVEL_KEYS = new Set([
   'version', 'createdAt', 'bands_hz', 'materials', 'room', 'zones',
-  'sources', 'receivers', 'treatments', 'physics', 'eq',
+  'sources', 'receivers', 'treatments', 'furniture', 'physics', 'eq',
   'triangles', 'bvh',
 ]);
 const actualKeys = new Set(Object.keys(snap));

@@ -31,7 +31,7 @@
 // partial histograms from different workers are summed directly without
 // scale correction.
 
-import { intersectRay } from './bvh.js';
+import { intersectRay, intersectRay_collectAabbs } from './bvh.js';
 import { airAbsorptionCoefficient_m } from '../air-absorption.js';
 
 const SPEED_OF_SOUND_M_PER_S = 343.2;      // 20 °C dry air
@@ -245,6 +245,69 @@ export function traceRays(scene, bvh, opts = {}) {
   if (airAbsorption) {
     for (let k = 0; k < B; k++) airCoef[k] = airAbsorptionCoefficient_m(bands[k]);
   }
+
+  // --- FurnitureLAB Beer-Lambert absorber sink (Phase 2, 2026-05-26) ---
+  // Each placed furniture instance contributes a per-band volumetric
+  // absorption coefficient μ_b (Nepers/m) inside its bbox per Dr. Chen's
+  // brief: μ_b = A_obj / (4·V_bbox) [Kuttruff 5e §4.1 eq. 4.11]. When a
+  // ray segment crosses the bbox over an in-bbox pathlength L_in,
+  // remaining energy per band: E' = E · exp(-μ_b · L_in). Applies to
+  // BOTH the analytical direct-path injection AND every reverberant
+  // ray segment (Beranek 2e §10.3 — direct sound IS occluded by tall
+  // furniture; exempting direct rays produces a flattering-but-wrong
+  // bug where STI looks better than reality).
+  //
+  // Skip path: when no furniture is placed (catalogue snapshot empty)
+  // OR opts.furnitureBvh is null, hasFurniture stays false and the
+  // collect-all calls below are skipped via a single early-return
+  // guard inside intersectRay_collectAabbs — zero hot-loop cost.
+  const furniBvh = opts.furnitureBvh ?? null;
+  const furniMu  = scene.furniture?.mu ?? null;
+  const hasFurniture = !!(furniBvh && furniBvh.nodeCount > 0 && furniMu);
+  const scratchAabbHits = [];      // per-segment scratch; stride-3 (idx, tEnter, tExit)
+  const furniExp = new Float32Array(B);     // per-band log-attenuation buffer
+  const furniExpPartial = new Float32Array(B); // for partial-path receiver crossings
+
+  // Pre-condition: direction (dx, dy, dz) must be unit-length so that
+  // t parameters returned by collect-AABB are pathlengths in metres.
+  // Fills out[] with Σ μ_b · L_in summed across every AABB crossed.
+  // The analytical direct-path block normalises (dxs/d, dys/d, dzs/d)
+  // BEFORE calling; the ray loop's directions are unit by construction.
+  function fillFurnitureExp(out, ox, oy, oz, dx, dy, dz, tMax) {
+    for (let k = 0; k < B; k++) out[k] = 0;
+    if (!hasFurniture) return;
+    const nHits = intersectRay_collectAabbs(furniBvh, ox, oy, oz, dx, dy, dz, tMax, scratchAabbHits);
+    for (let h = 0; h < nHits; h++) {
+      const aabbIdx = scratchAabbHits[h * 3 + 0];
+      const tEnter  = scratchAabbHits[h * 3 + 1];
+      const tExit   = scratchAabbHits[h * 3 + 2];
+      const L_in = tExit - tEnter;
+      if (L_in <= 0) continue;
+      const muBase = aabbIdx * B;
+      for (let k = 0; k < B; k++) out[k] += furniMu[muBase + k] * L_in;
+    }
+  }
+
+  // Partial-path variant for receiver crossings at parameter tRec
+  // mid-segment. Uses the SAME hit-list already collected for the full
+  // segment, clamping each crossing's exit to tRec. Cheaper than a
+  // second collect-all call.
+  function fillFurnitureExpPartial(out, nHits, tRec) {
+    for (let k = 0; k < B; k++) out[k] = 0;
+    if (!hasFurniture || nHits === 0) return;
+    for (let h = 0; h < nHits; h++) {
+      const aabbIdx = scratchAabbHits[h * 3 + 0];
+      const tEnter  = scratchAabbHits[h * 3 + 1];
+      const tExit   = scratchAabbHits[h * 3 + 2];
+      if (tEnter >= tRec) continue;
+      const effExit = Math.min(tExit, tRec);
+      const L_in = effExit - tEnter;
+      if (L_in <= 0) continue;
+      const muBase = aabbIdx * B;
+      for (let k = 0; k < B; k++) out[k] += furniMu[muBase + k] * L_in;
+    }
+  }
+
   const R = scene.receivers.count;
   const S = scene.sources.count;
   const T = Math.max(1, Math.ceil(maxTimeMs / bucketDtMs));
@@ -317,16 +380,22 @@ export function traceRays(scene, bvh, opts = {}) {
       // Receiver capture cross-section per source: π·r² / (4π·d²) = r²/(4d²)
       const captureFrac = (recR[recIdx] * recR[recIdx]) / (4 * d * d);
       const base = recIdx * B * T + bucket;
+      // Furniture absorption along the direct-path segment from source
+      // to receiver. Direction (dxn, dyn, dzn) is unit; tMax = d so the
+      // collect-AABB stops at the receiver position. Dr. Chen's edge
+      // case #4: direct rays MUST be attenuated by occluding furniture
+      // (Beranek 2e §10.3); exempting them produces flattering STI bug.
+      fillFurnitureExp(furniExp, sx, sy, sz, dxn, dyn, dzn, d);
       if (airAbsorption) {
         for (let k = 0; k < B; k++) {
           const sourcePower = Math.pow(10, srcLw[sIdx * B + k] / 10);
-          const E = sourcePower * Dlobe * captureFrac * Math.exp(-airCoef[k] * d) * workerShare;
+          const E = sourcePower * Dlobe * captureFrac * Math.exp(-airCoef[k] * d - furniExp[k]) * workerShare;
           histogram[base + k * T] += E;
         }
       } else {
         for (let k = 0; k < B; k++) {
           const sourcePower = Math.pow(10, srcLw[sIdx * B + k] / 10);
-          const E = sourcePower * Dlobe * captureFrac * workerShare;
+          const E = sourcePower * Dlobe * captureFrac * Math.exp(-furniExp[k]) * workerShare;
           histogram[base + k * T] += E;
         }
       }
@@ -374,11 +443,22 @@ export function traceRays(scene, bvh, opts = {}) {
         const segmentEnd_m = Math.min(hit.t, (maxTime_s * c_mps) - totalPath);
         if (segmentEnd_m <= 0) { terminations.timeOut++; terminated = true; break; }
 
+        // Collect furniture-bbox crossings for THIS segment once;
+        // reuse the same hit list for (a) the per-receiver partial-
+        // path attenuation and (b) the full-segment ray-energy
+        // attenuation below. Scratch array `scratchAabbHits` is
+        // owned by the closure; collect-AABB overwrites length.
+        const nFurniHits = hasFurniture
+          ? intersectRay_collectAabbs(furniBvh, ox, oy, oz, dx, dy, dz, segmentEnd_m, scratchAabbHits)
+          : 0;
+
         // Log receiver crossings on this segment. When air absorption is
         // enabled the logged energy must be attenuated by the PARTIAL
         // path length from segment-start to the sphere-entry point tRec —
         // the ray hasn't yet travelled the full segment when it crosses
-        // the receiver.
+        // the receiver. Same partial-path rule applies to the furniture
+        // absorber sink (Dr. Chen — receiver-crossing energy reflects
+        // the in-bbox pathlength up TO tRec, not the full segment).
         //
         // Phase 11.A — skip first-segment crossings (bounce === 0). The
         // ray's first segment is the direct path from the source; we
@@ -399,25 +479,55 @@ export function traceRays(scene, bvh, opts = {}) {
           const bucket = Math.floor((arrival_s * 1000) / bucketDtMs);
           if (bucket < 0 || bucket >= T) continue;
           const base = recIdx * B * T + bucket;
+          // Furniture partial-path attenuation up to tRec (uses the
+          // already-collected hit list; clamps each crossing's exit to
+          // tRec). Zero contribution when hasFurniture is false.
+          fillFurnitureExpPartial(furniExpPartial, nFurniHits, tRec);
           if (airAbsorption) {
             for (let k = 0; k < B; k++) {
-              histogram[base + k * T] += energy[k] * Math.exp(-airCoef[k] * tRec);
+              histogram[base + k * T] += energy[k] * Math.exp(-airCoef[k] * tRec - furniExpPartial[k]);
             }
           } else {
-            for (let k = 0; k < B; k++) histogram[base + k * T] += energy[k];
+            for (let k = 0; k < B; k++) {
+              histogram[base + k * T] += energy[k] * Math.exp(-furniExpPartial[k]);
+            }
           }
           hitCount++;
         }
 
         if (segmentEnd_m < hit.t) { terminations.timeOut++; terminated = true; break; }
 
-        // Advance to hit point + apply FULL-segment air absorption to
-        // the ray's carried energy before material reflection.
+        // Advance to hit point + apply FULL-segment air absorption AND
+        // full-segment furniture sink to the ray's carried energy before
+        // material reflection. Dr. Chen edge case #3 — do NOT also apply
+        // air absorption inside the bbox (the air sink is global; the
+        // bbox is an absorber region IN the same air). Both terms are
+        // additive in the log, exactly the same machinery the air
+        // coefficient already uses one line below.
         totalPath += hit.t;
         ox += dx * hit.t;
         oy += dy * hit.t;
         oz += dz * hit.t;
-        if (airAbsorption) {
+        // Full-segment furniture exponent — sum over all AABBs the ray
+        // segment crossed. nFurniHits is the same hit count collected
+        // above; the data lives in scratchAabbHits.
+        if (hasFurniture && nFurniHits > 0) {
+          for (let k = 0; k < B; k++) furniExp[k] = 0;
+          for (let h = 0; h < nFurniHits; h++) {
+            const aabbIdx = scratchAabbHits[h * 3 + 0];
+            const tEnter  = scratchAabbHits[h * 3 + 1];
+            const tExit   = scratchAabbHits[h * 3 + 2];
+            const L_in = tExit - tEnter;
+            if (L_in <= 0) continue;
+            const muBase = aabbIdx * B;
+            for (let k = 0; k < B; k++) furniExp[k] += furniMu[muBase + k] * L_in;
+          }
+          if (airAbsorption) {
+            for (let k = 0; k < B; k++) energy[k] *= Math.exp(-airCoef[k] * hit.t - furniExp[k]);
+          } else {
+            for (let k = 0; k < B; k++) energy[k] *= Math.exp(-furniExp[k]);
+          }
+        } else if (airAbsorption) {
           for (let k = 0; k < B; k++) energy[k] *= Math.exp(-airCoef[k] * hit.t);
         }
 

@@ -15,7 +15,7 @@
 
 import { buildPhysicsScene } from '../scene-snapshot.js';
 import { triangulateScene } from './triangulate-scene.js';
-import { buildBVH } from './bvh.js';
+import { buildBVH, buildAabbBVH } from './bvh.js';
 import { PrecisionWorkerPool } from './worker-pool.js';
 
 /**
@@ -48,6 +48,14 @@ export async function runPrecisionRender({ state, materials, getLoudspeakerDef, 
   const soup = triangulateScene(scene);
   const bvh = buildBVH(soup);
 
+  // 2b. FurnitureLAB absorber-volume BVH (Phase 2, 2026-05-26). One
+  // AABB per placed furniture instance; the tracer's Beer-Lambert sink
+  // queries this BVH for all bboxes crossed by each ray segment. Empty
+  // BVH (no furniture placed) skips the entire furniture pass via an
+  // early-return guard in intersectRay_collectAabbs — zero hot-loop
+  // cost when the user has no objects.
+  const furnitureBvh = buildAabbBVH(scene.furniture?.bboxes ?? new Float32Array(0));
+
   // 3. Worker count. Cap at a reasonable maximum so an absurd
   // hardwareConcurrency (containers, weird VMs) doesn't spawn 64 workers.
   const detected = (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined) ?? 4;
@@ -67,7 +75,7 @@ export async function runPrecisionRender({ state, materials, getLoudspeakerDef, 
   }
 
   try {
-    await pool.init(scene, bvh);
+    await pool.init(scene, bvh, furnitureBvh);
     const result = await pool.trace(opts, opts.onProgress);
     if (cancelled) throw new Error('Render cancelled');
     const elapsedMs = performance.now() - t0;
@@ -76,6 +84,7 @@ export async function runPrecisionRender({ state, materials, getLoudspeakerDef, 
       scene,
       soup,
       bvh,
+      furnitureBvh,
       workerCount,
       elapsedMs,
       generatedAt: new Date().toISOString(),
