@@ -100,6 +100,42 @@ export const GLOSSARY = {
 
   wall_hatch_family:
     'Wall hatch family — the plan-drawing convention RoomLAB uses to render wall materials on the 2D viewport and printed plan: solid fill for dense masonry, diagonal hatch for framed and lightweight partitions, outline only for glazing, blank for openings. Buckets are monochrome-safe so the print reads correctly on a black-and-white office machine; an unknown materialId draws as a dotted outline rather than silently as concrete.',
+
+  // --- FurnitureLAB glossary (Phase 4, 2026-05-27, Lin docs-writer
+  // debt list from the FurnitureLAB brainstorm + Phase 2 additions) ---
+
+  a_obj:
+    'A_obj — equivalent absorption area of a discrete object (chair, sofa, audience block, etc.) in m² Sabine units. Unlike α (per m² of a surface), A_obj is per object and per octave band: 0.25 m²·Sa @ 1 kHz for a single padded office chair means it removes the same energy from the diffuse field as 0.25 m² of a perfectly absorptive surface. Summed into the room\'s absorption budget as a parallel-A term outside the Eyring log (Kuttruff §5.3, Beranek §7.3) — see also "Object-frame vs surface-frame absorption."',
+
+  iso_354:
+    'ISO 354 — the reverberation-room method for measuring A_obj. A sample is placed in a 200 m³ reverb chamber; the difference in RT60 with and without the sample gives the sample\'s effective Sabine absorption. The only acceptable source of "measured" A_obj numbers in the FurnitureLAB catalogue. Reliability tag "measured" is reserved for ISO 354 (or its predecessor ASTM C423) lab certificates.',
+
+  iso_17497:
+    'ISO 17497 — measurement of the scattering coefficient s. Part 1 (reverberation-room method) yields a single number per band for how much reflected energy is sent diffusely rather than specularly. Used by the precision ray-tracer to choose Lambertian vs. specular reflection per bounce. Rarely measured for individual furniture items; most rows carry s=null and the engine falls back to 0.20 default per Cox & D\'Antonio §6.4.',
+
+  type_a_mounting:
+    'Type-A mounting — the default ISO 354 / ASTM E795 fixture for porous absorbers: sample placed flat directly on the reverb-room floor, no air gap. Catalogue rows derived from "audience" measurements assume Type-A; "occupied seat" data is also Type-A in practice (chairs on the floor). When a real installation deviates (panels on stand-off battens; deep ceiling void behind), the per-band α can drift 20-30% at the cavity-tuned frequency.',
+
+  object_vs_surface_frame:
+    'Object-frame vs. surface-frame absorption — two ways to encode the same acoustic effect. Surface-frame: α per m² of a finish (carpet on concrete, wood floor). Object-frame: A_obj per item (one chair). Don\'t double-count carpet under chairs — pick one frame per row. FurnitureLAB stores A_obj per item; SurfaceLAB stores α per m². The Sabine sum reads both: Σαᵢ·Sᵢ + Σ A_obj,j.',
+
+  interaction_mode:
+    'Interaction mode (porous vs reflective) — how the precision ray-tracer handles a placed object. "Porous" treats the object as a Beer-Lambert volumetric absorber the ray passes through with energy loss (chairs, sofas, drapes, audience — sound diffuses into the upholstery). "Reflective" triangulates the bbox into the wall BVH; rays bounce off the outer surfaces (wood tables, lecterns, bookshelves, metal racks). Both modes contribute identically to Sabine/Eyring via the rt60 parallel-A sum — the mode only changes how rays interact with the object in the precision engine.',
+
+  beer_lambert_furniture:
+    'Beer-Lambert furniture sink — the per-ray attenuation rule the precision tracer applies inside a porous-mode object. Per-band coefficient μ_b = A_obj(b) / (4·V_bbox) [Nepers/m], derived from Kuttruff 5e §4.1 eq. 4.11 via the Cauchy mean-chord theorem (factor of 4 is the ratio of mean chord length to volume of a convex region). Per-ray energy loss across pathlength L_in through the bbox: E\' = E·exp(-μ·L_in). Dropping the 4 in A/(4V) is the canonical bug — engines that get this wrong under-read RT60 by 25%.',
+
+  occupancy_state:
+    'Occupied vs. empty seat — two distinct catalogue rows, paired via paired_state_id. An occupied chair absorbs ~3× more energy at speech frequencies (Beranek 2e Table 7.2 vs 7.1). For rehearsal-vs-performance modelling, flip the placed-list row\'s "⇆ Occupied/Empty" toggle — same position + same id, swapped A_obj. Sound designers run BOTH states before sign-off because the RT60 swing is typically 0.3-0.6 s in seated venues.',
+
+  audience_block:
+    'Audience block per m² — a per-area row that represents one square metre of densely-seated audience, not one chair. Use this row when seats are >50 deep (Beranek 2e §7.3 recommendation): the discrete-chair sum overstates because crowded audiences absorb collectively. A_obj per row = published per-m² α × the row\'s 1 m² footprint, encoded directly as m²·Sa. Place one row per m² of seating area.',
+
+  reliability_tier:
+    'Reliability tier — the catalogue badge that tells you what evidence backs a row\'s A_obj numbers. "Measured" (green) = direct ISO 354 lab certificate. "Derived" (amber) = calculated from a parent ISO 354 measurement via a documented derivation (per-seat from per-m² × footprint, occupied from empty × Beranek ratio, etc.). "Estimated" (red) = engineering judgement, material-class extrapolation, or back-of-envelope. The Furnishing schedule in the printed report carries the same tier badge per row.',
+
+  confidence_overlay:
+    'Confidence overlay — FurnitureLAB sidebar toggle that re-tints every placed object in the 2D viewport by its reliability tier (green / amber / red). The competitive differentiator: most simulators bury per-row provenance in metadata; this view surfaces "where does the RT60 number rest on solid lab data, where on a guess" at a glance. No physics change; visual overlay only.',
 };
 
 // Attach `title=` attributes to every element with a matching `data-gloss`

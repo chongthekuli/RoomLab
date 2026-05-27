@@ -18,6 +18,7 @@ import { state } from '../../app-state.js';
 import { emit } from '../../shared/events.js';
 import { loadFurnitureCatalogue } from './catalog.js';
 import { buildGlyph, glyphViewBox } from './glyphs.js';
+import { applyGlossary } from '../../ui/glossary.js';
 
 let _mounted = false;
 
@@ -51,6 +52,10 @@ function renderGrid(grid, catalogueJson, detailPane) {
     return;
   }
   grid.innerHTML = items.map(item => renderCard(item)).join('');
+  // Apply glossary tooltips to the reliability badges + any other
+  // data-gloss elements in the card grid. The detail-pane renderer
+  // calls applyGlossary on its own scope at render time.
+  applyGlossary(grid);
   // Click delegation — one listener for the whole grid.
   grid.addEventListener('click', (ev) => {
     const cardEl = ev.target.closest('.fl-card');
@@ -84,7 +89,7 @@ function renderCard(item) {
           <span class="fl-card-A1k">A<sub>1k</sub> = ${A1k} m²&nbsp;Sa</span>
         </div>
         ${renderSparkline(A)}
-        <div class="fl-card-rel fl-rel-${escapeAttr(reliability)}">${escapeHtml(reliabilityLabel(reliability))}</div>
+        <div class="fl-card-rel fl-rel-${escapeAttr(reliability)}" data-gloss="reliability_tier">${escapeHtml(reliabilityLabel(reliability))}</div>
       </div>
     </article>`;
 }
@@ -133,11 +138,11 @@ function renderDetail(pane, item) {
   pane.innerHTML = `
     <header class="fl-detail-head">
       <h2 class="fl-detail-name">${escapeHtml(item.name)}</h2>
-      <div class="fl-detail-rel fl-rel-${escapeAttr(item.reliability || 'estimated')}">${escapeHtml(reliabilityLabel(item.reliability || 'estimated'))}</div>
+      <div class="fl-detail-rel fl-rel-${escapeAttr(item.reliability || 'estimated')}" data-gloss="reliability_tier">${escapeHtml(reliabilityLabel(item.reliability || 'estimated'))}</div>
     </header>
 
     <section class="fl-detail-section">
-      <h3>Equivalent absorption area, ISO 354 reverb-room (A<sub>obj</sub>)</h3>
+      <h3 data-gloss="a_obj">Equivalent absorption area, ISO 354 reverb-room (A<sub>obj</sub>)</h3>
       <table class="fl-detail-A">
         <tbody>${bandRows}</tbody>
       </table>
@@ -149,8 +154,9 @@ function renderDetail(pane, item) {
       <dl class="fl-detail-spec">
         <dt>Category</dt>      <dd>${escapeHtml(item.category)}${item.subcategory ? ' / ' + escapeHtml(item.subcategory) : ''}</dd>
         <dt>Footprint</dt>     <dd>${(fp.width_m ?? 0).toFixed(2)} m wide &times; ${(fp.depth_m ?? 0).toFixed(2)} m deep &times; ${(fp.height_m ?? 0).toFixed(2)} m tall</dd>
-        <dt>Mounting</dt>      <dd>${escapeHtml(item.placement?.mounts_on ?? '—')}</dd>
-        ${occ ? `<dt>Occupancy</dt><dd>${escapeHtml(occ)}</dd>` : ''}
+        <dt>Mounting</dt>      <dd><span data-gloss="type_a_mounting">${escapeHtml(item.placement?.mounts_on ?? '—')}</span></dd>
+        ${item.acoustics?.interaction_mode ? `<dt>Interaction</dt><dd><span data-gloss="interaction_mode">${escapeHtml(item.acoustics.interaction_mode)}</span></dd>` : ''}
+        ${occ ? `<dt>Occupancy</dt><dd><span data-gloss="occupancy_state">${escapeHtml(occ)}</span></dd>` : ''}
       </dl>
     </section>
 
@@ -158,7 +164,7 @@ function renderDetail(pane, item) {
       <h3>Citation</h3>
       <p class="fl-cite-source"><strong>${escapeHtml(c.source ?? '—')}</strong>${c.doi ? ` &middot; DOI <a href="https://doi.org/${escapeAttr(c.doi)}" target="_blank" rel="noopener">${escapeHtml(c.doi)}</a>` : ''}</p>
       <p class="fl-cite-ref">${escapeHtml(c.reference ?? '')}</p>
-      <p class="fl-cite-method"><em>Method:</em> ${escapeHtml(c.measurement_method ?? '—')}</p>
+      <p class="fl-cite-method"><em>Method:</em> <span data-gloss="iso_354">${escapeHtml(c.measurement_method ?? '—')}</span></p>
       ${c.notes ? `<p class="fl-cite-notes"><em>Notes:</em> ${escapeHtml(c.notes)}</p>` : ''}
     </section>
 
@@ -168,6 +174,10 @@ function renderDetail(pane, item) {
   `;
 
   pane.querySelector('.fl-place-btn')?.addEventListener('click', () => armForPlacement(item.id));
+  // Glossary tooltips on the data-gloss elements above (reliability
+  // badge, A_obj heading, mounting / interaction / occupancy values,
+  // ISO 354 method line).
+  applyGlossary(pane);
 }
 
 /**

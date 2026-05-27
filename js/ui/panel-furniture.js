@@ -14,6 +14,7 @@ import { on, emit } from './events.js';
 import { loadFurnitureCatalogue, getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { armFurniturePlacement } from '../labs/furniturelab/main.js';
 import { buildGlyph, glyphViewBox } from '../labs/furniturelab/glyphs.js';
+import { applyGlossary } from './glossary.js';
 
 let _mounted = false;
 
@@ -64,7 +65,7 @@ function render(root) {
     <h2>Furniture <span class="fl-rail-beta">beta</span></h2>
     <div class="pf-body">
       <p class="pf-intro">Pick an item, then click in the floor plan to place. Click a placed item to select; <kbd>Del</kbd> removes it.</p>
-      <label class="pf-toggle-row ${confOn ? 'on' : ''}" title="Re-tint placed furniture in the 2D viewport by acoustic-data reliability (measured / derived / estimated). The competitive moat: every RT60 number knows whether it rests on a lab measurement or a guess.">
+      <label class="pf-toggle-row ${confOn ? 'on' : ''}" data-gloss="confidence_overlay">
         <input type="checkbox" id="pf-confidence-toggle" ${confOn ? 'checked' : ''} />
         <span class="pf-toggle-label">Confidence overlay</span>
         <span class="pf-toggle-hint">colour placed items by evidence tier</span>
@@ -134,6 +135,11 @@ function render(root) {
       emit('furniture:changed', { id, flippedTo: pairedId });
     });
   });
+
+  // Apply glossary tooltips to any data-gloss elements rendered above
+  // (confidence overlay toggle, paired-state flip button, reliability
+  // badges, etc.). Re-run on every render since innerHTML replaced.
+  applyGlossary(root);
 }
 
 function renderMiniCard(item) {
@@ -179,7 +185,7 @@ function renderPlacedRow(f, idx, catalogue) {
     else pairedLabel = pairedRow.short_name || pairedRow.name || pairedId;
   }
   const stateBtn = pairedRow
-    ? `<button type="button" class="pf-row-flip" title="Switch to ${escapeAttr(pairedLabel)} state &mdash; identical footprint, different A_obj">&#8646; ${escapeHtml(pairedLabel)}</button>`
+    ? `<button type="button" class="pf-row-flip" data-gloss="occupancy_state" title="Switch to ${escapeAttr(pairedLabel)} state &mdash; identical footprint, different A_obj">&#8646; ${escapeHtml(pairedLabel)}</button>`
     : '';
 
   return `
