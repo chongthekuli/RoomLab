@@ -18,6 +18,7 @@ import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, no
 import { wallInsetPolygon } from '../physics/wall-inset.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
+import { furnitureBlocksCylinder } from '../physics/furniture-walk-collision.js';
 import { openPanel } from '../ui/rail-system.js';
 import { loadCharacterRig } from './character-loader.js';
 import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode, setAuditionMaterials } from '../audio/audition.js';
@@ -1936,6 +1937,14 @@ function initWalkthrough() {
     domElement: renderer.domElement,
     // Lazy getter — roomGroup is created by rebuildRoom AFTER initWalkthrough.
     getCollidables: () => roomGroup,
+    // Walk-mode furniture collision (v=682) — pure cylinder-vs-AABB
+    // test against the SAME sub-volumes that drive the visible 3D mesh
+    // and the acoustic snapshot. Catches the case where the avatar
+    // walks through a bookshelf / rack / table that the chest-ray
+    // raycast missed (table slab above ray, or furnitureGroup outside
+    // roomGroup so the raycast never even saw it).
+    getFurnitureBlocker: (sx, sy, yMin, yMax, radius) =>
+      furnitureBlocksCylinder(sx, sy, yMin, yMax, radius, state.furniture, getFurnitureCatalogueMap()),
     character: avatar,
   });
   tpController.onJump = () => {

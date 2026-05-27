@@ -22,13 +22,20 @@ function shortestAngle(from, to) {
 }
 
 export class ThirdPersonController {
-  constructor({ worldCamera, domElement, collidables, getCollidables, character }) {
+  constructor({ worldCamera, domElement, collidables, getCollidables, character, getFurnitureBlocker }) {
     this.worldCamera = worldCamera;
     this.domElement = domElement;
     // Accept either a direct Group reference OR a getter function that
     // returns the current roomGroup — scene.js builds roomGroup lazily,
     // so the getter pattern lets us create the controller early.
     this._collidablesGetter = getCollidables ?? (() => collidables);
+    // Furniture collision callback (v=682). Signature:
+    //   (stateX, stateY, yMin, yMax, radius) => boolean
+    // Returns true when a vertical cylinder at the given state-frame
+    // position would overlap any placed-furniture sub-volume. Optional —
+    // when omitted the controller falls back to raycast-only collision
+    // (older behaviour, walks through furniture).
+    this._furnitureBlocker = typeof getFurnitureBlocker === 'function' ? getFurnitureBlocker : null;
     this.character = character;
 
     // --- Character state (world-space) -----------------------------------
@@ -372,7 +379,22 @@ export class ThirdPersonController {
     const from = this._scratchFrom.set(this.pos.x, this.pos.y + this.characterHeight * 0.55, this.pos.z);
     this.raycaster.set(from, dxz);
     this.raycaster.far = dist + this.characterRadius;
-    return this._structuralHits(this.raycaster).length === 0;
+    if (this._structuralHits(this.raycaster).length > 0) return false;
+    // Furniture collision (v=682). Pure cylinder-vs-AABB test against
+    // furniture sub-volumes. Catches what the chest-height ray misses —
+    // tables (slab at 0.75 m, ray passes above), low racks, and chairs
+    // when approached from outside the raycast-collidable roomGroup.
+    // Skipped when the blocker isn't wired (older controllers / tests).
+    if (this._furnitureBlocker) {
+      // Convert world (newX, newZ) → state-frame (state.x = -world.x,
+      // state.y = world.z) per scene.scale.x = -1 mirror convention
+      // (CLAUDE.md §6 "Open bugs / convention mismatches").
+      const sx = -newX, sy = newZ;
+      // Avatar cylinder spans full height from feet to head; that way
+      // a table top blocks even though the chest ray passed above it.
+      if (this._furnitureBlocker(sx, sy, 0, this.characterHeight, this.characterRadius)) return false;
+    }
+    return true;
   }
 
   _groundSnap() {
