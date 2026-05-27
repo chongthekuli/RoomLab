@@ -126,7 +126,8 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
         <div class="rack-mid-header">
           <span class="rack-mid-title" id="rack-mid-title">No rack selected</span>
           <span class="rack-mid-summary" id="rack-mid-summary"></span>
-          <button class="rack-door-toggle" id="rack-mid-door-toggle" style="display:none" title="Open or close the front door in the 3D preview to inspect the rack interior">Open door</button>
+          <button class="rack-door-toggle" id="rack-mid-door-toggle" style="display:none" title="Open or close the FRONT door (mesh-glass) in the 3D preview">Open front</button>
+          <button class="rack-door-toggle" id="rack-mid-rear-door-toggle" style="display:none" title="Open or close the REAR door (perforated steel) in the 3D preview">Open rear</button>
         </div>
         <div class="rack-preview" id="rack-preview"></div>
         <div class="rack-slot-list" id="rack-slot-list"></div>
@@ -532,21 +533,36 @@ function renderRackMid() {
   }, 0);
   titleEl.textContent = `${_currentRack.label} (${_currentRack.rackModelKey})`;
   summaryEl.textContent = `${usedU} / ${totalU} U used · ${totalPower} W rated · ${_currentRack.slots.length} amp${_currentRack.slots.length === 1 ? '' : 's'}`;
-  // Door-toggle button in the rack editor — only relevant on enclosed
-  // racks. Live-syncs to the preview's 3D mesh.
+  // Door-toggle buttons in the rack editor — only relevant on enclosed
+  // racks. Live-sync to the preview's 3D mesh. Two independent buttons
+  // (front + rear) since the user wanted both doors open/closable.
   const doorBtnEl = document.getElementById('rack-mid-door-toggle');
+  const rearBtnEl = document.getElementById('rack-mid-rear-door-toggle');
+  const isEnclosed = (def?.style ?? 'open-frame') === 'enclosed';
   if (doorBtnEl) {
-    const isEnclosed = (def?.style ?? 'open-frame') === 'enclosed';
     if (isEnclosed) {
       doorBtnEl.style.display = '';
-      doorBtnEl.textContent = _currentRack.doorOpen ? 'Close door' : 'Open door';
+      doorBtnEl.textContent = _currentRack.doorOpen ? 'Close front' : 'Open front';
       doorBtnEl.onclick = () => {
         _currentRack.doorOpen = !_currentRack.doorOpen;
         persistCurrentRack();
-        renderRackMid();   // updates the button label + rebuilds the preview
+        renderRackMid();
       };
     } else {
       doorBtnEl.style.display = 'none';
+    }
+  }
+  if (rearBtnEl) {
+    if (isEnclosed) {
+      rearBtnEl.style.display = '';
+      rearBtnEl.textContent = _currentRack.rearDoorOpen ? 'Close rear' : 'Open rear';
+      rearBtnEl.onclick = () => {
+        _currentRack.rearDoorOpen = !_currentRack.rearDoorOpen;
+        persistCurrentRack();
+        renderRackMid();
+      };
+    } else {
+      rearBtnEl.style.display = 'none';
     }
   }
   // Render slot list, top-down so it reads like a rack from the front.
@@ -681,18 +697,18 @@ function renderSystemOverview() {
     const def = _rackCatalogue?.racks?.[r.rackModelKey];
     const totalU = def?.u ?? 0;
     const usedU = (r.slots ?? []).reduce((a, s) => a + (s.uHeight ?? 1), 0);
-    // Door open/close button only meaningful on enclosed racks — the
-    // open-frame family has no door. Hide for legacy / open-frame rows.
+    // Door open/close buttons — only meaningful on enclosed racks. Two
+    // independent buttons so the user can open front, rear, or both.
     const isEnclosed = (def?.style ?? 'open-frame') === 'enclosed';
-    const doorOpen = !!r.doorOpen;
-    const doorBtn = isEnclosed
-      ? `<button class="rack-door-toggle" data-rack-idx="${i}" title="Open or close the front door in 3D to inspect the rack interior">${doorOpen ? 'Close door' : 'Open door'}</button>`
+    const doorBtns = isEnclosed
+      ? `<button class="rack-door-toggle" data-rack-idx="${i}" data-door="front" title="Open or close the FRONT door (mesh-glass)">${r.doorOpen ? 'Close front' : 'Open front'}</button>
+         <button class="rack-door-toggle" data-rack-idx="${i}" data-door="rear" title="Open or close the REAR door (perforated steel)">${r.rearDoorOpen ? 'Close rear' : 'Open rear'}</button>`
       : '';
     return `
       <div class="rack-system-item">
         <div><strong>${escapeHtml(r.label || `Rack ${i + 1}`)}</strong></div>
         <div class="pr-mute">${r.rackModelKey} · ${usedU} / ${totalU} U · ${(r.slots || []).length} amps</div>
-        ${doorBtn}
+        ${doorBtns}
         <button class="rack-system-remove" data-rack-idx="${i}" title="Remove rack from room">remove</button>
       </div>
     `;
@@ -710,12 +726,10 @@ function renderSystemOverview() {
       const idx = parseInt(btn.dataset.rackIdx, 10);
       const rack = ensureRackSystem().racks[idx];
       if (!rack) return;
-      rack.doorOpen = !rack.doorOpen;
+      const which = btn.dataset.door;     // 'front' | 'rear'
+      if (which === 'rear') rack.rearDoorOpen = !rack.rearDoorOpen;
+      else                  rack.doorOpen     = !rack.doorOpen;
       renderSystemOverview();
-      // rack:changed triggers rebuildRacks in scene.js; Viktor's
-      // addEnclosedShell reads rack.doorOpen at mesh-build time and
-      // applies the -100° hinge rotation. Snap-toggle for now; smooth
-      // lerp is a polish item once UAT confirms the basic flow.
       emit('rack:changed');
     });
   });

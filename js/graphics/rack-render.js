@@ -671,34 +671,96 @@ function addEnclosedShell(group, rack, rackDef, geom) {
     group.add(cavity);
   }
 
-  // ---- Rear door — perforated steel -----------------------------------
-  // Full-back panel covering the opening between the two rear posts.
-  // ~10 mm inset toward the rack interior (-Z from the post outer face)
-  // so the door reads as a recessed panel, not flush with the post.
+  // ---- Rear door — perforated steel, HINGED (v=690) ----------------------
+  // Mirrors the front-door hinged-group pattern so the user can
+  // independently open BOTH doors. Hinge sits on the rear face's LEFT
+  // post when viewed from the rear (which is world +X, since the rack
+  // is mirrored from rear-POV). Door extends in -X direction from hinge.
+  // When rack.rearDoorOpen is true, the group rotates +100° about local
+  // Y axis — free edge swings outward (toward world +Z, away from rack
+  // body, the same outward direction as the front door swings -Z).
   const rearDoorDef = rackDef.rear_door ?? {};
   if (rearDoorDef.type && rearDoorDef.type !== 'none') {
-    const rearPct = rearDoorDef.perforation_pct ?? 50;
-    const doorW = outerW - 2 * postW + 0.002;   // span between posts, slight overlap
-    const doorH = shellH;
-    // Repeat the perforation tile across the door surface — about 18 mm per tile
-    // → repeat counts scale with door dimensions.
+    const rearPct  = rearDoorDef.perforation_pct ?? 50;
+    const hingeX_R = +outerW / 2 - postW;          // rear LEFT post (world +X)
+    const doorOpenW_R = outerW - 2 * postW;
+    const doorOpenH_R = shellH;
+    const doorThk_R   = 0.006;
+
+    const rearGroup = new THREE.Group();
+    rearGroup.userData.tag = 'rack-rear-door-hinge';
+    rearGroup.userData.rackId = rack.id;
+    // Position the hinge at the right-inner-rear corner of the opening.
+    // Door extends from local x=0 (hinge) to x=-doorOpenW_R (free edge
+    // at -X), z=0 (door plane).
+    rearGroup.position.set(hingeX_R, shellYc, rearZ - doorThk_R / 2 - 0.002);
+
+    const isRearOpen = !!rack.rearDoorOpen;
+    rearGroup.rotation.y = isRearOpen ? +(100 * Math.PI / 180) : 0;
+    rearGroup.userData.doorOpen = isRearOpen;
+
+    // Perforated-steel plane — material cloned so the per-door
+    // alphaMap.repeat settings don't collide with the front door.
     const tilePerM = 1 / 0.018;
     const rearMat = getPerforationMaterial(rearPct, 0x1a1c20).clone();
     rearMat.alphaMap = getPerforationTexture(rearPct).clone();
     rearMat.alphaMap.wrapS = THREE.RepeatWrapping;
     rearMat.alphaMap.wrapT = THREE.RepeatWrapping;
-    rearMat.alphaMap.repeat.set(doorW * tilePerM, doorH * tilePerM);
+    rearMat.alphaMap.repeat.set(doorOpenW_R * tilePerM, doorOpenH_R * tilePerM);
     rearMat.alphaMap.needsUpdate = true;
     rearMat.alphaTest = 0.5;
     rearMat.needsUpdate = true;
+
+    // Door is centered on local x=-doorOpenW_R/2 (extends from hinge at
+    // x=0 to free edge at x=-doorOpenW_R, so midpoint is at -W/2).
     const rearDoor = new THREE.Mesh(
-      new THREE.PlaneGeometry(doorW, doorH),
+      new THREE.PlaneGeometry(doorOpenW_R - 0.002, doorOpenH_R - 0.002),
       rearMat,
     );
-    rearDoor.rotation.y = Math.PI;  // face outward (-Z normal → +Z normal)
-    rearDoor.position.set(0, shellYc, rearZ - 0.010);
+    rearDoor.position.set(-doorOpenW_R / 2, 0, 0);
     rearDoor.userData.tag = 'rack-rear-door';
-    group.add(rearDoor);
+    rearDoor.userData.no_walk_collide = true;
+    rearGroup.add(rearDoor);
+
+    // Bezel — same 8 mm bar pattern as the front door, mirrored along
+    // the local -X direction so the silhouette reads as a "swung-open
+    // rectangle" when rotated.
+    const bezelW_R = 0.008;
+    const bars_R = [
+      { w: doorOpenW_R, h: bezelW_R, x: -doorOpenW_R / 2, y: +doorOpenH_R / 2 - bezelW_R / 2 },
+      { w: doorOpenW_R, h: bezelW_R, x: -doorOpenW_R / 2, y: -doorOpenH_R / 2 + bezelW_R / 2 },
+      { w: bezelW_R, h: doorOpenH_R, x: -bezelW_R / 2, y: 0 },                 // hinge side (local x=0)
+      { w: bezelW_R, h: doorOpenH_R, x: -doorOpenW_R + bezelW_R / 2, y: 0 },   // free side (local x=-W)
+    ];
+    for (const b of bars_R) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, doorThk_R), BLACK_MAT);
+      bar.position.set(b.x, b.y, 0);
+      bar.userData.no_walk_collide = true;
+      rearGroup.add(bar);
+    }
+
+    // Handle on the free edge (local x = -doorOpenW_R + ~0.018).
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0x0c0d11, metalness: 0.65, roughness: 0.35 });
+    const handleX_R = -doorOpenW_R + 0.018;
+    const handle_R = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.005, 0.005, 0.080, 12),
+      handleMat,
+    );
+    handle_R.position.set(handleX_R, 0, doorThk_R / 2 + 0.008);
+    handle_R.userData.no_walk_collide = true;
+    rearGroup.add(handle_R);
+    for (const sy of [-0.04, +0.04]) {
+      const standoff = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0035, 0.0035, 0.018, 10),
+        handleMat,
+      );
+      standoff.rotation.x = Math.PI / 2;
+      standoff.position.set(handleX_R, sy, doorThk_R / 2 + 0.004);
+      standoff.userData.no_walk_collide = true;
+      rearGroup.add(standoff);
+    }
+
+    group.add(rearGroup);
   }
 
   // ---- Front door — mesh-glass, HINGED --------------------------------
