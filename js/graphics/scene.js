@@ -330,19 +330,27 @@ function rebuildRayViz() {
 // init alongside the other rebuild handlers. Disposes the group, nulls
 // the cache, and auto-disables the toggle so the user clicks-to-rebuild
 // rather than seeing stale rays through new geometry (Martina, CRITICAL).
-function invalidateRayViz() {
+function invalidateRayViz({ rebuildIfVisible = false } = {}) {
   _rayBuildToken++; // poison any in-flight build
   _rayPathsCache = null;
+  const wasVisible = !!state.display.showRays;
   if (rayGroup) {
     disposeGroup(rayGroup);
     rayGroup.visible = false;
   }
-  // Auto-flip the toggle off — the user explicitly opts in again on
-  // the next click, which retraces against the new scene.
+  // v=701: keep rays visible across rack mutations (and other callers
+  // that pass rebuildIfVisible) — auto-rebuild against the new scene
+  // immediately instead of forcing the user to re-toggle. Without this
+  // the user moves a rack and rays disappear; on re-enable they see
+  // bouncing rays, but the round-trip felt like "rays don't update".
+  // Other callers (room-change, source-change) keep the legacy auto-
+  // toggle-off behaviour because their rebuilds can be heavy.
+  if (rebuildIfVisible && wasVisible) {
+    rebuildRayViz();
+    return;
+  }
   if (state.display.showRays) {
     state.display.showRays = false;
-    // Sync the toolbar button's active class via a synthetic emit; the
-    // wiring in main.js already handles this for other toggles.
     document.getElementById('toggle-rays')?.classList.remove('active');
   }
 }
@@ -499,7 +507,10 @@ export async function mount3DViewport({ materials }) {
   // re-trace through the new rack BVH triangles. Without these the
   // moved rack's shadow + reflected beams stayed stale.
   on('rack:changed', () => {
-    invalidateRayViz();
+    // Pass rebuildIfVisible so a moved / rotated rack auto-refreshes
+    // any visible rays — the user shouldn't have to re-toggle just to
+    // see the new bounce geometry.
+    invalidateRayViz({ rebuildIfVisible: true });
     queueRebuild(REBUILD_RACKS | REBUILD_HEATMAP);
   });
   // Master EQ change: heatmap + aim lines depend on per-band SPL; refresh
