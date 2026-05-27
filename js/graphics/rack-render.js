@@ -298,12 +298,20 @@ function buildAmpMesh(slot, ampDef, slotDepth_m) {
   );
   group.add(body);
 
-  // Front-panel label plane (with model name texture)
+  // Front-panel label plane (with model name texture).
+  // v=691: Z flipped from +d/2 to -d/2 so the label faces the rack's
+  // FRONT (-Z per the rack-render coord frame, where the mesh-glass
+  // door lives). Previously labels faced the +Z side (the rear/
+  // perforated-steel side) which left the user perceiving the rear as
+  // the front and the "Open front" button as "the wrong door."
+  // Same flip applied below to the channel knobs, LEDs, and mounting
+  // ears so the entire front panel stays on the correct face.
   const label = new THREE.Mesh(
     new THREE.PlaneGeometry(w * 0.95, h * 0.7),
     new THREE.MeshBasicMaterial({ map: getAmpLabelTexture(ampDef?.model ?? slot.amplifierId), transparent: false }),
   );
-  label.position.z = d / 2 + 0.001;
+  label.position.z = -d / 2 - 0.001;
+  label.rotation.y = Math.PI;     // texture's "this way up" must still face the viewer
   group.add(label);
 
   // Channel knobs along the bottom edge of the front face. Visual only.
@@ -318,7 +326,7 @@ function buildAmpMesh(slot, ampDef, slotDepth_m) {
       knob.rotation.x = Math.PI / 2;
       knob.position.set(startX + (ch === 1 ? span / 2 : (i / (ch - 1)) * span),
         -h / 2 + h * 0.18,
-        d / 2 + 0.005);
+        -d / 2 - 0.005);
       group.add(knob);
     }
   }
@@ -329,7 +337,7 @@ function buildAmpMesh(slot, ampDef, slotDepth_m) {
   });
   for (let i = 0; i < 3; i++) {
     const led = new THREE.Mesh(new THREE.SphereGeometry(0.003, 10, 8), ledMat);
-    led.position.set(w * 0.42 - i * 0.012, h * 0.3, d / 2 + 0.005);
+    led.position.set(w * 0.42 - i * 0.012, h * 0.3, -d / 2 - 0.005);
     group.add(led);
   }
 
@@ -350,28 +358,26 @@ function buildAmpMesh(slot, ampDef, slotDepth_m) {
   });
   const screwR  = Math.min(0.004, h * 0.10);                  // M6 cap-screw head ≈ 8-10 mm dia
   for (const sx of [-1, +1]) {
-    // Ear flange — sits flush with the amp's front face (z = d/2) and
-    // extends outward past the amp body on this side.
+    // Ear flange — sits flush with the amp's FRONT face (-Z in local)
+    // and extends outward past the amp body on this side. Same Z flip
+    // as the label / knobs / LEDs above (v=691).
     const earX = sx * (w / 2 + earW / 2);
     const ear = new THREE.Mesh(
       new THREE.BoxGeometry(earW, earH, earThk),
       earMat,
     );
-    ear.position.set(earX, 0, d / 2 + earThk / 2);
+    ear.position.set(earX, 0, -d / 2 - earThk / 2);
     group.add(ear);
     // 2 cage-nut screws per ear — one near the top of the U-cell, one
-    // near the bottom. (Real rackmount ears get 2 screws per U; with
-    // multi-U units the visible count grows but we cap at 2-per-ear
-    // for visual clarity — anything more reads as noise at typical
-    // rack-preview camera distance.)
+    // near the bottom.
     for (const sy of [-1, +1]) {
       const screw = new THREE.Mesh(
         new THREE.CylinderGeometry(screwR, screwR, earThk * 1.8, 10),
         screwMat,
       );
-      // Cylinder axis defaults to Y; rotate 90° so the head faces +Z (out toward viewer)
+      // Cylinder axis defaults to Y; rotate 90° so the head faces -Z (out toward viewer at front)
       screw.rotation.x = Math.PI / 2;
-      screw.position.set(earX, sy * (earH * 0.36), d / 2 + earThk + 0.0005);
+      screw.position.set(earX, sy * (earH * 0.36), -d / 2 - earThk - 0.0005);
       group.add(screw);
     }
   }
