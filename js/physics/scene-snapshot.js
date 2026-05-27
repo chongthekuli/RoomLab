@@ -406,10 +406,42 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     return idx;
   }
 
+  // Shared "furniture-frame" material for the SHELL sub-bboxes of
+  // hybrid items (legs, armrests, back panel of every chair). Single
+  // material reused across every hybrid chair in the scene — no need
+  // per catalogueId since wood / plastic / metal frames have similar
+  // α at the resolution the precision tracer reads. α = 0.05 flat
+  // (Cox & D'Antonio §3.6 generic hardwood / "office furniture
+  // essentially specular at LF, mild edge scattering at HF").
+  let furnFrameMatIdxCache = -1;
+  function registerFurnitureFrameMaterial() {
+    if (furnFrameMatIdxCache >= 0) return furnFrameMatIdxCache;
+    const absArr = new Float32Array(BANDS);
+    const scaArr = new Float32Array(BANDS);
+    for (let k = 0; k < BANDS; k++) {
+      absArr[k] = 0.05;
+      scaArr[k] = 0.20;
+    }
+    const idx = materialsTable.length;
+    materialsTable.push(Object.freeze({
+      index: idx,
+      id: 'furniture-frame:generic',
+      name: 'Furniture frame (generic wood/metal)',
+      absorption: absArr,
+      scattering: scaArr,
+    }));
+    furnFrameMatIdxCache = idx;
+    return idx;
+  }
+
   // Split state.furniture by mode and build TWO blocks: scene.furniture
   // (porous → Beer-Lambert sink) and scene.furnitureReflective (→
   // triangulated wall faces). A given placed item is in EXACTLY ONE
-  // block so the tracer never double-counts.
+  // block so the tracer never double-counts. HYBRID mode (chairs)
+  // contributes ONE porous sub-bbox (cushion) AND multiple reflective
+  // sub-bboxes (legs + arms + back) — the cushion volume gets the FULL
+  // catalogue A_obj-derived μ; shell sub-bboxes use the shared frame
+  // material above.
   const porousBboxes = [];
   const porousMu = [];
   const porousIds = [];
@@ -437,7 +469,86 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
         reflectiveMaterialIdxList.push(matIdx);
         reflectiveIds.push(f.id);
         reflectiveCatalogueIds.push(f.catalogueId);
+      } else if (mode === 'hybrid' && row.visual?.family === 'seat') {
+        // HYBRID seat: cushion (porous) + 4 legs + 2 arms + 1 back (all reflective).
+        // Visual mesh layout in scene.js _build_seat:
+        //   seatTop_z = min(0.50, h*0.42), cushHi_z = min(0.55, h*0.46),
+        //   armHi_z  = min(0.72, h*0.55).
+        // Group is positioned with -d/2 z-offset so the visual mesh
+        // centres on cy; the sub-bboxes here are computed in WORLD
+        // coords directly to match the visible silhouette.
+        const seatTop_z = Math.min(0.50, h * 0.42);
+        const cushHi_z  = Math.min(0.55, h * 0.46);
+        const armHi_z   = Math.min(0.72, h * 0.55);
+        const legSize   = 0.10;
+        const legInset  = 0.08;
+
+        // Cushion porous sub-bbox. Width = 0.86·w, depth = 0.84·d,
+        // height = cushHi_z − seatTop_z (the cushion slab). Centred
+        // slightly forward of cy (matching the visual mesh — the
+        // back panel claims the back end of the bbox).
+        const cushW = w * 0.86;
+        const cushD = d * 0.84;
+        const cushYOff = d * (0.46 - 0.50);   // local z-offset of cushion centre relative to bbox centre
+        const V_cushion = cushW * cushD * (cushHi_z - seatTop_z);
+        const A = row?.acoustics?.A_obj_m2_sab_per_band;
+        if (A && V_cushion > 0) {
+          porousBboxes.push(
+            cx - cushW / 2, cy + cushYOff - cushD / 2, seatTop_z,
+            cx + cushW / 2, cy + cushYOff + cushD / 2, cushHi_z,
+          );
+          for (let k = 0; k < BANDS; k++) {
+            const a = A[String(Math.round(bands_hz[k]))];
+            if (Number.isFinite(a) && a > 0) {
+              porousMu.push(Math.min(5, a / (4 * V_cushion)));
+            } else {
+              porousMu.push(0);
+            }
+          }
+          porousIds.push(f.id);
+          porousCatalogueIds.push(f.catalogueId);
+        }
+
+        // Shell sub-bboxes — all share the generic frame material.
+        const frameMatIdx = registerFurnitureFrameMaterial();
+        // 4 corner legs (matches _build_seat legSize / legInset).
+        for (const sx of [-1, +1]) {
+          for (const sy of [-1, +1]) {
+            const lcx = cx + sx * (w / 2 - legInset);
+            const lcy = cy + sy * (d / 2 - legInset);
+            reflectiveBboxes.push(
+              lcx - legSize / 2, lcy - legSize / 2, 0,
+              lcx + legSize / 2, lcy + legSize / 2, seatTop_z,
+            );
+            reflectiveMaterialIdxList.push(frameMatIdx);
+            reflectiveIds.push(`${f.id}:leg`);
+            reflectiveCatalogueIds.push(f.catalogueId);
+          }
+        }
+        // 2 armrests, if the chair is wide enough (matches _build_seat).
+        if (w >= 0.45) {
+          for (const sx of [-1, +1]) {
+            const acx = cx + sx * (w / 2 - 0.04);
+            reflectiveBboxes.push(
+              acx - 0.04, cy + cushYOff - d * 0.39, seatTop_z,
+              acx + 0.04, cy + cushYOff + d * 0.39, armHi_z,
+            );
+            reflectiveMaterialIdxList.push(frameMatIdx);
+            reflectiveIds.push(`${f.id}:arm`);
+            reflectiveCatalogueIds.push(f.catalogueId);
+          }
+        }
+        // Back panel — slim slab at back edge, full height from cushion to top.
+        reflectiveBboxes.push(
+          cx - cushW / 2, cy + d / 2 - 0.10, cushHi_z,
+          cx + cushW / 2, cy + d / 2 - 0.02, h,
+        );
+        reflectiveMaterialIdxList.push(frameMatIdx);
+        reflectiveIds.push(`${f.id}:back`);
+        reflectiveCatalogueIds.push(f.catalogueId);
       } else {
+        // porous mode (or hybrid fallback for non-seat families) —
+        // whole bbox is a single Beer-Lambert sink.
         const mu = muTable.get(f.catalogueId);
         if (!mu) continue;
         porousBboxes.push(cx - w / 2, cy - d / 2, 0, cx + w / 2, cy + d / 2, h);

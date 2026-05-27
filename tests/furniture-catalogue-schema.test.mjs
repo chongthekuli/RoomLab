@@ -59,13 +59,24 @@ const ALLOWED_MOUNTS = new Set(['floor', 'wall', 'ceiling', 'free-hanging']);
 // dispatcher always has something to read.
 const ALLOWED_VISUAL_FAMILIES = new Set(['seat', 'slab-on-legs', 'vertical-box', 'flat-pad']);
 // Schema v3 (2026-05-27): acoustics.interaction_mode controls how the
-// precision ray-tracer treats the object. 'porous' = Beer-Lambert
-// volumetric absorber the ray passes through with energy loss (chairs,
-// sofas, drapes, audience blocks). 'reflective' = bbox triangulated
-// into the wall BVH; rays hit and bounce with α-absorption (tables,
-// lecterns, bookshelves, server racks). Both contribute identically to
-// rt60.js Sabine/Eyring via the parallel-A sum.
-const ALLOWED_INTERACTION_MODES = new Set(['porous', 'reflective']);
+// precision ray-tracer treats the object.
+//   'porous'     = Beer-Lambert volumetric absorber; rays pass through
+//                  with energy loss (drapes, audience blocks, mats).
+//   'reflective' = bbox triangulated into the wall BVH; rays hit and
+//                  bounce with α-absorption (tables, lecterns,
+//                  bookshelves, server racks).
+//   'hybrid'     = (v=676) seat-family chairs. Split into a CUSHION
+//                  porous sub-bbox (gets the full catalogue A_obj via
+//                  Beer-Lambert) plus SHELL reflective sub-bboxes
+//                  (legs, armrests, back panel) sharing a generic
+//                  low-α 'furniture-frame' material. The eye sees ray
+//                  bounces on the chair frame AND absorption into the
+//                  upholstery — matching the physical reality and the
+//                  user's visual intuition.
+// All three modes contribute the catalogue A_obj to rt60.js Sabine/
+// Eyring via the parallel-A sum; the mode only chooses how the
+// precision tracer + ray-viz handle the geometry.
+const ALLOWED_INTERACTION_MODES = new Set(['porous', 'reflective', 'hybrid']);
 
 for (const item of catalogue.items) {
   const tag = `[${item.id ?? '<no-id>'}]`;
