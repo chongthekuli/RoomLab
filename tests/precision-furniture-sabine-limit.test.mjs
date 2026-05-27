@@ -103,7 +103,10 @@ const TEST_ROW = {
   category: 'decorative',
   footprint: { shape: 'rectangle', width_m: FOOTPRINT_W, depth_m: FOOTPRINT_D, height_m: FOOTPRINT_H },
   placement: { mounts_on: 'floor' },
-  visual: { family: 'flat-pad' },
+  // family = 'vertical-box' so the sub-volume IS the whole bbox
+  // (v=677 onward sub-volumes module routes flat-pad to a thin floor
+  // slab; this test's V_bbox = 0.5 m³ assumption needs whole-bbox).
+  visual: { family: 'vertical-box' },
   acoustics: {
     model: 'equivalent_absorption_area',
     A_obj_m2_sab_per_band: { '125': A_OBJ, '250': A_OBJ, '500': A_OBJ, '1000': A_OBJ, '2000': A_OBJ, '4000': A_OBJ },

@@ -21,7 +21,7 @@
 import { expandSources } from '../app-state.js';
 import { getCachedCatalogue } from '../labs/surfacelab/catalog.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
-import { furnitureVolumetricCoeffs } from './furniture-absorption.js';
+import { getSubVolumes } from '../labs/furniturelab/sub-volumes.js';
 
 export const PHYSICS_SCENE_VERSION = 1;
 
@@ -452,109 +452,66 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
   const reflectiveCatalogueIds = [];
 
   if (furnCatalogue && furnCatalogue.size > 0 && stateFurniture.length > 0) {
-    const muTable = furnitureVolumetricCoeffs(furnCatalogue, bands_hz);
+    // v=677 — unified per-family routing. Each placed item asks
+    // getSubVolumes(row) for its sub-bbox layout (cushion + legs +
+    // arms + back for seats; top slab + legs for tables; single bbox
+    // for bookshelves; etc.). Each sub-volume routes into either the
+    // porous block (Beer-Lambert sink) or the reflective block
+    // (triangulated wall faces) based on its role. Adding a new
+    // family is a one-function change in sub-volumes.js with NO
+    // touch-up here.
     for (const f of stateFurniture) {
       if (!f?.position || typeof f.catalogueId !== 'string') continue;
       const row = furnCatalogue.get(f.catalogueId);
       if (!row?.footprint) continue;
-      const w = Math.max(0.01, row.footprint.width_m ?? 0.5);
-      const d = Math.max(0.01, row.footprint.depth_m ?? 0.5);
-      const h = Math.max(0.01, row.footprint.height_m ?? 1.0);
       const cx = f.position.x, cy = f.position.y;
-      const mode = row.acoustics?.interaction_mode ?? 'porous';
-      if (mode === 'reflective') {
-        const matIdx = registerFurnitureMaterial(f.catalogueId, row);
-        if (matIdx < 0) continue;
-        reflectiveBboxes.push(cx - w / 2, cy - d / 2, 0, cx + w / 2, cy + d / 2, h);
-        reflectiveMaterialIdxList.push(matIdx);
-        reflectiveIds.push(f.id);
-        reflectiveCatalogueIds.push(f.catalogueId);
-      } else if (mode === 'hybrid' && row.visual?.family === 'seat') {
-        // HYBRID seat: cushion (porous) + 4 legs + 2 arms + 1 back (all reflective).
-        // Visual mesh layout in scene.js _build_seat:
-        //   seatTop_z = min(0.50, h*0.42), cushHi_z = min(0.55, h*0.46),
-        //   armHi_z  = min(0.72, h*0.55).
-        // Group is positioned with -d/2 z-offset so the visual mesh
-        // centres on cy; the sub-bboxes here are computed in WORLD
-        // coords directly to match the visible silhouette.
-        const seatTop_z = Math.min(0.50, h * 0.42);
-        const cushHi_z  = Math.min(0.55, h * 0.46);
-        const armHi_z   = Math.min(0.72, h * 0.55);
-        const legSize   = 0.10;
-        const legInset  = 0.08;
+      const subs = getSubVolumes(row);
+      if (!Array.isArray(subs) || subs.length === 0) continue;
 
-        // Cushion porous sub-bbox. Width = 0.86·w, depth = 0.84·d,
-        // height = cushHi_z − seatTop_z (the cushion slab). Centred
-        // slightly forward of cy (matching the visual mesh — the
-        // back panel claims the back end of the bbox).
-        const cushW = w * 0.86;
-        const cushD = d * 0.84;
-        const cushYOff = d * (0.46 - 0.50);   // local z-offset of cushion centre relative to bbox centre
-        const V_cushion = cushW * cushD * (cushHi_z - seatTop_z);
-        const A = row?.acoustics?.A_obj_m2_sab_per_band;
-        if (A && V_cushion > 0) {
-          porousBboxes.push(
-            cx - cushW / 2, cy + cushYOff - cushD / 2, seatTop_z,
-            cx + cushW / 2, cy + cushYOff + cushD / 2, cushHi_z,
-          );
+      // First pass — find the single porous sub-volume (if any) so we
+      // can compute μ from its volume. Layouts guarantee at most one.
+      const porousSub = subs.find(s => s.role === 'porous');
+      const porousV = porousSub
+        ? (porousSub.bounds[3] - porousSub.bounds[0])
+          * (porousSub.bounds[4] - porousSub.bounds[1])
+          * (porousSub.bounds[5] - porousSub.bounds[2])
+        : 0;
+      const A = row?.acoustics?.A_obj_m2_sab_per_band;
+
+      for (const sub of subs) {
+        // Translate local bounds to world (offset by cx, cy in xy;
+        // z is height, not offset).
+        const wb = [
+          cx + sub.bounds[0], cy + sub.bounds[1], sub.bounds[2],
+          cx + sub.bounds[3], cy + sub.bounds[4], sub.bounds[5],
+        ];
+        if (sub.role === 'porous') {
+          if (!A || !(porousV > 0)) continue;
+          porousBboxes.push(wb[0], wb[1], wb[2], wb[3], wb[4], wb[5]);
           for (let k = 0; k < BANDS; k++) {
             const a = A[String(Math.round(bands_hz[k]))];
             if (Number.isFinite(a) && a > 0) {
-              porousMu.push(Math.min(5, a / (4 * V_cushion)));
+              porousMu.push(Math.min(5, a / (4 * porousV)));
             } else {
               porousMu.push(0);
             }
           }
           porousIds.push(f.id);
           porousCatalogueIds.push(f.catalogueId);
+        } else if (sub.role === 'reflective_main') {
+          const matIdx = registerFurnitureMaterial(f.catalogueId, row);
+          if (matIdx < 0) continue;
+          reflectiveBboxes.push(wb[0], wb[1], wb[2], wb[3], wb[4], wb[5]);
+          reflectiveMaterialIdxList.push(matIdx);
+          reflectiveIds.push(f.id);
+          reflectiveCatalogueIds.push(f.catalogueId);
+        } else if (sub.role === 'frame') {
+          const frameMatIdx = registerFurnitureFrameMaterial();
+          reflectiveBboxes.push(wb[0], wb[1], wb[2], wb[3], wb[4], wb[5]);
+          reflectiveMaterialIdxList.push(frameMatIdx);
+          reflectiveIds.push(`${f.id}:frame`);
+          reflectiveCatalogueIds.push(f.catalogueId);
         }
-
-        // Shell sub-bboxes — all share the generic frame material.
-        const frameMatIdx = registerFurnitureFrameMaterial();
-        // 4 corner legs (matches _build_seat legSize / legInset).
-        for (const sx of [-1, +1]) {
-          for (const sy of [-1, +1]) {
-            const lcx = cx + sx * (w / 2 - legInset);
-            const lcy = cy + sy * (d / 2 - legInset);
-            reflectiveBboxes.push(
-              lcx - legSize / 2, lcy - legSize / 2, 0,
-              lcx + legSize / 2, lcy + legSize / 2, seatTop_z,
-            );
-            reflectiveMaterialIdxList.push(frameMatIdx);
-            reflectiveIds.push(`${f.id}:leg`);
-            reflectiveCatalogueIds.push(f.catalogueId);
-          }
-        }
-        // 2 armrests, if the chair is wide enough (matches _build_seat).
-        if (w >= 0.45) {
-          for (const sx of [-1, +1]) {
-            const acx = cx + sx * (w / 2 - 0.04);
-            reflectiveBboxes.push(
-              acx - 0.04, cy + cushYOff - d * 0.39, seatTop_z,
-              acx + 0.04, cy + cushYOff + d * 0.39, armHi_z,
-            );
-            reflectiveMaterialIdxList.push(frameMatIdx);
-            reflectiveIds.push(`${f.id}:arm`);
-            reflectiveCatalogueIds.push(f.catalogueId);
-          }
-        }
-        // Back panel — slim slab at back edge, full height from cushion to top.
-        reflectiveBboxes.push(
-          cx - cushW / 2, cy + d / 2 - 0.10, cushHi_z,
-          cx + cushW / 2, cy + d / 2 - 0.02, h,
-        );
-        reflectiveMaterialIdxList.push(frameMatIdx);
-        reflectiveIds.push(`${f.id}:back`);
-        reflectiveCatalogueIds.push(f.catalogueId);
-      } else {
-        // porous mode (or hybrid fallback for non-seat families) —
-        // whole bbox is a single Beer-Lambert sink.
-        const mu = muTable.get(f.catalogueId);
-        if (!mu) continue;
-        porousBboxes.push(cx - w / 2, cy - d / 2, 0, cx + w / 2, cy + d / 2, h);
-        for (let k = 0; k < BANDS; k++) porousMu.push(mu[k]);
-        porousIds.push(f.id);
-        porousCatalogueIds.push(f.catalogueId);
       }
     }
   }
