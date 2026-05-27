@@ -21,6 +21,7 @@ import { extractOverheadReflectors, computeOverheadReflectionPower } from './ove
 import { extractPorches, computePorchReverbPower } from './porch-enclosure.js';
 import { classifySource, listWallFacets } from './source-classification.js';
 import { furnitureDirectPathLossDb } from './furniture-direct-blocking.js';
+import { rackDirectPathLossDb } from './rack-direct-blocking.js';
 import {
   computeCouplingForAllBands,
   COUPLING_BANDS_HZ,
@@ -241,7 +242,7 @@ export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   };
 }
 
-export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null, airAbsorptionFn = null, furniture = null, furnitureCatalogue = null }) {
+export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null, airAbsorptionFn = null, furniture = null, furnitureCatalogue = null, racks = null, rackCatalogue = null }) {
   const { r, azimuth_deg, elevation_deg } = localAngles(
     speakerState.position, speakerState.aim, listenerPos
   );
@@ -304,6 +305,21 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
     spl_db -= furniture_loss_db;
   }
 
+  // DeviceLAB rack direct-path blocking (v=700, 2026-05-27). Same
+  // segment-AABB barrier-μ approach as furniture, but using each rack's
+  // outer footprint × outer height (rotated by yaw_deg). Sound disturbed
+  // by a rack sitting between speaker and listener now drops at the
+  // grid cell behind the rack instead of passing through unchanged.
+  let rack_loss_db = 0;
+  if (Array.isArray(racks) && racks.length > 0 && rackCatalogue && materials?.frequency_bands_hz) {
+    rack_loss_db = rackDirectPathLossDb(
+      speakerState.position, listenerPos,
+      racks, rackCatalogue,
+      materials.frequency_bands_hz, freq_hz,
+    );
+    spl_db -= rack_loss_db;
+  }
+
   return {
     r, azimuth_deg, elevation_deg, attn_db: attn, spl_db,
     through_wall,
@@ -311,6 +327,7 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
     tl_db_applied: tl.tl_db,
     outdoor_obstacle_loss_db,
     furniture_loss_db,
+    rack_loss_db,
   };
 }
 
@@ -517,6 +534,8 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
                               // T/RH-parametric ISO 9613-1. Null → indoor table.
   furniture = null,           // v=679: state.furniture for direct-path blocking
   furnitureCatalogue = null,  // v=679: Map<id, row> for sub-volume lookup
+  racks = null,               // v=700: state.rackSystem.racks for direct-path blocking
+  rackCatalogue = null,       // v=700: rack catalogue (raw JSON or Map)
 } = {}) {
   const { sourceCtx, freq_hz, reverbActive, revConst_db, eqGainDb, L_p_rev_inside_per_band } = ctx;
   // Phase A5 (2026-05-24, Martina audit §2.B): ctx fields are now
@@ -584,6 +603,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
       freq_hz, room, materials, airAbsorption, eqGainDb,
       outdoorObstacles: obstacles, airAbsorptionFn,
       furniture, furnitureCatalogue,
+      racks, rackCatalogue,
     });
     const spl_db = d.spl_db;
     if (!isFinite(spl_db)) continue;
@@ -819,6 +839,8 @@ export function computeMultiSourceSPL({
   airAbsorptionFn = null,
   furniture = null,              // v=679 — direct-path blocking by placed furniture
   furnitureCatalogue = null,
+  racks = null,                  // v=700 — direct-path blocking by placed racks
+  rackCatalogue = null,
 }) {
   // Phase 7 — gate the interior reverberant context on the listener's
   // geometric classification. When the listener is OUTSIDE the parent
@@ -871,6 +893,7 @@ export function computeMultiSourceSPL({
   return computeMultiSourceSPLFromContext(ctx, listenerPos, {
     room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn,
     furniture, furnitureCatalogue,
+    racks, rackCatalogue,
   });
 }
 
@@ -878,6 +901,8 @@ export function computeListenerBreakdown({
   sources, getSpeakerDef, listenerPos,
   freq_hz = 1000, room = null, materials = null,
   roomConstantR = 0, airAbsorption = true,
+  furniture = null, furnitureCatalogue = null,
+  racks = null, rackCatalogue = null,
 }) {
   // Phase 7 — same listener-classification gate as computeMultiSourceSPL.
   // The reverb leak term below adds (4/R · L_w) to every per-source
@@ -893,7 +918,7 @@ export function computeListenerBreakdown({
     const def = getSpeakerDef(src.modelUrl);
     const outsideRoom = room ? !isInsideRoom3D(src.position, room) : false;
     if (!def) return { idx: i, spl_db: -Infinity, r: null, azimuth_deg: null, modelUrl: src.modelUrl, outsideRoom, through_wall: false, tl_db_applied: 0 };
-    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room, materials, airAbsorption, outdoorObstacles: obstacles });
+    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room, materials, airAbsorption, outdoorObstacles: obstacles, furniture, furnitureCatalogue, racks, rackCatalogue });
     return {
       idx: i, spl_db: d.spl_db, r: d.r, azimuth_deg: d.azimuth_deg,
       modelUrl: src.modelUrl, outsideRoom,
@@ -1089,6 +1114,8 @@ export function computeSPLGrid({
   pressure_kPa = 101.325,
   furniture = null,            // v=679 — placed FurnitureLAB items for direct-path blocking
   furnitureCatalogue = null,
+  racks = null,                // v=700 — placed DeviceLAB racks for direct-path blocking
+  rackCatalogue = null,
 }) {
   const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
 
@@ -1200,7 +1227,7 @@ export function computeSPLGrid({
           })
         : ctxInside);
 
-  const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn, furniture, furnitureCatalogue };
+  const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn, furniture, furnitureCatalogue, racks, rackCatalogue };
 
   // Phase 7 (Dr. Chen audit 2026-05-23): cells inside the PARENT footprint
   // but in the WALL-THICKNESS annulus (between outer + inner polygons) are

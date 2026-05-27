@@ -146,6 +146,10 @@ function renderListenerSection() {
           racks: state.rackSystem?.racks ?? [],
           rackCatalogue: getRackCatalogue(),
         }) : 0,
+    furniture: state.furniture,
+    furnitureCatalogue: getFurnitureCatalogue(),
+    racks: state.rackSystem?.racks ?? [],
+    rackCatalogue: getRackCatalogue(),
   });
 
   const postureLabel = POSTURE_LABELS[lst.posture] ?? lst.posture;

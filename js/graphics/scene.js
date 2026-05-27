@@ -492,8 +492,16 @@ export async function mount3DViewport({ materials }) {
     frameCameraToRoom();
     queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_RACKS | REBUILD_TREATMENTS | REBUILD_FURNITURE);
   });
-  // Rack-builder edits — user added/removed an amp or moved a rack.
-  on('rack:changed', () => queueRebuild(REBUILD_RACKS));
+  // Rack-builder edits — user added/removed an amp or moved/rotated a
+  // rack. v=700: also rebuild the heatmap so direct-path attenuation
+  // by the rack (rack-direct-blocking.js) propagates to the 3D SPL
+  // grid; and invalidate ray-viz so the cached precision rays
+  // re-trace through the new rack BVH triangles. Without these the
+  // moved rack's shadow + reflected beams stayed stale.
+  on('rack:changed', () => {
+    invalidateRayViz();
+    queueRebuild(REBUILD_RACKS | REBUILD_HEATMAP);
+  });
   // Master EQ change: heatmap + aim lines depend on per-band SPL; refresh
   // both. Zone/listener panels don't need re-render (state.zones is
   // unchanged) so we skip them.
@@ -11218,6 +11226,10 @@ function rebuildHeatmap() {
     // viewport's heatmap call so 2D + 3D viewports agree.
     furniture: state.furniture,
     furnitureCatalogue: getFurnitureCatalogueMap(),
+    // v=700 — placed racks attenuate the direct field via the same
+    // segment-AABB barrier model on the rack's outer footprint.
+    racks: state.rackSystem?.racks ?? [],
+    rackCatalogue: _rackCatalogue,
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
   // Publish the grid for the 3D legend to read (with metric tag so the

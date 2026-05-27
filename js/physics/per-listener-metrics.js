@@ -70,6 +70,10 @@ export function computePerListenerMetrics(state, materials) {
           airAbsorption: phys.airAbsorption !== false,
           coherent: !!phys.coherent,
           roomConstantR,
+          furniture: state.furniture,
+          furnitureCatalogue: getFurnitureCatalogue(),
+          racks: state.rackSystem?.racks ?? [],
+          rackCatalogue: getRackCatalogue(),
         });
         if (Number.isFinite(v)) spl_db = v;
       } catch (err) {

@@ -1582,6 +1582,11 @@ function renderNormal(vp) {
       // segment-AABB barrier model in furniture-direct-blocking.js.
       furniture: state.furniture,
       furnitureCatalogue: getFurnitureCatalogue(),
+      // v=700 — DeviceLAB racks attenuate the direct field too via
+      // rack-direct-blocking.js (segment-AABB barrier-μ on the outer
+      // footprint). Same as furniture but rotated by rack.yaw_deg.
+      racks: state.rackSystem?.racks ?? [],
+      rackCatalogue: getRackCatalogue(),
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;

@@ -36,6 +36,7 @@ import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmap
 import { buildFloorPlanSVG } from './print-plan-svg.js';
 import { computePerListenerMetrics } from '../physics/per-listener-metrics.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
+import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 import { sumFurnitureAbsorption } from '../physics/furniture-absorption.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
 import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
@@ -119,6 +120,8 @@ export function buildPrintModel({ materials, nameHint } = {}) {
     // contribution to the bare-room absorption sometimes reads >100%.
     furniture: state.furniture,
     furnitureCatalogue: getFurnitureCatalogue(),
+    racks: state.rackSystem?.racks ?? [],
+    rackCatalogue: getRackCatalogue(),
   });
   const totalArea = rt60Bands[0]?.totalArea_m2 ?? 0;
   const volume = roomVolume(state.room);
@@ -324,6 +327,8 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
       // viewports.
       furniture: state.furniture,
       furnitureCatalogue: getFurnitureCatalogue(),
+      racks: state.rackSystem?.racks ?? [],
+      rackCatalogue: getRackCatalogue(),
     });
   } catch (err) {
     console.warn('[print-report] heatmap grid compute failed:', err);
