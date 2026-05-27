@@ -1170,6 +1170,14 @@ body.is-pdf-export .vp-tabs {
   #print-report .pr-acoustic-results .pr-chapter-opener {
     display: none;
   }
+  /* Furnishing schedule (v=671 — user request): drop the ghost "04"
+     numeral and the duplicate "Furnishing schedule" eyebrow that
+     repeat the running-header label. Only the H2 remains; reclaim the
+     18mm of padding the ghost numeral would have occupied. */
+  #print-report .pr-chapter-opener-furniture {
+    padding-top: 0;
+    margin-bottom: 4pt;
+  }
   /* Per-band consolidated table hidden (user request v=562) — its two
      load-bearing messages (Sabine/Eyring diffuse-field caveat; ray-traced
      T30 supersedes for sign-off) were folded into the Fig. 02.1 caption.

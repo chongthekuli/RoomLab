@@ -1896,9 +1896,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
 
     return `
       <div class="pr-page pr-page-furniture" data-running-title="Furnishing schedule">
-        <div class="pr-chapter-opener">
-          <span class="pr-chapter-number-ghost">04</span>
-          <span class="pr-eyebrow">Furnishing schedule</span>
+        <div class="pr-chapter-opener pr-chapter-opener-furniture">
           <h2>Room contents &mdash; placed furniture</h2>
         </div>
         <p class="pr-lead">${totalQty} placed object${totalQty === 1 ? '' : 's'} contributing ${total1k.toFixed(2)} m²&nbsp;Sa @ 1&nbsp;kHz (${totalPct} of total room absorption). Items tagged <em>reflective</em> bounce sound off their outer surfaces; items tagged <em>porous</em> absorb across the volume per Kuttruff §4.1. Both contribute identically to Sabine/Eyring via the parallel-A sum.</p>
