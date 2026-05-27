@@ -226,6 +226,53 @@ let _previewControls = null;
 let _previewRackGroup = null;
 let _previewRAF = 0;
 
+// Camera tween — drives the front/rear viewpoint swap when the user
+// clicks Open-front / Open-rear. Lerps camera.position + controls.target
+// over ~500 ms with smoothstep ease so the swing animation on the
+// chosen door is visible from the corresponding side.
+let _camTween = null;     // { p0, p1, t0, t1, dur, ts0 }
+const PREVIEW_CAM_VIEWS = {
+  // Rack-render coord frame: front face at -Z, rear at +Z.
+  front: { pos: [+0.9, +1.6, -2.4], target: [0, 1.0,  0] },
+  rear:  { pos: [-0.9, +1.6, +2.4], target: [0, 1.0,  0] },
+};
+function _setPreviewCameraView(viewKey, animate = true) {
+  if (!_previewCamera || !_previewControls) return;
+  const view = PREVIEW_CAM_VIEWS[viewKey];
+  if (!view) return;
+  if (!animate) {
+    _previewCamera.position.set(view.pos[0], view.pos[1], view.pos[2]);
+    _previewControls.target.set(view.target[0], view.target[1], view.target[2]);
+    _previewControls.update();
+    _camTween = null;
+    return;
+  }
+  _camTween = {
+    p0: _previewCamera.position.clone(),
+    p1: { x: view.pos[0], y: view.pos[1], z: view.pos[2] },
+    t0: _previewControls.target.clone(),
+    t1: { x: view.target[0], y: view.target[1], z: view.target[2] },
+    dur: 500,
+    ts0: performance.now(),
+  };
+}
+function _tickCameraTween() {
+  if (!_camTween) return;
+  const t = Math.min(1, (performance.now() - _camTween.ts0) / _camTween.dur);
+  const e = t * t * (3 - 2 * t);   // smoothstep
+  _previewCamera.position.set(
+    _camTween.p0.x + (_camTween.p1.x - _camTween.p0.x) * e,
+    _camTween.p0.y + (_camTween.p1.y - _camTween.p0.y) * e,
+    _camTween.p0.z + (_camTween.p1.z - _camTween.p0.z) * e,
+  );
+  _previewControls.target.set(
+    _camTween.t0.x + (_camTween.t1.x - _camTween.t0.x) * e,
+    _camTween.t0.y + (_camTween.t1.y - _camTween.t0.y) * e,
+    _camTween.t0.z + (_camTween.t1.z - _camTween.t0.z) * e,
+  );
+  if (t >= 1) _camTween = null;
+}
+
 function mountPreview() {
   console.info('[devicelab] mountPreview — build 2026-04-29a');
   const host = document.getElementById('rack-preview');
@@ -245,15 +292,14 @@ function mountPreview() {
   _previewScene = new THREE.Scene();
   _previewScene.background = new THREE.Color(0x222934);
   _previewCamera = new THREE.PerspectiveCamera(35, 1, 0.05, 30);
-  // Camera in FRONT of the rack with a slight 3/4 angle (v=692).
-  // Rack-render coord frame: front face normal at -Z; the amp labels,
-  // mesh-glass door, mounting ears + cage-nut screws all sit on the
-  // -Z side after the v=691 amp-panel flip. Camera at (0.9, 1.6, -2.4)
-  // → target (0, 1.0, 0) gives a near-head-on view of the front with
-  // a gentle 3/4 tilt so the user sees the door + the labels + the
-  // mounting flanges in one frame on first load. OrbitControls still
-  // lets them spin around.
-  _previewCamera.position.set(0.9, 1.6, -2.4);
+  // Initial camera position pulled from PREVIEW_CAM_VIEWS.front so the
+  // Open-front / Open-rear tween (v=693) shares one set of view
+  // presets with the default-load view.
+  _previewCamera.position.set(
+    PREVIEW_CAM_VIEWS.front.pos[0],
+    PREVIEW_CAM_VIEWS.front.pos[1],
+    PREVIEW_CAM_VIEWS.front.pos[2],
+  );
 
   // IBL — RoomEnvironment baked once into a PMREM texture. Without
   // this, MeshStandardMaterials with metalness > 0.5 (our brushed
@@ -296,7 +342,11 @@ function mountPreview() {
   _previewControls.dampingFactor = 0.08;
   _previewControls.minDistance = 0.5;
   _previewControls.maxDistance = 6;
-  _previewControls.target.set(0, 1.0, 0);
+  _previewControls.target.set(
+    PREVIEW_CAM_VIEWS.front.target[0],
+    PREVIEW_CAM_VIEWS.front.target[1],
+    PREVIEW_CAM_VIEWS.front.target[2],
+  );
 
   resizePreview();
   window.addEventListener('resize', resizePreview);
@@ -305,10 +355,13 @@ function mountPreview() {
     new ResizeObserver(resizePreview).observe(host);
   }
 
-  // Animation loop — only ticks while the tab is visible to save cycles
+  // Animation loop — only ticks while the tab is visible to save cycles.
+  // Also drives the camera-tween used by Open-front / Open-rear so the
+  // user is repositioned to face whichever door they're opening.
   const tick = () => {
     _previewRAF = requestAnimationFrame(tick);
     if (!host.offsetParent) return; // hidden tab
+    _tickCameraTween();
     _previewControls?.update();
     _previewRenderer?.render(_previewScene, _previewCamera);
   };
@@ -548,6 +601,11 @@ function renderRackMid() {
       doorBtnEl.textContent = _currentRack.doorOpen ? 'Close front' : 'Open front';
       doorBtnEl.onclick = () => {
         _currentRack.doorOpen = !_currentRack.doorOpen;
+        // Tween camera to the FRONT view whenever the user touches the
+        // front door — they want to SEE the swing happen, not have to
+        // orbit the camera manually first. Tween fires whether opening
+        // or closing so the affected side is on-screen either way.
+        _setPreviewCameraView('front', true);
         persistCurrentRack();
         renderRackMid();
       };
@@ -561,6 +619,9 @@ function renderRackMid() {
       rearBtnEl.textContent = _currentRack.rearDoorOpen ? 'Close rear' : 'Open rear';
       rearBtnEl.onclick = () => {
         _currentRack.rearDoorOpen = !_currentRack.rearDoorOpen;
+        // Same idea — opening the rear door swings on the +Z side, so
+        // we put the camera over there too.
+        _setPreviewCameraView('rear', true);
         persistCurrentRack();
         renderRackMid();
       };
