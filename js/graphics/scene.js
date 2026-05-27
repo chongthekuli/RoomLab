@@ -4100,6 +4100,31 @@ function _tickWallOpacity(dt) {
   // Exponential smoothing toward target. Frame-rate independent.
   const k = 1 - Math.exp(-Math.max(0.001, dt) / _WALL_OPACITY_LERP_TAU);
   _wallOpacityT += (_wallOpacityTarget - _wallOpacityT) * k;
+
+  // Heatmap renderOrder flip (v=685, Option N). The original
+  // "wall covers heatmap at grazing angles from inside" bug was a
+  // transparent-sort order issue: when camera-mesh distance puts walls
+  // AFTER heatmap in back-to-front sort, walls draw last and alpha-
+  // blend over heatmap (heatmap has depthWrite=false so the wall
+  // doesn't see "closer Z already there"). Forcing renderOrder=10 on
+  // the heatmap fixes inside view (walls always draw first, heatmap
+  // depth-tests against wall depth and wins where geometrically
+  // closer — i.e. the wall-base pixels the user complained about) but
+  // breaks the outside X-ray view (the wall is geometrically between
+  // camera and heatmap, so heatmap depth-fails against wall depth and
+  // disappears). The previous attempts (v=685–v=688 chain, rolled
+  // back) tried to bridge this with depthWrite / transparent-flag
+  // gymnastics and accumulated edge cases.
+  //
+  // Single-axis fix: bind renderOrder to the inside/outside signal
+  // _wallOpacityT we already lerp. Inside (>0.5) → 10 so heatmap draws
+  // last over walls; outside (≤0.5) → 0 (default) so the natural
+  // back-to-front sort puts heatmap behind walls and X-ray alpha-blend
+  // works. The 0.3 m hysteresis from the inside-test already prevents
+  // boundary flicker; the 150 ms lerp threshold 0.5 means the flip
+  // happens once mid-transition, not per frame.
+  if (heatmapMesh) heatmapMesh.renderOrder = _wallOpacityT > 0.5 ? 10 : 0;
+
   // Skip the per-mesh write when we've fully settled at the current
   // value — saves the traversal on every static frame.
   if (Math.abs(_wallOpacityTarget - _wallOpacityT) < 0.001 && _wallOpacityWritten === _wallOpacityT) return;
