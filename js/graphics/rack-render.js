@@ -38,12 +38,18 @@ const TOP_CAP_MAT = new THREE.MeshStandardMaterial({ color: COL_STEEL, metalness
 // (perfPct, dotPx, tilePx). depthWrite:false on both door layers so the
 // glass does not punch a hole in the depth buffer that hides the heatmap
 // or selection rings behind the rack.
+// Glass tint — bumped from 0.18 → 0.35 opacity (v=689) so the user can
+// visually distinguish a CLOSED door from no-door-at-all. The 0.18 read
+// as basically invisible at preview-distance, which was the second half
+// of "I clicked open/close and nothing changes" — there's no contrast
+// between "door there" and "door gone" if the door itself doesn't reflect
+// or refract any light. 0.35 still lets the amps read through clearly.
 const GLASS_TINT_MAT = new THREE.MeshStandardMaterial({
   color: 0x9ab7c4,
   metalness: 0.05,
   roughness: 0.20,
   transparent: true,
-  opacity: 0.18,
+  opacity: 0.35,
   depthWrite: false,
   side: THREE.DoubleSide,
 });
@@ -715,9 +721,15 @@ function addEnclosedShell(group, rack, rackDef, geom) {
     // from x=0 (hinge) to x=+doorOpenW (free edge), and z=0 (door plane).
     doorGroup.position.set(hingeX, shellYc, frontZ + doorThk / 2 + 0.002);
 
-    // Apply open/closed rotation. -100° = swing outward toward viewer (-Z).
+    // Apply open/closed rotation. Hinge on LEFT post; door extends to
+    // free edge at +X. For Three.js right-handed Y-rotation, the free
+    // edge swings toward -Z (out of the rack body, toward viewer) only
+    // for POSITIVE rotation around +Y. v=687 used -100°, which swung
+    // the door INTO the rack body (overlapping the amps + side panels)
+    // so the user perceived zero change — the door was opening
+    // backwards into already-dark interior. v=689 fixes the sign.
     const isOpen = !!rack.doorOpen;
-    doorGroup.rotation.y = isOpen ? -(100 * Math.PI / 180) : 0;
+    doorGroup.rotation.y = isOpen ? +(100 * Math.PI / 180) : 0;
     doorGroup.userData.doorOpen = isOpen;
 
     // --- Glass tint plane (back layer; inside the perforation overlay) ---
