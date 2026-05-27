@@ -851,6 +851,27 @@ function currentFieldGeom(fb) {
   return { scale, pxW, pxD, x0, y0, bounds: fb };
 }
 
+// Icon / label scale factor for the 2D viewport (v=680).
+// All icon and label sizes in the renderers below were originally tuned
+// for an INDOOR fit (~50 px/m). When outdoor mode is enabled the viewBox
+// fits a 50–1000 m field square into the same 800×500 SVG, so
+// geom.scale drops to ~1–13 px/m and the speaker triangles / listener
+// dots / FRONT-BACK labels become hugely oversized relative to the
+// visible room — they overlap, cover the heatmap, and crowd each other.
+//
+// Two clamps (Maya recommendation):
+//   • icons (triangles, dots, footprint label offsets) floor at 0.40
+//   • text font-sizes floor at 0.50 (5 px reads as noise below that)
+// Both ceiling at 1.0 so very small rooms don't get oversized icons.
+function vp2dIconScale(geom) {
+  const REF_PX_PER_M = 50;   // typical indoor fit
+  return Math.max(0.40, Math.min(1.0, geom.scale / REF_PX_PER_M));
+}
+function vp2dLabelScale(geom) {
+  const REF_PX_PER_M = 50;
+  return Math.max(0.50, Math.min(1.0, geom.scale / REF_PX_PER_M));
+}
+
 // --- Mount ---
 export function mount2DViewport({ materials }) {
   materialsRef = materials;
@@ -1564,7 +1585,13 @@ function renderNormal(vp) {
     state.results.splGrid = null;
   }
 
-  const roomOutline = renderRoomOutline(state.room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces);
+  // Outdoor mode shrinks geom.scale ~10× — icons/labels need to shrink
+  // proportionally or the room becomes unusable (overlap, cramped click
+  // targets). Indoor view → both scales ≈ 1.0 → no visible change.
+  const iconScale  = vp2dIconScale(geom);
+  const labelScale = vp2dLabelScale(geom);
+
+  const roomOutline = renderRoomOutline(state.room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces, labelScale);
   // Indoor: clip the heatmap to the room polygon (the field stops at the
   // walls). Outdoor: the field extends PAST the walls, so we do NOT clip it —
   // instead we apply a radial alpha feather at the field's OUTER edge (the 2D
@@ -1584,7 +1611,7 @@ function renderNormal(vp) {
   const selectedSrcIdx = (typeof state.selectedSourceIdx === 'number') ? state.selectedSourceIdx : -1;
   const draggingSrcIdx = (pickableDrag?.kind === 'source' && pickableDrag?.didMove) ? pickableDrag.sourceIdx : -1;
   const speakerSvg = state.sources.length > 0
-    ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, state.room, selectedSrcIdx, draggingSrcIdx)
+    ? renderSpeakersSVG(state.sources, x0, y0, pxW, pxD, state.room, selectedSrcIdx, draggingSrcIdx, iconScale)
     : '';
   const draggingListenerId = (pickableDrag?.kind === 'listener' && pickableDrag?.didMove) ? pickableDrag.listenerId : null;
   // Per-listener SPL / STI labels — SPL is the same 1-kHz total the
@@ -1594,13 +1621,13 @@ function renderNormal(vp) {
   const listenerMetrics = state.listeners.length > 0
     ? computePerListenerMetrics(state, materialsRef)
     : [];
-  const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room, draggingListenerId, listenerMetrics) : '';
+  const listenerSvg = state.listeners.length > 0 ? renderListenersSVG(state.listeners, state.selectedListenerId, x0, y0, pxW, pxD, state.room, draggingListenerId, listenerMetrics, iconScale) : '';
   const draggingTreatId = (pickableDrag?.kind === 'treatment' && pickableDrag?.didMove) ? pickableDrag.treatmentId : null;
   const treatmentSvg = (state.treatments && state.treatments.length > 0)
-    ? renderTreatmentsSVG(state.treatments, state.selectedTreatmentId, draggingTreatId, x0, y0, pxW, pxD, state.room)
+    ? renderTreatmentsSVG(state.treatments, state.selectedTreatmentId, draggingTreatId, x0, y0, pxW, pxD, state.room, labelScale)
     : '';
   const furnitureSvg = (state.furniture && state.furniture.length > 0)
-    ? renderFurnitureSVG(state.furniture, state.selectedFurnitureId, x0, y0, pxW, pxD, state.room)
+    ? renderFurnitureSVG(state.furniture, state.selectedFurnitureId, x0, y0, pxW, pxD, state.room, labelScale)
     : '';
 
   // Room-corner vertex handles. Skipped for 'round' rooms (no
@@ -2027,7 +2054,7 @@ function r2dHatchFor(kind) {
 // keep its existing layering: floorFill goes under the heatmap clip,
 // walls + labels paint on top.
 // --------------------------------------------------------------------
-function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
+function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces, labelScale = 1.0) {
   const shape = room.shape ?? 'rectangular';
   const inset = wallInsetPolygon(room);
   const outer = inset.outer || [];
@@ -2111,7 +2138,9 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
         // state-frame becomes CW on screen — negate the angle so the
         // label still tracks the wall direction visually.
         const rot = -anchor.rotation_deg;
-        labels += `<text x="${lsx.toFixed(1)}" y="${lsy.toFixed(1)}" transform="rotate(${rot.toFixed(2)} ${lsx.toFixed(1)} ${lsy.toFixed(1)})" text-anchor="middle" class="vp-lbl vp-lbl-wall vp-lbl-wall-mat">${escapeText2D(labelTxt)}</text>`;
+        // Per-wall material label scales with labelScale (8 px base × labelScale).
+        const wallMatPx = (8 * labelScale).toFixed(1);
+        labels += `<text x="${lsx.toFixed(1)}" y="${lsy.toFixed(1)}" transform="rotate(${rot.toFixed(2)} ${lsx.toFixed(1)} ${lsy.toFixed(1)})" text-anchor="middle" class="vp-lbl vp-lbl-wall vp-lbl-wall-mat" style="font-size:${wallMatPx}px">${escapeText2D(labelTxt)}</text>`;
       }
     }
   }
@@ -2120,29 +2149,38 @@ function renderRoomOutline(room, x0, y0, pxW, pxD, alphaOf, nameOf, surfaces) {
   // pre-Commit-4 layout (Maya v9 audit §2 retained). The wall material
   // name lives on the wall itself now (see labels above), so the
   // direction tags stay as orientation cues for the contractor.
+  // Font + offset both scale with labelScale so outdoor mode doesn't
+  // crowd the (now small) room with full-size cardinal tags.
+  const cardFontPx = (9 * labelScale).toFixed(1);
+  const cardOffsetTop    = 14 * labelScale;
+  const cardOffsetBottom = 22 * labelScale;
+  const cardOffsetSide   = 14 * labelScale;
   if (shape === 'rectangular') {
     const yTop = y0 - pxD, yBottom = y0;
     labels += `
-      <text x="${x0 + pxW/2}" y="${yTop - 14}" text-anchor="middle" class="vp-lbl vp-lbl-wall">FRONT</text>
-      <text x="${x0 + pxW/2}" y="${yBottom + 22}" text-anchor="middle" class="vp-lbl vp-lbl-wall">BACK</text>
-      <text x="${x0 + pxW + 14}" y="${(yTop + pxD/2) + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall">RIGHT</text>
-      <text x="${x0 - 14}" y="${(yTop + pxD/2) + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall">LEFT</text>
+      <text x="${x0 + pxW/2}" y="${(yTop - cardOffsetTop).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall" style="font-size:${cardFontPx}px">FRONT</text>
+      <text x="${x0 + pxW/2}" y="${(yBottom + cardOffsetBottom).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall" style="font-size:${cardFontPx}px">BACK</text>
+      <text x="${(x0 + pxW + cardOffsetSide).toFixed(1)}" y="${(yTop + pxD/2) + 4}" text-anchor="start" class="vp-lbl vp-lbl-wall" style="font-size:${cardFontPx}px">RIGHT</text>
+      <text x="${(x0 - cardOffsetSide).toFixed(1)}" y="${(yTop + pxD/2) + 4}" text-anchor="end" class="vp-lbl vp-lbl-wall" style="font-size:${cardFontPx}px">LEFT</text>
     `;
   } else if (shape === 'custom') {
     // Per-edge numeric tag — keeps the previous edge-handle UX legible
     // when the user is selecting a custom edge from the room panel.
+    // Font scales but the circle radius stays at 8 SVG units so it's
+    // still a clickable handle in outdoor view.
+    const edgeFontPx = (10 * labelScale).toFixed(1);
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
       const a = projOuter[i], b = projOuter[j];
       const midX = (a.sx + b.sx) / 2, midY = (a.sy + b.sy) / 2;
       labels += `<circle cx="${midX.toFixed(1)}" cy="${midY.toFixed(1)}" r="8" fill="#0e1116" stroke="#888" stroke-width="1" />`;
-      labels += `<text x="${midX.toFixed(1)}" y="${(midY + 3).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-edge">${i + 1}</text>`;
+      labels += `<text x="${midX.toFixed(1)}" y="${(midY + 3).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-edge" style="font-size:${edgeFontPx}px">${i + 1}</text>`;
     }
   } else if (n >= 3) {
     // Polygon / round — single WALLS tag at the top of the outline.
     const centerX = projOuter.reduce((s, p) => s + p.sx, 0) / n;
     const topY = Math.min(...projOuter.map(p => p.sy));
-    labels += `<text x="${centerX.toFixed(1)}" y="${(topY - 14).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall">WALLS</text>`;
+    labels += `<text x="${centerX.toFixed(1)}" y="${(topY - cardOffsetTop).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-wall" style="font-size:${cardFontPx}px">WALLS</text>`;
   }
 
   return { floorFill, walls, labels };
@@ -2215,7 +2253,7 @@ function renderHeatmapSVG(splResult, x0, y0, pxW, pxD, room) {
 // Selection + drag highlight:
 //   .r2d-source-selected — cyan ring around the group's source icon
 //   .r2d-source-dragging — 2x scale + yellow fill (transform appended)
-function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room, selectedIdx, draggingIdx) {
+function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room, selectedIdx, draggingIdx, iconScale = 1.0) {
   let s = '';
   // Iterate state.sources DIRECTLY (not the expanded list) so we know
   // each rendered element's parent source-idx for click/drag wiring.
@@ -2227,10 +2265,10 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room, selectedIdx, draggin
     if (src && src.kind === 'line-array') {
       const elements = expandLineArrayToElements(src);
       elements.forEach((el, k) => {
-        s += renderOneSpeakerSymbol(el, i, k, x0, y0, pxW, pxD, room, isSelected, isDragging, `LA${i + 1}-${k + 1}`);
+        s += renderOneSpeakerSymbol(el, i, k, x0, y0, pxW, pxD, room, isSelected, isDragging, `LA${i + 1}-${k + 1}`, iconScale);
       });
     } else if (src && src.position) {
-      s += renderOneSpeakerSymbol(src, i, 0, x0, y0, pxW, pxD, room, isSelected, isDragging, `S${i + 1}`);
+      s += renderOneSpeakerSymbol(src, i, 0, x0, y0, pxW, pxD, room, isSelected, isDragging, `S${i + 1}`, iconScale);
     }
   });
   return s;
@@ -2241,7 +2279,7 @@ function renderSpeakersSVG(sources, x0, y0, pxW, pxD, room, selectedIdx, draggin
 // element with position + aim + groupId). `parentIdx` is the index in
 // state.sources used for click-select / drag. `elemIdx` distinguishes
 // line-array elements (0..N-1).
-function renderOneSpeakerSymbol(src, parentIdx, elemIdx, x0, y0, pxW, pxD, room, isSelected, isDragging, labelText) {
+function renderOneSpeakerSymbol(src, parentIdx, elemIdx, x0, y0, pxW, pxD, room, isSelected, isDragging, labelText, iconScale = 1.0) {
   const sx = x0 + (src.position.x / room.width_m) * pxW;
   const sy = y0 - (src.position.y / room.depth_m) * pxD;
   const outside = !isInsideRoom3D(src.position, room);
@@ -2263,7 +2301,12 @@ function renderOneSpeakerSymbol(src, parentIdx, elemIdx, x0, y0, pxW, pxD, room,
   const bl  = { x: -size * 0.5 * aimX - size * 0.6 * rightX, y: -size * 0.5 * aimY - size * 0.6 * rightY };
   const br  = { x: -size * 0.5 * aimX + size * 0.6 * rightX, y: -size * 0.5 * aimY + size * 0.6 * rightY };
 
-  const transform = `translate(${sx.toFixed(1)},${sy.toFixed(1)})${isDragging ? ' scale(2)' : ''}`;
+  // Apply iconScale to the group so the entire symbol (triangle, rings,
+  // dot, label) shrinks together in outdoor mode. Drag scale is RELATIVE
+  // and stacks on top so dragging still gives a visible bump even when
+  // iconScale is < 1.
+  const sclTok = iconScale !== 1.0 ? ` scale(${iconScale.toFixed(3)})` : '';
+  const transform = `translate(${sx.toFixed(1)},${sy.toFixed(1)})${sclTok}${isDragging ? ' scale(2)' : ''}`;
   const cls = ['r2d-source']
     .concat(isSelected ? ['r2d-source-selected'] : [])
     .concat(isDragging ? ['r2d-source-dragging'] : [])
@@ -2271,6 +2314,13 @@ function renderOneSpeakerSymbol(src, parentIdx, elemIdx, x0, y0, pxW, pxD, room,
 
   let s = `<g class="${cls}" data-source-idx="${parentIdx}" data-elem-idx="${elemIdx}" transform="${transform}">`;
 
+  // Invisible hit-target sized for the cursor, NOT for the visual icon.
+  // At small iconScale the visible triangle can be 5–6 SVG units across
+  // (Maekawa-thumbsized on a trackpad → rage-quit). Divide by iconScale
+  // so the hit shape stays at full size in screen coords regardless of
+  // how shrunk the visible glyph is.
+  const hitR = 14 / Math.max(0.1, iconScale);
+  s += `<circle class="r2d-spk-hit" cx="0" cy="0" r="${hitR.toFixed(1)}" fill="transparent" stroke="none" />`;
   // Selection ring — soft cyan halo behind the icon. Sized so the
   // 2x-scaled dragging state stays visible and the selected state is
   // unambiguous against the heatmap.
@@ -3159,7 +3209,7 @@ function escapeMenuHtml(s) {
 // is the plan from above so a ceiling panel still has a recognisable
 // footprint). Both groups carry data-treatment-id so the click / drag
 // handlers can pick them up.
-function renderTreatmentsSVG(treatments, selectedId, draggingId, x0, y0, pxW, pxD, room) {
+function renderTreatmentsSVG(treatments, selectedId, draggingId, x0, y0, pxW, pxD, room, labelScale = 1.0) {
   if (!Array.isArray(treatments) || treatments.length === 0) return '';
   const stateToSvgX = (x) => x0 + (x / room.width_m) * pxW;
   const stateToSvgY = (y) => y0 - (y / room.depth_m) * pxD;
@@ -3172,6 +3222,10 @@ function renderTreatmentsSVG(treatments, selectedId, draggingId, x0, y0, pxW, px
   // INTO the room. Use the average scale for the short edge so a
   // skewed room aspect doesn't squash the panel visually.
   const px_per_m_avg = (px_per_m_x + px_per_m_y) / 2;
+  // Label-only scaling (footprints are real-world dimensions).
+  const lblFontPx = (10 * labelScale).toFixed(1);
+  const lblCeilOff = 12 * labelScale;
+  const lblWallOff = 4 * labelScale;
 
   let s = '';
   for (const t of treatments) {
@@ -3200,7 +3254,7 @@ function renderTreatmentsSVG(treatments, selectedId, draggingId, x0, y0, pxW, px
                     width="${wPx.toFixed(1)}" height="${hPx.toFixed(1)}"
                     fill="#7a89a0" fill-opacity="0.25" stroke="#a0afc0" stroke-width="1.2"
                     stroke-dasharray="3,2" />
-              ${isDrag ? '' : `<text x="0" y="${(hPx/2 + 12).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#a0afc0">${escapeXml(t.label || t.id)}</text>`}
+              ${isDrag ? '' : `<text x="0" y="${(hPx/2 + lblCeilOff).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#a0afc0" style="font-size:${lblFontPx}px">${escapeXml(t.label || t.id)}</text>`}
             </g>`;
       continue;
     }
@@ -3238,7 +3292,7 @@ function renderTreatmentsSVG(treatments, selectedId, draggingId, x0, y0, pxW, px
             <rect x="${(-wPx/2).toFixed(1)}" y="-${dPx.toFixed(1)}"
                   width="${wPx.toFixed(1)}" height="${dPx.toFixed(1)}"
                   fill="#7a89a0" fill-opacity="0.7" stroke="#cfd6df" stroke-width="1.2" />
-            ${isDrag ? '' : `<text x="0" y="-${(dPx + 4).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#cfd6df">${escapeXml(t.label || t.id)}</text>`}
+            ${isDrag ? '' : `<text x="0" y="-${(dPx + lblWallOff).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-zone-sub" fill="#cfd6df" style="font-size:${lblFontPx}px">${escapeXml(t.label || t.id)}</text>`}
           </g>`;
   }
   return s;
@@ -3257,13 +3311,19 @@ function escapeXml(s) {
 // is automatic. The catalogue resolves footprint dimensions; missing
 // rows render as a neutral grey box so a broken catalogueId doesn't
 // vanish silently.
-function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room) {
+function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room, labelScale = 1.0) {
   if (!Array.isArray(furniture) || furniture.length === 0) return '';
   const catalogue = getFurnitureCatalogue();
   const stateToSvgX = (x) => x0 + (x / room.width_m) * pxW;
   const stateToSvgY = (y) => y0 - (y / room.depth_m) * pxD;
   const px_per_m_x = pxW / Math.max(0.01, room.width_m);
   const px_per_m_y = pxD / Math.max(0.01, room.depth_m);
+  // Footprint is a real physical rectangle in metres → does NOT shrink
+  // with labelScale. Only the label text + its offset below the
+  // footprint scales, so a 0.30 m bookshelf stays 0.30 m wide on screen
+  // regardless of indoor vs outdoor view.
+  const lblFontPx = (10 * labelScale).toFixed(1);
+  const lblOffset = 11 * labelScale;
   // Carmen's confidence-overlay mode — when ON, the footprint fill /
   // stroke are sourced from reliability-colors.js (green/amber/red
   // per row.reliability) instead of the default accent CSS class.
@@ -3309,7 +3369,7 @@ function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room) {
                   x="${(-wPx/2).toFixed(1)}" y="${(-dPx/2).toFixed(1)}"
                   width="${wPx.toFixed(1)}" height="${dPx.toFixed(1)}"
                   ${rectStyle} />
-            <text class="r2d-furniture-label" x="0" y="${(dPx/2 + 11).toFixed(1)}" text-anchor="middle">${escapeXml(lblText)}</text>
+            <text class="r2d-furniture-label" x="0" y="${(dPx/2 + lblOffset).toFixed(1)}" text-anchor="middle" style="font-size:${lblFontPx}px">${escapeXml(lblText)}</text>
           </g>`;
   }
   return s;
@@ -3347,8 +3407,13 @@ function renderFurnitureConfidenceLegend(svgViewBoxW, svgViewBoxH) {
     </g>`;
 }
 
-function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId, metrics = []) {
+function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId, metrics = [], iconScale = 1.0) {
   let s = '';
+  // Per Maya UX gate: the SPL/STI metrics line below the dot becomes
+  // unreadable below ~0.65 (font shrinks to ≤ 6 px). Drop it from the
+  // viewport in outdoor mode — the same numbers are still in the
+  // listeners panel + report, so no data loss.
+  const showMetrics = iconScale >= 0.65;
   listeners.forEach((lst, idx) => {
     const sx = x0 + (lst.position.x / room.width_m) * pxW;
     const sy = y0 - (lst.position.y / room.depth_m) * pxD;
@@ -3358,24 +3423,27 @@ function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, dragg
     const fill = isSel ? '#ffd000' : '#4a8ff0';
     const stroke = isSel ? '#ffffff' : '#13161c';
     const strokeW = isSel ? 2.5 : 1.5;
-    const transform = `translate(${sx.toFixed(1)},${sy.toFixed(1)})${isDragging ? ' scale(2)' : ''}`;
+    const sclTok = iconScale !== 1.0 ? ` scale(${iconScale.toFixed(3)})` : '';
+    const transform = `translate(${sx.toFixed(1)},${sy.toFixed(1)})${sclTok}${isDragging ? ' scale(2)' : ''}`;
     const cls = ['r2d-listener']
       .concat(isSel       ? ['r2d-listener-selected'] : [])
       .concat(isDragging  ? ['r2d-listener-dragging'] : [])
       .join(' ');
     s += `<g class="${cls}" data-listener-id="${escapeMenuHtml(lst.id)}" transform="${transform}">`;
+    // Invisible hit-target — keeps full screen-coord click size even
+    // when the visible dot is shrunk to 3 SVG units in outdoor mode.
+    const hitR = 12 / Math.max(0.1, iconScale);
+    s += `<circle class="r2d-lst-hit" cx="0" cy="0" r="${hitR.toFixed(1)}" fill="transparent" stroke="none" />`;
     s += `<circle class="r2d-lst-dot" cx="0" cy="0" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" />`;
     if (!isDragging) {
       const lblMatch = String(lst.label).match(/\d+/);
       const short = lblMatch ? lblMatch[0] : String(lst.label).slice(0, 2);
       s += `<text x="0" y="3" text-anchor="middle" class="vp-lbl vp-lbl-listener">${escapeMenuHtml(short)}</text>`;
-      // SPL / STI line — placed below the dot so it never covers the
-      // short id inside it. Hidden during drag (the dot doubles in size
-      // and would push the text off-grid). Empty when neither metric is
-      // available so there's no orphan visual.
-      const txt = formatListenerMetricsLabel(metrics[idx] ?? {});
-      if (txt) {
-        s += `<text x="0" y="${(radius + 11).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-listener-metrics">${escapeMenuHtml(txt)}</text>`;
+      if (showMetrics) {
+        const txt = formatListenerMetricsLabel(metrics[idx] ?? {});
+        if (txt) {
+          s += `<text x="0" y="${(radius + 11).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-listener-metrics">${escapeMenuHtml(txt)}</text>`;
+        }
       }
     }
     s += `</g>`;
