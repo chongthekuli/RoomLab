@@ -2,6 +2,7 @@ import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, 
 import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
+import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 import { colorForReliability, reliabilityLegendRows } from '../labs/furniturelab/reliability-colors.js';
 import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
@@ -14,6 +15,7 @@ import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader, getRamp
 import { computePerListenerMetrics, formatListenerMetricsLabel } from '../physics/per-listener-metrics.js';
 import { wallInsetPolygon, wallLabelAnchor, WALL_LABEL_MAX_CHARS } from '../physics/wall-inset.js';
 import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
+import { renderRackFootprintSVG, lookupRackDef } from './rack-2d.js';
 
 let materialsRef;
 
@@ -1557,7 +1559,13 @@ function renderNormal(vp) {
       // horn bleeding into the prayer hall). Dr. Chen diagnosis 2026-05-22.
       materials: materialsRef || null,
       roomConstantR: phys.reverberantField && materialsRef
-        ? computeRoomConstant(state.room, materialsRef, freq, state.zones, { treatments: state.treatments }) : 0,
+        ? computeRoomConstant(state.room, materialsRef, freq, state.zones, {
+            treatments: state.treatments,
+            furniture: state.furniture,
+            furnitureCatalogue: getFurnitureCatalogue(),
+            racks: state.rackSystem?.racks ?? [],
+            rackCatalogue: getRackCatalogue(),
+          }) : 0,
       // OUTDOOR pass-through — must match the 3D call site (scene.js ~10605).
       // When outdoorOn is false these revert to computeSPLGrid's defaults
       // (outdoor:false, fieldBounds:null) → the indoor grid is byte-identical.
@@ -1629,6 +1637,13 @@ function renderNormal(vp) {
   const furnitureSvg = (state.furniture && state.furniture.length > 0)
     ? renderFurnitureSVG(state.furniture, state.selectedFurnitureId, x0, y0, pxW, pxD, state.room, labelScale)
     : '';
+  // PA equipment racks — closed-footprint top-down via the shared
+  // helper in rack-2d.js (also used by print-plan-svg.js, so the two
+  // surfaces cannot drift on origin / front-cue / hinge-cue). Door-open
+  // state is 3D-only — 2D always shows the closed rectangle.
+  const rackSvg = (Array.isArray(state.rackSystem?.racks) && state.rackSystem.racks.length > 0)
+    ? renderRacksSVG(state.rackSystem.racks, state.selectedRackId, x0, y0, pxW, pxD, state.room, labelScale)
+    : '';
 
   // Room-corner vertex handles. Skipped for 'round' rooms (no
   // corners) and when room dims are zero. Shown only after the user
@@ -1681,6 +1696,7 @@ function renderNormal(vp) {
         ${minaretSvg}
         ${treatmentSvg}
         ${furnitureSvg}
+        ${rackSvg}
         ${renderFurnitureConfidenceLegend(800, 500)}
         <g id="r2d-furniture-ghost-layer"></g>
         ${listenerSvg}
@@ -3311,6 +3327,48 @@ function escapeXml(s) {
 // is automatic. The catalogue resolves footprint dimensions; missing
 // rows render as a neutral grey box so a broken catalogueId doesn't
 // vanish silently.
+// Top-down rack footprints. Closed rectangle with a thicker FRONT-edge
+// stroke + a small hinge dot at the FRONT-LEFT corner — see
+// js/graphics/rack-2d.js header for the convention rationale and
+// 3D-coord-frame mapping. Same helper feeds the print plan SVG so the
+// two surfaces stay in lock-step (parity fixture:
+// tests/cross-surface-conventions.test.mjs).
+function renderRacksSVG(racks, selectedRackId, x0, y0, pxW, pxD, room, labelScale = 1.0) {
+  if (!Array.isArray(racks) || racks.length === 0) return '';
+  const catalogue = getRackCatalogue();
+  if (!catalogue) return '';   // graceful: no catalogue → no footprint (3D rebuild path warns)
+  const stateToSvgX = (x) => x0 + (x / room.width_m) * pxW;
+  const stateToSvgY = (y) => y0 - (y / room.depth_m) * pxD;
+  // Isotropic m→px factor. Use the smaller of the two so a non-square
+  // room doesn't squash the rack footprint into a parallelogram.
+  // Furniture uses the SAME approach (see renderFurnitureSVG).
+  const px_per_m_x = pxW / Math.max(0.01, room.width_m);
+  const px_per_m_y = pxD / Math.max(0.01, room.depth_m);
+  const mToPx = Math.min(px_per_m_x, px_per_m_y);
+  const labelFontPx = 10 * labelScale;
+
+  let s = '';
+  for (const r of racks) {
+    if (!r || !r.position) continue;
+    const def = lookupRackDef(catalogue, r.rackModelKey);
+    if (!def) continue;
+    const cxPx = stateToSvgX(r.position.x);
+    const cyPx = stateToSvgY(r.position.y);
+    const isSel = r.id && r.id === selectedRackId;
+    const label = r.label || def.label || r.rackModelKey || '';
+    s += renderRackFootprintSVG(r, def, {
+      cxPx, cyPx, mToPx,
+    }, {
+      selected: isSel,
+      label,
+      labelFontPx,
+      styleClass: 'r2d-rack' + (isSel ? ' selected' : ''),
+      dataAttrs: r.id ? `data-rack-id="${escapeXml(r.id)}"` : '',
+    });
+  }
+  return s;
+}
+
 function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room, labelScale = 1.0) {
   if (!Array.isArray(furniture) || furniture.length === 0) return '';
   const catalogue = getFurnitureCatalogue();

@@ -3,6 +3,7 @@ import { on } from './events.js';
 import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { computeListenerBreakdown, computeRoomConstant } from '../physics/spl-calculator.js';
+import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { applyGlossary } from './glossary.js';
@@ -138,7 +139,13 @@ function renderListenerSection() {
     materials: materialsRef,
     airAbsorption: phys.airAbsorption !== false,
     roomConstantR: phys.reverberantField && materialsRef
-      ? computeRoomConstant(state.room, materialsRef, freq, state.zones, { treatments: state.treatments }) : 0,
+      ? computeRoomConstant(state.room, materialsRef, freq, state.zones, {
+          treatments: state.treatments,
+          furniture: state.furniture,
+          furnitureCatalogue: getFurnitureCatalogue(),
+          racks: state.rackSystem?.racks ?? [],
+          rackCatalogue: getRackCatalogue(),
+        }) : 0,
   });
 
   const postureLabel = POSTURE_LABELS[lst.posture] ?? lst.posture;
@@ -200,6 +207,8 @@ function renderRT60() {
     treatments: state.treatments,
     furniture: state.furniture,
     furnitureCatalogue: getFurnitureCatalogue(),
+    racks: state.rackSystem?.racks ?? [],
+    rackCatalogue: getRackCatalogue(),
   });
   const f500 = bands.find(b => b.frequency_hz === 500);
   const f1k  = bands.find(b => b.frequency_hz === 1000);

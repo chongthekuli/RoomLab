@@ -10,6 +10,7 @@ import { mountHeaderNav } from './shared/header-nav.js';
 import { startRouter } from './shared/router.js';
 import { mountTermsModal } from './ui/welcome-card.js';
 import { loadFurnitureCatalogue } from './labs/furniturelab/catalog.js';
+import { loadRackCatalogue } from './labs/devicelab/catalog.js';
 
 mountHeaderNav();
 
@@ -19,6 +20,11 @@ mountHeaderNav();
 // rt60 helper returns 0 when the cache is empty, so a slow / failed
 // fetch quietly degrades rather than crashing the panel.
 loadFurnitureCatalogue().catch(err => console.warn('[main] FurnitureLAB pre-warm failed', err));
+// Same pattern for DeviceLAB rack catalogue — the rt60 / SPL paths
+// look up rack absorption via getRackCatalogue(); pre-warming here
+// means a user who never opens DeviceLAB still gets correct room
+// acoustics if a preset / saved scene ships with placed racks.
+loadRackCatalogue().catch(err => console.warn('[main] DeviceLAB rack pre-warm failed', err));
 
 // Mandatory terms-of-use acceptance — shown on EVERY page load.
 // Lin (docs-writer) drafted the copy, Sofia (designer) spec'd the

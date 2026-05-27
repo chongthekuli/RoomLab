@@ -658,10 +658,18 @@ function renderSystemOverview() {
     const def = _rackCatalogue?.racks?.[r.rackModelKey];
     const totalU = def?.u ?? 0;
     const usedU = (r.slots ?? []).reduce((a, s) => a + (s.uHeight ?? 1), 0);
+    // Door open/close button only meaningful on enclosed racks — the
+    // open-frame family has no door. Hide for legacy / open-frame rows.
+    const isEnclosed = (def?.style ?? 'open-frame') === 'enclosed';
+    const doorOpen = !!r.doorOpen;
+    const doorBtn = isEnclosed
+      ? `<button class="rack-door-toggle" data-rack-idx="${i}" title="Open or close the front door in 3D to inspect the rack interior">${doorOpen ? 'Close door' : 'Open door'}</button>`
+      : '';
     return `
       <div class="rack-system-item">
         <div><strong>${escapeHtml(r.label || `Rack ${i + 1}`)}</strong></div>
         <div class="pr-mute">${r.rackModelKey} · ${usedU} / ${totalU} U · ${(r.slots || []).length} amps</div>
+        ${doorBtn}
         <button class="rack-system-remove" data-rack-idx="${i}" title="Remove rack from room">remove</button>
       </div>
     `;
@@ -671,6 +679,20 @@ function renderSystemOverview() {
       const idx = parseInt(btn.dataset.rackIdx, 10);
       ensureRackSystem().racks.splice(idx, 1);
       renderSystemOverview();
+      emit('rack:changed');
+    });
+  });
+  root.querySelectorAll('.rack-door-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.rackIdx, 10);
+      const rack = ensureRackSystem().racks[idx];
+      if (!rack) return;
+      rack.doorOpen = !rack.doorOpen;
+      renderSystemOverview();
+      // rack:changed triggers rebuildRacks in scene.js; Viktor's
+      // addEnclosedShell reads rack.doorOpen at mesh-build time and
+      // applies the -100° hinge rotation. Snap-toggle for now; smooth
+      // lerp is a polish item once UAT confirms the basic flow.
       emit('rack:changed');
     });
   });

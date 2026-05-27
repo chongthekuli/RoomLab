@@ -2,6 +2,7 @@ import { roomSurfaces, roomEffectiveSurfaces, roomVolume } from './room-shape.js
 import { airSabins } from './air-absorption.js';
 import { getTreatmentAbsorption } from '../labs/surfacelab/catalog.js';
 import { sumFurnitureAbsorption } from './furniture-absorption.js';
+import { sumRackAbsorption } from './rack-absorption.js';
 
 const SABINE_CONSTANT = 0.161;
 
@@ -42,7 +43,7 @@ export function eyring({ volume_m3, totalArea_m2, surfaceMeanAbsorption, airAbsS
 // `airAbsorption` flag defaults to true. When a caller disables it here
 // it must also disable it in `computeRoomConstant` to keep the two
 // reverberant-field calculations consistent.
-export function computeRT60Band({ room, materials, bandIndex, zones = [], treatments = [], furniture = [], furnitureCatalogue = null, airAbsorption = true }) {
+export function computeRT60Band({ room, materials, bandIndex, zones = [], treatments = [], furniture = [], furnitureCatalogue = null, racks = [], rackCatalogue = null, airAbsorption = true }) {
   // Include zone + treatment absorption so stadium bowl carpet + court
   // wood + placed acoustic panels actually contribute. Without zones the
   // arena preset reports ~16 s RT60; without treatments the user can
@@ -80,7 +81,18 @@ export function computeRT60Band({ room, materials, bandIndex, zones = [], treatm
   // outside the log (Kuttruff §5.3, Beranek §7.3). When the caller has
   // no FurnitureLAB catalogue yet (Node tests, Lab not visited), the
   // helper returns 0 and rt60 reverts to the original surface+air model.
-  const objectAbsorption_sabins = sumFurnitureAbsorption(furniture, furnitureCatalogue, freq_hz);
+  const furnitureAbsorption_sabins = sumFurnitureAbsorption(furniture, furnitureCatalogue, freq_hz);
+  // DeviceLAB rack contribution (Dr. Chen slice 4, integrated slice 5).
+  // sumRackAbsorption accepts the rack catalogue and a per-band α
+  // lookup closure built from the same materials catalogue we already
+  // have in scope. Material-swap on the front face per Dr. Chen
+  // (perforated-panel-over-cavity Helmholtz behaviour empty vs lossy-
+  // chassis-front loaded — different absorber topologies, blended
+  // linearly by fillRatio). Sums into objectAbsorption alongside
+  // furniture so RT60 / Eyring / Hopkins-Stryker R all pick it up.
+  const rackMaterialAlphaAt = (id, _f) => materials.byId?.[id]?.absorption?.[bandIndex] ?? 0;
+  const rackAbsorption_sabins = sumRackAbsorption(racks, rackCatalogue, rackMaterialAlphaAt, freq_hz);
+  const objectAbsorption_sabins = furnitureAbsorption_sabins + rackAbsorption_sabins;
   const totalAbsorption_sabins = surfaceAbsorption_sabins + airAbsorption_sabins + objectAbsorption_sabins;
   // `meanAbsorption` stays surface-only — that's the α̅ a user expects to
   // see in UI (property of the walls, not a function of air or contents).
@@ -94,7 +106,9 @@ export function computeRT60Band({ room, materials, bandIndex, zones = [], treatm
     totalAbsorption_sabins,          // surface + 4mV + ΣA_obj — drives Sabine + R
     surfaceAbsorption_sabins,        // surface only
     airAbsorption_sabins,            // 4mV contribution
-    objectAbsorption_sabins,         // ΣA_obj from placed furniture
+    objectAbsorption_sabins,         // ΣA_obj: furniture + racks combined
+    furnitureAbsorption_sabins,      // ΣA_obj from FurnitureLAB placements only
+    rackAbsorption_sabins,           // ΣA_obj from DeviceLAB rack placements only
     meanAbsorption,                  // α̅ surfaces only (unchanged from before)
     sabine_s: sabine({ volume_m3, totalAbsorption_sabins }),
     eyring_s: eyring({
@@ -118,9 +132,9 @@ export function preferredRT60(band) {
   return band.sabine_s;
 }
 
-export function computeAllBands({ room, materials, zones = [], treatments = [], furniture = [], furnitureCatalogue = null, airAbsorption = true }) {
+export function computeAllBands({ room, materials, zones = [], treatments = [], furniture = [], furnitureCatalogue = null, racks = [], rackCatalogue = null, airAbsorption = true }) {
   return materials.frequency_bands_hz.map((frequency_hz, i) => ({
     frequency_hz,
-    ...computeRT60Band({ room, materials, bandIndex: i, zones, treatments, furniture, furnitureCatalogue, airAbsorption }),
+    ...computeRT60Band({ room, materials, bandIndex: i, zones, treatments, furniture, furnitureCatalogue, racks, rackCatalogue, airAbsorption }),
   }));
 }

@@ -1523,7 +1523,13 @@ function drawFrequencyResponse(canvas, sources, listenerPos) {
   // the 48 sample frequencies. Avoids walking the surface list 48 times.
   const Rbands = reverbOn
     ? [125, 250, 500, 1000, 2000, 4000, 8000].map(f => ({
-        f, R: computeRoomConstant(state.room, materialsRef, f, state.zones, { treatments: state.treatments }),
+        f, R: computeRoomConstant(state.room, materialsRef, f, state.zones, {
+          treatments: state.treatments,
+          furniture: state.furniture,
+          furnitureCatalogue: getFurnitureCatalogueMap(),
+          racks: state.rackSystem?.racks ?? [],
+          rackCatalogue: _rackCatalogue,
+        }),
       }))
     : null;
 
@@ -7789,7 +7795,13 @@ function currentPhysicsOpts(room) {
     // the legacy flat 30 dB whenever a path crossed a boundary.
     materials: materialsRef || null,
     roomConstantR: phys.reverberantField && materialsRef
-      ? computeRoomConstant(room, materialsRef, freq, state.zones, { treatments: state.treatments })
+      ? computeRoomConstant(room, materialsRef, freq, state.zones, {
+          treatments: state.treatments,
+          furniture: state.furniture,
+          furnitureCatalogue: getFurnitureCatalogueMap(),
+          racks: state.rackSystem?.racks ?? [],
+          rackCatalogue: _rackCatalogue,
+        })
       : 0,
     // Per-band room constant — drives the Tier 1a Kuttruff wall
     // re-radiation term. ~7× the cost of the single-band R at frame
@@ -7798,7 +7810,13 @@ function currentPhysicsOpts(room) {
     // returns zero downstream.
     roomR_per_band: phys.reverberantField && materialsRef
       ? materialsRef.frequency_bands_hz.map(fhz =>
-          computeRoomConstant(room, materialsRef, fhz, state.zones, { treatments: state.treatments }))
+          computeRoomConstant(room, materialsRef, fhz, state.zones, {
+            treatments: state.treatments,
+            furniture: state.furniture,
+            furnitureCatalogue: getFurnitureCatalogueMap(),
+            racks: state.rackSystem?.racks ?? [],
+            rackCatalogue: _rackCatalogue,
+          }))
       : null,
     // Excludes outdoor sources (e.g. surau arcade speakers on the
     // podium) from the interior reverberant aggregate used by the

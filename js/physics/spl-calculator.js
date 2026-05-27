@@ -138,7 +138,7 @@ export function speedOfSound(T_C = DEFAULT_TEMPERATURE_C) {
 //
 // `airAbsorption` defaults to `true` and must only be set false by a
 // deliberate caller (physics-toggle UI) that also disabled 4mV in RT60.
-export function computeRoomConstant(room, materials, freq_hz, zones = [], { airAbsorption = true, treatments = [] } = {}) {
+export function computeRoomConstant(room, materials, freq_hz, zones = [], { airAbsorption = true, treatments = [], furniture = [], furnitureCatalogue = null, racks = [], rackCatalogue = null } = {}) {
   if (!materials?.frequency_bands_hz) return 0;
   // Phase A2: was indexOf-exact-match; now snaps to nearest band. In
   // practice the UI emits exact band centres from the picker, so this is
@@ -146,7 +146,7 @@ export function computeRoomConstant(room, materials, freq_hz, zones = [], { airA
   // centres now resolve to the nearest band instead of silently
   // returning 0 (no reverb at all).
   const bandIdx = bandIndexForFreq(materials, freq_hz);
-  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, treatments, airAbsorption });
+  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, treatments, furniture, furnitureCatalogue, racks, rackCatalogue, airAbsorption });
   const S = rt.totalArea_m2;
   if (S <= 0) return 0;
   // rt.totalAbsorption_sabins already includes 4mV when airAbsorption is

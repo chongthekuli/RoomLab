@@ -1,18 +1,25 @@
 // Rack-builder 3D rendering. Pure-ish: takes (rack record + catalogues +
 // THREE namespace) and returns a THREE.Group ready to add to a scene.
 //
-// Open-frame, 4-post, NO doors / sides. Outlook spec by Sofia Calderón
-// (RACK_OUTLOOK_DESIGN.md): two materials only — brushed steel +
-// matte-black powder coat. The amps visibly bolt to a 19" front rail
-// with cage-nut holes (Sofia's "must not cut"), the frame is closed at
-// the top and bottom so it stops reading as scaffolding, and the
-// castors carry visible mounting brackets instead of bare cylinders.
+// TWO FAMILIES:
+//   • Open-frame, 4-post, NO doors / sides — Sofia Calderón's original
+//     spec (RACK_OUTLOOK_DESIGN.md): two materials only, brushed steel
+//     + matte-black powder coat. Amps visibly bolt to a 19" front rail
+//     with cage-nut holes, frame closed at top/bottom, castor brackets.
+//   • Enclosed (StarTech RK4236BKB family) — adds steel side panels,
+//     perforated-steel rear door, mesh-glass front door with a real
+//     openable hinge. Front door is alpha-tested perforation over a
+//     tinted glass plane so the user can see the amps inside.
+//
+// Selected by rackDef.style ∈ {"open-frame","enclosed"}. Missing /
+// undefined defaults to "open-frame" for backward compatibility with
+// pre-schema-2.0 saved scenes.
 //
 // 1 U = 44.45 mm. Outer width 600 mm. Coordinate frame:
 //   Group origin = base centre of rack (on the floor).
 //   +X = rack width (right when looking at the front)
 //   +Y = up
-//   +Z = depth (rear-pointing). Front face normal is +Z.
+//   +Z = depth (rear-pointing). Front face is at -Z; +Z is the rear.
 import * as THREE from 'three';
 
 const U_HEIGHT_M       = 0.04445;   // 1U = 44.45 mm
@@ -25,6 +32,133 @@ const COL_BLACK  = 0x15161a;
 const STEEL_MAT  = new THREE.MeshStandardMaterial({ color: COL_STEEL, metalness: 0.78, roughness: 0.42 });
 const BLACK_MAT  = new THREE.MeshStandardMaterial({ color: COL_BLACK, metalness: 0.10, roughness: 0.78 });
 const TOP_CAP_MAT = new THREE.MeshStandardMaterial({ color: COL_STEEL, metalness: 0.55, roughness: 0.60 });
+
+// ---- Enclosed-rack materials (slice 2) ----------------------------------
+// One shared glass tint and a family of perforation-mask textures keyed by
+// (perfPct, dotPx, tilePx). depthWrite:false on both door layers so the
+// glass does not punch a hole in the depth buffer that hides the heatmap
+// or selection rings behind the rack.
+const GLASS_TINT_MAT = new THREE.MeshStandardMaterial({
+  color: 0x9ab7c4,
+  metalness: 0.05,
+  roughness: 0.20,
+  transparent: true,
+  opacity: 0.18,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+
+// Module-level cache: avoid rebuilding the perforation canvas every frame.
+const _perfTextureCache = new Map();   // key → THREE.CanvasTexture
+const _perfMaterialCache = new Map();  // key → THREE.MeshStandardMaterial (mesh overlay)
+const _ventTextureCache = new Map();   // key → THREE.CanvasTexture (top vent slots)
+
+function getPerforationTexture(perfPct, opts = {}) {
+  // Tileable round-hole pattern at a given perforation_pct. Output is an
+  // alphaMap: WHITE = opaque hole pattern? No — for an alphaMap, WHITE = visible
+  // material, BLACK = transparent. We want the holes to be transparent (you
+  // see through the door) and the surrounding metal to be opaque. So:
+  // background WHITE (metal), holes BLACK (see-through).
+  const dotPx  = opts.dotPx  ?? 7;
+  const tilePx = opts.tilePx ?? 128;
+  const key = `perf:${perfPct}:${dotPx}:${tilePx}`;
+  if (_perfTextureCache.has(key)) return _perfTextureCache.get(key);
+
+  // Hex packing maximises hole density for a given dot diameter. Compute the
+  // pitch (centre-to-centre) needed to hit the requested area-fraction:
+  // hex unit cell area = pitch² · √3 / 2. One hole per unit cell, hole area
+  // = π · r². So pitch = r · √(2π / (perfPct · √3)).
+  const r = dotPx / 2;
+  const targetFrac = Math.max(0.05, Math.min(0.85, perfPct / 100));
+  const pitch = r * Math.sqrt((2 * Math.PI) / (targetFrac * Math.sqrt(3)));
+
+  const cv = document.createElement('canvas');
+  cv.width = tilePx; cv.height = tilePx;
+  const ctx = cv.getContext('2d');
+  // Metal = white = opaque on alphaMap
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, tilePx, tilePx);
+  // Holes = black = transparent on alphaMap. Hex offset every other row.
+  ctx.fillStyle = '#000000';
+  const rowH = pitch * Math.sqrt(3) / 2;
+  const cols = Math.ceil(tilePx / pitch) + 2;
+  const rows = Math.ceil(tilePx / rowH) + 2;
+  for (let row = -1; row < rows; row++) {
+    const offsetX = (row % 2 === 0) ? 0 : pitch / 2;
+    for (let col = -1; col < cols; col++) {
+      const cx = col * pitch + offsetX;
+      const cy = row * rowH;
+      // Draw the hole and its wraps (so the tile is genuinely tileable).
+      for (const dx of [0, -tilePx, tilePx]) {
+        for (const dy of [0, -tilePx, tilePx]) {
+          ctx.beginPath();
+          ctx.arc(cx + dx, cy + dy, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.NoColorSpace;  // alphaMap, not colour
+  tex.anisotropy = 4;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  _perfTextureCache.set(key, tex);
+  return tex;
+}
+
+function getPerforationMaterial(perfPct, colorHex = 0x111418, opts = {}) {
+  const key = `perfmat:${perfPct}:${colorHex.toString(16)}`;
+  if (_perfMaterialCache.has(key)) return _perfMaterialCache.get(key);
+  const mat = new THREE.MeshStandardMaterial({
+    color: colorHex,
+    metalness: 0.70,
+    roughness: 0.55,
+    transparent: true,
+    alphaMap: getPerforationTexture(perfPct, opts),
+    opacity: 1.0,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    alphaTest: 0.5,  // crisp hole edges — avoids translucent halo around perforations
+  });
+  _perfMaterialCache.set(key, mat);
+  return mat;
+}
+
+// Top-cap vent slots: rectangular louvers, ~40% open. Used as an alphaMap
+// on the top cap plane so we don't geometry-stamp 30+ slots.
+function getTopVentTexture(ventPct) {
+  const key = `vent:${ventPct}`;
+  if (_ventTextureCache.has(key)) return _ventTextureCache.get(key);
+  const W = 256, H = 64;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff';   // metal = opaque
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#000000';   // slot = transparent
+  // Centre-band of horizontal slots: open fraction ≈ ventPct/100 across the
+  // band. Band height = 60% of H; remaining 40% (top + bottom) is solid.
+  const bandY0 = H * 0.20;
+  const bandY1 = H * 0.80;
+  const bandH  = bandY1 - bandY0;
+  const slotCount = 8;
+  const slotH = (bandH * (ventPct / 100)) / slotCount;
+  const gap = (bandH - slotCount * slotH) / (slotCount + 1);
+  for (let i = 0; i < slotCount; i++) {
+    const yy = bandY0 + gap + i * (slotH + gap);
+    ctx.fillRect(W * 0.06, yy, W * 0.88, slotH);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.anisotropy = 4;
+  _ventTextureCache.set(key, tex);
+  return tex;
+}
 
 const _ampLabelCache = new Map();
 let _railTextureCache = null;
@@ -396,7 +530,232 @@ export function buildRackGroup(rack, ampCatalog, rackCatalog) {
     group.add(ampGroup);
   }
 
+  // ===== Enclosed-style add-ons (slice 2) ===========================
+  // Defensive: missing field → open-frame. New scenes carry style:"enclosed".
+  const style = rackDef.style ?? 'open-frame';
+  if (style === 'enclosed') {
+    addEnclosedShell(group, rack, rackDef, {
+      outerW, outerD, outerH, postW, frameTop, frameBot, castorH, postH, railZ,
+    });
+  }
+
   return group;
+}
+
+// ---- Enclosed shell: side panels + top vent + rear door + front door ----
+function addEnclosedShell(group, rack, rackDef, geom) {
+  const { outerW, outerD, outerH, postW, frameTop, frameBot, castorH, postH } = geom;
+
+  // Front face is at z = -outerD/2 + postW (outer face of the front post).
+  // Rear face is at z = +outerD/2 - postW (outer face of the rear post).
+  const frontZ = -outerD / 2 + postW;
+  const rearZ  = +outerD / 2 - postW;
+
+  // Vertical extent of the closed shell — sits between top-frame and the
+  // base plate, hugging the post inner faces.
+  const shellY0 = castorH + frameBot;
+  const shellY1 = castorH + postH - frameTop;
+  const shellH  = shellY1 - shellY0;
+  const shellYc = (shellY0 + shellY1) / 2;
+
+  // ---- Side panels (left + right) --------------------------------------
+  // Two thin solid panels flush with the outer face of the side posts.
+  // Inset 1 mm so the seam against the posts is visible. Span post-to-post
+  // along depth so the panel does not poke through the front/rear face.
+  if (rackDef.side_panels !== false) {
+    const sideThk = 0.003;           // 3 mm sheet
+    const sideD   = outerD - 2 * postW;   // sits between the two depth-direction posts
+    for (const sxSign of [-1, +1]) {
+      const sx = sxSign * (outerW / 2 - sideThk / 2 - 0.001);   // 1 mm inset from post outer face
+      const panel = new THREE.Mesh(
+        new THREE.BoxGeometry(sideThk, shellH, sideD),
+        BLACK_MAT,
+      );
+      panel.position.set(sx, shellYc, 0);
+      panel.userData.tag = 'rack-side-panel';
+      group.add(panel);
+    }
+  }
+
+  // ---- Top cap vent strip ---------------------------------------------
+  // The legacy builder already drew a solid steel cap plate at y = outerH - 3 mm.
+  // For enclosed cabinets the user expects a vent strip across the top.
+  // Overlay a perforation plane on top of the cap, ~2 mm proud, alpha-tested
+  // by the slot pattern. We don't remove the underlying cap — the alphaMap
+  // is the vent; the cap below it stays solid steel (acoustically tight).
+  // To make the vent VISIBLE, we drop a darker plane *inside* the rack at
+  // top-Y showing through the slots when looked at from above.
+  const ventPct = Math.max(0, Math.min(100, rackDef.vent_top_pct ?? 40));
+  if (ventPct > 0) {
+    const ventTex = getTopVentTexture(ventPct);
+    const ventMat = new THREE.MeshStandardMaterial({
+      color: 0x52555b,
+      metalness: 0.55, roughness: 0.55,
+      transparent: true, alphaMap: ventTex, alphaTest: 0.5,
+      depthWrite: true,
+      side: THREE.DoubleSide,
+    });
+    const ventW = outerW * 0.86;
+    const ventD = outerD * 0.30;
+    const ventPlane = new THREE.Mesh(new THREE.PlaneGeometry(ventW, ventD), ventMat);
+    ventPlane.rotation.x = -Math.PI / 2;
+    ventPlane.position.set(0, outerH + 0.001, 0);   // 1 mm above existing cap plate
+    ventPlane.userData.tag = 'rack-top-vent';
+    group.add(ventPlane);
+
+    // Dark inner cavity plane just below the cap so the vent slots read as
+    // openings (not as black lines on a steel plate).
+    const cavity = new THREE.Mesh(
+      new THREE.PlaneGeometry(ventW * 0.95, ventD * 0.95),
+      new THREE.MeshBasicMaterial({ color: 0x05060a, side: THREE.DoubleSide }),
+    );
+    cavity.rotation.x = -Math.PI / 2;
+    cavity.position.set(0, outerH - 0.010, 0);
+    group.add(cavity);
+  }
+
+  // ---- Rear door — perforated steel -----------------------------------
+  // Full-back panel covering the opening between the two rear posts.
+  // ~10 mm inset toward the rack interior (-Z from the post outer face)
+  // so the door reads as a recessed panel, not flush with the post.
+  const rearDoorDef = rackDef.rear_door ?? {};
+  if (rearDoorDef.type && rearDoorDef.type !== 'none') {
+    const rearPct = rearDoorDef.perforation_pct ?? 50;
+    const doorW = outerW - 2 * postW + 0.002;   // span between posts, slight overlap
+    const doorH = shellH;
+    // Repeat the perforation tile across the door surface — about 18 mm per tile
+    // → repeat counts scale with door dimensions.
+    const tilePerM = 1 / 0.018;
+    const rearMat = getPerforationMaterial(rearPct, 0x1a1c20).clone();
+    rearMat.alphaMap = getPerforationTexture(rearPct).clone();
+    rearMat.alphaMap.wrapS = THREE.RepeatWrapping;
+    rearMat.alphaMap.wrapT = THREE.RepeatWrapping;
+    rearMat.alphaMap.repeat.set(doorW * tilePerM, doorH * tilePerM);
+    rearMat.alphaMap.needsUpdate = true;
+    rearMat.alphaTest = 0.5;
+    rearMat.needsUpdate = true;
+    const rearDoor = new THREE.Mesh(
+      new THREE.PlaneGeometry(doorW, doorH),
+      rearMat,
+    );
+    rearDoor.rotation.y = Math.PI;  // face outward (-Z normal → +Z normal)
+    rearDoor.position.set(0, shellYc, rearZ - 0.010);
+    rearDoor.userData.tag = 'rack-rear-door';
+    group.add(rearDoor);
+  }
+
+  // ---- Front door — mesh-glass, HINGED --------------------------------
+  // Hinged child group; hinge axis runs vertically along the inner edge of
+  // the LEFT front post (state-frame x = -outerW/2 + postW). When
+  // rack.doorOpen is true, the group rotates -100° about its local Y axis
+  // (swings outward toward the viewer, i.e. toward -Z). When closed, 0°.
+  const frontDoorDef = rackDef.front_door ?? {};
+  if (frontDoorDef.type && frontDoorDef.type !== 'none') {
+    const hingeX = -outerW / 2 + postW;
+    const doorOpenW = outerW - 2 * postW;      // post-to-post in X
+    const doorOpenH = shellH;
+    const doorThk = 0.006;                      // door frame depth
+
+    const doorGroup = new THREE.Group();
+    doorGroup.userData.tag = 'rack-front-door-hinge';
+    doorGroup.userData.rackId = rack.id;
+    // Position the hinge at the left-inner-front corner of the opening.
+    // The door's local origin = hinge; geometry built so the door extends
+    // from x=0 (hinge) to x=+doorOpenW (free edge), and z=0 (door plane).
+    doorGroup.position.set(hingeX, shellYc, frontZ + doorThk / 2 + 0.002);
+
+    // Apply open/closed rotation. -100° = swing outward toward viewer (-Z).
+    const isOpen = !!rack.doorOpen;
+    doorGroup.rotation.y = isOpen ? -(100 * Math.PI / 180) : 0;
+    doorGroup.userData.doorOpen = isOpen;
+
+    // --- Glass tint plane (back layer; inside the perforation overlay) ---
+    // Centred on x=+doorOpenW/2 (door extends from hinge to free edge in +x).
+    const glass = new THREE.Mesh(
+      new THREE.PlaneGeometry(doorOpenW - 0.004, doorOpenH - 0.004),
+      GLASS_TINT_MAT,
+    );
+    glass.position.set(doorOpenW / 2, 0, -doorThk / 2 + 0.001);
+    glass.userData.tag = 'rack-front-door-glass';
+    glass.userData.no_walk_collide = true;
+    glass.renderOrder = 1;  // after opaque, before perforation overlay
+    doorGroup.add(glass);
+
+    // --- Mesh perforation overlay (front layer; toward viewer) ---
+    // CLONE the cached material + alphaMap so we can tile this door's
+    // perforation density independently of the rear door's.
+    const frontPct = frontDoorDef.perforation_pct ?? 63;
+    const meshMat = getPerforationMaterial(frontPct, 0x111418).clone();
+    meshMat.alphaMap = getPerforationTexture(frontPct).clone();
+    meshMat.alphaMap.wrapS = THREE.RepeatWrapping;
+    meshMat.alphaMap.wrapT = THREE.RepeatWrapping;
+    // ~16 mm per tile → fine mesh that reads as a screen up close and as
+    // a tinted surface at room scale.
+    const meshTilePerM = 1 / 0.016;
+    meshMat.alphaMap.repeat.set(doorOpenW * meshTilePerM, doorOpenH * meshTilePerM);
+    meshMat.alphaMap.needsUpdate = true;
+    meshMat.needsUpdate = true;
+    const meshPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(doorOpenW - 0.002, doorOpenH - 0.002),
+      meshMat,
+    );
+    meshPlane.position.set(doorOpenW / 2, 0, +doorThk / 2);
+    meshPlane.userData.tag = 'rack-front-door-mesh';
+    meshPlane.userData.no_walk_collide = true;
+    meshPlane.renderOrder = 2;
+    doorGroup.add(meshPlane);
+
+    // --- Door frame (thin black bezel around the glass) ------------------
+    // Four 8 mm bars. Gives the door a rigid silhouette in the closed state
+    // and a visible "swung-out rectangle" when open.
+    const bezelMat = BLACK_MAT;
+    const bezelW = 0.008;
+    const bars = [
+      // top
+      { w: doorOpenW, h: bezelW, x: doorOpenW / 2, y: +doorOpenH / 2 - bezelW / 2 },
+      // bottom
+      { w: doorOpenW, h: bezelW, x: doorOpenW / 2, y: -doorOpenH / 2 + bezelW / 2 },
+      // hinge side (left, x=0)
+      { w: bezelW, h: doorOpenH, x: bezelW / 2, y: 0 },
+      // free side (right)
+      { w: bezelW, h: doorOpenH, x: doorOpenW - bezelW / 2, y: 0 },
+    ];
+    for (const b of bars) {
+      const bar = new THREE.Mesh(
+        new THREE.BoxGeometry(b.w, b.h, doorThk),
+        bezelMat,
+      );
+      bar.position.set(b.x, b.y, 0);
+      bar.userData.no_walk_collide = true;
+      doorGroup.add(bar);
+    }
+
+    // --- Handle on the free (right) edge ---------------------------------
+    // Small vertical black bar, ~80 mm tall × 8 mm diameter, standing out
+    // about 18 mm proud of the mesh face. Positioned at mid-height, 50 mm
+    // in from the free edge so it doesn't clip the bezel.
+    const handle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.004, 0.004, 0.080, 14),
+      new THREE.MeshStandardMaterial({ color: 0x0c0d10, metalness: 0.55, roughness: 0.45 }),
+    );
+    handle.position.set(doorOpenW - 0.050, 0, doorThk / 2 + 0.018);
+    handle.userData.tag = 'rack-front-door-handle';
+    handle.userData.no_walk_collide = true;
+    doorGroup.add(handle);
+    // Two short standoffs that visually carry the handle (top + bottom).
+    for (const yy of [-0.045, +0.045]) {
+      const standoff = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.003, 0.003, 0.018, 10),
+        new THREE.MeshStandardMaterial({ color: 0x0c0d10, metalness: 0.55, roughness: 0.45 }),
+      );
+      standoff.rotation.x = Math.PI / 2;
+      standoff.position.set(doorOpenW - 0.050, yy, doorThk / 2 + 0.009);
+      standoff.userData.no_walk_collide = true;
+      doorGroup.add(standoff);
+    }
+
+    group.add(doorGroup);
+  }
 }
 
 export const RACK_RENDER_CONSTANTS = Object.freeze({

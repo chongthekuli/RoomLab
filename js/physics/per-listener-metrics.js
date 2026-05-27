@@ -15,6 +15,8 @@ import { earHeightFor, expandSources } from '../app-state.js';
 import { computeMultiSourceSPL, computeRoomConstant } from './spl-calculator.js';
 import { getCachedLoudspeaker } from './loudspeaker.js';
 import { deriveMetrics } from './precision/derive-metrics.js';
+import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
+import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 
 export function computePerListenerMetrics(state, materials) {
   const listeners = state.listeners ?? [];
@@ -24,7 +26,13 @@ export function computePerListenerMetrics(state, materials) {
   const freq = phys.freq_hz ?? 1000;
   const flatSources = expandSources(state.sources ?? []);
   const roomConstantR = (phys.reverberantField && materials)
-    ? computeRoomConstant(state.room, materials, freq, state.zones, { treatments: state.treatments })
+    ? computeRoomConstant(state.room, materials, freq, state.zones, {
+        treatments: state.treatments,
+        furniture: state.furniture,
+        furnitureCatalogue: getFurnitureCatalogue(),
+        racks: state.rackSystem?.racks ?? [],
+        rackCatalogue: getRackCatalogue(),
+      })
     : 0;
 
   // STI lookup — only populated when a precision render exists. Reuses

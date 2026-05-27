@@ -8,6 +8,7 @@
 
 import { mountRackPanel } from './panel-rack.js';
 import { mountRailSystem } from '../../ui/rail-system.js';
+import { loadRackCatalogue } from './catalog.js';
 
 let _mounted = false;
 
@@ -21,8 +22,12 @@ export async function mountDeviceLab() {
   if (_mounted) return;
   _mounted = true;
 
-  const [rackCatalogue, ampCatalog] = await Promise.all([
-    loadJSON('data/racks/catalogue.json').catch(err => {
+  // Use the shared catalog accessor so the rack catalogue is also
+  // available to the physics layer (rt60.js / spl-calculator.js) via
+  // getRackCatalogue() without re-fetching. Falls back to a direct
+  // fetch on the amp side until that gets its own loader.
+  const [rackBundle, ampCatalog] = await Promise.all([
+    loadRackCatalogue().catch(err => {
       console.warn('rack catalogue missing', err);
       return null;
     }),
@@ -31,6 +36,7 @@ export async function mountDeviceLab() {
       return null;
     }),
   ]);
+  const rackCatalogue = rackBundle?.json ?? null;
 
   mountRackPanel({ rackCatalogue, ampCatalog });
   // P4 — viewport-first rails for DeviceLAB. Auto-open removed in

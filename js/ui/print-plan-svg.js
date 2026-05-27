@@ -19,6 +19,8 @@
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
 import { wallInsetPolygon, wallLabelAnchor, WALL_LABEL_MAX_CHARS } from '../physics/wall-inset.js';
 import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
+import { renderRackFootprintSVG, lookupRackDef } from '../graphics/rack-2d.js';
+import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 
 // 1.5m margin gives the North arrow + scale bar enough room to live
 // fully inside the top-right and bottom-left margin bands without ever
@@ -314,6 +316,52 @@ export function buildFloorPlanSVG(state, opts = {}) {
     return circle + label + metricsTxt;
   }).join('');
 
+  // PA equipment racks — closed-footprint top-down via the shared
+  // helper (js/graphics/rack-2d.js). Same visual cues as the 2D
+  // viewport: thicker FRONT-edge stroke + hinge dot at front-LEFT
+  // corner. Parity guaranteed by tests/cross-surface-conventions.test.mjs.
+  // Print stroke is monochrome (the print report is BW-fabricator-friendly
+  // by contract — see WALL_HATCH_DEFS_PRINT note above).
+  // Caller may pass opts.rackCatalogue to inject the catalogue (Node
+  // tests do this); falls back to the live sync getter for the browser
+  // (catalogue is loaded before the print iframe renders).
+  const rackCatalogue = opts.rackCatalogue || getRackCatalogue();
+  const rackEl = (() => {
+    const racks = state.rackSystem?.racks;
+    if (!Array.isArray(racks) || racks.length === 0 || !rackCatalogue) return '';
+    // Use a single isotropic m→px factor of 1 — the print SVG viewBox
+    // is in METRES already (1 SVG unit = 1 m). So pixel-space helpers
+    // collapse to identity in this surface; the projection just shifts
+    // the centre into the viewBox via projectXY().
+    const mToPx = 1;
+    let s = '';
+    for (const r of racks) {
+      if (!r || !r.position) continue;
+      const def = lookupRackDef(rackCatalogue, r.rackModelKey);
+      if (!def) continue;
+      const p = projectXY(r.position.x, r.position.y, anchorY, offsetX);
+      const label = r.label || def.label || r.rackModelKey || '';
+      s += renderRackFootprintSVG(r, def, {
+        cxPx: p.sx, cyPx: p.sy, mToPx,
+      }, {
+        // Print is monochrome by contract — no selection halo, no
+        // colour-coded fill. Light grey body, black side stroke, thicker
+        // black front-line, black hinge dot. Same kind / family as walls.
+        fill: '#dadce0',
+        stroke: '#1c1c1c',
+        frontStroke: '#000000',
+        hingeFill: '#000000',
+        // lineScale = 1 — stroke widths in metres match the print SVG's
+        // metric viewBox (6 cm front-edge line, 1.5 cm side stroke).
+        lineScale: 1,
+        label,
+        labelFontPx: 0.32,        // metres — readable but small
+        labelFill: '#1a1a1a',
+      });
+    }
+    return s;
+  })();
+
   // Surau minaret — filled mid-grey square + crescent (or dome) glyph
   // at the outdoor corner specified by surauStructure.minaret.corner.
   // Mirrors the live 2D viewport rendering so the printed plan stays
@@ -383,7 +431,7 @@ export function buildFloorPlanSVG(state, opts = {}) {
   // the print pipeline rasterises them with the rest of the document
   // (a separate <svg defs> would be lost when the report node is
   // cloned into the print iframe).
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg"><defs>${WALL_HATCH_DEFS_PRINT}</defs>${roomEl}${zonesEl}${minaretEl}${sourcesEl}${listenersEl}${wallLabelsEl}${scaleBarEl}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg"><defs>${WALL_HATCH_DEFS_PRINT}</defs>${roomEl}${zonesEl}${minaretEl}${rackEl}${sourcesEl}${listenersEl}${wallLabelsEl}${scaleBarEl}</svg>`;
 }
 
 // Build a small legend block (paste-ready HTML) that names the symbol

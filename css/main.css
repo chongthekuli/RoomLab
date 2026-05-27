@@ -3421,6 +3421,18 @@ section h3 {
   font-family: inherit;
 }
 .rack-system-remove:hover { border-color: #d93a3a; color: #d93a3a; }
+.rack-door-toggle {
+  margin-top: 0.35rem;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0.18rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: inherit;
+}
+.rack-door-toggle:hover { border-color: var(--accent); color: var(--accent); }
 .rack-empty {
   font-size: 0.74rem;
   color: var(--muted);

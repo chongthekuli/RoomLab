@@ -1213,6 +1213,278 @@ function assertPhase11aLegendConvention() {
 
 assertPhase11aLegendConvention();
 
+// ---------------------------------------------------------------------------
+// DeviceLAB rack upgrade — slice 6 (Sam, 2026-05-27). Rack footprint
+// parity across 2D viewport + print plan SVG.
+//
+// Background. Slice 1 (Lin) added schema v2.0 with style:"enclosed"
+// front-door / rear-door / side-panels / vent fields. Slice 2 (Viktor)
+// built the enclosed 3D mesh with a left-hinged front door swinging
+// outward to the viewer's right. Slice 6 (this fixture + the new
+// js/graphics/rack-2d.js shared helper) lands the 2D + print plan
+// representation. Two surfaces, one helper, one parity fixture — the
+// cross-surface convention owner discipline (CLAUDE.md §3).
+//
+// What this guards:
+//   • Both surfaces import the shared renderRackFootprintSVG helper —
+//     no surface re-implements the footprint geometry locally.
+//   • Footprint dimensions = outer_w_mm × outer_d_mm (no door-swing arc
+//     inflating the rectangle).
+//   • FRONT-edge marker is on the local +y edge of the un-rotated rect
+//     (Viktor's local -Z, the front-door face).
+//   • HINGE dot is at the front-LEFT corner of the un-rotated rect
+//     (Viktor's left-hinged door, local x = -outerW/2 + postW).
+//   • Front-edge stroke is THICKER than the side stroke (the visual
+//     cue itself).
+//   • State-y agreement: a rack at state.y=+2 renders ABOVE a rack at
+//     state.y=-3 on the print SVG (same Y-flip every other entity uses).
+//   • State-x agreement: a rack at state.x=+1 renders to the RIGHT of a
+//     rack at state.x=-1 on the print SVG (same X-mirror invariant).
+// ---------------------------------------------------------------------------
+
+import { renderRackFootprintSVG, lookupRackDef, rackFootprintMetres, RACK_2D_CONSTANTS } from '../js/graphics/rack-2d.js';
+
+function assertRackFootprintParity() {
+  // (1) Helper file exists with the locked exports.
+  const rackHelperSrc = readFileSync('./js/graphics/rack-2d.js', 'utf8');
+  ok(/export\s+function\s+renderRackFootprintSVG\b/.test(rackHelperSrc),
+     'rack-2d: exports renderRackFootprintSVG');
+  ok(/export\s+function\s+lookupRackDef\b/.test(rackHelperSrc),
+     'rack-2d: exports lookupRackDef');
+  ok(/export\s+function\s+rackFootprintMetres\b/.test(rackHelperSrc),
+     'rack-2d: exports rackFootprintMetres');
+  ok(/export\s+const\s+RACK_2D_CONSTANTS\b/.test(rackHelperSrc),
+     'rack-2d: exports RACK_2D_CONSTANTS (locked convention constants)');
+  // Front-edge stroke must be visibly thicker than the side stroke —
+  // the multiplier IS the visual cue. ≥ 2× to read as a distinct line
+  // and not just a slightly bolder rectangle stroke.
+  ok(RACK_2D_CONSTANTS.FRONT_STROKE_MULT >= 2,
+     `rack-2d: FRONT_STROKE_MULT >= 2 (got ${RACK_2D_CONSTANTS.FRONT_STROKE_MULT})`);
+  // Hinge dot lives on the front-LEFT corner — these literal strings are
+  // the contract the room-2d / print-plan callers depend on; bumping
+  // them is a deliberate API break.
+  ok(RACK_2D_CONSTANTS.FRONT_EDGE_LOCAL_Y === '+halfD',
+     `rack-2d: FRONT_EDGE_LOCAL_Y === '+halfD' (got '${RACK_2D_CONSTANTS.FRONT_EDGE_LOCAL_Y}')`);
+  ok(RACK_2D_CONSTANTS.HINGE_CORNER_LOCAL === '(-halfW, +halfD)',
+     `rack-2d: HINGE_CORNER_LOCAL === '(-halfW, +halfD)' (got '${RACK_2D_CONSTANTS.HINGE_CORNER_LOCAL}')`);
+
+  // (2) Both 2D viewport + print plan SVG import the shared helper.
+  // Anti-leak grep: if a future surface inlines its own rack-rectangle
+  // render, this gate trips.
+  const room2dSrc = readFileSync('./js/graphics/room-2d.js', 'utf8');
+  // room-2d.js sits IN js/graphics/, so the import is the sibling
+  // './rack-2d.js'; print-plan-svg.js sits in js/ui/ so it imports
+  // '../graphics/rack-2d.js'. Accept either.
+  ok(/from\s+['"](?:\.\/|[^'"]*graphics\/)rack-2d(?:\.js)?['"]/.test(room2dSrc),
+     'rack-2d parity: room-2d.js imports from rack-2d.js');
+  ok(/renderRackFootprintSVG\s*\(/.test(room2dSrc),
+     'rack-2d parity: room-2d.js calls renderRackFootprintSVG');
+
+  const printPlanSrc = readFileSync('./js/ui/print-plan-svg.js', 'utf8');
+  ok(/from\s+['"](?:\.\/|[^'"]*graphics\/)rack-2d(?:\.js)?['"]/.test(printPlanSrc),
+     'rack-2d parity: print-plan-svg.js imports from rack-2d.js');
+  ok(/renderRackFootprintSVG\s*\(/.test(printPlanSrc),
+     'rack-2d parity: print-plan-svg.js calls renderRackFootprintSVG');
+
+  // (3) Anti-leak grep — raw "outer_w_mm / 1000" / "outer_d_mm / 1000"
+  // arithmetic OUTSIDE rack-2d.js / rack-render.js trips the gate. The
+  // helpers (rackFootprintMetres / rack-render constructor) are the
+  // canonical conversion sites; any other site doing the same mm→m
+  // arithmetic on rack dims means a renderer is computing dimensions
+  // independently — a fifth source of truth waiting to drift.
+  const RACK_LEAK_FILES = [
+    'js/graphics/room-2d.js',
+    'js/ui/print-plan-svg.js',
+  ];
+  for (const f of RACK_LEAK_FILES) {
+    let src = '';
+    try { src = readFileSync(f, 'utf8'); } catch { continue; }
+    const stripped = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+      .replace(/[ \t]+\/\/.*$/gm, '');
+    // Direct mm→m on a rack catalogue field is the leak pattern.
+    const leak = stripped.match(/outer_[wd]_mm\s*\/\s*1000/);
+    ok(leak === null,
+       `rack-2d anti-leak: ${f} has no raw outer_*_mm arithmetic`,
+       leak ? `found "${leak[0]}" — call rackFootprintMetres(rackDef) instead` : '');
+  }
+
+  // (4) Catalogue lookup contract — accepts both shapes (raw JSON +
+  // Map) the live code passes around.
+  const fakeDef = { outer_w_mm: 600, outer_d_mm: 800, label: 'Test 18U' };
+  const jsonCatalogue = { schema_version: '2.0', racks: { 'test-18u': fakeDef } };
+  const mapCatalogue = new Map([['test-18u', fakeDef]]);
+  ok(lookupRackDef(jsonCatalogue, 'test-18u') === fakeDef,
+     'rack-2d: lookupRackDef handles raw JSON catalogue ({racks: {key: def}})');
+  ok(lookupRackDef(mapCatalogue, 'test-18u') === fakeDef,
+     'rack-2d: lookupRackDef handles Map<key, def> catalogue');
+  ok(lookupRackDef(jsonCatalogue, 'nope') === null,
+     'rack-2d: lookupRackDef returns null on missing key');
+  ok(lookupRackDef(null, 'test-18u') === null,
+     'rack-2d: lookupRackDef returns null on null catalogue (graceful degrade)');
+
+  const dims = rackFootprintMetres(fakeDef);
+  ok(Math.abs(dims.w_m - 0.6) < 1e-9 && Math.abs(dims.d_m - 0.8) < 1e-9,
+     'rack-2d: rackFootprintMetres returns mm→m (600,800) → (0.6,0.8)');
+  // Fallback when fields missing — must still produce a non-zero
+  // footprint so the user sees SOMETHING and the bug is visible.
+  const fb = rackFootprintMetres({});
+  ok(fb.w_m > 0 && fb.d_m > 0,
+     `rack-2d: rackFootprintMetres falls back to non-zero when dims missing (got ${fb.w_m} × ${fb.d_m})`);
+
+  // (5) Geometric parity — drive renderRackFootprintSVG with a known
+  // (centre, mToPx) and parse the SVG output. This is the unambiguous
+  // closed-form test of the front-edge + hinge-corner convention.
+  const rack = { id: 'r1', rackModelKey: 'test-18u', yaw_deg: 0, position: { x: 1, y: 2, z: 0 } };
+  // Centre at (10, 20), 100 px / m → 60×80 px footprint, halfW=30, halfD=40.
+  const svgUnrot = renderRackFootprintSVG(rack, fakeDef, { cxPx: 10, cyPx: 20, mToPx: 100 });
+  ok(svgUnrot && svgUnrot.includes('<g'),
+     'rack-2d: renderRackFootprintSVG produces a <g> for a valid (rack, def)');
+
+  // Body rect: x=-30, y=-40, width=60, height=80.
+  const bodyRect = svgUnrot.match(/<rect x="(-?[\d.]+)" y="(-?[\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
+  ok(bodyRect &&
+       Math.abs(parseFloat(bodyRect[1]) - (-30)) < 1e-6 &&
+       Math.abs(parseFloat(bodyRect[2]) - (-40)) < 1e-6 &&
+       Math.abs(parseFloat(bodyRect[3]) - 60) < 1e-6 &&
+       Math.abs(parseFloat(bodyRect[4]) - 80) < 1e-6,
+     'rack-2d: body rect is centred at local (0,0) with extent ±halfW × ±halfD');
+
+  // Front line: y1 = y2 = +halfD = +40, x1 = -30, x2 = +30. AND the
+  // stroke-width on the front line is FRONT_STROKE_MULT × the side
+  // stroke (so the line is the visual cue, not just incidental).
+  const frontLine = svgUnrot.match(/<line x1="(-?[\d.]+)" y1="(-?[\d.]+)" x2="(-?[\d.]+)" y2="(-?[\d.]+)" stroke="[^"]+" stroke-width="([\d.]+)"/);
+  ok(frontLine,
+     'rack-2d: front-edge <line> emitted');
+  if (frontLine) {
+    const y1 = parseFloat(frontLine[2]);
+    const y2 = parseFloat(frontLine[4]);
+    const x1 = parseFloat(frontLine[1]);
+    const x2 = parseFloat(frontLine[3]);
+    const sw = parseFloat(frontLine[5]);
+    ok(Math.abs(y1 - 40) < 1e-6 && Math.abs(y2 - 40) < 1e-6,
+       `rack-2d: front-edge line sits at local y = +halfD = +40 (Viktor's local -Z = state -y → SVG +y under Y-flip); got y1=${y1}, y2=${y2}`);
+    ok(Math.abs(x1 - (-30)) < 1e-6 && Math.abs(x2 - 30) < 1e-6,
+       `rack-2d: front-edge line spans local x = -halfW..+halfW (got x1=${x1}, x2=${x2})`);
+    // Side stroke = 0.06 × lineScale (default 1) = 0.06; front stroke
+    // = 0.06 × FRONT_STROKE_MULT (2.4) = 0.144. Check sw > side stroke
+    // by ≥ the locked multiplier.
+    ok(sw > 0.06 * 2,
+       `rack-2d: front-edge stroke-width (${sw}) is ≥ 2× the side stroke (0.06) — visual cue intact`);
+  }
+
+  // Hinge dot: <circle cx="..." cy="..." r="..."> at (-halfW + inset,
+  // +halfD - inset). inset = min(w, d) * HINGE_INSET_FRAC. For 60×80
+  // px: min=60, inset=60*0.18=10.8 → cx = -30+10.8 = -19.2, cy =
+  // 40-10.8 = 29.2.
+  const dot = svgUnrot.match(/<circle cx="(-?[\d.]+)" cy="(-?[\d.]+)" r="([\d.]+)" fill="[^"]+" stroke="none"/);
+  ok(dot,
+     'rack-2d: hinge <circle> emitted (front-LEFT corner mark)');
+  if (dot) {
+    const cx = parseFloat(dot[1]);
+    const cy = parseFloat(dot[2]);
+    const r  = parseFloat(dot[3]);
+    ok(cx < 0,
+       `rack-2d: hinge dot is on the LEFT side of the rack (local x < 0; got ${cx}) — Viktor's left-hinged front door`);
+    ok(cy > 0,
+       `rack-2d: hinge dot is on the FRONT side of the rack (local y > 0; got ${cy}) — same edge as the front-line`);
+    ok(r > 0 && r < Math.min(60, 80) / 2,
+       `rack-2d: hinge dot radius is positive and smaller than half the footprint (got r=${r})`);
+  }
+
+  // (6) Closed-footprint discipline. The brief: "the rack footprint in
+  // 2D + print SVG is outer_w_mm × outer_d_mm (NOT including any
+  // door-swing arc)." Anti-leak: SVG output for a rack with doorOpen=true
+  // must NOT include any <path d="..."/> arc / pie geometry. Same rack,
+  // doorOpen toggle — output SHOULD be identical (closed footprint
+  // ignores doorOpen state per the brief).
+  const rackOpen = { ...rack, doorOpen: true };
+  const svgOpen = renderRackFootprintSVG(rackOpen, fakeDef, { cxPx: 10, cyPx: 20, mToPx: 100 });
+  ok(svgOpen === svgUnrot,
+     'rack-2d: doorOpen state ignored — 2D footprint is closed regardless (door swing is 3D-only)');
+  ok(!/<path\b/.test(svgUnrot),
+     'rack-2d: no <path> arc geometry — closed rectangle only (no door-swing arc visualization)');
+
+  // (7) Yaw rotation — yaw_deg flows into the SVG rotate() transform
+  // with the same numeric handedness as scene.js (g.rotation.y = yaw *
+  // π/180). Tests render at yaw=0 and yaw=90 and confirm the rotate
+  // angle in the transform attribute.
+  const tf0 = svgUnrot.match(/transform="translate\([^)]*\)\s+rotate\(([-\d.]+)\)"/);
+  ok(tf0 && Math.abs(parseFloat(tf0[1])) < 1e-6,
+     `rack-2d: yaw_deg=0 → rotate(0.00) (got ${tf0?.[1]})`);
+  const rackYaw90 = { ...rack, yaw_deg: 90 };
+  const svgYaw90 = renderRackFootprintSVG(rackYaw90, fakeDef, { cxPx: 10, cyPx: 20, mToPx: 100 });
+  const tf90 = svgYaw90.match(/transform="translate\([^)]*\)\s+rotate\(([-\d.]+)\)"/);
+  ok(tf90 && Math.abs(parseFloat(tf90[1]) - 90) < 1e-6,
+     `rack-2d: yaw_deg=90 → rotate(90.00) (got ${tf90?.[1]}) — matches scene.js handedness`);
+
+  // (8) End-to-end print SVG. Build a fixture with TWO racks at
+  // different state-y, drive buildFloorPlanSVG with an explicit
+  // catalogue, and parse the output for the two rack groups. Asserts:
+  //   • Y-axis: rack at state.y=+2 renders ABOVE rack at state.y=-3
+  //   • X-axis: rack at state.x=+1 renders to the RIGHT of rack at state.x=-1
+  //   • Both racks emit the front-line + hinge dot
+  buildFixtureState();
+  state.rackSystem = {
+    racks: [
+      { id: 'rA', rackModelKey: 'test-18u', position: { x: +1, y: +2, z: 0 }, yaw_deg: 0, label: 'A' },
+      { id: 'rB', rackModelKey: 'test-18u', position: { x: -1, y: -3, z: 0 }, yaw_deg: 0, label: 'B' },
+    ],
+  };
+  const svgFull = buildFloorPlanSVG(state, { rackCatalogue: jsonCatalogue });
+  // Both rack groups present (transforms with translate(... ...) +
+  // rotate(0.00)). Strict matching: there are exactly TWO rack groups
+  // in the output (matchers look for the rate-limited rack body rect
+  // shape with stroke-width 0.06 — the locked side stroke).
+  const rackGroups = svgFull.match(/<rect x="-0\.300" y="-0\.400" width="0\.600" height="0\.800" fill="#dadce0" stroke="#1c1c1c" stroke-width="0\.060"/g) || [];
+  ok(rackGroups.length === 2,
+     `rack-2d print-parity: 2 rack body rects rendered in print SVG (got ${rackGroups.length})`);
+  // Front-line + hinge dot present TWICE (once per rack).
+  const frontLines = svgFull.match(/<line x1="-0\.300" y1="0\.400" x2="0\.300" y2="0\.400" stroke="#000000"/g) || [];
+  ok(frontLines.length === 2,
+     `rack-2d print-parity: 2 front-edge lines rendered (got ${frontLines.length})`);
+  const hingeDots = svgFull.match(/<circle cx="-0\.192" cy="0\.292" r="0\.060" fill="#000000"/g) || [];
+  ok(hingeDots.length === 2,
+     `rack-2d print-parity: 2 hinge dots rendered (got ${hingeDots.length})`);
+
+  // Y-axis ordering. Parse each rack group's translate() to recover
+  // its SVG-space centre, then assert rack A (state.y=+2) is ABOVE
+  // rack B (state.y=-3) — "above" = smaller SVG y.
+  const tfList = [...svgFull.matchAll(/<g[^>]*transform="translate\(([-\d.]+)\s+([-\d.]+)\)\s+rotate\(0\.00\)"/g)]
+    .map(m => ({ x: parseFloat(m[1]), y: parseFloat(m[2]) }));
+  // Filter to the rack centres specifically — they're the ones that
+  // also contain the rack-rect body marker. The full SVG has other <g>
+  // groups (zones etc.) that don't share this rotate(0.00) signature
+  // alongside translate of these magnitudes, so we sort the matches
+  // and pick the two extremes by y.
+  ok(tfList.length >= 2,
+     `rack-2d print-parity: at least 2 rack <g> groups parsed (got ${tfList.length})`);
+  if (tfList.length >= 2) {
+    // Identify rack A (state.y=+2) and B (state.y=-3) by their SVG y.
+    // anchorY = MARGIN_M (1.5) + room.depth_m (8) = 9.5. So:
+    // rack A at state(1, 2) → SVG y = 9.5 - 2 = 7.5
+    // rack B at state(-1, -3) → SVG y = 9.5 - (-3) = 12.5
+    // Listener / source triangles also live in the SVG via translates;
+    // pick the racks by their KNOWN expected y values.
+    const yA = tfList.find(p => Math.abs(p.y - 7.5) < 0.01);
+    const yB = tfList.find(p => Math.abs(p.y - 12.5) < 0.01);
+    ok(yA && yB,
+       `rack-2d print-parity: rack A (y=+2) at SVG y≈7.5, rack B (y=-3) at SVG y≈12.5 (got A=${yA?.y}, B=${yB?.y})`);
+    if (yA && yB) {
+      ok(yA.y < yB.y,
+         `rack-2d Y-parity: rack at state.y=+2 renders ABOVE rack at state.y=-3 (SVG y smaller) — same Y-flip as listeners + sources`);
+      // X-axis: rack A at state.x=+1 → SVG x = offsetX + 1 = 1.5 + 1 =
+      // 2.5; rack B at state.x=-1 → SVG x = 1.5 + (-1) = 0.5. So
+      // xA > xB ("right of"). The same convention every entity uses.
+      ok(yA.x > yB.x,
+         `rack-2d X-parity: rack at state.x=+1 renders to the RIGHT of rack at state.x=-1 (SVG x larger)`);
+    }
+  }
+}
+
+assertRackFootprintParity();
+
 // Diagnostic dump — printed before exit so failures carry context.
 if (failed > 0) {
   console.log('\n--- Probe results (state-frame source (+1,+2), listener (-1,-3)) ---');
