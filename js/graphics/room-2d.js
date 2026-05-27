@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, duplicateFurniture, convertRoomToCustomPolygon } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, duplicateFurniture, duplicateRack, rotateRack, convertRoomToCustomPolygon } from '../app-state.js';
 import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
@@ -889,6 +889,7 @@ export function mount2DViewport({ materials }) {
   on('furniture:selected', render);
   on('furniture-confidence:changed', render);
   on('treatment:selected', render);
+  on('rack:changed', render);
   on('scene:reset', render);
   // OUTDOOR SIMULATION MODE (Phase 3b) — the UI panel mutates
   // state.outdoor.{enabled,field_size_m,temperature_C,humidity_pct} then emits
@@ -2649,6 +2650,12 @@ function findPickableFromEvent(e) {
     const id = furnEl.dataset.furnitureId;
     if (id) return { kind: 'furniture', el: furnEl, furnitureId: id };
   }
+  // DeviceLAB placed racks — same priority bucket as furniture.
+  const rackEl = target.closest('.r2d-rack');
+  if (rackEl) {
+    const id = rackEl.dataset.rackId;
+    if (id) return { kind: 'rack', el: rackEl, rackId: id };
+  }
   return null;
 }
 
@@ -2833,6 +2840,22 @@ function onPickablePointerDown(e) {
       startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
       pointerId: e.pointerId, didMove: false,
     };
+  } else if (pick.kind === 'rack') {
+    const r = state.rackSystem?.racks?.find(x => x.id === pick.rackId);
+    if (!r || !r.position) return;
+    if (state.selectedRackId !== pick.rackId) {
+      state.selectedRackId = pick.rackId;
+      emit('rack:changed');
+    }
+    startWorldX = r.position.x;
+    startWorldY = r.position.y;
+    pickableDrag = {
+      kind: 'rack',
+      rackId: pick.rackId,
+      startClientX: e.clientX, startClientY: e.clientY,
+      startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
+      pointerId: e.pointerId, didMove: false,
+    };
   } else { // 'vertex'
     // Resolve the vertex's CURRENT world position from whatever shape
     // the room is in right now. If/when the user actually drags, the
@@ -2892,6 +2915,7 @@ function onPickablePointerMove(e) {
                    : pickableDrag.kind === 'vertex'   ? 'room:changed'
                    : pickableDrag.kind === 'treatment' ? 'treatment:changed'
                    : pickableDrag.kind === 'furniture' ? 'furniture:changed'
+                   : pickableDrag.kind === 'rack'      ? 'rack:changed'
                    : 'source:changed';
     emit(firstEvt);
   }
@@ -2967,6 +2991,19 @@ function onPickablePointerMove(e) {
       f.position.x = nx;
       f.position.y = ny;
       emit('furniture:changed');
+    }
+  } else if (pickableDrag.kind === 'rack') {
+    // DeviceLAB racks — same free-drag pattern as furniture. Snap to
+    // the existing SOURCE_SNAP_M grid; clamped to room bounds by the
+    // shared clamp above. rack.position.z stays untouched (racks are
+    // floor-standing; vertical position is decorative — castors land
+    // them at z=0 in 3D regardless).
+    const r = state.rackSystem?.racks?.find(x => x.id === pickableDrag.rackId);
+    if (!r || !r.position) return;
+    if (r.position.x !== nx || r.position.y !== ny) {
+      r.position.x = nx;
+      r.position.y = ny;
+      emit('rack:changed');
     }
   } else if (pickableDrag.kind === 'treatment') {
     // Treatments are constrained to their anchored surface plane —
@@ -3094,6 +3131,12 @@ function onPickableContextMenu(e) {
       emit('furniture:selected', { id: pick.furnitureId });
     }
     openFurnitureContextMenu(e.clientX, e.clientY, pick.furnitureId);
+  } else if (pick.kind === 'rack') {
+    if (state.selectedRackId !== pick.rackId) {
+      state.selectedRackId = pick.rackId;
+      emit('rack:changed');
+    }
+    openRackContextMenu(e.clientX, e.clientY, pick.rackId);
   } else if (pick.kind === 'listener') {
     try { openPanel('left', 'listeners'); } catch (_) {}
     if (state.selectedListenerId !== pick.listenerId) {
@@ -3159,18 +3202,54 @@ function openFurnitureContextMenu(clientX, clientY, furnitureId) {
   });
 }
 
-// Shared menu builder — same chrome for sources and listeners. The
-// `onDuplicate` callback is the only behavioural difference.
-function openPickableMenu(clientX, clientY, label, onDuplicate) {
+function openRackContextMenu(clientX, clientY, rackId) {
+  closeSourceContextMenu();
+  const r = state.rackSystem?.racks?.find(x => x.id === rackId);
+  if (!r) return;
+  const cat = getRackCatalogue();
+  const def = cat?.racks?.[r.rackModelKey];
+  const label = r.label || def?.label || r.rackModelKey || 'Rack';
+  openPickableMenu(
+    clientX, clientY, label,
+    // Duplicate
+    () => {
+      const newId = duplicateRack(rackId);
+      closeSourceContextMenu();
+      if (newId) {
+        state.selectedRackId = newId;
+        emit('rack:changed');
+      }
+    },
+    // Rotate +45° clockwise (in state-frame; the rack-2d.js renderer +
+    // scene.js rebuildRacks both read rack.yaw_deg).
+    () => {
+      const next = rotateRack(rackId, 45);
+      closeSourceContextMenu();
+      if (next != null) emit('rack:changed');
+    },
+  );
+}
+
+// Shared menu builder — same chrome for sources / listeners / furniture /
+// racks. `onDuplicate` always shown; `onRotate` (optional) adds a "Rotate
+// 45°" item for racks + anything else that grows rotation support later.
+function openPickableMenu(clientX, clientY, label, onDuplicate, onRotate = null) {
   const menu = document.createElement('div');
   menu.className = 'r2d-ctx-menu';
   menu.setAttribute('role', 'menu');
+  const rotateRow = typeof onRotate === 'function'
+    ? `<button type="button" class="r2d-ctx-item" data-action="rotate" role="menuitem">
+         <span class="r2d-ctx-glyph">↻</span> Rotate 45°
+         <span class="r2d-ctx-hint">clockwise around centre</span>
+       </button>`
+    : '';
   menu.innerHTML = `
     <div class="r2d-ctx-header">${escapeMenuHtml(label)}</div>
     <button type="button" class="r2d-ctx-item" data-action="duplicate" role="menuitem">
       <span class="r2d-ctx-glyph">⎘</span> Duplicate
       <span class="r2d-ctx-hint">all settings, +0.5 m</span>
     </button>
+    ${rotateRow}
   `;
   // Position. Clamp into the viewport so menus near the right/bottom
   // edge don't open off-screen.
@@ -3182,6 +3261,9 @@ function openPickableMenu(clientX, clientY, label, onDuplicate) {
   menu.style.top  = `${Math.max(8, top)}px`;
 
   menu.querySelector('[data-action="duplicate"]').addEventListener('click', onDuplicate);
+  if (typeof onRotate === 'function') {
+    menu.querySelector('[data-action="rotate"]')?.addEventListener('click', onRotate);
+  }
 
   // Dismiss on outside click / Escape.
   const onWinDown = (ev) => {

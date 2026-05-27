@@ -3581,6 +3581,26 @@ section h3 {
   font-family: inherit;
 }
 .rack-system-remove:hover { border-color: #d93a3a; color: #d93a3a; }
+.rack-system-edit {
+  position: absolute;
+  top: 0.4rem;
+  right: 3.5rem;     /* sit to the LEFT of .rack-system-remove */
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-family: inherit;
+}
+.rack-system-edit:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 2D-viewport placed-rack interactivity (v=696). Same cursor + hover
+   pattern as r2d-furniture so drag-to-move + right-click read as
+   first-class affordances. */
+.r2d-rack { cursor: pointer; }
+.r2d-rack:hover { filter: brightness(1.18); }
 .rack-door-toggle {
   margin-top: 0.35rem;
   background: none;

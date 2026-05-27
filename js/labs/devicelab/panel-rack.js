@@ -729,11 +729,29 @@ function placeCurrentRack() {
   const targetEl = document.getElementById('rack-target-room');
   const target = targetEl?.value || '__current__';
   const rackCopy = JSON.parse(JSON.stringify(_currentRack));
+  // Default position = room centre (state.x, state.y) if the editor
+  // didn't carry one. This fires on a fresh Place (rack was just
+  // built in DeviceLAB) where the user never picked a 2D location
+  // before. Edit-in-place flow (below) preserves the existing
+  // position because the rack was loaded WITH it.
+  if (!rackCopy.position) {
+    const cx = (state.room?.width_m ?? 8) / 2;
+    const cy = (state.room?.depth_m ?? 8) / 2;
+    rackCopy.position = { x: cx, y: cy, z: 0 };
+  }
+  if (!Number.isFinite(rackCopy.yaw_deg)) rackCopy.yaw_deg = 0;
 
   if (target === '__current__') {
     // Live placement: into state.rackSystem so RoomLAB renders it
-    // immediately when the user flips back.
-    ensureRackSystem().racks.push(rackCopy);
+    // immediately when the user flips back. Edit-in-place semantics:
+    // when the rack already exists in the system (we loaded it from
+    // there via Edit), REPLACE that entry by id instead of pushing
+    // a new one. Without this, every "Place in room" would duplicate
+    // the rack the user thought they were just editing.
+    const racks = ensureRackSystem().racks;
+    const existingIdx = racks.findIndex(r => r?.id && r.id === rackCopy.id);
+    if (existingIdx >= 0) racks[existingIdx] = rackCopy;
+    else racks.push(rackCopy);
     emit('rack:changed');
   } else {
     // Saved-room placement: append to that entry's rackSystem in
@@ -805,6 +823,7 @@ function renderSystemOverview() {
         <div><strong>${escapeHtml(r.label || `Rack ${i + 1}`)}</strong></div>
         <div class="pr-mute">${r.rackModelKey} · ${usedU} / ${totalU} U · ${(r.slots || []).length} amps</div>
         ${doorBtns}
+        <button class="rack-system-edit" data-rack-idx="${i}" title="Load this placed rack back into the editor — change amps, rotate, then Place to update in place">edit</button>
         <button class="rack-system-remove" data-rack-idx="${i}" title="Remove rack from room">remove</button>
       </div>
     `;
@@ -827,6 +846,28 @@ function renderSystemOverview() {
       else                  rack.doorOpen     = !rack.doorOpen;
       renderSystemOverview();
       emit('rack:changed');
+    });
+  });
+  // "Edit" button — load a placed rack back into the editor (deep-clone
+  // so accidental edits don't leak into the placed copy until the user
+  // hits Place again). placeCurrentRack() will UPDATE the original by
+  // matching id rather than appending a new one.
+  root.querySelectorAll('.rack-system-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.rackIdx, 10);
+      const placed = ensureRackSystem().racks[idx];
+      if (!placed) return;
+      _currentRack = JSON.parse(JSON.stringify(placed));
+      // Strip ephemeral viewer state so the editor doesn't carry it
+      // back when re-placing. Door-open is an inspection toggle on
+      // the placed rack; the editor preview rebuilds with its own
+      // doorOpen state from scratch.
+      delete _currentRack.doorOpen;
+      delete _currentRack.rearDoorOpen;
+      persistCurrentRack();
+      renderRackMid();
+      renderAmpList(document.getElementById('rack-amp-search').value);
+      updatePreview();
     });
   });
 }

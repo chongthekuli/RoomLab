@@ -242,6 +242,80 @@ export function duplicateFurniture(id) {
   return copy.id;
 }
 
+// Duplicate a placed rack (state.rackSystem.racks[*]). Mirrors
+// duplicateFurniture's "+0.5 m offset, fall back to wall-adjacent
+// stepping" pattern so the copy lands somewhere legal even if the
+// original sits right at the room edge. Returns the new rack's id,
+// or null when the source rack can't be found.
+export function duplicateRack(id) {
+  if (!state.rackSystem || !Array.isArray(state.rackSystem.racks)) return null;
+  const racks = state.rackSystem.racks;
+  const idx = racks.findIndex(r => r && r.id === id);
+  if (idx < 0) return null;
+  const original = racks[idx];
+  const copy = JSON.parse(JSON.stringify(original));
+
+  // Fresh unique id — keep the "rack_<base36 timestamp>" shape that
+  // panel-rack.js startNewRack uses, but bump with a tiny suffix so
+  // two duplicates in the same millisecond don't collide.
+  const usedIds = new Set(racks.map(r => r?.id).filter(Boolean));
+  let nid;
+  let attempt = 0;
+  do {
+    nid = `rack_${Date.now().toString(36)}_${attempt.toString(36)}`;
+    attempt++;
+  } while (usedIds.has(nid));
+  copy.id = nid;
+  if (typeof copy.label === 'string' && copy.label.length > 0) {
+    copy.label = /\d+$/.test(copy.label)
+      ? copy.label.replace(/\d+$/, m => String(parseInt(m, 10) + 1))
+      : `${copy.label} copy`;
+  }
+
+  // Offset the duplicate +0.5 m on state.x. If that lands past the
+  // room edge, fall back to a -0.5 m step or a +0.5 m on state.y.
+  const STEP = 0.5;
+  const snap = v => Math.round(v / STEP) * STEP;
+  const w = Number.isFinite(state.room?.width_m) ? state.room.width_m : Infinity;
+  const d = Number.isFinite(state.room?.depth_m) ? state.room.depth_m : Infinity;
+  const margin = STEP;
+  const op = original.position ?? { x: w / 2, y: d / 2 };
+  const origX = snap(op.x ?? 0);
+  const origY = snap(op.y ?? 0);
+  let nx = origX + STEP;
+  let ny = origY;
+  if (nx > w - margin) {
+    nx = origX - STEP;
+    if (nx < margin) {
+      nx = origX;
+      ny = origY + STEP;
+      if (ny > d - margin) ny = origY - STEP;
+    }
+  }
+  copy.position = { x: nx, y: ny, z: op.z ?? 0 };
+  // doorOpen state should NOT round-trip — inspection-only flag.
+  delete copy.doorOpen;
+  delete copy.rearDoorOpen;
+
+  racks.push(copy);
+  return copy.id;
+}
+
+// Rotate a placed rack by `degrees` (additive, normalized to [0,360)).
+// rack.yaw_deg is the canonical rotation field (see rack-2d.js / scene.js
+// rebuildRacks which both read yaw_deg). Returns the new yaw_deg, or
+// null if the rack isn't found.
+export function rotateRack(id, degrees) {
+  if (!state.rackSystem || !Array.isArray(state.rackSystem.racks)) return null;
+  const r = state.rackSystem.racks.find(x => x && x.id === id);
+  if (!r) return null;
+  const current = Number.isFinite(r.yaw_deg) ? r.yaw_deg : 0;
+  let next = (current + (Number(degrees) || 0)) % 360;
+  if (next < 0) next += 360;
+  r.yaw_deg = next;
+  return next;
+}
+
 // Convert the current room into a free-form custom polygon and return
 // the vertex array. Idempotent: if shape is already 'custom' with a
 // valid vertex list, returns the existing list unchanged.
@@ -590,6 +664,10 @@ export const state = {
   // Currently-selected furniture id (parallel to selectedTreatmentId).
   // null = no item selected. Cleared by scene:reset and project load.
   selectedFurnitureId: null,
+  // Currently-selected placed rack id (parallel to selectedFurnitureId).
+  // Drives the 2D viewport's selection ring + the DeviceLAB editor's
+  // "edit placed rack" flow. Null when nothing is selected.
+  selectedRackId: null,
   results: {
     // Draft-engine outputs (current Sabine / Hopkins-Stryker / STIPA) —
     // re-used names for backward compat; the entire block is conceptually
