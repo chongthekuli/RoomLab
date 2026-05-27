@@ -19,6 +19,7 @@ import { wallInsetPolygon } from '../physics/wall-inset.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { furnitureBlocksCylinder } from '../physics/furniture-walk-collision.js';
+import { rackBlocksCylinder } from '../physics/rack-walk-collision.js';
 import { openPanel } from '../ui/rail-system.js';
 import { loadCharacterRig } from './character-loader.js';
 import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode, setAuditionMaterials } from '../audio/audition.js';
@@ -1951,7 +1952,10 @@ function initWalkthrough() {
     // raycast missed (table slab above ray, or furnitureGroup outside
     // roomGroup so the raycast never even saw it).
     getFurnitureBlocker: (sx, sy, yMin, yMax, radius) =>
-      furnitureBlocksCylinder(sx, sy, yMin, yMax, radius, state.furniture, getFurnitureCatalogueMap()),
+      furnitureBlocksCylinder(sx, sy, yMin, yMax, radius, state.furniture, getFurnitureCatalogueMap())
+      // v=699 — also block on placed racks. The avatar would otherwise
+      // walk through a placed enclosed rack as if it were vapour.
+      || rackBlocksCylinder(sx, sy, yMin, yMax, radius, state.rackSystem?.racks ?? [], _rackCatalogue),
     character: avatar,
   });
   tpController.onJump = () => {

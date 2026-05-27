@@ -22,6 +22,7 @@ import { expandSources } from '../app-state.js';
 import { getCachedCatalogue } from '../labs/surfacelab/catalog.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { getSubVolumes } from '../labs/furniturelab/sub-volumes.js';
+import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 
 export const PHYSICS_SCENE_VERSION = 1;
 
@@ -434,6 +435,33 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     return idx;
   }
 
+  // v=699 — DeviceLAB rack outer-shell material. Reused by every placed
+  // rack regardless of model (side panels, top, doors all approximate as
+  // one box with painted-steel α per Dr. Chen's slice-4 spec, material
+  // id `rack_metal_painted_panel`). A more detailed per-face split
+  // (mesh-glass front, perforated rear) is a P2 refinement — for now the
+  // tracer just needs the rack to STOP being invisible to rays.
+  let rackShellMatIdxCache = -1;
+  function registerRackShellMaterial() {
+    if (rackShellMatIdxCache >= 0) return rackShellMatIdxCache;
+    const absArr = new Float32Array(BANDS);
+    const scaArr = new Float32Array(BANDS);
+    for (let k = 0; k < BANDS; k++) {
+      absArr[k] = 0.05;       // Dr. Chen: painted-steel α flat across band
+      scaArr[k] = 0.10;       // Mostly specular at the rack's scale
+    }
+    const idx = materialsTable.length;
+    materialsTable.push(Object.freeze({
+      index: idx,
+      id: 'rack-shell:painted-steel',
+      name: 'Rack shell (painted steel)',
+      absorption: absArr,
+      scattering: scaArr,
+    }));
+    rackShellMatIdxCache = idx;
+    return idx;
+  }
+
   // Split state.furniture by mode and build TWO blocks: scene.furniture
   // (porous → Beer-Lambert sink) and scene.furnitureReflective (→
   // triangulated wall faces). A given placed item is in EXACTLY ONE
@@ -513,6 +541,49 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
           reflectiveCatalogueIds.push(f.catalogueId);
         }
       }
+    }
+  }
+
+  // v=699 — DeviceLAB rack bboxes piggy-back on the furnitureReflective
+  // block so the existing triangulateFurnitureReflective path picks
+  // them up automatically. Each placed rack adds ONE axis-aligned bbox
+  // covering the full outer footprint (no per-face split yet; that's a
+  // P2 refinement once Dr. Chen weighs in on per-face α distribution).
+  // catalogueId is recorded as `rack:<rackModelKey>` so debug tools
+  // can tell them apart from real furniture entries.
+  //
+  // Rotation (rack.yaw_deg) is intentionally IGNORED here for now —
+  // the tracer's bvh.js builds an axis-aligned BVH. Rotating each box
+  // would require either decomposing into eight rotated triangles or
+  // using a rotated-bbox BVH. The error from approximating a rotated
+  // rack as an AABB is bounded by 0.5 * (rackD - rackW) in the worst
+  // case (~5-20 cm for typical rack dimensions), well below the
+  // tracer's grid-cell resolution. Refine if a user complains.
+  const stateRacks = state.rackSystem?.racks ?? [];
+  const rackCatalogue = getRackCatalogue();
+  if (Array.isArray(stateRacks) && stateRacks.length > 0 && rackCatalogue?.racks) {
+    for (const rack of stateRacks) {
+      if (!rack?.position || typeof rack.rackModelKey !== 'string') continue;
+      const def = rackCatalogue.racks[rack.rackModelKey];
+      if (!def) continue;
+      const fcx = rack.position.x;
+      const fcy = rack.position.y;
+      const w_m = (Number(def.outer_w_mm) || 600) / 1000;
+      const d_m = (Number(def.outer_d_mm) || 600) / 1000;
+      const outerH_mm = Number(def.outer_h_mm) || 1000;
+      const halfW = w_m / 2;
+      const halfD = d_m / 2;
+      const minZ = 0;
+      const maxZ = outerH_mm / 1000;
+      const minX = fcx - halfW;
+      const maxX = fcx + halfW;
+      const minY = fcy - halfD;
+      const maxY = fcy + halfD;
+      const matIdx = registerRackShellMaterial();
+      reflectiveBboxes.push(minX, minY, minZ, maxX, maxY, maxZ);
+      reflectiveMaterialIdxList.push(matIdx);
+      reflectiveIds.push(`rack:${rack.id ?? rack.rackModelKey}`);
+      reflectiveCatalogueIds.push(`rack:${rack.rackModelKey}`);
     }
   }
 
