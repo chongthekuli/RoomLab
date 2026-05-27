@@ -259,6 +259,13 @@ let _previewRAF = 0;
 // over ~500 ms with smoothstep ease so the swing animation on the
 // chosen door is visible from the corresponding side.
 let _camTween = null;     // { p0, p1, t0, t1, dur, ts0 }
+// v=703: track the last view the camera was DELIBERATELY snapped to
+// (via _setPreviewCameraView, NOT via user orbiting). Subsequent calls
+// to the same view skip the tween entirely so amp-add doesn't restart
+// a redundant 500 ms animation on every click. User-initiated orbits
+// clear this flag (see _previewControls 'start' listener below) so the
+// next button press tweens back as expected.
+let _lastSnappedView = null;
 const PREVIEW_CAM_VIEWS = {
   // Rack-render coord frame: front face at -Z, rear at +Z.
   front: { pos: [+0.9, +1.6, -2.4], target: [0, 1.0,  0] },
@@ -268,45 +275,20 @@ function _setPreviewCameraView(viewKey, animate = true) {
   if (!_previewCamera || !_previewControls) return;
   const view = PREVIEW_CAM_VIEWS[viewKey];
   if (!view) return;
+  // v=703 — skip the tween if the camera was already deliberately
+  // snapped to this view (and the user hasn't orbited since). Without
+  // this, addAmpToRack re-fires _setPreviewCameraView('front', …)
+  // every click and the camera does a 500 ms wobble even when it's
+  // already facing the front. _lastSnappedView is cleared by the
+  // OrbitControls 'start' event when the user begins a manual orbit /
+  // pan / zoom, so the next button press still tweens back.
+  if (animate && _lastSnappedView === viewKey) return;
   if (!animate) {
     _previewCamera.position.set(view.pos[0], view.pos[1], view.pos[2]);
     _previewControls.target.set(view.target[0], view.target[1], view.target[2]);
     _previewControls.update();
     _camTween = null;
-    return;
-  }
-  // v=702 — if the camera is ALREADY pointing at the requested view
-  // (within a small angular tolerance), skip the tween. Without this
-  // every amp-add fires a 500 ms full reorientation even when the
-  // camera was already at the front view, which reads as "the view
-  // keeps spinning every time I do anything" (user UAT).
-  //
-  // The check is angular, not positional: the user has full orbit
-  // freedom around the target, so "same orbit angle, different
-  // distance / pitch" should still skip. Two checks together:
-  //   1. The viewing DIRECTION (camera → target) must point the
-  //      same hemisphere as the preset.
-  //   2. The camera-to-target vector's Z-sign must match (front view
-  //      lives at camera-Z<0, rear at +Z; flipping sides is the only
-  //      case that needs a real tween).
-  const curDir = {
-    x: _previewControls.target.x - _previewCamera.position.x,
-    y: _previewControls.target.y - _previewCamera.position.y,
-    z: _previewControls.target.z - _previewCamera.position.z,
-  };
-  const tgtDir = {
-    x: view.target[0] - view.pos[0],
-    y: view.target[1] - view.pos[1],
-    z: view.target[2] - view.pos[2],
-  };
-  const curLen = Math.hypot(curDir.x, curDir.y, curDir.z) || 1;
-  const tgtLen = Math.hypot(tgtDir.x, tgtDir.y, tgtDir.z) || 1;
-  const cosAngle = (curDir.x * tgtDir.x + curDir.y * tgtDir.y + curDir.z * tgtDir.z) / (curLen * tgtLen);
-  // cos(angle) ≥ 0.85  ≈  angle ≤ 32°. Comfortably allows the user to
-  // orbit ~30° around the front face without re-snapping; flipping to
-  // the rear or top falls below the threshold.
-  if (cosAngle >= 0.85) {
-    _camTween = null;
+    _lastSnappedView = viewKey;
     return;
   }
   _camTween = {
@@ -316,6 +298,7 @@ function _setPreviewCameraView(viewKey, animate = true) {
     t1: { x: view.target[0], y: view.target[1], z: view.target[2] },
     dur: 500,
     ts0: performance.now(),
+    viewKey,
   };
 }
 function _tickCameraTween() {
@@ -332,7 +315,10 @@ function _tickCameraTween() {
     _camTween.t0.y + (_camTween.t1.y - _camTween.t0.y) * e,
     _camTween.t0.z + (_camTween.t1.z - _camTween.t0.z) * e,
   );
-  if (t >= 1) _camTween = null;
+  if (t >= 1) {
+    _lastSnappedView = _camTween.viewKey ?? _lastSnappedView;
+    _camTween = null;
+  }
 }
 
 function mountPreview() {
@@ -409,6 +395,13 @@ function mountPreview() {
     PREVIEW_CAM_VIEWS.front.target[1],
     PREVIEW_CAM_VIEWS.front.target[2],
   );
+  // v=703 — mount-time camera position equals PREVIEW_CAM_VIEWS.front,
+  // so seed _lastSnappedView so the first amp-add doesn't fire a
+  // redundant tween. OrbitControls fires 'start' on the first manual
+  // orbit / pan / zoom; we clear the snap so the next button press
+  // tweens back as expected.
+  _lastSnappedView = 'front';
+  _previewControls.addEventListener('start', () => { _lastSnappedView = null; });
 
   resizePreview();
   window.addEventListener('resize', resizePreview);
