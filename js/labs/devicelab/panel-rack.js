@@ -244,7 +244,12 @@ function mountPreview() {
   _previewScene = new THREE.Scene();
   _previewScene.background = new THREE.Color(0x222934);
   _previewCamera = new THREE.PerspectiveCamera(35, 1, 0.05, 30);
-  _previewCamera.position.set(1.6, 1.2, 2.0);
+  // Camera in FRONT of the rack so the user is looking at the front
+  // door (rack-render.js coord frame: front face normal at -Z, rear at
+  // +Z). v=686 had this at +2.0 and viewer was staring at the rear
+  // perforated-steel door instead — door-open animations and
+  // mounting-ear screws were on the far side and invisible.
+  _previewCamera.position.set(1.6, 1.2, -2.0);
 
   // IBL — RoomEnvironment baked once into a PMREM texture. Without
   // this, MeshStandardMaterials with metalness > 0.5 (our brushed

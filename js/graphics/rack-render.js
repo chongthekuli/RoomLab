@@ -524,14 +524,22 @@ export function buildRackGroup(rack, ampCatalog, rackCatalog) {
   if (rackDef.castors) {
     const bracketH = 0.030;        // 30 mm housing (less than castorH so wheel shows)
     const bracketSize = 0.060;     // 60 × 40 × 60 housing
+    // Bracket sits at y = [bracketBottom, bracketTop]; rack frame
+    // bottom sits at y = castorH. The stem bridges bracketTop → castorH.
+    // v=687: prior math left the stem topping at 0.07 m while the frame
+    // bottom was at 0.10 m → 30 mm visible gap "rack floating on wheels".
+    const bracketBottom = 0.02;                     // 20 mm above floor
+    const bracketTop    = bracketBottom + bracketH; // 50 mm above floor
+    const stemH         = Math.max(0.001, castorH - bracketTop);
+    const stemY         = bracketTop + stemH / 2;
     for (const sx of [-outerW / 2 + 0.06, outerW / 2 - 0.06]) {
       for (const sz of [-outerD / 2 + 0.06, outerD / 2 - 0.06]) {
-        // Stem connects bottom-frame to bracket top
+        // Stem connects bracket TOP to frame BOTTOM (no gap).
         const stem = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.008, 0.008, castorH - bracketH, 12),
+          new THREE.CylinderGeometry(0.008, 0.008, stemH, 12),
           STEEL_MAT,
         );
-        stem.position.set(sx, castorH - (castorH - bracketH) / 2 - bracketH, sz);
+        stem.position.set(sx, stemY, sz);
         group.add(stem);
         // Bracket (matte-black cube housing)
         const bracket = new THREE.Mesh(
