@@ -6843,14 +6843,17 @@ function _build_seat(w, d, h, broken) {
   const seatTop_z = Math.min(0.50, h * 0.42);
   const cushHi_z  = Math.min(0.55, h * 0.46);
   const armHi_z   = Math.min(0.72, h * 0.55);
-  const legSize   = 0.05;
-  const legInset  = 0.06;
+  const legSize   = 0.10;   // v=675 — bumped from 0.05 so legs read AS legs at typical viewport distance
+  const legInset  = 0.08;
+  const stretcherTh = 0.05;
+  const stretcherZ  = seatTop_z * 0.30;  // low cross-member height
 
   // Four corner legs from floor (z=0) to seat bottom (seatTop_z).
-  // Replaces the v=658 floor-slab approach that left a visible gap
-  // between the floor and the cushion (UAT v=673: "the seat and footer
-  // are not connected, this is not real"). Legs at the corners of the
-  // cushion footprint — works for theatre seats AND office chairs.
+  // Bumped to 10 cm wide (v=675) so they survive the white-cushion-on-
+  // pale-floor visual collision the user reported at v=674. Plus low
+  // front + back stretcher bars so the base reads as a single chair
+  // frame, not four floating posts — anchors "seat connects to the
+  // floor" at a glance from any 3D angle.
   for (const sx of [-1, +1]) {
     for (const sy of [0, 1]) {
       const xc = sx * (w / 2 - legInset);
@@ -6858,6 +6861,11 @@ function _build_seat(w, d, h, broken) {
       _addMesh(group, new THREE.BoxGeometry(legSize, seatTop_z, legSize), matLeg, xc, seatTop_z / 2, zc);
     }
   }
+  // Front + back stretcher bars between the leg pairs. Width spans
+  // between the two legs (leg-edge to leg-edge); thickness = stretcherTh.
+  const stretcherLen = w - 2 * (legInset + legSize / 2);
+  _addMesh(group, new THREE.BoxGeometry(stretcherLen, stretcherTh, stretcherTh), matLeg, 0, stretcherZ, legInset);
+  _addMesh(group, new THREE.BoxGeometry(stretcherLen, stretcherTh, stretcherTh), matLeg, 0, stretcherZ, d - legInset);
   const cushion = _addMesh(group, new THREE.BoxGeometry(w * 0.86, cushHi_z - seatTop_z, d * 0.84), matCush, 0, (seatTop_z + cushHi_z) / 2, d * 0.46);
   _addMesh(group, new THREE.BoxGeometry(w * 0.86, h - cushHi_z, 0.08), matBack, 0, (cushHi_z + h) / 2, d - 0.08);
   if (w >= 0.45) {

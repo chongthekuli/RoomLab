@@ -80,21 +80,36 @@ function boxFaces(x1, y1, z1, x2, y2, z2, scale, cx, cy) {
 // equal optical margins.
 function glyph_theaterSeat({ scale = 70, cx = 55, cy = 110, paper = false } = {}) {
   const W = 0.55, D = 0.60, H_SEAT = 0.42, H_CUSH = 0.50, H_ARM = 0.66, H_BACK = 1.18;
-  const LEG_W = 0.05, LEG_INSET = 0.06;
+  const LEG_W = 0.08, LEG_INSET = 0.07;
+  const STRETCHER_TH = 0.04;
+  const STRETCHER_Z  = H_SEAT * 0.30;
 
-  // Four corner legs — slim vertical boxes from floor (z=0) up to the
-  // cushion bottom (H_SEAT). Replaces the v=658 base slab that left a
-  // visible gap between floor and seat (UAT v=673 — "seat and footer
-  // are not connected, not real"). Order: back legs first so the front
-  // legs occlude in front. Each leg's xy corner extents.
+  // Four corner legs + low front/back stretcher bars from floor (z=0)
+  // up to the cushion bottom (H_SEAT). v=675 — thickened from 0.05 to
+  // 0.08 m so the legs survive the white-on-pale visual collision the
+  // user reported at v=674 ("seat and footer detached"); stretchers
+  // make the base read as a connected chair frame from any angle.
   const legBoxes = [
     // back-left, back-right, front-left, front-right (draw order:
     // back pair first for proper z-occlusion)
-    [LEG_INSET,           D - LEG_INSET - LEG_W],
+    [LEG_INSET,             D - LEG_INSET - LEG_W],
     [W - LEG_INSET - LEG_W, D - LEG_INSET - LEG_W],
-    [LEG_INSET,           LEG_INSET],
+    [LEG_INSET,             LEG_INSET],
     [W - LEG_INSET - LEG_W, LEG_INSET],
   ].map(([x0, y0]) => boxFaces(x0, y0, 0, x0 + LEG_W, y0 + LEG_W, H_SEAT, scale, cx, cy));
+
+  // Stretchers — horizontal bars between front pair and back pair.
+  // Drawn at a low z so they sit clearly below the cushion.
+  const stretcherFront = boxFaces(
+    LEG_INSET + LEG_W, LEG_INSET, STRETCHER_Z - STRETCHER_TH / 2,
+    W - LEG_INSET - LEG_W, LEG_INSET + LEG_W, STRETCHER_Z + STRETCHER_TH / 2,
+    scale, cx, cy,
+  );
+  const stretcherBack = boxFaces(
+    LEG_INSET + LEG_W, D - LEG_INSET - LEG_W, STRETCHER_Z - STRETCHER_TH / 2,
+    W - LEG_INSET - LEG_W, D - LEG_INSET, STRETCHER_Z + STRETCHER_TH / 2,
+    scale, cx, cy,
+  );
 
   // Seat cushion — the accent surface, z [H_SEAT, H_CUSH]
   const cushion = boxFaces(0.04, 0.04, H_SEAT, W - 0.04, D - 0.06, H_CUSH, scale, cx, cy);
@@ -128,6 +143,11 @@ function glyph_theaterSeat({ scale = 70, cx = 55, cy = 110, paper = false } = {}
       ${legPaths(legBoxes[0])}
       ${legPaths(legBoxes[1])}
 
+      <!-- back stretcher (connects back-left and back-right legs) -->
+      <path d="${stretcherBack.right}" ${fills.leg} />
+      <path d="${stretcherBack.front}" ${fills.leg} />
+      <path d="${stretcherBack.top}"   ${fills.leg} />
+
       <!-- seat back — drawn before arms so arms occlude correctly -->
       <path d="${back.right}"   ${fills.back} />
       <path d="${back.front}"   ${fills.back} />
@@ -136,6 +156,11 @@ function glyph_theaterSeat({ scale = 70, cx = 55, cy = 110, paper = false } = {}
       <!-- front legs -->
       ${legPaths(legBoxes[2])}
       ${legPaths(legBoxes[3])}
+
+      <!-- front stretcher (connects front-left and front-right legs) -->
+      <path d="${stretcherFront.right}" ${fills.leg} />
+      <path d="${stretcherFront.front}" ${fills.leg} />
+      <path d="${stretcherFront.top}"   ${fills.leg} />
 
       <!-- armrests -->
       <path d="${armL.right}"   ${fills.arm} />
