@@ -275,6 +275,40 @@ function _setPreviewCameraView(viewKey, animate = true) {
     _camTween = null;
     return;
   }
+  // v=702 — if the camera is ALREADY pointing at the requested view
+  // (within a small angular tolerance), skip the tween. Without this
+  // every amp-add fires a 500 ms full reorientation even when the
+  // camera was already at the front view, which reads as "the view
+  // keeps spinning every time I do anything" (user UAT).
+  //
+  // The check is angular, not positional: the user has full orbit
+  // freedom around the target, so "same orbit angle, different
+  // distance / pitch" should still skip. Two checks together:
+  //   1. The viewing DIRECTION (camera → target) must point the
+  //      same hemisphere as the preset.
+  //   2. The camera-to-target vector's Z-sign must match (front view
+  //      lives at camera-Z<0, rear at +Z; flipping sides is the only
+  //      case that needs a real tween).
+  const curDir = {
+    x: _previewControls.target.x - _previewCamera.position.x,
+    y: _previewControls.target.y - _previewCamera.position.y,
+    z: _previewControls.target.z - _previewCamera.position.z,
+  };
+  const tgtDir = {
+    x: view.target[0] - view.pos[0],
+    y: view.target[1] - view.pos[1],
+    z: view.target[2] - view.pos[2],
+  };
+  const curLen = Math.hypot(curDir.x, curDir.y, curDir.z) || 1;
+  const tgtLen = Math.hypot(tgtDir.x, tgtDir.y, tgtDir.z) || 1;
+  const cosAngle = (curDir.x * tgtDir.x + curDir.y * tgtDir.y + curDir.z * tgtDir.z) / (curLen * tgtLen);
+  // cos(angle) ≥ 0.85  ≈  angle ≤ 32°. Comfortably allows the user to
+  // orbit ~30° around the front face without re-snapping; flipping to
+  // the rear or top falls below the threshold.
+  if (cosAngle >= 0.85) {
+    _camTween = null;
+    return;
+  }
   _camTween = {
     p0: _previewCamera.position.clone(),
     p1: { x: view.pos[0], y: view.pos[1], z: view.pos[2] },
