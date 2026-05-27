@@ -14,7 +14,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { buildRackGroup } from './rack-render.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
-import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, normalizeWallSlot, applySurauOpeningsToSlot } from '../physics/room-shape.js';
+import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, isInsideRoom, normalizeWallSlot, applySurauOpeningsToSlot } from '../physics/room-shape.js';
 import { wallInsetPolygon } from '../physics/wall-inset.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
@@ -112,6 +112,7 @@ let walkPhase = 0;            // stride phase for leg/arm swing animation
 let _lastAuditionOrientTs = 0;  // ms — last time we pushed walk yaw/pitch to AudioListener
 let tpController = null;
 let tpLastTs = 0;
+let _lastFrameTs = 0;             // ms — universal frame clock for tick helpers
 // Rigged GLTF character (loaded async). When present, the avatar swaps to
 // this rig and procedural animation layers are bypassed in favor of the
 // AnimationMixer's idle/walk/run crossfade.
@@ -4047,6 +4048,86 @@ function _tickCameraFocus(ts) {
     }
   }
 }
+
+// Wall + ceiling opacity inside/outside-the-room toggle (v=684).
+// User UX: from OUTSIDE the room → semi-transparent walls (default 0.55
+// "X-ray inspection" so the viewer can see the speakers / heatmap inside).
+// From INSIDE → full opacity, showing the actual material texture exactly
+// as a real occupant would experience the room. Trigger:
+//   - walk mode → avatar position (NOT chase camera; the camera intentionally
+//     orbits outside the avatar so triggering off it would dissolve the walls
+//     every time the user turned around).
+//   - 3D orbit mode → active camera position.
+// Hysteresis: switch to "inside" only when a 0.30 m disc around the
+// reference point is ENTIRELY inside the room, switch to "outside" only
+// when ENTIRELY outside. Inside the hysteresis band → keep last target.
+// Smoothing: exponential lerp toward target, tau = 0.15 s (~150 ms).
+let _wallOpacityT = 0;            // 0 = outside (base), 1 = inside (opaque)
+let _wallOpacityTarget = 0;
+const _WALL_OPACITY_LERP_TAU = 0.15;
+const _WALL_OPACITY_HYSTERESIS_M = 0.30;
+const _WALL_OPACITY_TAGS = new Set([
+  'wall_shell_inner', 'wall_shell_top', 'wall_shell_bottom',
+  'wall', 'wall_segment', 'wall_above_tunnel',
+]);
+function _tickWallOpacity(dt) {
+  if (!scene || !state.room || !roomGroup) return;
+  // Reference point in STATE frame (state.x = -world.x per scene.scale.x
+  // = -1 mirror; state.y = world.z). Walk mode → avatar (tpController.pos
+  // is in mesh-local / world frame for x and y); 3D mode → activeCamera.
+  let sx, sy;
+  if (walkMode && tpController) {
+    sx = -tpController.pos.x;
+    sy = tpController.pos.z;
+  } else if (activeCamera) {
+    sx = -activeCamera.position.x;
+    sy = activeCamera.position.z;
+  } else {
+    return;
+  }
+  const m = _WALL_OPACITY_HYSTERESIS_M;
+  const c = isInsideRoom(sx, sy, state.room);
+  const e = isInsideRoom(sx + m, sy, state.room);
+  const wIn = isInsideRoom(sx - m, sy, state.room);
+  const n = isInsideRoom(sx, sy + m, state.room);
+  const s = isInsideRoom(sx, sy - m, state.room);
+  const fullyInside = c && e && wIn && n && s;
+  const fullyOutside = !c && !e && !wIn && !n && !s;
+  if (fullyInside) _wallOpacityTarget = 1.0;
+  else if (fullyOutside) _wallOpacityTarget = 0.0;
+  // Hysteresis band — keep last target unchanged.
+
+  // Exponential smoothing toward target. Frame-rate independent.
+  const k = 1 - Math.exp(-Math.max(0.001, dt) / _WALL_OPACITY_LERP_TAU);
+  _wallOpacityT += (_wallOpacityTarget - _wallOpacityT) * k;
+  // Skip the per-mesh write when we've fully settled at the current
+  // value — saves the traversal on every static frame.
+  if (Math.abs(_wallOpacityTarget - _wallOpacityT) < 0.001 && _wallOpacityWritten === _wallOpacityT) return;
+  _wallOpacityWritten = _wallOpacityT;
+
+  roomGroup.traverse((obj) => {
+    if (!obj.isMesh || !obj.material || Array.isArray(obj.material)) return;
+    const ud = obj.userData ?? {};
+    // open-air "boundary" meshes deliberately render at opacity 0 — leave alone.
+    if (ud.acoustic_material === 'open-air') return;
+    const tag = ud.tag ?? '';
+    const sid = ud.surface_id ?? '';
+    const isWall = _WALL_OPACITY_TAGS.has(tag);
+    const isCeiling = sid === 'ceiling';
+    if (!isWall && !isCeiling) return;
+    // Cache the original opacity so we can lerp toward 1.0 from whatever
+    // the construction-time value was (0.55 walls, 0.55 ceiling, plus
+    // any custom overrides). First contact wins; the build code never
+    // re-mutates after first traversal so the cache stays valid for the
+    // lifetime of the mesh.
+    if (typeof ud._baseOpacity !== 'number') {
+      ud._baseOpacity = (typeof obj.material.opacity === 'number') ? obj.material.opacity : 0.55;
+    }
+    const base = ud._baseOpacity;
+    obj.material.opacity = base + (1.0 - base) * _wallOpacityT;
+  });
+}
+let _wallOpacityWritten = -1;     // last lerp value actually flushed to meshes
 
 // ----- AutoCAD-style preset views ----------------------------------------
 // Six buttons (Top / Front / Back / Left / Right / Iso) anchored to the
@@ -11356,8 +11437,14 @@ function animate(ts) {
   if (shadowsNeedRefresh) { applyShadowFlags(); shadowsNeedRefresh = false; }
   _tickSurfaceSelectionPulse(ts);
   _tickCameraFocus(ts);
+  // Frame dt — used by walk controller AND _tickWallOpacity. Computed
+  // once so both consumers get the same value (no double-clock skew).
+  const _now = ts || performance.now();
+  const _frameDt = Math.min(0.1, (_now - _lastFrameTs) / 1000);
+  _lastFrameTs = _now;
+  _tickWallOpacity(_frameDt);
   if (walkMode && tpController) {
-    const now = ts || performance.now();
+    const now = _now;
     const dt = Math.min(0.1, (now - tpLastTs) / 1000);
     tpLastTs = now;
     tpController.update(dt);
