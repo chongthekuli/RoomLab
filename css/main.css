@@ -602,7 +602,7 @@ html[data-rail-right="polar"]     #panel-polar,
 html[data-rail-right="waterfall"] #panel-waterfall,
 /* DeviceLAB (P4) */
 html[data-rail-left="rackbrowser"]   #panel-rackbrowser,
-html[data-rail-left="devicelibrary"] #panel-devicelibrary,
+html[data-rail-left="amplifiers"]    #panel-amplifiers,
 html[data-rail-right="signalflow"]   #panel-signalflow,
 html[data-rail-right="bom"]          #panel-bom,
 /* SurfaceLAB (Lab #4) — seven left-rail icons by mechanism, four
@@ -3150,9 +3150,14 @@ section h3 {
   height: 100%;
   display: flex;
   flex-direction: column;
-  /* Same chrome-clearance as #view-speaker: top for glass header,
-     sides for floating rail icons. */
-  padding: 56px 64px 16px 64px;
+  /* v=695 — full-bleed preview matches RoomLAB's #viewport: only top
+     padding to clear the glass header; sides + bottom hug the screen
+     edge so the 3D preview goes edge-to-edge behind the floating rail
+     icons. (Old padding-64-each-side reserved gutters for the rails
+     when the layout was a 3-column grid; the centre column is now the
+     only thing in the grid so the gutters were just dead space.)
+  */
+  padding: 56px 0 0 0;
   box-sizing: border-box;
 }
 #devicelab-root #view-rack .rack-builder { flex: 1; min-height: 0; }
