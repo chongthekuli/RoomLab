@@ -6362,6 +6362,14 @@ function rebuildRacks() {
     // else in scene.js.
     g.position.set(rack.position?.x ?? 0, rack.position?.z ?? 0, rack.position?.y ?? 0);
     g.rotation.y = ((rack.yaw_deg ?? 0) * Math.PI) / 180;
+    // Mirror-cancel each amp label so the model-name texture reads
+    // forward in the RoomLAB scene (scene.scale.x = -1 from initScene
+    // otherwise renders it mirrored). Same pattern as the walk avatar
+    // (~line 91) and surface-selection edges (~line 1136). DeviceLAB
+    // preview doesn't apply this because it doesn't run rebuildRacks.
+    g.traverse(o => {
+      if (o.isMesh && o.userData?.tag === 'rack-amp-label') o.scale.x = -1;
+    });
     racksGroup.add(g);
   }
 }

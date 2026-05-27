@@ -312,6 +312,12 @@ function buildAmpMesh(slot, ampDef, slotDepth_m) {
   );
   label.position.z = -d / 2 - 0.001;
   label.rotation.y = Math.PI;     // texture's "this way up" must still face the viewer
+  // Tag so the RoomLAB scene can apply a counter-mirror (scale.x = -1)
+  // when the rack ends up under the scene.scale.x = -1 mirror. Without
+  // the counter, amp-model text reads right-to-left in the room view.
+  // DeviceLAB preview (no scene mirror) leaves the tag alone → text
+  // reads correctly there. v=698.
+  label.userData.tag = 'rack-amp-label';
   group.add(label);
 
   // Channel knobs along the bottom edge of the front face. Visual only.
