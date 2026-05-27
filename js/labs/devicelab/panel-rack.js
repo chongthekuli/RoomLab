@@ -268,21 +268,14 @@ function _setPreviewCameraView(viewKey, animate = true) {
   if (!_previewCamera || !_previewControls) return;
   const view = PREVIEW_CAM_VIEWS[viewKey];
   if (!view) return;
-  // v=706 — use the LOOK DIRECTION (camera → target) instead of the
-  // raw camera.z. The 0.5 m position dead-zone from v=705 was too
-  // narrow: a user who zooms in close to the front rack face lands
-  // at camera.z = -0.4 (not < -0.5) even though they're clearly
-  // facing the front, so every amp-add re-tweened. The look-vector
-  // is independent of zoom and side-offset: front view always has
-  // (target - cam).z > 0 (camera at -Z looks toward +Z to see the
-  // front face at z = -0.46 → +0.46 target span). Threshold 0.1 to
-  // ignore degenerate cases (camera looking straight down at top of
-  // rack, lookZ ≈ 0 → tween to the requested side, which is fine).
-  if (animate) {
-    const lookZ = _previewControls.target.z - _previewCamera.position.z;
-    if (viewKey === 'front' && lookZ > +0.1) return;    // already looking +Z = at front face
-    if (viewKey === 'rear'  && lookZ < -0.1) return;    // already looking -Z = at rear face
-  }
+  // v=707 design: no skip-detection. The function does exactly what it
+  // says — tween (or snap) to the named preset. Skip logic is the
+  // caller's responsibility (door buttons always tween; amp-add never
+  // calls this function). v=702/703/705/706 all tried to "be smart"
+  // about whether the camera was already at the right view; the smart
+  // checks all had corner cases (zoom, damping, orbit angle,
+  // OrbitControls events firing on stray clicks). A predictable
+  // unconditional tween is preferable to clever-but-flaky.
   if (!animate) {
     _previewCamera.position.set(view.pos[0], view.pos[1], view.pos[2]);
     _previewControls.target.set(view.target[0], view.target[1], view.target[2]);
@@ -599,12 +592,14 @@ function addAmpToRack(ampId) {
   });
   persistCurrentRack();
   renderRackMid();
-  // v=705 — auto-snap back to the FRONT view if the user is currently
-  // looking from the REAR hemisphere (camera.z > 0.5), so the new amp
-  // is on-screen. The Z-sign check inside _setPreviewCameraView early-
-  // returns when the camera is ALREADY on the front side, so no
-  // redundant tween fires on consecutive amp adds from the same side.
-  _setPreviewCameraView('front', true);
+  // v=707 design: amp-add never moves the camera. Trying to be smart
+  // about "snap to front if user is on rear" produced a chain of
+  // failed iterations (v=697/702/703/705/706). The camera is now
+  // exclusively under the user's control — door buttons (Open front /
+  // Open rear) tween explicitly, manual orbit works as expected, amp
+  // add/remove only updates rack geometry. If the user is on the
+  // rear and adds an amp, they can click "Open front" once to see
+  // the new amp on the visible side.
 }
 
 function removeSlot(slotIdx) {
@@ -612,7 +607,6 @@ function removeSlot(slotIdx) {
   _currentRack.slots.splice(slotIdx, 1);
   persistCurrentRack();
   renderRackMid();
-  _setPreviewCameraView('front', true);
 }
 
 function renderRackMid() {
