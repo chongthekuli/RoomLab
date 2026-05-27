@@ -327,6 +327,49 @@ function buildAmpMesh(slot, ampDef, slotDepth_m) {
     group.add(led);
   }
 
+  // 19" mounting ears — the standard rackmount flange that protrudes
+  // 25 mm past the rail-inner width on each side, lining up with the
+  // cage-nut holes on the front of each post. Two visible screw heads
+  // per ear (top + bottom slot). User asked for this explicitly:
+  // "side mounting holes to mount the device by locking the mounting
+  // ear". Adds ~14 cheap meshes per amp; negligible perf hit.
+  const earW    = 0.025;                                      // 25 mm flange width per ISO 19"
+  const earThk  = 0.0025;                                     // 2.5 mm steel ear thickness, just proud of the front face
+  const earH    = h;                                          // matches the amp's front-panel height
+  const earMat  = new THREE.MeshStandardMaterial({
+    color: bodyHex, roughness: 0.55, metalness: 0.30,         // slightly more metallic than the body so light catches the bevel
+  });
+  const screwMat = new THREE.MeshStandardMaterial({
+    color: 0x3a3e44, roughness: 0.4, metalness: 0.75,
+  });
+  const screwR  = Math.min(0.004, h * 0.10);                  // M6 cap-screw head ≈ 8-10 mm dia
+  for (const sx of [-1, +1]) {
+    // Ear flange — sits flush with the amp's front face (z = d/2) and
+    // extends outward past the amp body on this side.
+    const earX = sx * (w / 2 + earW / 2);
+    const ear = new THREE.Mesh(
+      new THREE.BoxGeometry(earW, earH, earThk),
+      earMat,
+    );
+    ear.position.set(earX, 0, d / 2 + earThk / 2);
+    group.add(ear);
+    // 2 cage-nut screws per ear — one near the top of the U-cell, one
+    // near the bottom. (Real rackmount ears get 2 screws per U; with
+    // multi-U units the visible count grows but we cap at 2-per-ear
+    // for visual clarity — anything more reads as noise at typical
+    // rack-preview camera distance.)
+    for (const sy of [-1, +1]) {
+      const screw = new THREE.Mesh(
+        new THREE.CylinderGeometry(screwR, screwR, earThk * 1.8, 10),
+        screwMat,
+      );
+      // Cylinder axis defaults to Y; rotate 90° so the head faces +Z (out toward viewer)
+      screw.rotation.x = Math.PI / 2;
+      screw.position.set(earX, sy * (earH * 0.36), d / 2 + earThk + 0.0005);
+      group.add(screw);
+    }
+  }
+
   group.userData.tag = 'rack-amp';
   group.userData.amplifierId = slot.amplifierId;
   return group;

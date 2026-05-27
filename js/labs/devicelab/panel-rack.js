@@ -126,6 +126,7 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
         <div class="rack-mid-header">
           <span class="rack-mid-title" id="rack-mid-title">No rack selected</span>
           <span class="rack-mid-summary" id="rack-mid-summary"></span>
+          <button class="rack-door-toggle" id="rack-mid-door-toggle" style="display:none" title="Open or close the front door in the 3D preview to inspect the rack interior">Open door</button>
         </div>
         <div class="rack-preview" id="rack-preview"></div>
         <div class="rack-slot-list" id="rack-slot-list"></div>
@@ -526,6 +527,23 @@ function renderRackMid() {
   }, 0);
   titleEl.textContent = `${_currentRack.label} (${_currentRack.rackModelKey})`;
   summaryEl.textContent = `${usedU} / ${totalU} U used · ${totalPower} W rated · ${_currentRack.slots.length} amp${_currentRack.slots.length === 1 ? '' : 's'}`;
+  // Door-toggle button in the rack editor — only relevant on enclosed
+  // racks. Live-syncs to the preview's 3D mesh.
+  const doorBtnEl = document.getElementById('rack-mid-door-toggle');
+  if (doorBtnEl) {
+    const isEnclosed = (def?.style ?? 'open-frame') === 'enclosed';
+    if (isEnclosed) {
+      doorBtnEl.style.display = '';
+      doorBtnEl.textContent = _currentRack.doorOpen ? 'Close door' : 'Open door';
+      doorBtnEl.onclick = () => {
+        _currentRack.doorOpen = !_currentRack.doorOpen;
+        persistCurrentRack();
+        renderRackMid();   // updates the button label + rebuilds the preview
+      };
+    } else {
+      doorBtnEl.style.display = 'none';
+    }
+  }
   // Render slot list, top-down so it reads like a rack from the front.
   // Highest U at the top of the list.
   const sorted = [..._currentRack.slots]
