@@ -105,32 +105,54 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
   // they're editing for the hifi room they were just in, or a stale
   // scene from yesterday.
   const ctx = describeSceneContext();
+  // v=694 layout: full-bleed 3D preview as the main view (like RoomLAB).
+  // Left rail splits into "Rack frames" and "Amplifiers" as separate
+  // panels. The currently-edited rack's slot list + place/discard
+  // actions move to the right rail "System overview" panel. The
+  // editing-context banner ("Editing racks for …") becomes a small
+  // floating overlay so it doesn't eat vertical space.
   root.innerHTML = `
-    <div class="rack-builder-ctx">
-      <span class="rack-ctx-label">Editing racks for</span>
-      <span class="rack-ctx-name">${escapeHtml(ctx.name)}</span>
-      <span class="rack-ctx-meta">${escapeHtml(ctx.meta)}</span>
-      <a class="rack-ctx-back" href="#/room" title="Open RoomLAB">View room →</a>
-    </div>
     <div class="rack-builder">
-      <aside class="rack-col-left">
+      <section class="rack-col-mid">
+        <div class="rack-preview" id="rack-preview">
+          <div class="rack-vp-overlay-top">
+            <div class="rack-vp-ctx" title="${escapeHtml(ctx.name)} — ${escapeHtml(ctx.meta)}">
+              <span class="rack-vp-ctx-label">Editing racks for</span>
+              <span class="rack-vp-ctx-name">${escapeHtml(ctx.name)}</span>
+              <a class="rack-vp-ctx-back" href="#/room" title="Open RoomLAB">View room →</a>
+            </div>
+            <div class="rack-vp-door-segment">
+              <button class="rack-vp-door-tab" id="rack-mid-door-toggle" style="display:none" title="Open or close the FRONT door (mesh-glass)">Open front</button>
+              <button class="rack-vp-door-tab" id="rack-mid-rear-door-toggle" style="display:none" title="Open or close the REAR door (perforated steel)">Open rear</button>
+            </div>
+            <div class="rack-vp-title">
+              <span class="rack-mid-title" id="rack-mid-title">No rack selected</span>
+              <span class="rack-mid-summary" id="rack-mid-summary"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- Hidden detached panels — moved into rails by the mount logic
+           below. Keeping them inside .rack-builder before the move keeps
+           the HTML self-contained and easy to read. -->
+      <aside class="rack-col-frames" hidden>
         <h3>Rack frames</h3>
         <div class="rack-frame-list" id="rack-frame-list"></div>
+      </aside>
+      <aside class="rack-col-amps" hidden>
         <h3>Amplifiers</h3>
         <div class="rack-amp-filter">
           <input id="rack-amp-search" placeholder="Search models / categories…" />
         </div>
         <div class="rack-amp-list" id="rack-amp-list"></div>
       </aside>
-      <section class="rack-col-mid">
-        <div class="rack-mid-header">
-          <span class="rack-mid-title" id="rack-mid-title">No rack selected</span>
-          <span class="rack-mid-summary" id="rack-mid-summary"></span>
-          <button class="rack-door-toggle" id="rack-mid-door-toggle" style="display:none" title="Open or close the FRONT door (mesh-glass) in the 3D preview">Open front</button>
-          <button class="rack-door-toggle" id="rack-mid-rear-door-toggle" style="display:none" title="Open or close the REAR door (perforated steel) in the 3D preview">Open rear</button>
+      <aside class="rack-col-right" hidden>
+        <h3>System overview</h3>
+        <div class="rack-system-list" id="rack-system-list"></div>
+        <div class="rack-slot-list-wrap">
+          <h3>Current rack contents</h3>
+          <div class="rack-slot-list" id="rack-slot-list"></div>
         </div>
-        <div class="rack-preview" id="rack-preview"></div>
-        <div class="rack-slot-list" id="rack-slot-list"></div>
         <div class="rack-mid-actions">
           <label class="rack-target-label" for="rack-target-room">Place in:</label>
           <select id="rack-target-room" class="rack-target-room"
@@ -140,10 +162,6 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
           <button class="rack-action rack-action-place" id="rack-action-place" disabled>Place in room</button>
           <button class="rack-action rack-action-discard" id="rack-action-discard" disabled>Discard rack</button>
         </div>
-      </section>
-      <aside class="rack-col-right">
-        <h3>System overview</h3>
-        <div class="rack-system-list" id="rack-system-list"></div>
       </aside>
     </div>
   `;
@@ -201,19 +219,29 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
     });
   });
 
-  // P4.5 — relocate side columns out of the centre 3-column layout
-  // into rail panels. The DOM nodes move with their event handlers
-  // intact. Centre keeps the rack editor (.rack-col-mid).
-  const colLeft  = root.querySelector('.rack-col-left');
-  const colRight = root.querySelector('.rack-col-right');
+  // v=694 — relocate detached panels into rails. The centre column
+  // now hosts JUST the 3D preview + the floating-overlay top bar. The
+  // three side panels (rack frames, amps, system overview + slot
+  // editor) move into their respective rail panels.
+  const colFrames = root.querySelector('.rack-col-frames');
+  const colAmps   = root.querySelector('.rack-col-amps');
+  const colRight  = root.querySelector('.rack-col-right');
   const railRackBrowser = document.getElementById('panel-rackbrowser');
-  const railBom = document.getElementById('panel-bom');
-  if (colLeft && railRackBrowser) {
-    railRackBrowser.innerHTML = '<h2>Rack browser</h2>';
-    railRackBrowser.appendChild(colLeft);
+  const railAmplifiers  = document.getElementById('panel-amplifiers');
+  const railBom         = document.getElementById('panel-bom');
+  if (colFrames && railRackBrowser) {
+    railRackBrowser.innerHTML = '<h2>Rack frames</h2>';
+    colFrames.hidden = false;
+    railRackBrowser.appendChild(colFrames);
+  }
+  if (colAmps && railAmplifiers) {
+    railAmplifiers.innerHTML = '<h2>Amplifiers</h2>';
+    colAmps.hidden = false;
+    railAmplifiers.appendChild(colAmps);
   }
   if (colRight && railBom) {
     railBom.innerHTML = '<h2>System overview</h2>';
+    colRight.hidden = false;
     railBom.appendChild(colRight);
   }
 }
@@ -595,6 +623,10 @@ function renderRackMid() {
   const doorBtnEl = document.getElementById('rack-mid-door-toggle');
   const rearBtnEl = document.getElementById('rack-mid-rear-door-toggle');
   const isEnclosed = (def?.style ?? 'open-frame') === 'enclosed';
+  // Hide the whole floating pill when no enclosed rack is selected
+  // (otherwise an empty 8 px box hangs at the top-centre of the viewport).
+  const doorSegEl = doorBtnEl?.parentElement;
+  if (doorSegEl) doorSegEl.hidden = !isEnclosed;
   if (doorBtnEl) {
     if (isEnclosed) {
       doorBtnEl.style.display = '';

@@ -3306,6 +3306,161 @@ section h3 {
   width: 100%;
   height: 100%;
 }
+/* v=694 — DeviceLAB now uses a full-bleed 3D preview (like RoomLAB's
+   3D viewport) with overlay controls instead of stacked rows. */
+#devicelab-root #view-rack .rack-builder {
+  display: block;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+#devicelab-root #view-rack .rack-col-mid {
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+#devicelab-root #view-rack .rack-preview {
+  border: 0;
+  border-radius: 0;
+  height: 100%;
+}
+/* Top overlay row above the preview — context + door tabs + title.
+   Pointer-events: none on the row, re-enabled on individual children
+   so the underlying OrbitControls still catches drag-rotate over the
+   gaps between controls. */
+.rack-vp-overlay-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem 0.85rem;
+  pointer-events: none;
+  z-index: 10;
+}
+.rack-vp-overlay-top > * { pointer-events: auto; }
+
+/* Small floating context chip (top-left of viewport). Replaces the
+   full-width banner from v=693. */
+.rack-vp-ctx {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  padding: 0.32rem 0.65rem;
+  background: rgba(20, 22, 28, 0.55);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  font-size: 0.72rem;
+  color: var(--fg);
+  max-width: 38ch;
+}
+@supports not ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  .rack-vp-ctx { background: rgba(20, 22, 28, 0.78); }
+}
+.rack-vp-ctx-label {
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+}
+.rack-vp-ctx-name {
+  color: var(--fg-strong, #e5e7eb);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rack-vp-ctx-back {
+  margin-left: 0.4rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+.rack-vp-ctx-back:hover { text-decoration: underline; }
+
+/* Door-toggle segmented control (top-centre) — same glass-pill family
+   as RoomLAB's 2D/3D/Walk vp-mode-segment (css/main.css ~645). When the
+   current rack isn't enclosed the two buttons stay display:none, so the
+   segment shrinks to nothing and the centre is left clean. */
+.rack-vp-door-segment {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(20, 22, 28, 0.45);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+}
+@supports not ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  .rack-vp-door-segment { background: rgba(20, 22, 28, 0.65); }
+}
+.rack-vp-door-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 5px 14px;
+  min-width: 84px;
+  border-radius: calc(var(--radius) - 1px);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-align: center;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.rack-vp-door-tab:hover { color: var(--fg-strong, #fff); background: rgba(255, 255, 255, 0.04); }
+
+/* Title cluster (top-right) — rack model name + summary. Compact so
+   it doesn't crowd the door pill. */
+.rack-vp-title {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.05rem;
+  padding: 0.32rem 0.65rem;
+  background: rgba(20, 22, 28, 0.55);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  max-width: 36ch;
+}
+@supports not ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  .rack-vp-title { background: rgba(20, 22, 28, 0.78); }
+}
+.rack-vp-title .rack-mid-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--fg-strong, #e5e7eb);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34ch;
+}
+.rack-vp-title .rack-mid-summary {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+/* Slot-list / current-rack section inside the BOM rail panel. */
+#panel-bom .rack-slot-list-wrap h3 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0.6rem 0 0.3rem 0;
+}
 .rack-slot-list {
   flex: 0 0 auto;
   max-height: 220px;
