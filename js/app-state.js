@@ -494,14 +494,22 @@ export const state = {
     // as room-shape.js `normalizeWallSlot`. wallSegments use flat shape,
     // not the slot normaliser, so consumers read `seg.thickness_m ?? 0.10`.
     wallSegments: [],
+    // Wall defaults: painted concrete 150 mm (v=683, 2026-05-27).
+    // Standard external/internal wall in Malaysian construction —
+    // reinforced concrete cast at 150 mm with paint finish. Hopkins TL
+    // ~47 dB @ 500 Hz, ground-G=0 (hard surface). Floor + ceiling kept
+    // as before; the user can override per-room in the room panel.
+    // Object form (not plain string) so the 150 mm thickness rides with
+    // the material — the legacy DEFAULT_WALL_THICKNESS_M (0.10 m) stays
+    // as the safety-net fallback for omitted-thickness slots.
     surfaces: {
       floor: 'wood-floor',
       ceiling: 'acoustic-tile',
-      wall_north: 'gypsum-board',
-      wall_south: 'gypsum-board',
-      wall_east: 'gypsum-board',
-      wall_west: 'gypsum-board',
-      walls: 'gypsum-board',
+      wall_north: { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
+      wall_south: { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
+      wall_east:  { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
+      wall_west:  { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
+      walls:      { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
       edges: null,
     },
   },
@@ -772,14 +780,18 @@ const DEFAULT_ROOM_STATE = {
   // enforced by panel-author-note.js and defensively re-clipped in the
   // print model + deserializeProject below.
   authorComments: '',
+  // Wall defaults: painted concrete 150 mm — see active-state surfaces
+  // block above for the rationale. Keep these two structures in sync
+  // when changing wall defaults so blank-slate room creation and the
+  // reset path agree.
   surfaces: {
     floor: 'wood-floor',
     ceiling: 'gypsum-board',
-    walls: 'gypsum-board',
-    wall_north: 'gypsum-board',
-    wall_south: 'gypsum-board',
-    wall_east: 'gypsum-board',
-    wall_west: 'gypsum-board',
+    walls:      { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
+    wall_north: { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
+    wall_south: { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
+    wall_east:  { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
+    wall_west:  { materialId: 'concrete-painted', thickness_m: 0.15, openings: [] },
     edges: null,
   },
 };
