@@ -3409,11 +3409,6 @@ function renderFurnitureConfidenceLegend(svgViewBoxW, svgViewBoxH) {
 
 function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, draggingId, metrics = [], iconScale = 1.0) {
   let s = '';
-  // Per Maya UX gate: the SPL/STI metrics line below the dot becomes
-  // unreadable below ~0.65 (font shrinks to ≤ 6 px). Drop it from the
-  // viewport in outdoor mode — the same numbers are still in the
-  // listeners panel + report, so no data loss.
-  const showMetrics = iconScale >= 0.65;
   listeners.forEach((lst, idx) => {
     const sx = x0 + (lst.position.x / room.width_m) * pxW;
     const sy = y0 - (lst.position.y / room.depth_m) * pxD;
@@ -3439,11 +3434,14 @@ function renderListenersSVG(listeners, selectedId, x0, y0, pxW, pxD, room, dragg
       const lblMatch = String(lst.label).match(/\d+/);
       const short = lblMatch ? lblMatch[0] : String(lst.label).slice(0, 2);
       s += `<text x="0" y="3" text-anchor="middle" class="vp-lbl vp-lbl-listener">${escapeMenuHtml(short)}</text>`;
-      if (showMetrics) {
-        const txt = formatListenerMetricsLabel(metrics[idx] ?? {});
-        if (txt) {
-          s += `<text x="0" y="${(radius + 11).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-listener-metrics">${escapeMenuHtml(txt)}</text>`;
-        }
+      // SPL / STI line — placed below the dot so it never covers the
+      // short id inside it. Hidden during drag (the dot doubles in size
+      // and would push the text off-grid). Empty when neither metric is
+      // available so there's no orphan visual. Scales with the group's
+      // iconScale in outdoor view — small but still rendered.
+      const txt = formatListenerMetricsLabel(metrics[idx] ?? {});
+      if (txt) {
+        s += `<text x="0" y="${(radius + 11).toFixed(1)}" text-anchor="middle" class="vp-lbl vp-lbl-listener-metrics">${escapeMenuHtml(txt)}</text>`;
       }
     }
     s += `</g>`;
