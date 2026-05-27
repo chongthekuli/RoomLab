@@ -268,19 +268,20 @@ function _setPreviewCameraView(viewKey, animate = true) {
   if (!_previewCamera || !_previewControls) return;
   const view = PREVIEW_CAM_VIEWS[viewKey];
   if (!view) return;
-  // v=705 — simple Z-sign check. Rack-render coord frame has front
-  // face at -Z (so the "front" view's camera lives at camera.z<0) and
-  // rear at +Z. Anywhere the user orbits around the front hemisphere
-  // keeps camera.z<0; anywhere around the rear hemisphere keeps z>0.
-  // So the cleanest "are we already facing this side?" check is the
-  // SIGN of camera.z compared with the target side. Distance / angle
-  // tolerances + state tracking both raced (v=702/703); the sign
-  // check is robust to OrbitControls damping and any non-flipping
-  // orbit the user might have done.
+  // v=706 — use the LOOK DIRECTION (camera → target) instead of the
+  // raw camera.z. The 0.5 m position dead-zone from v=705 was too
+  // narrow: a user who zooms in close to the front rack face lands
+  // at camera.z = -0.4 (not < -0.5) even though they're clearly
+  // facing the front, so every amp-add re-tweened. The look-vector
+  // is independent of zoom and side-offset: front view always has
+  // (target - cam).z > 0 (camera at -Z looks toward +Z to see the
+  // front face at z = -0.46 → +0.46 target span). Threshold 0.1 to
+  // ignore degenerate cases (camera looking straight down at top of
+  // rack, lookZ ≈ 0 → tween to the requested side, which is fine).
   if (animate) {
-    const camZ = _previewCamera.position.z;
-    if (viewKey === 'front' && camZ < -0.5) return;     // already on the -Z (front) hemisphere
-    if (viewKey === 'rear'  && camZ > +0.5) return;     // already on the +Z (rear) hemisphere
+    const lookZ = _previewControls.target.z - _previewCamera.position.z;
+    if (viewKey === 'front' && lookZ > +0.1) return;    // already looking +Z = at front face
+    if (viewKey === 'rear'  && lookZ < -0.1) return;    // already looking -Z = at rear face
   }
   if (!animate) {
     _previewCamera.position.set(view.pos[0], view.pos[1], view.pos[2]);
