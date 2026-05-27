@@ -113,6 +113,26 @@ function render(root) {
         emit('furniture:changed', { removed: id });
       }
     });
+    // Paired-state flip. Looks up the partner via the catalogue's
+    // paired_state_id and swaps state.furniture[i].catalogueId. The
+    // re-render is triggered by furniture:changed (panel + 2D + 3D +
+    // RT60 panel all subscribe). Position + rotation + id stay; only
+    // the catalogue link flips.
+    rowEl.querySelector('.pf-row-flip')?.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const cat = getFurnitureCatalogue();
+      const idx = state.furniture.findIndex(f => f.id === id);
+      if (idx < 0) return;
+      const f = state.furniture[idx];
+      const row = cat.get(f.catalogueId);
+      const pairedId = row?.acoustics?.paired_state_id;
+      if (!pairedId || !cat.has(pairedId)) return;
+      f.catalogueId = pairedId;
+      // Clear the cached spec so the renderer re-resolves against the
+      // new catalogue row.
+      if (f._cachedSpec) delete f._cachedSpec;
+      emit('furniture:changed', { id, flippedTo: pairedId });
+    });
   });
 }
 
@@ -139,12 +159,36 @@ function renderPlacedRow(f, idx, catalogue) {
   const name = f.label || row?.short_name || row?.name || f.catalogueId;
   const broken = !row;
   const isSel = state.selectedFurnitureId === f.id;
+
+  // Paired-state toggle (Phase 4, 2026-05-27). When the catalogue row
+  // has paired_state_id pointing at another row in the same catalogue,
+  // show a small flip button that swaps catalogueId to the partner —
+  // typically an occupied↔empty switch on seating, but the schema is
+  // open to any paired states (rolled↔unrolled mats etc.). Dr. Chen's
+  // physics-grade gate rule #4. Occupied vs empty changes RT60 by 0.5 s
+  // in a typical auditorium — too important to require delete + replace.
+  const pairedId = row?.acoustics?.paired_state_id ?? null;
+  const pairedRow = pairedId ? catalogue.get(pairedId) : null;
+  // Label: prefer the partner's occupancy_state for a clean verb
+  // ("Occupied"/"Empty"); fall back to its short_name if state is null.
+  let pairedLabel = null;
+  if (pairedRow) {
+    const partnerState = pairedRow.acoustics?.occupancy_state;
+    if (partnerState === 'occupied') pairedLabel = 'Occupied';
+    else if (partnerState === 'empty') pairedLabel = 'Empty';
+    else pairedLabel = pairedRow.short_name || pairedRow.name || pairedId;
+  }
+  const stateBtn = pairedRow
+    ? `<button type="button" class="pf-row-flip" title="Switch to ${escapeAttr(pairedLabel)} state &mdash; identical footprint, different A_obj">&#8646; ${escapeHtml(pairedLabel)}</button>`
+    : '';
+
   return `
     <div class="pf-placed-row ${isSel ? 'selected' : ''} ${broken ? 'broken' : ''}" data-id="${escapeAttr(f.id)}">
       <button type="button" class="pf-row-pick" title="Select in viewport">
         <span class="pf-row-id">${escapeHtml(f.id)}</span>
         <span class="pf-row-name">${escapeHtml(name)}${broken ? ' <em>(broken link)</em>' : ''}</span>
       </button>
+      ${stateBtn}
       <button type="button" class="pf-row-remove" title="Remove this item (or press Del while selected)" aria-label="Remove ${escapeAttr(name)}">×</button>
     </div>`;
 }

@@ -7895,12 +7895,30 @@ section h3 {
 .pf-placed-list { display: grid; gap: 4px; }
 .pf-placed-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+}
+.pf-row-flip {
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pf-row-flip:hover {
+  color: var(--accent);
+  background: rgba(74, 163, 255, 0.08);
 }
 .pf-placed-row.selected { border-color: #00d4ff; box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.3); }
 .pf-placed-row.broken { border-color: rgba(255, 107, 107, 0.5); }
