@@ -259,13 +259,6 @@ let _previewRAF = 0;
 // over ~500 ms with smoothstep ease so the swing animation on the
 // chosen door is visible from the corresponding side.
 let _camTween = null;     // { p0, p1, t0, t1, dur, ts0 }
-// v=703: track the last view the camera was DELIBERATELY snapped to
-// (via _setPreviewCameraView, NOT via user orbiting). Subsequent calls
-// to the same view skip the tween entirely so amp-add doesn't restart
-// a redundant 500 ms animation on every click. User-initiated orbits
-// clear this flag (see _previewControls 'start' listener below) so the
-// next button press tweens back as expected.
-let _lastSnappedView = null;
 const PREVIEW_CAM_VIEWS = {
   // Rack-render coord frame: front face at -Z, rear at +Z.
   front: { pos: [+0.9, +1.6, -2.4], target: [0, 1.0,  0] },
@@ -275,20 +268,25 @@ function _setPreviewCameraView(viewKey, animate = true) {
   if (!_previewCamera || !_previewControls) return;
   const view = PREVIEW_CAM_VIEWS[viewKey];
   if (!view) return;
-  // v=703 — skip the tween if the camera was already deliberately
-  // snapped to this view (and the user hasn't orbited since). Without
-  // this, addAmpToRack re-fires _setPreviewCameraView('front', …)
-  // every click and the camera does a 500 ms wobble even when it's
-  // already facing the front. _lastSnappedView is cleared by the
-  // OrbitControls 'start' event when the user begins a manual orbit /
-  // pan / zoom, so the next button press still tweens back.
-  if (animate && _lastSnappedView === viewKey) return;
+  // v=705 — simple Z-sign check. Rack-render coord frame has front
+  // face at -Z (so the "front" view's camera lives at camera.z<0) and
+  // rear at +Z. Anywhere the user orbits around the front hemisphere
+  // keeps camera.z<0; anywhere around the rear hemisphere keeps z>0.
+  // So the cleanest "are we already facing this side?" check is the
+  // SIGN of camera.z compared with the target side. Distance / angle
+  // tolerances + state tracking both raced (v=702/703); the sign
+  // check is robust to OrbitControls damping and any non-flipping
+  // orbit the user might have done.
+  if (animate) {
+    const camZ = _previewCamera.position.z;
+    if (viewKey === 'front' && camZ < -0.5) return;     // already on the -Z (front) hemisphere
+    if (viewKey === 'rear'  && camZ > +0.5) return;     // already on the +Z (rear) hemisphere
+  }
   if (!animate) {
     _previewCamera.position.set(view.pos[0], view.pos[1], view.pos[2]);
     _previewControls.target.set(view.target[0], view.target[1], view.target[2]);
     _previewControls.update();
     _camTween = null;
-    _lastSnappedView = viewKey;
     return;
   }
   _camTween = {
@@ -298,7 +296,6 @@ function _setPreviewCameraView(viewKey, animate = true) {
     t1: { x: view.target[0], y: view.target[1], z: view.target[2] },
     dur: 500,
     ts0: performance.now(),
-    viewKey,
   };
 }
 function _tickCameraTween() {
@@ -315,10 +312,7 @@ function _tickCameraTween() {
     _camTween.t0.y + (_camTween.t1.y - _camTween.t0.y) * e,
     _camTween.t0.z + (_camTween.t1.z - _camTween.t0.z) * e,
   );
-  if (t >= 1) {
-    _lastSnappedView = _camTween.viewKey ?? _lastSnappedView;
-    _camTween = null;
-  }
+  if (t >= 1) _camTween = null;
 }
 
 function mountPreview() {
@@ -395,13 +389,6 @@ function mountPreview() {
     PREVIEW_CAM_VIEWS.front.target[1],
     PREVIEW_CAM_VIEWS.front.target[2],
   );
-  // v=703 — mount-time camera position equals PREVIEW_CAM_VIEWS.front,
-  // so seed _lastSnappedView so the first amp-add doesn't fire a
-  // redundant tween. OrbitControls fires 'start' on the first manual
-  // orbit / pan / zoom; we clear the snap so the next button press
-  // tweens back as expected.
-  _lastSnappedView = 'front';
-  _previewControls.addEventListener('start', () => { _lastSnappedView = null; });
 
   resizePreview();
   window.addEventListener('resize', resizePreview);
@@ -611,14 +598,12 @@ function addAmpToRack(ampId) {
   });
   persistCurrentRack();
   renderRackMid();
-  // v=704 — removed the auto-camera-snap that v=697 added. The
-  // _lastSnappedView guard (v=703) was supposed to skip the tween
-  // when already at the front, but the chain of races (OrbitControls
-  // damping, 'start' event firing on amp-tile clicks that happened
-  // over the canvas margin, the seed being overwritten) kept producing
-  // "camera moves on every amp click." The simplest fix is to not
-  // touch the camera here. If the user opened the rear door earlier,
-  // they can click "Open front" or orbit manually — both still work.
+  // v=705 — auto-snap back to the FRONT view if the user is currently
+  // looking from the REAR hemisphere (camera.z > 0.5), so the new amp
+  // is on-screen. The Z-sign check inside _setPreviewCameraView early-
+  // returns when the camera is ALREADY on the front side, so no
+  // redundant tween fires on consecutive amp adds from the same side.
+  _setPreviewCameraView('front', true);
 }
 
 function removeSlot(slotIdx) {
@@ -626,7 +611,7 @@ function removeSlot(slotIdx) {
   _currentRack.slots.splice(slotIdx, 1);
   persistCurrentRack();
   renderRackMid();
-  // v=704 — same reasoning as addAmpToRack above; do not auto-tween.
+  _setPreviewCameraView('front', true);
 }
 
 function renderRackMid() {
