@@ -6835,7 +6835,7 @@ function _addMesh(group, geometry, material, x, y, z) {
 // (accent terracotta = active acoustic surface) + back + optional armrests.
 function _build_seat(w, d, h, broken) {
   const group = new THREE.Group();
-  const matBase = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_DARK,  0.85);
+  const matLeg  = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_DARK,  0.85);
   const matCush = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT,      0.65);
   const matBack = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_MID,   0.80);
   const matArm  = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_LIGHT, 0.80);
@@ -6843,8 +6843,21 @@ function _build_seat(w, d, h, broken) {
   const seatTop_z = Math.min(0.50, h * 0.42);
   const cushHi_z  = Math.min(0.55, h * 0.46);
   const armHi_z   = Math.min(0.72, h * 0.55);
+  const legSize   = 0.05;
+  const legInset  = 0.06;
 
-  _addMesh(group, new THREE.BoxGeometry(w * 0.92, 0.10, d * 0.92), matBase, 0, 0.05, d / 2);
+  // Four corner legs from floor (z=0) to seat bottom (seatTop_z).
+  // Replaces the v=658 floor-slab approach that left a visible gap
+  // between the floor and the cushion (UAT v=673: "the seat and footer
+  // are not connected, this is not real"). Legs at the corners of the
+  // cushion footprint — works for theatre seats AND office chairs.
+  for (const sx of [-1, +1]) {
+    for (const sy of [0, 1]) {
+      const xc = sx * (w / 2 - legInset);
+      const zc = sy === 0 ? legInset : (d - legInset);
+      _addMesh(group, new THREE.BoxGeometry(legSize, seatTop_z, legSize), matLeg, xc, seatTop_z / 2, zc);
+    }
+  }
   const cushion = _addMesh(group, new THREE.BoxGeometry(w * 0.86, cushHi_z - seatTop_z, d * 0.84), matCush, 0, (seatTop_z + cushHi_z) / 2, d * 0.46);
   _addMesh(group, new THREE.BoxGeometry(w * 0.86, h - cushHi_z, 0.08), matBack, 0, (cushHi_z + h) / 2, d - 0.08);
   if (w >= 0.45) {
