@@ -611,13 +611,14 @@ function addAmpToRack(ampId) {
   });
   persistCurrentRack();
   renderRackMid();
-  // v=697 — after a slot change, swing the camera back to the FRONT
-  // view. The amp's label / knobs / LEDs / mounting ears are on the
-  // -Z (front) face per the v=691 panel-flip; if the user had previously
-  // orbited around to the rear (e.g. last action was clicking "Open
-  // rear"), they would otherwise watch their freshly-added amp appear
-  // on the side they CAN'T see.
-  _setPreviewCameraView('front', true);
+  // v=704 — removed the auto-camera-snap that v=697 added. The
+  // _lastSnappedView guard (v=703) was supposed to skip the tween
+  // when already at the front, but the chain of races (OrbitControls
+  // damping, 'start' event firing on amp-tile clicks that happened
+  // over the canvas margin, the seed being overwritten) kept producing
+  // "camera moves on every amp click." The simplest fix is to not
+  // touch the camera here. If the user opened the rear door earlier,
+  // they can click "Open front" or orbit manually — both still work.
 }
 
 function removeSlot(slotIdx) {
@@ -625,9 +626,7 @@ function removeSlot(slotIdx) {
   _currentRack.slots.splice(slotIdx, 1);
   persistCurrentRack();
   renderRackMid();
-  // Same reasoning as addAmpToRack — keep the editor returning to a
-  // visible-from-the-front state after every slot mutation.
-  _setPreviewCameraView('front', true);
+  // v=704 — same reasoning as addAmpToRack above; do not auto-tween.
 }
 
 function renderRackMid() {
