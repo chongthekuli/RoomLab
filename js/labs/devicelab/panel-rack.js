@@ -584,6 +584,13 @@ function addAmpToRack(ampId) {
   });
   persistCurrentRack();
   renderRackMid();
+  // v=697 — after a slot change, swing the camera back to the FRONT
+  // view. The amp's label / knobs / LEDs / mounting ears are on the
+  // -Z (front) face per the v=691 panel-flip; if the user had previously
+  // orbited around to the rear (e.g. last action was clicking "Open
+  // rear"), they would otherwise watch their freshly-added amp appear
+  // on the side they CAN'T see.
+  _setPreviewCameraView('front', true);
 }
 
 function removeSlot(slotIdx) {
@@ -591,6 +598,9 @@ function removeSlot(slotIdx) {
   _currentRack.slots.splice(slotIdx, 1);
   persistCurrentRack();
   renderRackMid();
+  // Same reasoning as addAmpToRack — keep the editor returning to a
+  // visible-from-the-front state after every slot mutation.
+  _setPreviewCameraView('front', true);
 }
 
 function renderRackMid() {
