@@ -319,6 +319,11 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
       // stay -Infinity. Do NOT wire the field-mode scene flag into this
       // path — enforced by tests/outdoor-report-exclusion.test.mjs.
       outdoor: false,
+      // v=679 — placed furniture attenuates the direct field on each
+      // source→cell ray; the printed heatmap matches the live 2D + 3D
+      // viewports.
+      furniture: state.furniture,
+      furnitureCatalogue: getFurnitureCatalogue(),
     });
   } catch (err) {
     console.warn('[print-report] heatmap grid compute failed:', err);

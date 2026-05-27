@@ -1547,6 +1547,11 @@ function renderNormal(vp) {
       fieldBounds,
       temperature_C: outdoorOn ? (state.outdoor.temperature_C ?? 20) : undefined,
       humidity_pct:  outdoorOn ? (state.outdoor.humidity_pct ?? 70) : undefined,
+      // v=679 — placed furniture attenuates the direct field. Bookshelf
+      // or rack between source and a grid cell drops SPL via the
+      // segment-AABB barrier model in furniture-direct-blocking.js.
+      furniture: state.furniture,
+      furnitureCatalogue: getFurnitureCatalogue(),
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;

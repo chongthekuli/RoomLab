@@ -11068,6 +11068,11 @@ function rebuildHeatmap() {
     fieldBounds,
     temperature_C: outdoorOn ? (state.outdoor.temperature_C ?? 20) : undefined,
     humidity_pct:  outdoorOn ? (state.outdoor.humidity_pct ?? 70) : undefined,
+    // v=679 — placed furniture attenuates the direct field on each
+    // source→cell ray (segment-AABB barrier model). Matches the 2D
+    // viewport's heatmap call so 2D + 3D viewports agree.
+    furniture: state.furniture,
+    furnitureCatalogue: getFurnitureCatalogueMap(),
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
   // Publish the grid for the 3D legend to read (with metric tag so the

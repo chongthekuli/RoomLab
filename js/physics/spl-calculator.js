@@ -20,6 +20,7 @@ import { wallInsetPolygon } from './wall-inset.js';
 import { extractOverheadReflectors, computeOverheadReflectionPower } from './overhead-reflection.js';
 import { extractPorches, computePorchReverbPower } from './porch-enclosure.js';
 import { classifySource, listWallFacets } from './source-classification.js';
+import { furnitureDirectPathLossDb } from './furniture-direct-blocking.js';
 import {
   computeCouplingForAllBands,
   COUPLING_BANDS_HZ,
@@ -240,7 +241,7 @@ export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   };
 }
 
-export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null, airAbsorptionFn = null }) {
+export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null, airAbsorptionFn = null, furniture = null, furnitureCatalogue = null }) {
   const { r, azimuth_deg, elevation_deg } = localAngles(
     speakerState.position, speakerState.aim, listenerPos
   );
@@ -288,12 +289,28 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
     spl_db -= outdoor_obstacle_loss_db;
   }
 
+  // FurnitureLAB direct-path blocking (v=679, 2026-05-27). When a
+  // placed bookshelf / table / chair sits on the source→listener line
+  // its sub-volumes attenuate the direct field. Same physics as the
+  // precision tracer's Beer-Lambert sink for porous items + a barrier
+  // μ for reflective ones. No-op when no furniture or no catalogue.
+  let furniture_loss_db = 0;
+  if (Array.isArray(furniture) && furniture.length > 0 && furnitureCatalogue && materials?.frequency_bands_hz) {
+    furniture_loss_db = furnitureDirectPathLossDb(
+      speakerState.position, listenerPos,
+      furniture, furnitureCatalogue,
+      materials.frequency_bands_hz, freq_hz,
+    );
+    spl_db -= furniture_loss_db;
+  }
+
   return {
     r, azimuth_deg, elevation_deg, attn_db: attn, spl_db,
     through_wall,
     wallsCrossed: tl.wallsCrossed,
     tl_db_applied: tl.tl_db,
     outdoor_obstacle_loss_db,
+    furniture_loss_db,
   };
 }
 
@@ -498,6 +515,8 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   outdoorObstacles = null,    // optional; auto-extracted from room.surauStructure when null
   airAbsorptionFn = null,     // optional (freq_hz)=>dB/m closure — OUTDOOR field
                               // T/RH-parametric ISO 9613-1. Null → indoor table.
+  furniture = null,           // v=679: state.furniture for direct-path blocking
+  furnitureCatalogue = null,  // v=679: Map<id, row> for sub-volume lookup
 } = {}) {
   const { sourceCtx, freq_hz, reverbActive, revConst_db, eqGainDb, L_p_rev_inside_per_band } = ctx;
   // Phase A5 (2026-05-24, Martina audit §2.B): ctx fields are now
@@ -564,6 +583,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
       speakerDef: def, speakerState: src, listenerPos,
       freq_hz, room, materials, airAbsorption, eqGainDb,
       outdoorObstacles: obstacles, airAbsorptionFn,
+      furniture, furnitureCatalogue,
     });
     const spl_db = d.spl_db;
     if (!isFinite(spl_db)) continue;
@@ -797,6 +817,8 @@ export function computeMultiSourceSPL({
   eqGainDb = 0,
   enableTier1a = PHYSICS_P1_5_ENABLED,
   airAbsorptionFn = null,
+  furniture = null,              // v=679 — direct-path blocking by placed furniture
+  furnitureCatalogue = null,
 }) {
   // Phase 7 — gate the interior reverberant context on the listener's
   // geometric classification. When the listener is OUTSIDE the parent
@@ -848,6 +870,7 @@ export function computeMultiSourceSPL({
   });
   return computeMultiSourceSPLFromContext(ctx, listenerPos, {
     room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn,
+    furniture, furnitureCatalogue,
   });
 }
 
@@ -1064,6 +1087,8 @@ export function computeSPLGrid({
   temperature_C = DEFAULT_TEMPERATURE_C,  // ISO 9613-1 parametric inputs (field)
   humidity_pct = 70,
   pressure_kPa = 101.325,
+  furniture = null,            // v=679 — placed FurnitureLAB items for direct-path blocking
+  furnitureCatalogue = null,
 }) {
   const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
 
@@ -1175,7 +1200,7 @@ export function computeSPLGrid({
           })
         : ctxInside);
 
-  const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn };
+  const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn, furniture, furnitureCatalogue };
 
   // Phase 7 (Dr. Chen audit 2026-05-23): cells inside the PARENT footprint
   // but in the WALL-THICKNESS annulus (between outer + inner polygons) are
