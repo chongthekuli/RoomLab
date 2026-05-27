@@ -245,12 +245,15 @@ function mountPreview() {
   _previewScene = new THREE.Scene();
   _previewScene.background = new THREE.Color(0x222934);
   _previewCamera = new THREE.PerspectiveCamera(35, 1, 0.05, 30);
-  // Camera in FRONT of the rack so the user is looking at the front
-  // door (rack-render.js coord frame: front face normal at -Z, rear at
-  // +Z). v=686 had this at +2.0 and viewer was staring at the rear
-  // perforated-steel door instead — door-open animations and
-  // mounting-ear screws were on the far side and invisible.
-  _previewCamera.position.set(1.6, 1.2, -2.0);
+  // Camera in FRONT of the rack with a slight 3/4 angle (v=692).
+  // Rack-render coord frame: front face normal at -Z; the amp labels,
+  // mesh-glass door, mounting ears + cage-nut screws all sit on the
+  // -Z side after the v=691 amp-panel flip. Camera at (0.9, 1.6, -2.4)
+  // → target (0, 1.0, 0) gives a near-head-on view of the front with
+  // a gentle 3/4 tilt so the user sees the door + the labels + the
+  // mounting flanges in one frame on first load. OrbitControls still
+  // lets them spin around.
+  _previewCamera.position.set(0.9, 1.6, -2.4);
 
   // IBL — RoomEnvironment baked once into a PMREM texture. Without
   // this, MeshStandardMaterials with metalness > 0.5 (our brushed
@@ -293,7 +296,7 @@ function mountPreview() {
   _previewControls.dampingFactor = 0.08;
   _previewControls.minDistance = 0.5;
   _previewControls.maxDistance = 6;
-  _previewControls.target.set(0, 0.8, 0);
+  _previewControls.target.set(0, 1.0, 0);
 
   resizePreview();
   window.addEventListener('resize', resizePreview);
