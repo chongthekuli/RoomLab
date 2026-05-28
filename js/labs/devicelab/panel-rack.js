@@ -386,8 +386,18 @@ function mountPreview() {
 
   // Controls
   _previewControls = new OrbitControls(_previewCamera, _previewRenderer.domElement);
-  _previewControls.enableDamping = true;
-  _previewControls.dampingFactor = 0.08;
+  // v=710 — damping disabled. With enableDamping=true the OrbitControls
+  // internal sphericalDelta keeps draining across frames, gradually
+  // shifting camera.position even when the user isn't touching the
+  // canvas. That drift turned the v=709 lookZ skip check into a
+  // ping-pong: tween places camera exactly at (-2.4 Z), damping moves
+  // it toward (-2.3, -2.2, -2.1…), next amp-add finds lookZ slipping
+  // below the threshold → re-tween. Disabling damping locks the
+  // camera at whatever position the tween / user-drag put it. The
+  // user still gets smooth orbit feel during a mouse-drag (OrbitControls
+  // updates continuously while button is held); they just don't get
+  // the post-release glide. Net UX win.
+  _previewControls.enableDamping = false;
   _previewControls.minDistance = 0.5;
   _previewControls.maxDistance = 6;
   _previewControls.target.set(
