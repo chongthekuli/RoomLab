@@ -7293,28 +7293,47 @@ function _build_theaterSeat(w, d, h, broken) {
     const armLo_y     = cushY + 0.015;
     const armHi_y     = armLo_y + 0.085;
     const armBackHi   = armLo_y + 0.115;   // armrest is slightly taller at the rear
-    const armLen      = d * 0.78;
+    // v=716 fix: armrest must NOT extend past the cushion's front edge.
+    // Anchor the back end near the backrest face and the front nose well
+    // back from the cushion's front edge — real cinema chairs have armrests
+    // shorter than the cushion depth.
+    const armBackZ    = d - 0.07;
+    const armFrontZ   = d * 0.18;
+    const armLen      = armBackZ - armFrontZ;
+    const armCentreZ  = (armBackZ + armFrontZ) / 2;
     const armW        = 0.085;
-    const armCentreZ  = d * 0.52;
-    // Side-view profile in shape coords (origin = bottom-front corner).
-    // Z grows from 0 (front) to armLen (back) inside the shape's X.
+    // Side-view profile in shape coords, CENTRED on shape-x = 0 so that
+    // position.z = armCentreZ places the armrest exactly where intended
+    // (approach #2 from Viktor's fix plan). The rotation.y = +π/2 below
+    // maps shape-+x → world -z, so we make shape-x = +armLen/2 the FRONT
+    // nose (low, rounded) and shape-x = -armLen/2 the TALL BACK — then the
+    // tall back lands at world z = armCentreZ + armLen/2 = armBackZ.
     const armShape = new THREE.Shape();
-    const r = 0.04;
-    armShape.moveTo(r, 0);
-    armShape.lineTo(armLen - r, 0);
-    armShape.quadraticCurveTo(armLen, 0, armLen, r);
-    armShape.lineTo(armLen, armBackHi - armLo_y - r);
-    armShape.quadraticCurveTo(armLen, armBackHi - armLo_y,
-                              armLen - r, armBackHi - armLo_y);
-    // top edge slopes gently down toward the front
-    armShape.lineTo(armLen * 0.18 + r, armHi_y - armLo_y);
-    armShape.quadraticCurveTo(armLen * 0.18, armHi_y - armLo_y,
-                              armLen * 0.18 - 0.01, armHi_y - armLo_y - 0.005);
-    // rounded front nose
-    armShape.lineTo(r, (armHi_y - armLo_y) * 0.55);
-    armShape.quadraticCurveTo(0, (armHi_y - armLo_y) * 0.55, 0, (armHi_y - armLo_y) * 0.55 - r);
-    armShape.lineTo(0, r);
-    armShape.quadraticCurveTo(0, 0, r, 0);
+    const r       = 0.04;
+    const halfLen = armLen / 2;
+    const topHi   = armHi_y   - armLo_y;          // front top height (above armLo_y)
+    const topBack = armBackHi - armLo_y;          // back top height
+    // Walk the perimeter CCW starting from the back-bottom corner.
+    // bottom edge: back-bottom → front-bottom
+    armShape.moveTo(-halfLen + r, 0);
+    armShape.lineTo( halfLen - r, 0);
+    // front-bottom rounded corner up to the front nose
+    armShape.quadraticCurveTo(halfLen, 0, halfLen, r);
+    armShape.lineTo(halfLen, topHi * 0.55 - r);
+    armShape.quadraticCurveTo(halfLen, topHi * 0.55,
+                              halfLen - r, topHi * 0.55);
+    // top edge slopes gently UP from front nose toward the back slab.
+    // The slope starts at the front-top corner (halfLen - r, topHi*0.55)
+    // and reaches full front-top height shortly behind it.
+    armShape.lineTo(halfLen - armLen * 0.18 + 0.01, topHi - 0.005);
+    armShape.quadraticCurveTo(halfLen - armLen * 0.18, topHi,
+                              halfLen - armLen * 0.18 - r, topHi);
+    // long flat-ish top heading to the back, finishing at the tall back slab
+    armShape.lineTo(-halfLen + r, topBack);
+    armShape.quadraticCurveTo(-halfLen, topBack, -halfLen, topBack - r);
+    // back face down to bottom
+    armShape.lineTo(-halfLen, r);
+    armShape.quadraticCurveTo(-halfLen, 0, -halfLen + r, 0);
     const armGeo = flatExtrude(armShape, armW, 0.012);
     // Cup-holder dish — LatheGeometry profile around Y axis. Outer lip at
     // r=0.040, walls drop to r=0.022 inside, flat bottom at depth 0.020.
@@ -7331,22 +7350,23 @@ function _build_theaterSeat(w, d, h, broken) {
 
     for (const sx of [-1, +1]) {
       const armMesh = new THREE.Mesh(armGeo, matArm);
-      // Shape was built in (z, y) — rotate so shape's +z (extrude axis)
-      // aligns with world X. Then we offset along world X to place left/right.
+      // Shape was built centred on shape-x = 0 (length axis) and shape-y
+      // = vertical. rotation.y = +π/2 maps shape-+x → world -z and shape
+      // extrude axis (+z) → world +x. The shape was authored so that
+      // shape-x = +halfLen is the front nose → world z = armCentreZ
+      // - halfLen = armFrontZ; shape-x = -halfLen is the tall back
+      // → world z = armCentreZ + halfLen = armBackZ.
       armMesh.rotation.y = Math.PI / 2;
-      // After rotation, shape-x (was depth) maps to world +z; shape-y stays world +y.
-      // Place the armrest with its shape-x=0 at armCentreZ - armLen/2 (the front).
       armMesh.position.set(sx * (w / 2 - armW / 2 - 0.005),
                            armLo_y,
-                           armCentreZ - armLen / 2);
+                           armCentreZ);
       armMesh.castShadow = true; armMesh.receiveShadow = true;
       group.add(armMesh);
 
-      // Cup-holder dish — sunk into the top of the armrest near the front.
-      // Place at the forward third of the armrest so it reads as "near the
-      // user's hand", per the user's reference photos.
+      // Cup-holder dish — sunk into the top of the armrest, on the forward
+      // third (near the user's hand). One dish PER side per Viktor's spec.
       const dishMesh = new THREE.Mesh(dishGeo, matDish);
-      const dishZ = armCentreZ - armLen / 2 + armLen * 0.22;
+      const dishZ    = armFrontZ + armLen * 0.22;   // ~z = 0.20 for d=0.6
       dishMesh.position.set(sx * (w / 2 - armW / 2 - 0.005),
                             armHi_y - 0.005,
                             dishZ);
