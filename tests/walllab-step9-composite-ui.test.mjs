@@ -195,8 +195,9 @@ for (const [cls, label] of cssClasses) {
 // =============================================================================
 
 const html = read('index.html');
+const _vAll = [...html.matchAll(/\?v=(\d+)\b/g)].map(m => Number(m[1]));
 check('index.html cache-bust is past v=622 (Step 9 shipped at v=623+)',
-  !/\?v=62[0-2]\b/.test(html) && /\?v=6(?:2[3-9]|[3-9][0-9])\b/.test(html));
+  _vAll.length > 0 && _vAll.every(v => v >= 623));
 
 console.log(`\n${failed === 0 ? 'OK' : 'FAIL'}  ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

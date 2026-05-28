@@ -159,8 +159,9 @@ check("Step 4 Hopkins derating still present (not regressed by Step 5)",
 // =============================================================================
 
 const html = read('index.html');
+const _vAll = [...html.matchAll(/\?v=(\d+)\b/g)].map(m => Number(m[1]));
 check('index.html cache-bust is past v=630 (Step 5 shipped at v=631+)',
-  !/\?v=63[0-0]\b/.test(html) && /\?v=6(?:3[1-9]|[4-9][0-9])\b/.test(html));
+  _vAll.length > 0 && _vAll.every(v => v >= 631));
 
 console.log(`\n${failed === 0 ? 'OK' : 'FAIL'}  ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

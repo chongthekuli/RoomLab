@@ -1121,6 +1121,7 @@
         44,
         50
       ],
+      "tl_third_oct": [12.1, 14, 16.1, 18.1, 20, 22, 24.1, 26, 28, 30.1, 32, 33.9, 36.1, 38, 39.9, 41.9, 44, 45.9],
       "surface_density_kg_m2": 7.8,
       "tl_estimated": true,
       "estimated": true,
@@ -1159,6 +1160,7 @@
         30,
         34
       ],
+      "tl_third_oct": [6.1, 8, 9.4, 10.7, 12, 14, 16.1, 18, 19.3, 20.7, 22, 23.3, 24.7, 26, 27.3, 28.6, 30, 31.3],
       "surface_density_kg_m2": 12,
       "tl_estimated": true,
       "estimated": true,
@@ -1197,6 +1199,7 @@
         30,
         34
       ],
+      "tl_third_oct": [6.1, 8, 9.4, 10.7, 12, 14, 16.1, 18, 19.3, 20.7, 22, 23.3, 24.7, 26, 27.3, 28.6, 30, 31.3],
       "surface_density_kg_m2": 12,
       "tl_estimated": true,
       "estimated": true,
@@ -1235,6 +1238,7 @@
         26,
         30
       ],
+      "tl_third_oct": [4.1, 6, 7.4, 8.7, 10, 11.3, 12.7, 14, 15.3, 16.7, 18, 19.3, 20.7, 22, 23.3, 24.6, 26, 27.3],
       "surface_density_kg_m2": 4,
       "tl_estimated": true,
       "estimated": true,
@@ -1273,6 +1277,7 @@
         34,
         38
       ],
+      "tl_third_oct": [8.1, 10, 11.8, 13.4, 15, 16.7, 18.4, 20, 22, 24.1, 26, 27.3, 28.7, 30, 31.3, 32.6, 34, 35.3],
       "surface_density_kg_m2": 15,
       "tl_estimated": true,
       "estimated": true,
@@ -1311,6 +1316,7 @@
         26,
         30
       ],
+      "tl_third_oct": [4.1, 6, 7.4, 8.7, 10, 11.3, 12.7, 14, 15.3, 16.7, 18, 19.3, 20.7, 22, 23.3, 24.6, 26, 27.3],
       "surface_density_kg_m2": 4,
       "tl_estimated": true,
       "estimated": true,

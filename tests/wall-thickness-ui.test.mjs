@@ -181,8 +181,9 @@ check('compactSlot path: non-default thickness → keeps object form (preserves 
 // =============================================================================
 
 const html = readFileSync('./index.html', 'utf8');
+const _vAll = [...html.matchAll(/\?v=(\d+)\b/g)].map(m => Number(m[1]));
 check('index.html cache-bust is past v=632 (Commit 3 shipped at v=633+)',
-  !/\?v=63[0-2]\b/.test(html) && /\?v=6(?:3[3-9]|[4-9][0-9])\b/.test(html));
+  _vAll.length > 0 && _vAll.every(v => v >= 633));
 
 console.log(`\n${failed === 0 ? 'OK' : 'FAIL'}  ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

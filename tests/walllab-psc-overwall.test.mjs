@@ -146,10 +146,12 @@ check('css adds .xs-image-leader class', /\.xs-image-leader\b/.test(css));
 check('css adds .wall-tl-net row styling', /\.wall-tl-net\b/.test(css));
 check('css adds .wall-ground-row layout', /\.wall-ground-row\b/.test(css));
 
-// (14) Cache bump — assert no stale ?v=60x left behind (PSC shipped at
-// v=610). Forward-compat: future cache bumps to v=611, v=612, … still pass.
+// (14) Cache bump — assert every ?v=NNN in index.html is >= 610 (PSC
+// shipped at v=610). Forward-compat: any future bump still passes as
+// long as no asset is left below the threshold.
 const html = read('index.html');
+const _vAll = [...html.matchAll(/\?v=(\d+)\b/g)].map(m => Number(m[1]));
 check('index.html cache-bust is past v=609 (PSC shipped at v=610+)',
-  !/\?v=60[0-9]\b/.test(html) && /\?v=6[1-9][0-9]\b/.test(html));
+  _vAll.length > 0 && _vAll.every(v => v >= 610));
 
 console.log(`\nOK  ${passed} assertions passed`);

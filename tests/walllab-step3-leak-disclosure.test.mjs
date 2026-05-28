@@ -108,8 +108,9 @@ check('table cells: leak description left-aligned, numeric columns right-aligned
 // =============================================================================
 
 const html = read('index.html');
+const _vAll = [...html.matchAll(/\?v=(\d+)\b/g)].map(m => Number(m[1]));
 check('index.html cache-bust is past v=628 (Step 3 shipped at v=629+)',
-  !/\?v=62[0-8]\b/.test(html) && /\?v=6(?:29|[3-9][0-9])\b/.test(html));
+  _vAll.length > 0 && _vAll.every(v => v >= 629));
 
 console.log(`\n${failed === 0 ? 'OK' : 'FAIL'}  ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

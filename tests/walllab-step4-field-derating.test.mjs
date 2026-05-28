@@ -110,8 +110,9 @@ check("comment names Dr. Chen's decoupled N correction (range 5-7, lock 6)",
 // =============================================================================
 
 const html = read('index.html');
+const _vAll = [...html.matchAll(/\?v=(\d+)\b/g)].map(m => Number(m[1]));
 check('index.html cache-bust is past v=629 (Step 4 shipped at v=630+)',
-  !/\?v=62[0-9]\b/.test(html) && /\?v=6(?:3[0-9]|[4-9][0-9])\b/.test(html));
+  _vAll.length > 0 && _vAll.every(v => v >= 630));
 
 console.log(`\n${failed === 0 ? 'OK' : 'FAIL'}  ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
