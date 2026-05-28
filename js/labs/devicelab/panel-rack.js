@@ -592,14 +592,15 @@ function addAmpToRack(ampId) {
   });
   persistCurrentRack();
   renderRackMid();
-  // v=707 design: amp-add never moves the camera. Trying to be smart
-  // about "snap to front if user is on rear" produced a chain of
-  // failed iterations (v=697/702/703/705/706). The camera is now
-  // exclusively under the user's control — door buttons (Open front /
-  // Open rear) tween explicitly, manual orbit works as expected, amp
-  // add/remove only updates rack geometry. If the user is on the
-  // rear and adds an amp, they can click "Open front" once to see
-  // the new amp on the visible side.
+  // v=708 — auto-tween to the FRONT view on amp-add so the user can
+  // see the just-added amp's labels / knobs / mounting ears (all on
+  // the -Z face per the v=691 panel flip). User's latest UAT confirmed
+  // door-button front/rear identities are correct, so PREVIEW_CAM
+  // _VIEWS.front IS the side with the amp panel visible.
+  // No skip-detection: always tween. The earlier skip-detection
+  // attempts (v=702/703/705/706) all had corner cases that produced
+  // worse UX than the unconditional tween. Predictable beats clever.
+  _setPreviewCameraView('front', true);
 }
 
 function removeSlot(slotIdx) {
@@ -607,6 +608,7 @@ function removeSlot(slotIdx) {
   _currentRack.slots.splice(slotIdx, 1);
   persistCurrentRack();
   renderRackMid();
+  _setPreviewCameraView('front', true);
 }
 
 function renderRackMid() {
