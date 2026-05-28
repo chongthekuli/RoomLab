@@ -7361,84 +7361,81 @@ function _build_theaterSeat(w, d, h, broken) {
     armShape.lineTo(-halfLen, r);
     armShape.quadraticCurveTo(-halfLen, 0, -halfLen + r, 0);
     const armGeo = flatExtrude(armShape, armW, 0.012);
-    // v=719 — CSG-drilled cup-holder hole.
+    // v=720 — CSG drill rewritten. v=719 used `brush.matrix.copy(...)` +
+    // matrixAutoUpdate=false, which evaluated to an empty subtraction
+    // (whole armrest disappeared). Two fixes:
+    //   (1) Pre-merge the armrest's ExtrudeGeometry vertices via
+    //       BufferGeometryUtils.mergeVertices so the mesh is manifold.
+    //       Raw ExtrudeGeometry has duplicated vertices at the bevel
+    //       seam that break the CSG manifold check silently.
+    //   (2) Set position/rotation on the Brush like a normal Mesh
+    //       (the documented three-bvh-csg pattern) instead of copying
+    //       matrices. Brush internally calls updateMatrix → updateBVH,
+    //       which needs the auto-update path.
     //
-    // Previous attempts (v=715/718) sat a fake "dish" geometry ON TOP of
-    // the armrest with no actual hole through the material, so it never
-    // read as drilled. This pass uses three-bvh-csg to subtract a
-    // cylinder from the armrest geometry, producing a real hole the
-    // user can see into. A thin dark disc at the bottom of the hole
-    // closes it off so it reads as a cup-holder recess, not an
-    // open-ended tunnel.
-    //
-    // Drill dimensions: inner radius 28 mm (matches a 56-mm-diameter
-    // 12-oz cup), full pierce through the 100-mm armrest thickness so
-    // the inner cylinder wall is visible from any 3D viewing angle.
-    // Floor disc sits 20 mm below the armrest top so the visible
-    // recess depth is 20 mm (≈ a typical cinema-chair recess depth).
+    // Drill dimensions: inner radius 28 mm (≈ 56 mm cup), 180 mm tall
+    // so it pierces the full 100 mm armrest cleanly. Floor disc 20 mm
+    // below armrest top forms the visible cup bottom.
     const evaluator = new Evaluator();
     evaluator.useGroups = false;
-    const drillR     = 0.028;
-    const drillH     = 0.18;          // taller than armrest, so it pierces cleanly
-    const recessDepth = 0.020;        // visible recess depth from armrest top
-    const drillGeo   = new THREE.CylinderGeometry(drillR, drillR, drillH, 28);
-    const floorDiscR = drillR - 0.0008;
-    const floorGeo   = new THREE.CircleGeometry(floorDiscR, 28);
+    const drillR      = 0.028;
+    const drillH      = 0.18;
+    const recessDepth = 0.020;
+    const drillGeo    = new THREE.CylinderGeometry(drillR, drillR, drillH, 32);
+    const floorGeo    = new THREE.CircleGeometry(drillR - 0.0008, 32);
+
+    // Pre-merge the extruded armrest geometry to remove duplicated
+    // vertices at the bevel seams. Without this CSG silently returns
+    // empty geometry on the first SUBTRACTION call.
+    let armGeoCsg;
+    try { armGeoCsg = mergeVertices(armGeo, 1e-5); }
+    catch { armGeoCsg = armGeo; }
 
     for (const sx of [-1, +1]) {
-      const armX = sx * (w / 2 - armW / 2 - 0.005);
-      const dishZ = armFrontZ + armLen * 0.22;   // ~z = 0.20 for d=0.6
+      const armX  = sx * (w / 2 - armW / 2 - 0.005);
+      const dishZ = armFrontZ + armLen * 0.22;
 
-      // Build the armrest mesh, position it, then CSG-subtract the
-      // cup-holder cylinder. The cylinder is positioned at the
-      // cup-holder location in WORLD coords; we use mesh matrices on
-      // both brushes so the boolean works in the same frame.
-      const armMesh = new THREE.Mesh(armGeo, matArm);
-      armMesh.rotation.y = Math.PI / 2;
-      armMesh.position.set(armX, armLo_y, armCentreZ);
-      armMesh.updateMatrixWorld();
-
-      const drillMesh = new THREE.Mesh(drillGeo);
-      // Cylinder axis is Y by default — good, we want a vertical hole.
-      // Centre the cylinder so it pierces the full armrest height
-      // cleanly: armrest spans [armLo_y, armBackHi] (10-13 cm tall),
-      // drill cylinder height = drillH = 180 mm. Centre at the armrest
-      // mid-height, which guarantees both ends poke OUT of the armrest.
-      drillMesh.position.set(armX, (armLo_y + armHi_y) / 2, dishZ);
-      drillMesh.updateMatrixWorld();
-
-      // CSG: subtract the drill cylinder from the armrest mesh.
-      const armBrush = new Brush(armGeo);
-      armBrush.matrix.copy(armMesh.matrixWorld);
-      armBrush.matrixAutoUpdate = false;
+      // Armrest brush — use position/rotation directly (not matrix.copy).
+      // Brush extends Mesh; the Evaluator reads matrixWorld from the
+      // auto-update path. Setting matrix manually with matrixAutoUpdate
+      // = false skips the BVH refresh that Brush.prepareGeometry needs.
+      const armBrush = new Brush(armGeoCsg, matArm);
+      armBrush.rotation.y = Math.PI / 2;
+      armBrush.position.set(armX, armLo_y, armCentreZ);
       armBrush.updateMatrixWorld();
 
+      // Drill cylinder centred on the armrest mid-height so it pokes
+      // OUT both ends of the armrest body (clean pierce → clean hole).
       const drillBrush = new Brush(drillGeo);
-      drillBrush.matrix.copy(drillMesh.matrixWorld);
-      drillBrush.matrixAutoUpdate = false;
+      drillBrush.position.set(armX, (armLo_y + armHi_y) / 2, dishZ);
       drillBrush.updateMatrixWorld();
 
       let drilledMesh;
       try {
         const result = evaluator.evaluate(armBrush, drillBrush, SUBTRACTION);
+        // Defensive: if CSG returned empty geometry, fall back.
+        const vertCount = result?.geometry?.attributes?.position?.count ?? 0;
+        if (vertCount < 12) {
+          throw new Error(`CSG returned ${vertCount} vertices (expected >> 12)`);
+        }
         result.material = matArm;
         result.castShadow = true;
         result.receiveShadow = true;
         drilledMesh = result;
       } catch (err) {
-        // CSG failed (rare — non-manifold geometry edge case). Fall
-        // back to the undrilled armrest so the chair still renders.
-        console.warn('[theatre-seat] CSG drill failed, using undrilled armrest:', err);
-        armMesh.castShadow = true; armMesh.receiveShadow = true;
-        drilledMesh = armMesh;
+        console.warn('[theatre-seat] CSG drill failed, rendering solid armrest:', err);
+        const fallback = new THREE.Mesh(armGeo, matArm);
+        fallback.rotation.y = Math.PI / 2;
+        fallback.position.set(armX, armLo_y, armCentreZ);
+        fallback.castShadow = true; fallback.receiveShadow = true;
+        drilledMesh = fallback;
       }
       group.add(drilledMesh);
 
-      // Floor disc — closes off the bottom of the drilled hole so the
-      // recess reads as a cup, not a through-tunnel. Dark matte disc
-      // positioned recessDepth below the armrest top.
+      // Floor disc — closes the bottom of the drilled hole so it
+      // reads as a cup-holder recess, not an open through-tunnel.
       const floorMesh = new THREE.Mesh(floorGeo, matDish);
-      floorMesh.rotation.x = -Math.PI / 2;   // horizontal (face up)
+      floorMesh.rotation.x = -Math.PI / 2;
       floorMesh.position.set(armX, armHi_y - recessDepth, dishZ);
       floorMesh.receiveShadow = true;
       group.add(floorMesh);
