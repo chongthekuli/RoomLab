@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -7085,90 +7086,272 @@ function _build_flatPad(w, d, h, broken) {
   return { group, activeMesh: pad };
 }
 
-// Theatre-seat family — cinema / auditorium fold-up chair. Pedestal-foot
-// mount (NOT 4 legs), tall contoured back with dark plastic shell + soft
-// accent-coloured upholstery, chunky armrests with a recessed cup-holder
-// dish, and a sponge cushion (roughness ≈ 0.97 — reads as porous foam so
-// the user can SEE the absorption that the catalogue's A_obj already
-// encodes). v=714. The absorption coefficients themselves come from
-// Beranek & Hidaka (1998) per the catalogue row's _source — visual
-// fidelity only here, not a physics change.
+// Theatre-seat family — cinema / auditorium fold-up chair. Real-fidelity
+// build (v=715): sled-foot pedestal extrude, contoured backrest with hard
+// black shell + soft red upholstered front, sponge cushion with rolled
+// bevel edge (smooth-normalised), chunky bevelled armrests with a recessed
+// LatheGeometry cup-holder dish. Replaces the v=714 BoxGeometry stack the
+// user called "Lego".
+//
+// Geometry budget per chair: ~2.5k tris (curveSegments=6, bevelSegments=2).
+// Materials reuse FURN_ACCENT for upholstery (sponge: roughness ≈ 0.97
+// reads as porous foam so the user SEES the absorption that the
+// catalogue's A_obj already encodes — physics unchanged, fidelity only).
 function _build_theaterSeat(w, d, h, broken) {
   const group = new THREE.Group();
-  const matPed   = _furnMat(broken ? FURN_BROKEN : 0x1A1A1A, 0.40);   // black plastic pedestal feet
-  const matShell = _furnMat(broken ? FURN_BROKEN : 0x252525, 0.55);   // dark shell behind upholstery
+  const matPed   = _furnMat(broken ? FURN_BROKEN : 0x1A1A1A, 0.45);   // black plastic sled feet
+  const matShell = _furnMat(broken ? FURN_BROKEN : 0x1F1F1F, 0.50);   // hard back shell
   const matCush  = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.97);// sponge — extremely matte
   const matBack  = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.95);// back upholstery — matte
-  const matArm   = _furnMat(broken ? FURN_BROKEN : 0x2A2A2A, 0.50);   // armrest plastic
-  const matDish  = _furnMat(broken ? FURN_BROKEN : 0x141414, 0.35);   // cup-holder dish (recessed)
+  const matArm   = _furnMat(broken ? FURN_BROKEN : 0x222222, 0.50);   // armrest plastic
+  const matDish  = _furnMat(broken ? FURN_BROKEN : 0x0E0E0E, 0.40);   // cup-holder dish (recessed)
 
-  // --- Pedestal feet (sled-style, 2× black mounts under the seat) ---
-  const pedTop_z = Math.min(0.40, h * 0.34);
-  const pedPostW = 0.06;
-  const pedFootD = 0.18;
-  const pedSpan  = w * 0.70;   // foot centre-to-foot centre
-  const pedZ_foot = 0.02;
+  // ===================================================================
+  // Helper: rounded-rectangle Shape centred at origin in its own XY plane.
+  // Used as the base profile for every extrude in this builder.
+  // ===================================================================
+  const roundedRectShape = (rw, rh, r) => {
+    const sh = new THREE.Shape();
+    const x0 = -rw / 2, y0 = -rh / 2, x1 = rw / 2, y1 = rh / 2;
+    const rr = Math.min(r, rw / 2, rh / 2);
+    sh.moveTo(x0 + rr, y0);
+    sh.lineTo(x1 - rr, y0);
+    sh.quadraticCurveTo(x1, y0, x1, y0 + rr);
+    sh.lineTo(x1, y1 - rr);
+    sh.quadraticCurveTo(x1, y1, x1 - rr, y1);
+    sh.lineTo(x0 + rr, y1);
+    sh.quadraticCurveTo(x0, y1, x0, y1 - rr);
+    sh.lineTo(x0, y0 + rr);
+    sh.quadraticCurveTo(x0, y0, x0 + rr, y0);
+    return sh;
+  };
+
+  // Helper: pillow-style extrude (small bevel both sides) → reads soft.
+  const pillowExtrude = (shape, depth, bevel = 0.018) => {
+    const g = new THREE.ExtrudeGeometry(shape, {
+      depth, steps: 1, curveSegments: 8,
+      bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel,
+      bevelSegments: 2,
+    });
+    // Centre along extrude axis (extrude default goes +z from shape plane).
+    g.translate(0, 0, -depth / 2);
+    // Merge near-coincident verts + recompute normals so the bevel reads
+    // smooth instead of faceted — same trick Three.js docs show for
+    // ExtrudeGeometry "soft" looks. Wrap in try (mergeVertices throws if
+    // attribute counts mismatch on older addons).
+    try {
+      const merged = mergeVertices(g, 1e-4);
+      merged.computeVertexNormals();
+      return merged;
+    } catch { g.computeVertexNormals(); return g; }
+  };
+
+  const flatExtrude = (shape, depth, bevel = 0.010) => {
+    const g = new THREE.ExtrudeGeometry(shape, {
+      depth, steps: 1, curveSegments: 6,
+      bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel,
+      bevelSegments: 1,
+    });
+    g.translate(0, 0, -depth / 2);
+    g.computeVertexNormals();
+    return g;
+  };
+
+  // ===================================================================
+  // 1) Sled feet — black plastic. Side-view profile: long flat bar on the
+  // floor with a short riser column that meets the seat shell. Extruded
+  // along X by pedThickness so each foot is a thin chunky sled.
+  // ===================================================================
+  const pedTop_z   = Math.min(0.42, h * 0.36);
+  const pedThk     = 0.055;        // extrude depth (= foot thickness along X)
+  const pedSpan    = w * 0.66;     // foot-pair centre-to-centre along X
+  const sledLen    = d * 0.86;     // sled length along z
+  const sledHi     = 0.04;         // sled flat-bar height
+  const riserBase  = 0.18;         // riser foot length on the floor
+  const riserTop   = 0.16;         // riser width where it meets the seat
+  // Side-view profile in the (z, y) plane → built as a Shape (XY) which we
+  // then extrude in X via rotation/positioning.
+  const sledShape = new THREE.Shape();
+  // Coordinate system inside the shape: x ↔ depth-along-z, y ↔ height-along-y
+  const sledCx = sledLen / 2;
+  sledShape.moveTo(-sledCx, 0);
+  sledShape.lineTo( sledCx, 0);
+  sledShape.lineTo( sledCx, sledHi);
+  // taper inward at the front (toward smaller z) up to the riser base
+  sledShape.lineTo( riserBase / 2,             sledHi);
+  sledShape.lineTo( riserTop  / 2,             pedTop_z);
+  sledShape.lineTo(-riserTop  / 2,             pedTop_z);
+  sledShape.lineTo(-riserBase / 2,             sledHi);
+  sledShape.lineTo(-sledCx,                    sledHi);
+  sledShape.lineTo(-sledCx, 0);
+  const sledGeo = flatExtrude(sledShape, pedThk, 0.006);
+  // Extrude axis is the shape's +z (= world X here after rotation). We
+  // built the profile in the shape's XY where shape-X = world-Z (depth)
+  // and shape-Y = world-Y (height). Rotate so shape's normal aligns with
+  // world X.
   for (const sx of [-1, +1]) {
-    const xc = sx * pedSpan / 2;
-    // Sled feet: a back foot pad + a front foot pad on each side
-    _addMesh(group, new THREE.BoxGeometry(pedPostW, 0.04, pedFootD), matPed, xc, pedZ_foot, d * 0.62);
-    _addMesh(group, new THREE.BoxGeometry(pedPostW, 0.04, pedFootD), matPed, xc, pedZ_foot, d * 0.22);
-    // Vertical post connecting sled to seat shell
-    _addMesh(group, new THREE.BoxGeometry(pedPostW, pedTop_z - 0.04, pedPostW), matPed,
-      xc, (pedTop_z + 0.04) / 2, d * 0.42);
+    const m = new THREE.Mesh(sledGeo, matPed);
+    m.rotation.y = Math.PI / 2;            // shape's +z normal → +x world
+    m.position.set(sx * pedSpan / 2, 0, d / 2);
+    m.castShadow = true; m.receiveShadow = true;
+    group.add(m);
   }
 
-  // --- Seat shell (the dark base the cushion sits in) ---
-  const shellTop_z = pedTop_z;
-  const shellHi_z  = shellTop_z + 0.07;
-  _addMesh(group, new THREE.BoxGeometry(w * 0.92, shellHi_z - shellTop_z, d * 0.84),
-    matShell, 0, (shellTop_z + shellHi_z) / 2, d * 0.50);
+  // ===================================================================
+  // 2) Seat shell — the hard black tub the cushion sits in. Rounded-rect
+  // pan from above, modest depth.
+  // ===================================================================
+  const shellY      = pedTop_z;
+  const shellThk    = 0.06;
+  const shellShape  = roundedRectShape(w * 0.94, d * 0.84, 0.055);
+  const shellGeo    = flatExtrude(shellShape, shellThk, 0.012);
+  // shape XY → extrude axis Z. We want shape XY to lie in world XZ (i.e.
+  // horizontal pan), so rotate -90° about world X. Shape Y → world Z.
+  const shellMesh = new THREE.Mesh(shellGeo, matShell);
+  shellMesh.rotation.x = -Math.PI / 2;
+  shellMesh.position.set(0, shellY + shellThk / 2, d / 2);
+  shellMesh.castShadow = true; shellMesh.receiveShadow = true;
+  group.add(shellMesh);
 
-  // --- Sponge cushion (two-layer stack so the rolled edge reads from any
-  // angle — matches the visual "pillow" look in the user's reference) ---
-  const cushMid_z = shellHi_z + 0.06;
-  const cushHi_z  = shellHi_z + 0.11;
-  // Lower wider layer
-  _addMesh(group, new THREE.BoxGeometry(w * 0.86, cushMid_z - shellHi_z, d * 0.80),
-    matCush, 0, (shellHi_z + cushMid_z) / 2, d * 0.48);
-  // Upper narrower layer — the active acoustic surface (selection ring binds here)
-  const cushion = _addMesh(group, new THREE.BoxGeometry(w * 0.78, cushHi_z - cushMid_z, d * 0.72),
-    matCush, 0, (cushMid_z + cushHi_z) / 2, d * 0.48);
+  // ===================================================================
+  // 3) Sponge cushion — pillow extrude with generous bevel so the rolled
+  // edge reads from any angle. activeMesh = this (selection ring binds).
+  // ===================================================================
+  const cushY       = shellY + shellThk;
+  const cushThk     = 0.10;
+  const cushShape   = roundedRectShape(w * 0.84, d * 0.74, 0.085);
+  const cushGeo     = pillowExtrude(cushShape, cushThk, 0.022);
+  const cushion     = new THREE.Mesh(cushGeo, matCush);
+  cushion.rotation.x = -Math.PI / 2;
+  cushion.position.set(0, cushY + cushThk / 2, d * 0.48);
+  cushion.castShadow = true; cushion.receiveShadow = true;
+  group.add(cushion);
 
-  // --- Backrest: dark shell behind + soft upholstery in front ---
-  const backLo_z = cushHi_z;
-  const backHi_z = h * 0.98;
-  // Hard outer shell (seen from behind — most cinema chairs show this)
-  _addMesh(group, new THREE.BoxGeometry(w * 0.88, backHi_z - backLo_z, 0.05),
-    matShell, 0, (backLo_z + backHi_z) / 2, d - 0.025);
-  // Upper "headrest" wing — slightly wider band near the top, hard shell
-  _addMesh(group, new THREE.BoxGeometry(w * 0.92, 0.10, 0.05),
-    matShell, 0, backHi_z - 0.06, d - 0.022);
-  // Soft upholstered front panel (sponge — the part the audience leans into)
-  // Two-layer: wider lower mid-back + narrower upper-back for the contoured look
-  _addMesh(group, new THREE.BoxGeometry(w * 0.72, (backHi_z - backLo_z) * 0.55, 0.09),
-    matBack, 0, backLo_z + (backHi_z - backLo_z) * 0.30, d - 0.075);
-  _addMesh(group, new THREE.BoxGeometry(w * 0.62, (backHi_z - backLo_z) * 0.40, 0.09),
-    matBack, 0, backLo_z + (backHi_z - backLo_z) * 0.72, d - 0.075);
+  // ===================================================================
+  // 4) Backrest — hard outer shell (curved-top tombstone profile, seen
+  // from behind) + soft upholstered front panel (pillow extrude, seen by
+  // the audience). Profile drawn in the (x, y) front-view plane, then
+  // extruded by a thin depth along Z so shell sits at z ≈ d-shellD, front
+  // sits a bit forward.
+  // ===================================================================
+  const backLo_y  = cushY + cushThk + 0.005;
+  const backHi_y  = h - 0.01;
+  const backH     = backHi_y - backLo_y;
+  // Shell — wide rounded-top trapezoid silhouette, viewed from in front.
+  // Drawn in shape coords with the BASE on shape-y=0 so we can translate
+  // it straight up to backLo_y after extrude.
+  const shellW_lo = w * 0.88;
+  const shellW_hi = w * 0.80;
+  const shellTopR = (shellW_hi / 2) * 0.65;   // big rounded top corners
+  const backShell = new THREE.Shape();
+  backShell.moveTo(-shellW_lo / 2, 0);
+  backShell.lineTo( shellW_lo / 2, 0);
+  // taper up to the upper width
+  backShell.lineTo( shellW_hi / 2, backH - shellTopR);
+  backShell.quadraticCurveTo( shellW_hi / 2, backH, shellW_hi / 2 - shellTopR, backH);
+  backShell.lineTo(-shellW_hi / 2 + shellTopR, backH);
+  backShell.quadraticCurveTo(-shellW_hi / 2, backH, -shellW_hi / 2, backH - shellTopR);
+  backShell.lineTo(-shellW_lo / 2, 0);
+  const shellDepth = 0.06;
+  const backShellGeo = flatExtrude(backShell, shellDepth, 0.014);
+  // Shape XY is front-view, extrude along Z → matches our desired axes.
+  const backShellMesh = new THREE.Mesh(backShellGeo, matShell);
+  backShellMesh.position.set(0, backLo_y, d - shellDepth / 2 - 0.005);
+  backShellMesh.castShadow = true; backShellMesh.receiveShadow = true;
+  group.add(backShellMesh);
 
-  // --- Armrests with cup-holder dish (only render if seat is wide enough) ---
+  // Soft upholstered front — slightly smaller rounded-corner panel that
+  // pillows out toward the audience. Lower mid-back + upper-back are
+  // separated by a horizontal stitch gap to read as a contoured back.
+  const frontW    = w * 0.74;
+  const frontGap  = 0.018;                   // visible gap between mid + top pads
+  const midH      = backH * 0.55;
+  const topH      = backH * 0.40;
+  const padDepth  = 0.07;
+  const midShape  = roundedRectShape(frontW,            midH, 0.05);
+  const topShape  = roundedRectShape(frontW * 0.92,     topH, 0.07);
+  const midGeo    = pillowExtrude(midShape, padDepth, 0.024);
+  const topGeo    = pillowExtrude(topShape, padDepth, 0.024);
+  const midMesh = new THREE.Mesh(midGeo, matBack);
+  midMesh.position.set(0, backLo_y + midH / 2 + 0.01,
+                       d - shellDepth - padDepth / 2 + 0.002);
+  midMesh.castShadow = true; midMesh.receiveShadow = true;
+  group.add(midMesh);
+  const topMesh = new THREE.Mesh(topGeo, matBack);
+  topMesh.position.set(0, backLo_y + midH + frontGap + topH / 2 + 0.01,
+                       d - shellDepth - padDepth / 2 + 0.002);
+  topMesh.castShadow = true; topMesh.receiveShadow = true;
+  group.add(topMesh);
+
+  // ===================================================================
+  // 5) Armrests with recessed cup-holder dish.
+  // Side-view profile (in shape XY, x↔depth-along-z, y↔height-along-y):
+  // a chunky rounded slab that tapers down slightly toward the front.
+  // Extruded by armW along the shape's +z (= world X) axis.
+  // ===================================================================
   if (w >= 0.40) {
-    const armLo_z = cushMid_z + 0.01;
-    const armHi_z = armLo_z + 0.10;
-    const armForwardD = d * 0.62;  // armrest length front-to-back
-    const armForwardCentre = d * 0.52;
+    const armLo_y     = cushY + 0.015;
+    const armHi_y     = armLo_y + 0.085;
+    const armBackHi   = armLo_y + 0.115;   // armrest is slightly taller at the rear
+    const armLen      = d * 0.78;
+    const armW        = 0.085;
+    const armCentreZ  = d * 0.52;
+    // Side-view profile in shape coords (origin = bottom-front corner).
+    // Z grows from 0 (front) to armLen (back) inside the shape's X.
+    const armShape = new THREE.Shape();
+    const r = 0.04;
+    armShape.moveTo(r, 0);
+    armShape.lineTo(armLen - r, 0);
+    armShape.quadraticCurveTo(armLen, 0, armLen, r);
+    armShape.lineTo(armLen, armBackHi - armLo_y - r);
+    armShape.quadraticCurveTo(armLen, armBackHi - armLo_y,
+                              armLen - r, armBackHi - armLo_y);
+    // top edge slopes gently down toward the front
+    armShape.lineTo(armLen * 0.18 + r, armHi_y - armLo_y);
+    armShape.quadraticCurveTo(armLen * 0.18, armHi_y - armLo_y,
+                              armLen * 0.18 - 0.01, armHi_y - armLo_y - 0.005);
+    // rounded front nose
+    armShape.lineTo(r, (armHi_y - armLo_y) * 0.55);
+    armShape.quadraticCurveTo(0, (armHi_y - armLo_y) * 0.55, 0, (armHi_y - armLo_y) * 0.55 - r);
+    armShape.lineTo(0, r);
+    armShape.quadraticCurveTo(0, 0, r, 0);
+    const armGeo = flatExtrude(armShape, armW, 0.012);
+    // Cup-holder dish — LatheGeometry profile around Y axis. Outer lip at
+    // r=0.040, walls drop to r=0.022 inside, flat bottom at depth 0.020.
+    const dishProfile = [
+      new THREE.Vector2(0.000, 0.000),
+      new THREE.Vector2(0.022, 0.000),
+      new THREE.Vector2(0.026, 0.004),
+      new THREE.Vector2(0.028, 0.018),
+      new THREE.Vector2(0.038, 0.022),
+      new THREE.Vector2(0.044, 0.022),
+    ];
+    const dishGeo = new THREE.LatheGeometry(dishProfile, 22);
+    dishGeo.computeVertexNormals();
+
     for (const sx of [-1, +1]) {
-      const xc = sx * (w / 2 - 0.05);
-      // Main armrest body — chunky dark plastic
-      _addMesh(group, new THREE.BoxGeometry(0.09, armHi_z - armLo_z, armForwardD),
-        matArm, xc, (armLo_z + armHi_z) / 2, armForwardCentre);
-      // Forward "elbow" cap — slightly raised pad at the front of the armrest
-      _addMesh(group, new THREE.BoxGeometry(0.11, 0.04, 0.16),
-        matArm, xc, armHi_z + 0.02, armForwardCentre - armForwardD / 2 + 0.10);
-      // Cup-holder dish — small dark cylinder recessed into the elbow cap
-      const dishGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.012, 14);
-      _addMesh(group, dishGeo, matDish,
-        xc, armHi_z + 0.034, armForwardCentre - armForwardD / 2 + 0.10);
+      const armMesh = new THREE.Mesh(armGeo, matArm);
+      // Shape was built in (z, y) — rotate so shape's +z (extrude axis)
+      // aligns with world X. Then we offset along world X to place left/right.
+      armMesh.rotation.y = Math.PI / 2;
+      // After rotation, shape-x (was depth) maps to world +z; shape-y stays world +y.
+      // Place the armrest with its shape-x=0 at armCentreZ - armLen/2 (the front).
+      armMesh.position.set(sx * (w / 2 - armW / 2 - 0.005),
+                           armLo_y,
+                           armCentreZ - armLen / 2);
+      armMesh.castShadow = true; armMesh.receiveShadow = true;
+      group.add(armMesh);
+
+      // Cup-holder dish — sunk into the top of the armrest near the front.
+      // Place at the forward third of the armrest so it reads as "near the
+      // user's hand", per the user's reference photos.
+      const dishMesh = new THREE.Mesh(dishGeo, matDish);
+      const dishZ = armCentreZ - armLen / 2 + armLen * 0.22;
+      dishMesh.position.set(sx * (w / 2 - armW / 2 - 0.005),
+                            armHi_y - 0.005,
+                            dishZ);
+      dishMesh.castShadow = false; dishMesh.receiveShadow = true;
+      group.add(dishMesh);
     }
   }
 
