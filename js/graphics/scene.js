@@ -7290,9 +7290,20 @@ function _build_theaterSeat(w, d, h, broken) {
   // Extruded by armW along the shape's +z (= world X) axis.
   // ===================================================================
   if (w >= 0.40) {
-    const armLo_y     = cushY + 0.015;
-    const armHi_y     = armLo_y + 0.085;
-    const armBackHi   = armLo_y + 0.115;   // armrest is slightly taller at the rear
+    // v=717 fix: armrest must sit ABOVE the cushion at true elbow-rest
+    // height, not flank the cushion at the same Y. Previous values had
+    // armLo_y at cushY + 0.015 = 0.495 m, making the armrest top at
+    // 0.58 m — identical to the cushion top → the armrest visually
+    // fused with the cushion side. Real cinema chairs have the
+    // armrest top ~12-15 cm above the cushion top so the arm has
+    // something to actually rest ON.
+    //   cushion top = cushY + cushThk = 0.48 + 0.10 = 0.58 m
+    //   armrest bottom (now) = 0.60 m (2 cm clear gap above cushion)
+    //   armrest top (front)  = 0.70 m → elbow-rest surface
+    //   armrest top (back)   = 0.73 m → slight upslope toward rear
+    const armLo_y     = cushY + cushThk + 0.02;   // 0.60 m
+    const armHi_y     = armLo_y + 0.10;           // 0.70 m
+    const armBackHi   = armLo_y + 0.13;           // 0.73 m — slight rise to the back
     // v=716 fix: armrest must NOT extend past the cushion's front edge.
     // Anchor the back end near the backrest face and the front nose well
     // back from the cushion's front edge — real cinema chairs have armrests
