@@ -453,6 +453,15 @@ function disposeRackGroup(group) {
   });
 }
 
+// v=712 — track the rack-frame model the camera was last framed for.
+// updatePreview() re-runs on every amp add/remove (via renderRackMid),
+// so the camera-framing code below MUST be guarded — otherwise every
+// amp-add slams the camera back to the rear-3/4 default and undoes
+// whatever face the user was looking at. This is the actual root cause
+// of the v=697 → v=711 tween saga: every previous attempt to suppress
+// the tween was fighting updatePreview, which was already moving the
+// camera unconditionally before the tween skip-check ran.
+let _lastFramedRackKey = null;
 function updatePreview() {
   if (!_previewScene) return;
   // Dispose old group
@@ -461,17 +470,29 @@ function updatePreview() {
     disposeRackGroup(_previewRackGroup);
     _previewRackGroup = null;
   }
-  if (!_currentRack || !_rackCatalogue) return;
+  if (!_currentRack || !_rackCatalogue) {
+    _lastFramedRackKey = null;
+    return;
+  }
   _previewRackGroup = buildRackGroup(_currentRack, _ampCatalog || [], _rackCatalogue);
   _previewScene.add(_previewRackGroup);
-  // Frame the camera to the rack height
-  const def = _rackCatalogue.racks[_currentRack.rackModelKey];
-  const outerH = (def?.outer_h_mm ?? 1248) / 1000;
-  _previewControls.target.set(0, outerH * 0.4, 0);
-  // Position camera at a slight 3/4 angle, distance proportional to height
-  const dist = Math.max(2.0, outerH * 1.5);
-  _previewCamera.position.set(dist * 0.7, outerH * 0.65, dist * 0.85);
-  _previewControls.update();
+  // Re-frame the camera ONLY when the rack model itself changes
+  // (first frame, or user picked a different rack size). Amp add /
+  // remove keeps the same rackModelKey, so the camera is left alone
+  // and the user's current view is preserved.
+  if (_currentRack.rackModelKey !== _lastFramedRackKey) {
+    const def = _rackCatalogue.racks[_currentRack.rackModelKey];
+    const outerH = (def?.outer_h_mm ?? 1248) / 1000;
+    // Snap to the canonical FRONT view (matches PREVIEW_CAM_VIEWS.front
+    // direction: camera at -Z, looking toward +Z = front face). Scale
+    // distance with rack height so a 42U rack fits without manual orbit.
+    const dist = Math.max(2.4, outerH * 1.5);
+    _previewControls.target.set(0, outerH * 0.4, 0);
+    _previewCamera.position.set(dist * 0.375, Math.max(1.0, outerH * 0.8), -dist);
+    _previewControls.update();
+    _camTween = null;
+    _lastFramedRackKey = _currentRack.rackModelKey;
+  }
 }
 
 // In-progress rack the user is currently building. Lives outside the
