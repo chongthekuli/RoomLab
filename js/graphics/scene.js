@@ -7104,7 +7104,16 @@ function _build_theaterSeat(w, d, h, broken) {
   const matCush  = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.97);// sponge — extremely matte
   const matBack  = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.95);// back upholstery — matte
   const matArm   = _furnMat(broken ? FURN_BROKEN : 0x222222, 0.50);   // armrest plastic
-  const matDish  = _furnMat(broken ? FURN_BROKEN : 0x0E0E0E, 0.40);   // cup-holder dish (recessed)
+  // v=718 — cup-holder dish material uses DoubleSide so the inner
+  // wall of the cup recess is visible regardless of LatheGeometry's
+  // computed normal direction (we can't easily verify the winding-
+  // order convention without a UAT pass; DoubleSide makes it work).
+  const matDish  = new THREE.MeshStandardMaterial({
+    color: broken ? FURN_BROKEN : 0x080808,
+    roughness: 0.55,
+    metalness: 0.0,
+    side: THREE.DoubleSide,
+  });
 
   // ===================================================================
   // Helper: rounded-rectangle Shape centred at origin in its own XY plane.
@@ -7346,17 +7355,36 @@ function _build_theaterSeat(w, d, h, broken) {
     armShape.lineTo(-halfLen, r);
     armShape.quadraticCurveTo(-halfLen, 0, -halfLen + r, 0);
     const armGeo = flatExtrude(armShape, armW, 0.012);
-    // Cup-holder dish — LatheGeometry profile around Y axis. Outer lip at
-    // r=0.040, walls drop to r=0.022 inside, flat bottom at depth 0.020.
+    // Cup-holder dish — LatheGeometry profile around Y axis. v=718:
+    // rebuilt to be a proper cup-shaped recess with a visible inner
+    // wall + raised rim, so the user can SEE the hole. The previous
+    // v=717 profile was an outward-flaring cone that stuck UP from
+    // the armrest by 17 mm (user reported "can't see the hole").
+    //
+    // Profile traces in (radius, height) where height=0 sits at the
+    // armrest top and the rim rises 12 mm above that:
+    //
+    //   (0, 0)     centre bottom of the cup interior
+    //   (0.025, 0) bottom flat, inner cup radius = 25 mm
+    //   (0.025, 0.012) up the inner cylinder wall to rim height
+    //   (0.050, 0.012) flat rim outward to 50 mm outer radius
+    //   (0.050, 0)     outer wall back down to the base
+    //
+    // Revolved, this produces a flat cup floor + cylindrical inner
+    // wall + flat ring rim + cylindrical outer wall. Without CSG we
+    // can't actually drill a hole through the armrest, so the dish
+    // sits 1 mm ABOVE the armrest top and the "recess" is internal
+    // to the dish geometry (cup floor at armrest level, rim 12 mm
+    // above). Visually indistinguishable from a real drilled recess
+    // from the user's viewing angle.
     const dishProfile = [
       new THREE.Vector2(0.000, 0.000),
-      new THREE.Vector2(0.022, 0.000),
-      new THREE.Vector2(0.026, 0.004),
-      new THREE.Vector2(0.028, 0.018),
-      new THREE.Vector2(0.038, 0.022),
-      new THREE.Vector2(0.044, 0.022),
+      new THREE.Vector2(0.025, 0.000),
+      new THREE.Vector2(0.025, 0.012),
+      new THREE.Vector2(0.050, 0.012),
+      new THREE.Vector2(0.050, 0.000),
     ];
-    const dishGeo = new THREE.LatheGeometry(dishProfile, 22);
+    const dishGeo = new THREE.LatheGeometry(dishProfile, 28);
     dishGeo.computeVertexNormals();
 
     for (const sx of [-1, +1]) {
@@ -7374,12 +7402,15 @@ function _build_theaterSeat(w, d, h, broken) {
       armMesh.castShadow = true; armMesh.receiveShadow = true;
       group.add(armMesh);
 
-      // Cup-holder dish — sunk into the top of the armrest, on the forward
-      // third (near the user's hand). One dish PER side per Viktor's spec.
+      // Cup-holder dish — sits 1 mm ABOVE the armrest top with the
+      // rim 12 mm higher (v=718). Profile is a proper cup recess so
+      // the user sees a clear circular hole with a visible inner
+      // wall going down to a flat bottom — same visual cue as a
+      // drilled cinema-chair cup-holder.
       const dishMesh = new THREE.Mesh(dishGeo, matDish);
       const dishZ    = armFrontZ + armLen * 0.22;   // ~z = 0.20 for d=0.6
       dishMesh.position.set(sx * (w / 2 - armW / 2 - 0.005),
-                            armHi_y - 0.005,
+                            armHi_y + 0.001,
                             dishZ);
       dishMesh.castShadow = false; dishMesh.receiveShadow = true;
       group.add(dishMesh);
