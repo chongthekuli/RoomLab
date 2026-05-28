@@ -7085,8 +7085,99 @@ function _build_flatPad(w, d, h, broken) {
   return { group, activeMesh: pad };
 }
 
+// Theatre-seat family — cinema / auditorium fold-up chair. Pedestal-foot
+// mount (NOT 4 legs), tall contoured back with dark plastic shell + soft
+// accent-coloured upholstery, chunky armrests with a recessed cup-holder
+// dish, and a sponge cushion (roughness ≈ 0.97 — reads as porous foam so
+// the user can SEE the absorption that the catalogue's A_obj already
+// encodes). v=714. The absorption coefficients themselves come from
+// Beranek & Hidaka (1998) per the catalogue row's _source — visual
+// fidelity only here, not a physics change.
+function _build_theaterSeat(w, d, h, broken) {
+  const group = new THREE.Group();
+  const matPed   = _furnMat(broken ? FURN_BROKEN : 0x1A1A1A, 0.40);   // black plastic pedestal feet
+  const matShell = _furnMat(broken ? FURN_BROKEN : 0x252525, 0.55);   // dark shell behind upholstery
+  const matCush  = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.97);// sponge — extremely matte
+  const matBack  = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.95);// back upholstery — matte
+  const matArm   = _furnMat(broken ? FURN_BROKEN : 0x2A2A2A, 0.50);   // armrest plastic
+  const matDish  = _furnMat(broken ? FURN_BROKEN : 0x141414, 0.35);   // cup-holder dish (recessed)
+
+  // --- Pedestal feet (sled-style, 2× black mounts under the seat) ---
+  const pedTop_z = Math.min(0.40, h * 0.34);
+  const pedPostW = 0.06;
+  const pedFootD = 0.18;
+  const pedSpan  = w * 0.70;   // foot centre-to-foot centre
+  const pedZ_foot = 0.02;
+  for (const sx of [-1, +1]) {
+    const xc = sx * pedSpan / 2;
+    // Sled feet: a back foot pad + a front foot pad on each side
+    _addMesh(group, new THREE.BoxGeometry(pedPostW, 0.04, pedFootD), matPed, xc, pedZ_foot, d * 0.62);
+    _addMesh(group, new THREE.BoxGeometry(pedPostW, 0.04, pedFootD), matPed, xc, pedZ_foot, d * 0.22);
+    // Vertical post connecting sled to seat shell
+    _addMesh(group, new THREE.BoxGeometry(pedPostW, pedTop_z - 0.04, pedPostW), matPed,
+      xc, (pedTop_z + 0.04) / 2, d * 0.42);
+  }
+
+  // --- Seat shell (the dark base the cushion sits in) ---
+  const shellTop_z = pedTop_z;
+  const shellHi_z  = shellTop_z + 0.07;
+  _addMesh(group, new THREE.BoxGeometry(w * 0.92, shellHi_z - shellTop_z, d * 0.84),
+    matShell, 0, (shellTop_z + shellHi_z) / 2, d * 0.50);
+
+  // --- Sponge cushion (two-layer stack so the rolled edge reads from any
+  // angle — matches the visual "pillow" look in the user's reference) ---
+  const cushMid_z = shellHi_z + 0.06;
+  const cushHi_z  = shellHi_z + 0.11;
+  // Lower wider layer
+  _addMesh(group, new THREE.BoxGeometry(w * 0.86, cushMid_z - shellHi_z, d * 0.80),
+    matCush, 0, (shellHi_z + cushMid_z) / 2, d * 0.48);
+  // Upper narrower layer — the active acoustic surface (selection ring binds here)
+  const cushion = _addMesh(group, new THREE.BoxGeometry(w * 0.78, cushHi_z - cushMid_z, d * 0.72),
+    matCush, 0, (cushMid_z + cushHi_z) / 2, d * 0.48);
+
+  // --- Backrest: dark shell behind + soft upholstery in front ---
+  const backLo_z = cushHi_z;
+  const backHi_z = h * 0.98;
+  // Hard outer shell (seen from behind — most cinema chairs show this)
+  _addMesh(group, new THREE.BoxGeometry(w * 0.88, backHi_z - backLo_z, 0.05),
+    matShell, 0, (backLo_z + backHi_z) / 2, d - 0.025);
+  // Upper "headrest" wing — slightly wider band near the top, hard shell
+  _addMesh(group, new THREE.BoxGeometry(w * 0.92, 0.10, 0.05),
+    matShell, 0, backHi_z - 0.06, d - 0.022);
+  // Soft upholstered front panel (sponge — the part the audience leans into)
+  // Two-layer: wider lower mid-back + narrower upper-back for the contoured look
+  _addMesh(group, new THREE.BoxGeometry(w * 0.72, (backHi_z - backLo_z) * 0.55, 0.09),
+    matBack, 0, backLo_z + (backHi_z - backLo_z) * 0.30, d - 0.075);
+  _addMesh(group, new THREE.BoxGeometry(w * 0.62, (backHi_z - backLo_z) * 0.40, 0.09),
+    matBack, 0, backLo_z + (backHi_z - backLo_z) * 0.72, d - 0.075);
+
+  // --- Armrests with cup-holder dish (only render if seat is wide enough) ---
+  if (w >= 0.40) {
+    const armLo_z = cushMid_z + 0.01;
+    const armHi_z = armLo_z + 0.10;
+    const armForwardD = d * 0.62;  // armrest length front-to-back
+    const armForwardCentre = d * 0.52;
+    for (const sx of [-1, +1]) {
+      const xc = sx * (w / 2 - 0.05);
+      // Main armrest body — chunky dark plastic
+      _addMesh(group, new THREE.BoxGeometry(0.09, armHi_z - armLo_z, armForwardD),
+        matArm, xc, (armLo_z + armHi_z) / 2, armForwardCentre);
+      // Forward "elbow" cap — slightly raised pad at the front of the armrest
+      _addMesh(group, new THREE.BoxGeometry(0.11, 0.04, 0.16),
+        matArm, xc, armHi_z + 0.02, armForwardCentre - armForwardD / 2 + 0.10);
+      // Cup-holder dish — small dark cylinder recessed into the elbow cap
+      const dishGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.012, 14);
+      _addMesh(group, dishGeo, matDish,
+        xc, armHi_z + 0.034, armForwardCentre - armForwardD / 2 + 0.10);
+    }
+  }
+
+  return { group, activeMesh: cushion };
+}
+
 const FAMILY_BUILDERS = {
   'seat': _build_seat,
+  'theater-seat': _build_theaterSeat,
   'slab-on-legs': _build_slabOnLegs,
   'vertical-box': _build_verticalBox,
   'flat-pad': _build_flatPad,

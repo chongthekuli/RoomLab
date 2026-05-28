@@ -20,7 +20,7 @@
         "default_spacing_m": 0.05
       },
       "visual": {
-        "family": "seat"
+        "family": "theater-seat"
       },
       "acoustics": {
         "model": "equivalent_absorption_area",
@@ -71,7 +71,7 @@
         "default_spacing_m": 0.05
       },
       "visual": {
-        "family": "seat"
+        "family": "theater-seat"
       },
       "acoustics": {
         "model": "equivalent_absorption_area",

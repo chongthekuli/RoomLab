@@ -57,7 +57,11 @@ const ALLOWED_MOUNTS = new Set(['floor', 'wall', 'ceiling', 'free-hanging']);
 // (glyphs.js dispatch). Categories without a dedicated builder fall
 // back to the generic box, but the FIELD is still required so the
 // dispatcher always has something to read.
-const ALLOWED_VISUAL_FAMILIES = new Set(['seat', 'slab-on-legs', 'vertical-box', 'flat-pad']);
+// v=714: 'theater-seat' added — dedicated cinema-chair builder
+// (pedestal feet + chunky armrests + sponge cushion + cup-holder) for
+// theater-seat-upholstered-* rows. 2D glyph still routes via the
+// 'seat' glyph (no bespoke iso variant yet).
+const ALLOWED_VISUAL_FAMILIES = new Set(['seat', 'theater-seat', 'slab-on-legs', 'vertical-box', 'flat-pad']);
 // Schema v3 (2026-05-27): acoustics.interaction_mode controls how the
 // precision ray-tracer treats the object.
 //   'porous'     = Beer-Lambert volumetric absorber; rays pass through

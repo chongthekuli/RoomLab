@@ -259,6 +259,12 @@ function glyph_seat(item, opts = {}) {
 
 const FAMILY_GLYPHS = {
   'seat': glyph_seat,
+  // Theatre-seat family (v=714) — uses the same iso glyph as 'seat' for
+  // now since the 2D viewport / catalogue card render at low resolution.
+  // 3D viewport uses a dedicated cinema-chair builder. A bespoke
+  // theatre-glyph (pedestal feet + tall back) is a Maya UX call for a
+  // later pass.
+  'theater-seat': glyph_seat,
   'slab-on-legs': glyph_slabOnLegs,
   'vertical-box': glyph_verticalBox,
   'flat-pad': glyph_flatPad,
