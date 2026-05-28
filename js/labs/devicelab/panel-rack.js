@@ -264,18 +264,30 @@ const PREVIEW_CAM_VIEWS = {
   front: { pos: [+0.9, +1.6, -2.4], target: [0, 1.0,  0] },
   rear:  { pos: [-0.9, +1.6, +2.4], target: [0, 1.0,  0] },
 };
-function _setPreviewCameraView(viewKey, animate = true) {
+function _setPreviewCameraView(viewKey, animate = true, force = false) {
   if (!_previewCamera || !_previewControls) return;
   const view = PREVIEW_CAM_VIEWS[viewKey];
   if (!view) return;
-  // v=707 design: no skip-detection. The function does exactly what it
-  // says — tween (or snap) to the named preset. Skip logic is the
-  // caller's responsibility (door buttons always tween; amp-add never
-  // calls this function). v=702/703/705/706 all tried to "be smart"
-  // about whether the camera was already at the right view; the smart
-  // checks all had corner cases (zoom, damping, orbit angle,
-  // OrbitControls events firing on stray clicks). A predictable
-  // unconditional tween is preferable to clever-but-flaky.
+  // v=709 — skip the tween when the camera is already on the
+  // requested side (and the caller didn't force it). Door buttons
+  // pass force=true (explicit user request, always tween + always
+  // operate the door). Amp-add calls without force, so it's free to
+  // skip when the user is already looking at the front.
+  //
+  // Side test = SIGN of look direction's Z component (camera → target).
+  //   Front view: camera at -Z, target at 0  →  lookZ = +2.4
+  //   Rear view : camera at +Z, target at 0  →  lookZ = -2.4
+  //   Orbited to side: lookZ near 0
+  // Threshold +/- 0.5 → only the deeply-front or deeply-rear half-
+  // spaces skip. Anywhere else (e.g. user orbited to a side angle),
+  // the tween fires and brings them back to the canonical preset.
+  // Zoom-independent: the look vector's sign doesn't change with
+  // dolly, only its magnitude.
+  if (animate && !force) {
+    const lookZ = _previewControls.target.z - _previewCamera.position.z;
+    if (viewKey === 'front' && lookZ > +0.5) return;
+    if (viewKey === 'rear'  && lookZ < -0.5) return;
+  }
   if (!animate) {
     _previewCamera.position.set(view.pos[0], view.pos[1], view.pos[2]);
     _previewControls.target.set(view.target[0], view.target[1], view.target[2]);
@@ -652,10 +664,9 @@ function renderRackMid() {
       doorBtnEl.onclick = () => {
         _currentRack.doorOpen = !_currentRack.doorOpen;
         // Tween camera to the FRONT view whenever the user touches the
-        // front door — they want to SEE the swing happen, not have to
-        // orbit the camera manually first. Tween fires whether opening
-        // or closing so the affected side is on-screen either way.
-        _setPreviewCameraView('front', true);
+        // front door — explicit user intent, force=true bypasses the
+        // already-at-front skip so the door swing is always on-screen.
+        _setPreviewCameraView('front', true, true);
         persistCurrentRack();
         renderRackMid();
       };
@@ -670,8 +681,8 @@ function renderRackMid() {
       rearBtnEl.onclick = () => {
         _currentRack.rearDoorOpen = !_currentRack.rearDoorOpen;
         // Same idea — opening the rear door swings on the +Z side, so
-        // we put the camera over there too.
-        _setPreviewCameraView('rear', true);
+        // we put the camera over there too. force=true.
+        _setPreviewCameraView('rear', true, true);
         persistCurrentRack();
         renderRackMid();
       };
