@@ -614,15 +614,20 @@ function addAmpToRack(ampId) {
   });
   persistCurrentRack();
   renderRackMid();
-  // v=708 — auto-tween to the FRONT view on amp-add so the user can
-  // see the just-added amp's labels / knobs / mounting ears (all on
-  // the -Z face per the v=691 panel flip). User's latest UAT confirmed
-  // door-button front/rear identities are correct, so PREVIEW_CAM
-  // _VIEWS.front IS the side with the amp panel visible.
-  // No skip-detection: always tween. The earlier skip-detection
-  // attempts (v=702/703/705/706) all had corner cases that produced
-  // worse UX than the unconditional tween. Predictable beats clever.
-  _setPreviewCameraView('front', true);
+  // v=711 — final: do NOT move the camera on amp-add. Every previous
+  // attempt at "auto-snap to front" produced one of two complaints:
+  // "tween fires every time even when I'm already at front" OR "I'm
+  // stuck at rear after the v=704/707 no-snap design." Six tries at
+  // a skip-check (v=702/703/705/706/709/710) couldn't survive every
+  // combination of zoom, orbit angle, OrbitControls events, and
+  // damping drift.
+  //
+  // The user has two reliable ways to get to the front view:
+  //   • Click "Open front" — tweens to front + opens the front door.
+  //   • Click "Close front" while open — closes the door + tweens to
+  //     the front side as part of the same action.
+  // Both still work and remain force-tweens. Amp-add is decoupled
+  // from camera state entirely.
 }
 
 function removeSlot(slotIdx) {
@@ -630,7 +635,6 @@ function removeSlot(slotIdx) {
   _currentRack.slots.splice(slotIdx, 1);
   persistCurrentRack();
   renderRackMid();
-  _setPreviewCameraView('front', true);
 }
 
 function renderRackMid() {
