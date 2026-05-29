@@ -1,4 +1,10 @@
-export async function loadMaterials(url = 'data/materials.json') {
+// Load + index the material absorption catalogue. The URL is REQUIRED — the
+// engine carries no host-specific default path (a third-party adopter passes
+// their own catalogue location). RoomLab callers pass 'data/materials.json'.
+export async function loadMaterials(url) {
+  if (!url) {
+    throw new Error('loadMaterials(url): a materials-JSON URL is required (the engine has no host default path).');
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
   const data = await res.json();

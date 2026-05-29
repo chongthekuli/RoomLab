@@ -15,9 +15,16 @@
 // furniture contributes A_obj yet" — same graceful-degradation pattern
 // as surfacelab/catalog.js's getTreatmentAbsorption returning null.
 
+import { setFurnitureCatalogueProvider } from '../../physics/providers.js';
+
 const CATALOGUE_URL = './data/furniture/catalogue.json';
 
 let _cache = null;
+
+// Wire this catalogue into the engine's provider registry (labs → physics is
+// the allowed direction) so nymphysics reads furniture rows without importing
+// js/labs/. getFurnitureCatalogue is a hoisted function declaration.
+setFurnitureCatalogueProvider(getFurnitureCatalogue);
 let _loadPromise = null;
 
 /**

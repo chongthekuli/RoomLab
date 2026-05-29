@@ -11,12 +11,11 @@
 // computeMultiSourceSPL per listener — N sources × N listeners — cheaper
 // than the splGrid we already build).
 
-import { earHeightFor, expandSources } from '../app-state.js';
+import { earHeightFor, expandSources } from './source-expand.js';
 import { computeMultiSourceSPL, computeRoomConstant } from './spl-calculator.js';
 import { getCachedLoudspeaker } from './loudspeaker.js';
 import { deriveMetrics } from './precision/derive-metrics.js';
-import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
-import { getRackCatalogue } from '../labs/devicelab/catalog.js';
+import { getFurnitureCatalogue, getRackCatalogue } from './providers.js';
 
 export function computePerListenerMetrics(state, materials) {
   const listeners = state.listeners ?? [];

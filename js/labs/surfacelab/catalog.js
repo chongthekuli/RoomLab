@@ -21,6 +21,14 @@
 // mounted on a wall vs overhead.
 
 import { runTrustFlagAudit } from './trust-flags.js';
+import { setSurfaceCatalogueProvider } from '../../physics/providers.js';
+
+// Wire this catalogue into the engine's provider registry so nymphysics can
+// read treatment absorption/scattering without importing js/labs/. labs →
+// physics is the allowed dependency direction. getCachedCatalogue is a
+// hoisted function declaration, so registering its reference here (at module
+// import) is safe; the engine reads it live on every call.
+setSurfaceCatalogueProvider(getCachedCatalogue);
 
 // Rail navigation order — Sofia's "most-used first" arrangement.
 const RAIL_ORDER = ['absorber', 'bass', 'diffuser', 'ceiling', 'surface', 'opening', 'system'];

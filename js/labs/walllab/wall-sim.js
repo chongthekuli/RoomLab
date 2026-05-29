@@ -224,7 +224,7 @@ function statusLine(stored, sessionState, effectiveIntent, autoOrigin) {
 // Simulator — two modes sharing the centre + the right method panel
 // ---------------------------------------------------------------------------
 async function buildSimulator(view) {
-  const materials = await loadMaterials();
+  const materials = await loadMaterials('data/materials.json');
   const bands = materials.frequency_bands_hz;
   const body = view.querySelector('#wall-sim-body');
   const methodBody = document.getElementById('wall-method-body');

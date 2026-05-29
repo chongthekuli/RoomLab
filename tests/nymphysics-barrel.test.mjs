@@ -81,7 +81,6 @@ const TIER_PROBES = [
   ['PrecisionWorkerPool', 'function'], // class → typeof 'function'
   // display & util
   ['dilateGridForDisplay', 'function'],
-  ['recordRayPaths', 'function'],
   ['importDxfFile', 'function'],
   ['furnitureBlocksCylinder', 'function'],
 ];

@@ -197,6 +197,33 @@ export {
 
 export { GLL_GUIDE, importSpeakerFile } from './speaker-import.js';
 
+// Source/listener geometry helpers (pure) — line-array expansion + ear
+// height. Moved off the app boundary into the engine; see source-expand.js.
+export {
+  POSTURE_EAR_HEIGHTS_M,
+  earHeightFor,
+  expandLineArrayToElements,
+  expandSources,
+} from './source-expand.js';
+
+// ---------------------------------------------------------------------------
+// providers — dependency-injection registry for OUTSIDE catalogue data.
+// An adopter wires their own treatment / furniture / rack catalogue here so
+// the engine never imports a host app's UI/catalogue layer. RoomLab's
+// SurfaceLAB / FurnitureLAB / DeviceLAB modules self-register at import.
+// ---------------------------------------------------------------------------
+
+export {
+  setSurfaceCatalogueProvider,
+  setFurnitureCatalogueProvider,
+  setRackCatalogueProvider,
+  getCachedCatalogue,
+  getTreatmentAbsorption,
+  getTreatmentScattering,
+  getFurnitureCatalogue,
+  getRackCatalogue,
+} from './providers.js';
+
 // ---------------------------------------------------------------------------
 // per-listener — combined SPL + STI metric helper (2D + print share this)
 // ---------------------------------------------------------------------------
@@ -247,12 +274,10 @@ export {
 export { PrecisionWorkerPool, mergePartialHistograms } from './precision/worker-pool.js';
 
 // ---------------------------------------------------------------------------
-// display & utilities — render-only grid post-processing, viz, flags, import
+// display & utilities — render-only grid post-processing, flags, import
 // ---------------------------------------------------------------------------
 
 export { dilateGridForDisplay, buildSilhouetteMask } from './grid-display.js';
-
-export { recordRayPaths, buildLineSegmentIndex } from './ray-viz.js';
 
 export {
   PHYSICS_P1_5_ENABLED,

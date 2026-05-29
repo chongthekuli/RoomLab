@@ -1,8 +1,14 @@
-export const POSTURE_EAR_HEIGHTS_M = {
-  standing: 1.60,
-  sitting_chair: 1.15,
-  sitting_floor: 0.85,
-};
+// Source/listener geometry helpers now live on the engine side
+// (js/physics/source-expand.js) so js/physics/ no longer reaches back across
+// the app boundary to call them. Re-exported here for zero churn — existing
+// RoomLab callers keep importing `earHeightFor`, `expandSources`,
+// `expandLineArrayToElements`, `POSTURE_EAR_HEIGHTS_M` from app-state.js.
+export {
+  POSTURE_EAR_HEIGHTS_M,
+  earHeightFor,
+  expandLineArrayToElements,
+  expandSources,
+} from './physics/source-expand.js';
 
 export const POSTURE_LABELS = {
   standing: 'Standing',
@@ -22,15 +28,6 @@ export const CEILING_LABELS = {
   flat: 'Flat',
   dome: 'Domed (spherical cap)',
 };
-
-export function earHeightFor(listener) {
-  if (!listener) return 1.2;
-  const elev = listener.elevation_m ?? 0;
-  if (listener.posture === 'custom' && typeof listener.custom_ear_height_m === 'number') {
-    return listener.custom_ear_height_m;
-  }
-  return elev + (POSTURE_EAR_HEIGHTS_M[listener.posture] ?? 1.2);
-}
 
 export function getSelectedListener() {
   if (state.selectedListenerId == null) return null;
@@ -391,114 +388,9 @@ import { TEMPLATES } from './templates/index.js';
 import { resetSceneState } from './state/scene-lifecycle.js';
 export { PRESETS, TEMPLATES };
 
-// ---------------------------------------------------------------------------
-// Line-array expansion — one "compound" source entry expands to N element
-// sources, each with its own position and aim. Matches how EASE Focus /
-// EASE 5 handle line arrays: each element is an independent directional
-// point source whose SPL contribution sums at every listener.
-//
-// A line-array source entry has shape:
-//   {
-//     kind: 'line-array',
-//     modelUrl, groupId, id,
-//     origin: { x, y, z },           // top rigging pin location
-//     baseYaw_deg,                    // horizontal aim of whole hang
-//     topTilt_deg,                    // flown angle — pitch of the top element
-//     splayAnglesDeg: [2, 3, 4, ...], // cumulative splay between element i and i+1
-//     elementSpacing_m,               // vertical spacing (≈ cabinet height)
-//     power_watts_each,
-//   }
-// Element count = splayAnglesDeg.length + 1 (first element has no leading splay).
-// ---------------------------------------------------------------------------
-// Cabinet dimensions by speaker model. Mirror of the table in scene.js —
-// kept here because expansion math needs depth to compute the cabinet center
-// offset from the top-back rigging pin.
-function lineArrayCabinetDims(modelUrl) {
-  const url = modelUrl || '';
-  if (/line-array/i.test(url)) return { h: 0.42, d: 0.45 };
-  if (/compact-6/i.test(url))  return { h: 0.36, d: 0.24 };
-  return { h: 0.66, d: 0.38 };
-}
-
-export function expandLineArrayToElements(src) {
-  const splays = src.splayAnglesDeg || [];
-  const n = (src.elementCount ?? (splays.length + 1));
-  const dims = lineArrayCabinetDims(src.modelUrl);
-  // elementSpacing_m is the cabinet height — adjacent cabinets butt against
-  // each other along their back edges (spacing = h means bottom-back of
-  // cabinet i is the top-back of cabinet i+1).
-  const h = src.elementSpacing_m ?? dims.h;
-  const d = src.cabinetDepth_m ?? dims.d;
-  const topTilt = src.topTilt_deg ?? 0;
-  const yaw = src.baseYaw_deg ?? 0;
-  const origin = src.origin || src.position || { x: 0, y: 0, z: 0 };
-  const power = src.power_watts_each ?? 500;
-  const yawRad = yaw * Math.PI / 180;
-
-  const elements = [];
-  let curPitch = topTilt;
-  // curRig is the TOP-BACK corner of the current cabinet — real line-array
-  // rigging pivots around this point, so adjacent cabinets share their back
-  // edge and only splay the fronts apart (no back-side overlap).
-  let curRig = { x: origin.x, y: origin.y, z: origin.z };
-
-  for (let i = 0; i < n; i++) {
-    const pitchRad = curPitch * Math.PI / 180;
-    // Cabinet-local axes expressed in world state coords (x=width, y=depth, z=height):
-    //   aim = local −Z (front face normal, the direction the speaker points)
-    //   up  = local +Y (cabinet vertical, tilted forward when pitch<0)
-    //   down = local −Y, back = local +Z
-    const aimX =  Math.sin(yawRad) * Math.cos(pitchRad);
-    const aimY =  Math.cos(yawRad) * Math.cos(pitchRad);
-    const aimZ =  Math.sin(pitchRad);
-    const downX =  Math.sin(yawRad) * Math.sin(pitchRad);
-    const downY =  Math.cos(yawRad) * Math.sin(pitchRad);
-    const downZ = -Math.cos(pitchRad);
-    // Geometric center of cabinet (rendering + point-source location): from
-    // the top-back rig, go h/2 DOWN and d/2 FORWARD. Placing the rig at the
-    // top-back corner matches real rigging hardware and makes the back edges
-    // of adjacent cabinets align when splayed.
-    const center = {
-      x: curRig.x + (h / 2) * downX + (d / 2) * aimX,
-      y: curRig.y + (h / 2) * downY + (d / 2) * aimY,
-      z: curRig.z + (h / 2) * downZ + (d / 2) * aimZ,
-    };
-    elements.push({
-      modelUrl: src.modelUrl,
-      position: center,
-      aim: { yaw, pitch: curPitch, roll: 0 },
-      power_watts: power,
-      groupId: src.groupId,
-      arrayId: src.id ?? null,
-      elementIndex: i,
-      rigPoint: { ...curRig },
-    });
-    // Next element's top-back rig = this element's bottom-back corner.
-    curRig = {
-      x: curRig.x + h * downX,
-      y: curRig.y + h * downY,
-      z: curRig.z + h * downZ,
-    };
-    // Apply splay: positive splay = "this much more downward than the
-    // element above". Pitch is negative for downward aim, so splay subtracts.
-    curPitch -= splays[i] ?? 0;
-  }
-  return elements;
-}
-
-// Flatten any mix of single sources + line-array compound entries into the
-// list of physical element sources used everywhere SPL math + rendering runs.
-export function expandSources(sources) {
-  const out = [];
-  for (const s of sources) {
-    if (s && s.kind === 'line-array') {
-      for (const el of expandLineArrayToElements(s)) out.push(el);
-    } else {
-      out.push(s);
-    }
-  }
-  return out;
-}
+// Line-array expansion + source flattening (expandSources,
+// expandLineArrayToElements) moved to js/physics/source-expand.js and are
+// re-exported at the top of this file. See the schema docblock there.
 
 export const state = {
   room: {

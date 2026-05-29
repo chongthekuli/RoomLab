@@ -22,9 +22,9 @@
 //   }
 // Caller turns this into a LineSegments mesh.
 
-import { buildPhysicsScene } from './scene-snapshot.js';
-import { triangulateScene } from './precision/triangulate-scene.js';
-import { buildBVH, buildAabbBVH, intersectRay, intersectRay_collectAabbs } from './precision/bvh.js';
+import { buildPhysicsScene } from '../physics/scene-snapshot.js';
+import { triangulateScene } from '../physics/precision/triangulate-scene.js';
+import { buildBVH, buildAabbBVH, intersectRay, intersectRay_collectAabbs } from '../physics/precision/bvh.js';
 import { colorForGroup } from '../app-state.js';
 
 const DEFAULT_TOTAL_PATHS = 200;

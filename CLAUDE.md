@@ -39,8 +39,13 @@ js/
     speakerlab/         speaker browser/editor
     surfacelab/         material catalogue
     devicelab/          rack/amp/PA hardware browser
-  physics/              pure (Node-testable), no DOM — the "nymphysics" engine
-    nymphysics.js       PUBLIC API barrel (import from here) — Draft + Precision modes; see docs/NYMPHYSICS.md
+  physics/              pure (Node-testable), no DOM, NO imports outside js/physics/ — the "nymphysics" engine
+    index.js            CURATED public entry (adopters import this; → nymphysics package name)
+    nymphysics.js       comprehensive internal barrel (RoomLab imports this); see docs/NYMPHYSICS.md
+    package.json        nymphysics manifest + exports map (no build step)
+    providers.js        DI registry — outside catalogue data enters ONLY here (labs self-register)
+    source-expand.js    expandSources / earHeightFor (moved off app-state 2026-05-29)
+    furniture-sub-volumes.js   acoustic sub-bboxes (moved from labs/furniturelab 2026-05-29)
     rt60.js             Sabine + Eyring, per band
     spl-calculator.js   computeSPLGrid, computeListenerBreakdown, computeMultiSourceSPL
     stipa.js            IEC 60268-16 STIPA
@@ -51,11 +56,11 @@ js/
     per-listener-metrics.js     SPL+STI label helper (shared by 2D + print)
     room-shape.js        geometry — rectangular / polygon / round / custom
     scene-snapshot.js    immutable snapshot for the precision engine
-    ray-viz.js
   graphics/             Three.js + 2D SVG renderers
     scene.js             3D scene, heatmap planes, walk-mode controller wiring
     room-2d.js           2D SVG viewport (top-down editor + heatmap overlay)
     heatmap-shader.js    scalar-field shader (replaces canvas-texture per-zone)
+    ray-viz.js           ray-path debug LineSegments (moved from physics 2026-05-29)
     colour-ramps.js, legend-ticks.js
     third-person-controller.js, place-room-controller.js
   ui/                   panels + report — DOM-side, subscribes to events
@@ -119,6 +124,18 @@ These run in Node tests. Never import Three.js or browser-only APIs
 into them. The `per-listener-metrics.js` helper imports physics but is
 itself imported only by browser-side callers — the pure print SVG
 modules accept its OUTPUT (precomputed array), not the helper itself.
+
+### nymphysics is DECOUPLED (no outbound imports)
+No module under `js/physics/` may import from `../app-state`, `../labs`,
+`../graphics`, `../state`, `../ui`, or Three.js — the engine must stay
+standalone-adoptable. Mechanically guarded by
+`tests/nymphysics-no-outbound-imports.test.mjs` (the barrel test does NOT
+cover this). Outside catalogue data (treatments / furniture / racks) enters
+ONLY through the provider registry `js/physics/providers.js`: RoomLab's lab
+modules self-register at import (`set*CatalogueProvider`), adopters wire their
+own. Two entry points: `js/physics/index.js` (curated, for adopters) and
+`js/physics/nymphysics.js` (full internal barrel, for RoomLab). See
+`docs/NYMPHYSICS.md` Part 5 and `docs/NYMPHYSICS_AUDIT_2026-05-29.md`.
 
 ### Specialist consultation BEFORE commit
 For any visual-physics work (heatmap, 3D, 2D rendering, audio playback,

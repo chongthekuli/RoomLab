@@ -1,6 +1,6 @@
 import { roomSurfaces, roomEffectiveSurfaces, roomVolume } from './room-shape.js';
 import { airSabins } from './air-absorption.js';
-import { getTreatmentAbsorption } from '../labs/surfacelab/catalog.js';
+import { getTreatmentAbsorption } from './providers.js';
 import { sumFurnitureAbsorption } from './furniture-absorption.js';
 import { sumRackAbsorption } from './rack-absorption.js';
 

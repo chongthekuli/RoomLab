@@ -399,7 +399,7 @@ export async function mountRoomLab() {
   if (_mounted) return;
   _mounted = true;
 
-  const materials = await loadMaterials();
+  const materials = await loadMaterials('data/materials.json');
   await Promise.all(SPEAKER_CATALOG.map(c => loadLoudspeaker(c.url)));
 
   const [rackCatalogue, ampCatalog] = await Promise.all([

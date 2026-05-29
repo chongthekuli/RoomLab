@@ -113,7 +113,7 @@ if (typeof window !== 'undefined') {
     const { loadMaterials } = await import('./physics/materials.js');
     const { loadLoudspeaker, getCachedLoudspeaker } = await import('./physics/loudspeaker.js');
     const { runPrecisionRender } = await import('./physics/precision/precision-engine.js');
-    const materials = await loadMaterials();
+    const materials = await loadMaterials('data/materials.json');
     await Promise.all(SPEAKER_CATALOG.map(c => loadLoudspeaker(c.url)));
     if (state.sources.length === 0 && state.listeners.length === 0 && state.zones.length === 0) {
       applyPresetToState(DEFAULT_PRESET_KEY);

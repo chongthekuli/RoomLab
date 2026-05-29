@@ -18,11 +18,9 @@
 // `state.*` directly; the A2 refactor will retire those call sites in
 // favour of `PhysicsScene`-accepting signatures.
 
-import { expandSources } from '../app-state.js';
-import { getCachedCatalogue } from '../labs/surfacelab/catalog.js';
-import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
-import { getSubVolumes } from '../labs/furniturelab/sub-volumes.js';
-import { getRackCatalogue } from '../labs/devicelab/catalog.js';
+import { expandSources } from './source-expand.js';
+import { getCachedCatalogue, getFurnitureCatalogue, getRackCatalogue } from './providers.js';
+import { getSubVolumes } from './furniture-sub-volumes.js';
 
 export const PHYSICS_SCENE_VERSION = 1;
 

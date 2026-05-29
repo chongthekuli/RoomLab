@@ -33,7 +33,7 @@
 //
 // Pure / Node-testable. No DOM, no Three.js.
 
-import { getSubVolumes } from '../labs/furniturelab/sub-volumes.js';
+import { getSubVolumes } from './furniture-sub-volumes.js';
 
 // Effective μ for "solid" reflective sub-volumes acting as direct-path
 // barriers. Pathlength-aware: tiny obstructions = small loss, deep

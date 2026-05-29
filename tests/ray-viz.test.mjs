@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import {
   state, applyPresetToState, applyTemplateToState, PRESETS, TEMPLATES,
 } from '../js/app-state.js';
-import { recordRayPaths, buildLineSegmentIndex } from '../js/physics/ray-viz.js';
+import { recordRayPaths, buildLineSegmentIndex } from '../js/graphics/ray-viz.js';
 
 const data = JSON.parse(readFileSync('data/materials.json', 'utf8'));
 const materials = {

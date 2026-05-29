@@ -172,10 +172,28 @@ Architecture and metric derivations live in
 
 ---
 
-## Part 5 — Public API reference (`nymphysics.js`)
+## Part 5 — Public API reference
 
-The barrel re-exports the public surface in tiers. Import from
-`js/physics/nymphysics.js`, not from individual modules (new code).
+There are **two entry points** (added in the 2026-05-29 modularity pass):
+
+- **`js/physics/index.js`** — the **curated adopter surface** (~33 symbols):
+  the orchestrators, the standard band/constant exports, and the provider
+  hooks. This is what a third party imports (`import { runPrecisionRender }
+  from 'nymphysics'` resolves here via the `exports` map in
+  `js/physics/package.json`).
+- **`js/physics/nymphysics.js`** — the **comprehensive internal barrel**
+  (~148 symbols, every public + many leaf helpers). RoomLab's own code imports
+  from here; it exposes implementation detail the curated index intentionally
+  hides.
+
+The barrel re-exports the internal surface in tiers (below). **Decoupling is
+mechanically guarded** by `tests/nymphysics-no-outbound-imports.test.mjs` —
+no module under `js/physics/` may import from `../app-state`, `../labs`,
+`../graphics`, `../state`, `../ui`, or Three.js. Outside catalogue data
+(treatments / furniture / racks) enters only through the **provider registry**
+(`js/physics/providers.js`); RoomLab's lab modules self-register at import,
+adopters call `setSurfaceCatalogueProvider` / `setFurnitureCatalogueProvider`
+/ `setRackCatalogueProvider`.
 
 | Tier | Key exports | Model (Part) |
 |------|-------------|--------------|
@@ -186,13 +204,21 @@ The barrel re-exports the public surface in tiers. Import from
 | **reverberation** | `sabine`, `eyring`, `computeRT60Band`, `computeAllBands`, `preferredRT60` | 1.1 |
 | **intelligibility** | `computeSTIPA`, `computeSTIPAAt`, `precomputeSTIPAContext`, `stipaRating`, `STIPA_BANDS` | 1.6 |
 | **sources** | `loadLoudspeaker`, `getCachedLoudspeaker`, `interpolateAttenuation`, `registerLoudspeaker`, `analyseSpeaker`, `importSpeakerFile` | 1.2 |
+| **sources (geometry)** | `expandSources`, `expandLineArrayToElements`, `earHeightFor`, `POSTURE_EAR_HEIGHTS_M` | 1.2/1.7 (`source-expand.js`) |
+| **providers** | `setSurfaceCatalogueProvider`, `setFurnitureCatalogueProvider`, `setRackCatalogueProvider`, `getTreatmentAbsorption`, `getCachedCatalogue`, `getFurnitureCatalogue`, `getRackCatalogue` | DI registry (`providers.js`) |
 | **per-listener** | `computePerListenerMetrics`, `formatListenerMetricsLabel` | 1.2/1.3 + Precision STI |
 | **precision** | `runPrecisionRender`, `buildPhysicsScene`, `PHYSICS_SCENE_VERSION`, `buildBVH`, `intersectRay`, `traceRays`, `triangulateScene`, `deriveMetrics`, `calcEDT`/`calcT30`/`calcC80`/`calcC50`/`calcDR`/`calcSTIFromIR`, `PrecisionWorkerPool` | Part 2 |
-| **display & util** | `dilateGridForDisplay`, `buildSilhouetteMask`, `recordRayPaths`, `PHYSICS_P1_5_ENABLED`, `importDxfFile`, `furnitureBlocksCylinder`, `rackBlocksCylinder` | Render-only / utilities |
+| **display & util** | `dilateGridForDisplay`, `buildSilhouetteMask`, `PHYSICS_P1_5_ENABLED`, `importDxfFile`, `furnitureBlocksCylinder`, `rackBlocksCylinder` | Render-only / utilities |
+
+> `recordRayPaths` / `buildLineSegmentIndex` moved OUT of the engine to
+> `js/graphics/ray-viz.js` (2026-05-29) — they are a Three.js-feeding
+> visualisation helper, not physics.
 
 Full symbol list: see [`js/physics/nymphysics.js`](../js/physics/nymphysics.js)
-(138 exports). Re-export integrity is guarded by
-[`tests/nymphysics-barrel.test.mjs`](../tests/nymphysics-barrel.test.mjs).
+(~148 exports). Re-export integrity is guarded by
+[`tests/nymphysics-barrel.test.mjs`](../tests/nymphysics-barrel.test.mjs);
+decoupling by
+[`tests/nymphysics-no-outbound-imports.test.mjs`](../tests/nymphysics-no-outbound-imports.test.mjs).
 
 ---
 

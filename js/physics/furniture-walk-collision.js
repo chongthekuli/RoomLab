@@ -23,7 +23,7 @@
 //
 // Pure / Node-testable. No DOM, no Three.js.
 
-import { getSubVolumes } from '../labs/furniturelab/sub-volumes.js';
+import { getSubVolumes } from './furniture-sub-volumes.js';
 
 /**
  * Return true if a vertical cylinder at state-frame position (sx, sy)

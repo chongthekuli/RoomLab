@@ -1,0 +1,29 @@
+{
+  "name": "nymphysics",
+  "version": "1.0.0",
+  "description": "RoomLab's acoustics engine — Draft (analytical: Sabine/Eyring RT60, Hopkins-Stryker diffuse field, mass-law/Sharp TL, ISO 717 ratings, Maekawa diffraction, IEC 60268-16 STIPA) + Precision (BVH ray-traced impulse response → ISO 3382 metrics). Pure ESM, no build step, browser + Node.",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./full": "./nymphysics.js",
+    "./precision": "./precision/precision-engine.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "acoustics",
+    "room-acoustics",
+    "rt60",
+    "sabine",
+    "stipa",
+    "sound-transmission-loss",
+    "ray-tracing",
+    "iso-3382",
+    "iec-60268-16",
+    "ease"
+  ],
+  "license": "UNLICENSED",
+  "private": true
+}

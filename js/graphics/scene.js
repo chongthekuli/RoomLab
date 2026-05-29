@@ -16,7 +16,7 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, eqGainAt } from '../app-state.js';
 import { on, emit } from '../ui/events.js';
-import { recordRayPaths, buildLineSegmentIndex } from '../physics/ray-viz.js';
+import { recordRayPaths, buildLineSegmentIndex } from './ray-viz.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { buildRackGroup } from './rack-render.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';

@@ -12,10 +12,17 @@
 // a Map<key, def>. Either is accepted by sumRackAbsorption (the helper
 // detects shape).
 
+import { setRackCatalogueProvider } from '../../physics/providers.js';
+
 const CATALOGUE_URL = './data/racks/catalogue.json';
 
 let _cache = null;
 let _loadPromise = null;
+
+// Wire this catalogue into the engine's provider registry (labs → physics is
+// the allowed direction) so nymphysics reads rack defs without importing
+// js/labs/. getRackCatalogue is a hoisted function declaration.
+setRackCatalogueProvider(getRackCatalogue);
 
 /**
  * Load and cache the catalogue. Idempotent — repeat calls return the
