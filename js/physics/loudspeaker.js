@@ -89,13 +89,9 @@ export function registerLoudspeaker(url, def) {
   cache.set(url, def);
 }
 
-export function interpolateAttenuation(directivity, azimuth_deg, elevation_deg, freq_hz) {
-  const grid = directivity.attenuation_db[String(freq_hz)];
-  if (!grid) return 0;
-
-  const azs = directivity.azimuth_deg;
-  const els = directivity.elevation_deg;
-
+// Bilinear interpolation of ONE band's attenuation grid (dB) at (az, el),
+// clamping to the measured angular extent.
+function bilinearGrid(grid, azs, els, azimuth_deg, elevation_deg) {
   const az = Math.max(azs[0], Math.min(azs[azs.length - 1], azimuth_deg));
   const el = Math.max(els[0], Math.min(els[els.length - 1], elevation_deg));
 
@@ -116,4 +112,43 @@ export function interpolateAttenuation(directivity, azimuth_deg, elevation_deg, 
   const v11 = grid[j1][i1];
 
   return (1 - tEl) * ((1 - tAz) * v00 + tAz * v01) + tEl * ((1 - tAz) * v10 + tAz * v11);
+}
+
+// Attenuation (dB) at an arbitrary az/el/frequency. Octave-band callers
+// (heatmap, STIPA, precision) pass an exact measured band → the fast path
+// returns the bilinear grid value, identical to before. OFF-GRID frequencies
+// (the EQ frequency-response probe, sparse custom-speaker JSONs) used to fall
+// through to 0 = omni; we now log-frequency interpolate between the two
+// enclosing measured bands (Dr. Chen P3) so a 1500 Hz query on a {1000, 2000}
+// grid returns the beamed value, not omni. Below/above the measured range we
+// clamp to the nearest band.
+export function interpolateAttenuation(directivity, azimuth_deg, elevation_deg, freq_hz) {
+  const table = directivity.attenuation_db;
+  const azs = directivity.azimuth_deg;
+  const els = directivity.elevation_deg;
+
+  // Fast path — exact measured band (all octave-centre callers hit this).
+  const exact = table[String(freq_hz)];
+  if (exact) return bilinearGrid(exact, azs, els, azimuth_deg, elevation_deg);
+
+  // Off-grid — interpolate in log-frequency between the enclosing bands.
+  const bandFreqs = Object.keys(table).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if (bandFreqs.length === 0) return 0;
+  if (freq_hz <= bandFreqs[0]) {
+    return bilinearGrid(table[String(bandFreqs[0])], azs, els, azimuth_deg, elevation_deg);
+  }
+  const last = bandFreqs[bandFreqs.length - 1];
+  if (freq_hz >= last) {
+    return bilinearGrid(table[String(last)], azs, els, azimuth_deg, elevation_deg);
+  }
+  let lo = bandFreqs[0], hi = last;
+  for (let i = 0; i < bandFreqs.length - 1; i++) {
+    if (bandFreqs[i] <= freq_hz && freq_hz <= bandFreqs[i + 1]) {
+      lo = bandFreqs[i]; hi = bandFreqs[i + 1]; break;
+    }
+  }
+  const vLo = bilinearGrid(table[String(lo)], azs, els, azimuth_deg, elevation_deg);
+  const vHi = bilinearGrid(table[String(hi)], azs, els, azimuth_deg, elevation_deg);
+  const t = (Math.log(freq_hz) - Math.log(lo)) / (Math.log(hi) - Math.log(lo));
+  return (1 - t) * vLo + t * vHi;
 }

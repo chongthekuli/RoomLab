@@ -116,8 +116,17 @@
 //   - Possibly arcade-edge enumeration for cells AT-the-wall too
 // These are follow-up tasks; the substantive user-visible inversions
 // (R1-R7) are fixed.
+//
+// Re-baselined 115 → 158 (2026-05-29): the fixture now loads the hs880 def
+// through registerLoudspeaker (production path) so its 250/4000 Hz directivity
+// is FILLED from the class_hint factors instead of reading as omni 0. That is
+// the real heatmap behaviour and it deterministically yields 154 violations
+// (verified IDENTICAL under both the old and the new interpolateAttenuation —
+// i.e. independent of the directivity frequency-interpolation fix, which is
+// inert for filled defs). The prior 115 understated reality because two of the
+// three probed bands were accidentally omni in the raw fixture. 154 + 4 buffer.
 const PHASE_B_COMPLETE = false;
-const PHASE_B_PENDING_MAX_VIOLATIONS = 115;
+const PHASE_B_PENDING_MAX_VIOLATIONS = 158;
 
 import { readFileSync } from 'node:fs';
 
@@ -133,6 +142,8 @@ globalThis.localStorage = {
 const { computeMultiSourceSPL, computeRoomConstant } =
   await import('../js/physics/spl-calculator.js');
 const { wallsCrossedByPath } = await import('../js/physics/wall-path.js');
+const { registerLoudspeaker, getCachedLoudspeaker } =
+  await import('../js/physics/loudspeaker.js');
 
 const matJson = JSON.parse(readFileSync('./data/materials.json', 'utf8'));
 const materials = {
@@ -140,8 +151,16 @@ const materials = {
   list: matJson.materials,
   byId: Object.fromEntries(matJson.materials.map(m => [m.id, m])),
 };
-const hs880 = JSON.parse(readFileSync(
+// Production loads speaker defs through loadLoudspeaker / registerLoudspeaker,
+// which fills the missing octave bands from the single measured band (hs880
+// ships only 1000 Hz) via the class_hint factors. Mirror that here so the
+// fixture matches the real heatmap pipeline. With a RAW def, 250/4000 Hz had
+// no grid and interpolateAttenuation returned omni 0 (the pre-fill default),
+// understating the horn's true directional behaviour at those bands.
+const _hs880raw = JSON.parse(readFileSync(
   './data/loudspeakers/amperes-hs880.json', 'utf8'));
+registerLoudspeaker('test://hs880', _hs880raw);
+const hs880 = getCachedLoudspeaker('test://hs880');
 
 // ---------------------------------------------------------------------------
 // Surau-preset geometry — matches js/presets/surau.js for the rectangular
