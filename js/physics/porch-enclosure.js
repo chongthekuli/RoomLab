@@ -19,15 +19,33 @@
 //     this partial enclosure determines a per-band reverberant lift
 //     on top of the direct-path SPL reaching the porch.
 //
-// Mechanism (Dr. Chen formula):
-//   A_porch[band] = Σ (α_i[band] · S_i) over PRESENT surfaces
-//                 + 1.0 · S_open                      over OPEN surfaces
-//   α_avg_porch  = A_porch / S_total
-//   R_porch      = A_porch / (1 − α_avg_porch)         (Sabine)
-//   lift_dB[band] = 10 · log10(4 / R_porch[band])      (reverb-field term)
-//   L_drive       = direct-path SPL from source to porch entry midpoint
-//   L_porch_rev   = L_drive + lift_dB
-//   SPL_cell      = energy_sum(direct_at_cell, L_porch_rev)
+// Mechanism (partial-enclosure Sabine — present-surface room constant +
+// open-face energy-fraction scaling; Beranek "semi-open enclosure" adapted):
+//   A_present[band] = Σ (α_i[band] · S_i)  over PRESENT surfaces (roof, podium, back)
+//   ᾱ_present       = A_present / S_present
+//   R_present       = A_present / (1 − ᾱ_present)        (Sabine room constant)
+//   closedLift_dB   = 10 · log10(4 / R_present)          (reverb-field term)
+//   lift_dB[band]   = closedLift_dB + 10·log10(S_present/S_total)  (open-face loss)
+//   L_drive         = direct-path SPL from source to porch entry midpoint
+//   L_porch_rev     = L_drive + lift_dB
+//   SPL_cell        = energy_sum(direct_at_cell, L_porch_rev)
+//
+// WHY NOT the pure Beranek S_open-at-α=1 form (A = Σα·S_present + 1·S_open):
+//   In that form the α=1 open faces sit in the SAME A sum as the roof's α·S,
+//   so roof-material changes barely move ᾱ — the "roof change had <0.1 dB
+//   effect" user report (v=641). The present-surface-R + energy-scale form
+//   above keeps the roof an AUDIBLE lever, which is the correct behaviour in
+//   this module's gated regime: it only fires when openFrac ≤ 0.6 (≥40%
+//   enclosed), where the roof genuinely matters. Dr. Chen re-reviewed this
+//   2026-05-29 and ENDORSED the implemented form over her earlier audit's
+//   S_open suggestion — the two agree as openFrac→0.6 and diverge as the
+//   porch gets more enclosed, where S_open would under-read the lift by
+//   ~2 dB on a typical 0.6-enclosure-factor cell. See docs/NYMPHYSICS.md
+//   Part 3 + docs/NYMPHYSICS_AUDIT_2026-05-29.md.
+//
+// LIMITATION: for a porch open ABOVE the 0.6 gate this module returns zero
+//   lift (correct — it is basically outdoors; the roof legitimately stops
+//   being a lever there). That is physics, not a bug.
 //
 // Detection (Dr. Chen Q5):
 //   Cell is in a partial enclosure iff

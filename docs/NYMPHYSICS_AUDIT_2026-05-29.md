@@ -118,3 +118,45 @@ No circular deps. Internal graph is a clean DAG with evidence of active hygiene.
 User approved **both, modularity first then physics**. Tranche A
 (modularity v1, pushable) → Tranche B (physics fixes, LOCAL-FIRST).
 Directory move + neutral schema deferred to a later v2 pass.
+
+## Reconciliations after re-review (2026-05-29)
+
+On implementation, two of Dr. Chen's audit recommendations were **revised by
+Dr. Chen herself** after reading the actual code:
+
+- **P2 Porch → WITHDRAWN.** Her S_open-at-α=1 recommendation was the
+  textbook-clean form for the general case, but `porch-enclosure.js` is gated
+  to the ≥40%-enclosed regime (`openFrac ≤ 0.6`), where the *implemented*
+  present-surface-R + energy-fraction form is the better physics — pure S_open
+  would put the α=1 open faces in the same `A` sum and kill the roof-material
+  lever (the v=641 finding). **Resolution: keep the code, fix the docs** (the
+  header described the rejected formula). No heatmap change.
+- **P1 Diffraction floor → DEFERRED.** Two findings: (a) the correct thickness
+  for `thickBarrierIL` is the WALL's geometric `thickness_m` (already in state
+  — NO materials.json migration); (b) BUT a thin-wall (0.10 m) `thickBarrierIL`
+  gives ~0 dB bonus below 3.4 kHz, so a drop-in would drop ~11-13 dB at
+  125 Hz-2 kHz and **reintroduce the interior-louder-than-exterior inversion**
+  the floor fixes (verified at the break-band; would fail
+  `diffraction-interior-not-louder-than-exterior.test.mjs`). The floor is
+  masking a transmission-loss-budget bug for near-wall interior receivers, not
+  a diffraction error. **Resolution: documentation only this pass; a per-path
+  power-breakdown diagnostic at the guard positions must precede the band-shape
+  fix, and the TL fix + thickBarrierIL must land together.**
+
+## Validation goldens — STATUS
+- `tests/precision-sti-noise.test.mjs` — **LANDED** (with the P0 fix, ae… `4a091e6`).
+- `tests/directivity-freq-interp.test.mjs` — **LANDED** (with the P3 fix, `ae83147`).
+- `tests/precision-iso3382-analytic.test.mjs` — **LANDED** (EDT/T20/T30 = 1.500 on analytic decay).
+- `tests/golden-spl-surau.test.mjs` — **LANDED** (6 pts × 2 bands frozen + scene orderings; the diffraction-fix tripwire).
+- `tests/nymphysics-no-outbound-imports.test.mjs` — **LANDED** (modularity decoupling guard).
+- Diffraction band-shape test — pending the deferred P1 work.
+- Coherent λ/4 decorrelation test — pending the deferred (spacing-aware) coherent gate.
+
+## Still deferred (next pass)
+- **Diffraction inversion diagnostic → thick-barrier-floor fix** (P1; needs the
+  TL-budget mechanism understood first — Dr. Chen will not sign off otherwise).
+- **Coherent-sum λ/4 gate** (P2): must be spacing-aware — a blanket >500 Hz
+  cutoff wrongly de-correlates co-located sources (+6 → +3 dB).
+- **v2 extraction**: directory move, neutral `PhysicsScene` input schema,
+  feature-flags → config object, loudspeaker-cache instance scoping, god-module
+  splits under characterization tests.

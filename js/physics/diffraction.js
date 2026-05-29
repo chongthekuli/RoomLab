@@ -536,12 +536,28 @@ export function computeDiffractionContributions({
   // most-effective screen (= dominant bypass = loudest delivered path).
   //
   // The 16 dB IL floors (VERTICAL_EDGE_IL_FLOOR_DB, TOP_EDGE_IL_FLOOR_DB)
-  // are RETAINED here as an interim thick-barrier proxy. Real construction
-  // walls have 100-300 mm thickness; the knife-edge Maekawa formula under-
-  // counts the additional edge attenuation. Phase C will replace the
-  // floors with thickBarrierIL(delta, lambda, thickness_m) once
-  // materials.json carries thickness_m (Dr. Chen audit E7, deferred to
-  // Phase C pending Lin's catalogue work).
+  // are RETAINED as an interim thick-barrier proxy. Real construction walls
+  // have 100-300 mm thickness; the knife-edge Maekawa formula under-counts
+  // the additional edge attenuation.
+  //
+  // LOAD-BEARING — DO NOT DROP without the diagnostic in step 2 below.
+  // Dr. Chen re-reviewed 2026-05-29 (docs/NYMPHYSICS_AUDIT_2026-05-29.md,
+  // P1). Two findings:
+  //  (1) The correct thickness input is the WALL's geometric thickness_m
+  //      (normalizeWallSlot / getWallEdgeThickness — already in state, NO
+  //      materials.json migration needed), NOT a material sheet thickness.
+  //  (2) BUT a drop-in thickBarrierIL(δ, λ, 0.10) gives ~0 dB bonus below
+  //      ~3.4 kHz (w<λ clamp), so it would drop ~11-13 dB of attenuation at
+  //      125 Hz-2 kHz and REINTRODUCE the interior-louder-than-exterior
+  //      inversion these floors fix — failing
+  //      tests/diffraction-interior-not-louder-than-exterior.test.mjs (1 kHz).
+  // The floor is masking a transmission-loss BUDGET issue for near-wall
+  // interior receivers (the eave diffraction is roughly right; the relative
+  // TL-vs-diffraction energy accounting is not), which lives outside this
+  // module. Replacing the floor with the correct band-shaped thickBarrierIL
+  // is safe ONLY after a per-path power-breakdown diagnostic at the guard-
+  // test positions (floor=0, 1/2/4 kHz) identifies that mechanism. Tracked
+  // as a deferred task; the band-shape fix and the TL fix must land together.
 
   // Cache the per-band TL formula (Phase B3 series-TL on the bent path).
   const bandIdx = materials ? bandIndexForFreq(materials, freq_hz) : 0;
