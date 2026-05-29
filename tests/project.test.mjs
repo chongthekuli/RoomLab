@@ -7,6 +7,7 @@ import {
   state, applyPresetToState, applyTemplateToState, PRESETS, TEMPLATES,
   serializeProject, deserializeProject, PROJECT_FORMAT_VERSION,
 } from '../js/app-state.js';
+import { defaultSaveFilename, normalizeSaveFilename } from '../js/io/project-file.js';
 
 let failed = 0;
 function assert(cond, label) {
@@ -225,6 +226,43 @@ state.outdoor.field_size_m = 800;
 applyTemplateToState('hifi');
 assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
   `applyTemplateToState resets outdoor to default (got enabled=${state.outdoor.enabled}, size=${state.outdoor.field_size_m})`);
+
+// 8. Save-As filename helpers (v=721) — the pure pieces behind the
+//    "Save As" button. Browser-API paths (showSaveFilePicker, prompt,
+//    anchor download) aren't unit-testable in Node, but these are.
+{
+  const fixedDate = new Date('2026-05-29T14:30:05.123Z');
+  // 8a. Auto-suggested name: <base>_<stamp>.roomlab.json, ':'/'.' → '-'.
+  assert(defaultSaveFilename('surau', fixedDate) === 'surau_2026-05-29_14-30-05.roomlab.json',
+    'defaultSaveFilename: hint + stamp, colons/dots stripped');
+  // 8b. Blank / missing hint falls back to 'roomlab'.
+  assert(defaultSaveFilename('', fixedDate) === 'roomlab_2026-05-29_14-30-05.roomlab.json',
+    'defaultSaveFilename: blank hint → roomlab');
+  assert(defaultSaveFilename(undefined, fixedDate).startsWith('roomlab_'),
+    'defaultSaveFilename: undefined hint → roomlab');
+  assert(defaultSaveFilename('  ', fixedDate).startsWith('roomlab_'),
+    'defaultSaveFilename: whitespace-only hint → roomlab');
+
+  // 8c. normalizeSaveFilename: appends extension when the user omits it.
+  assert(normalizeSaveFilename('Hospital Serdang', 'fallback.roomlab.json') === 'Hospital Serdang.roomlab.json',
+    'normalizeSaveFilename: appends .roomlab.json when missing');
+  // 8d. A typed .json (or full .roomlab.json) is left intact.
+  assert(normalizeSaveFilename('mine.json', 'fallback.roomlab.json') === 'mine.json',
+    'normalizeSaveFilename: keeps a .json the user typed');
+  assert(normalizeSaveFilename('mine.roomlab.json', 'fallback.roomlab.json') === 'mine.roomlab.json',
+    'normalizeSaveFilename: keeps a full .roomlab.json');
+  // 8e. Blank / null typed value → fallback (used when prompt returns '').
+  assert(normalizeSaveFilename('', 'fallback.roomlab.json') === 'fallback.roomlab.json',
+    'normalizeSaveFilename: blank → fallback');
+  assert(normalizeSaveFilename('   ', 'fallback.roomlab.json') === 'fallback.roomlab.json',
+    'normalizeSaveFilename: whitespace → fallback');
+  // 8f. Surrounding whitespace is trimmed.
+  assert(normalizeSaveFilename('  trimmed  ', 'fallback.roomlab.json') === 'trimmed.roomlab.json',
+    'normalizeSaveFilename: trims surrounding whitespace');
+  // 8g. Extension match is case-insensitive (don't double-append).
+  assert(normalizeSaveFilename('LOUD.JSON', 'fallback.roomlab.json') === 'LOUD.JSON',
+    'normalizeSaveFilename: case-insensitive extension check');
+}
 
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll project round-trip tests passed.');

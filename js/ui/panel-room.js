@@ -2,7 +2,7 @@ import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToS
 import { emit, on } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { importDxfFile } from '../physics/dxf-import.js';
-import { saveProjectToDownload, loadProjectFromFile } from '../io/project-file.js';
+import { saveProjectAs, loadProjectFromFile } from '../io/project-file.js';
 import { encodeShareLink, buildShareUrl } from '../io/share-link.js';
 import { triggerPrint } from './print-report.js';
 import { listCustomRooms, listProjects, latestRoomInProject, saveCustomRoom, getCustomRoomById, deleteCustomRoom, updateCustomRoom } from '../shared/custom-rooms.js';
@@ -281,10 +281,11 @@ export function mountRoomPanel({ materials }) {
   // Lab route). Handlers are still bound here because RoomLAB owns
   // the scene state these actions operate on; the click bindings
   // attach when RoomLAB mounts.
-  document.getElementById('btn-save-project')?.addEventListener('click', () => {
+  document.getElementById('btn-save-project')?.addEventListener('click', async () => {
     try {
-      const filename = saveProjectToDownload();
-      showStatus(`Saved as ${filename}`, 'ok');
+      const res = await saveProjectAs(state.projectName || undefined);
+      if (res.cancelled) { showStatus('Save cancelled.'); return; }
+      showStatus(`Saved as ${res.filename}`, 'ok');
     } catch (err) {
       showStatus(`Save failed: ${err.message || err}`, 'err');
     }

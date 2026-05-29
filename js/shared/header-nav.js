@@ -52,7 +52,7 @@ export function mountHeaderNav({ activeLab } = {}) {
     <nav class="lab-nav" aria-label="Lab navigation">${tabs}</nav>
     <div class="header-actions">
       <button id="btn-reset-data" class="btn-reset" aria-label="Reset all RoomLAB data" title="Reset all RoomLAB data — saved scene, custom rooms, panel state, Lab preferences. Asks for confirmation; cannot be undone.">↻</button>
-      <button id="btn-save-project" class="btn-save" title="Save the entire project (room, speakers, listeners, zones, EQ, ambient noise) to a .roomlab.json file">💾 Save</button>
+      <button id="btn-save-project" class="btn-save" title="Save the entire project (room, speakers, listeners, zones, EQ, ambient noise) to a .roomlab.json file. On Chrome/Edge you choose the folder and filename; elsewhere you name it and it lands in Downloads.">💾 Save As</button>
       <button id="btn-load-project" class="btn-load" title="Load a previously saved .roomlab.json project file">📂 Load</button>
       <button id="btn-share-link" class="btn-share" aria-label="share scene as link" title="Copy a URL that opens this exact scene — paste into Slack or email">🔗 Share</button>
       <button id="btn-print-report" class="btn-print" aria-label="print proposal" title="Print a multi-page proposal of the current scene. Use the print dialog's 'Save as PDF' destination on desktop. On mobile: choose 'Save as PDF' (Android) or pinch-and-share-to-Files (iOS).">🖨 Print</button>
@@ -85,7 +85,7 @@ function resetAllData() {
     '  • All saved custom rooms\n' +
     '  • Sidebar collapse state\n' +
     '  • SpeakerLAB / DeviceLAB preferences\n\n' +
-    'Cannot be undone. Save your work first via 💾 Save if needed.'
+    'Cannot be undone. Save your work first via 💾 Save As if needed.'
   );
   if (!ok) return;
   try {
