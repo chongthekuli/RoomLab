@@ -174,6 +174,8 @@ export {
   precomputeSTIPAContext,
   computeSTIPAAt,
   computeSTIPA,
+  drPerBandAt,
+  signalSPLPerBandAt,
   stipaRating,
 } from './stipa.js';
 

@@ -272,32 +272,36 @@ export function computeSTIPAAt(stipaCtx, listenerPos, ambientNoise_per_band = NC
   return sti < 0 ? 0 : (sti > 1 ? 1 : sti);
 }
 
-export function computeSTIPA({
-  sources, getSpeakerDef, listenerPos, room, materials, zones = [], treatments = [],
-  ambientNoise_per_band = NC_35_PER_BAND,
-  temperature_C = 20,
-}) {
-  const ctx = precomputeSTIPAContext({ sources, getSpeakerDef, room, materials, zones, treatments });
-  const rt60_per_band = ctx.rt60_per_band;
-  const roomR_per_band = ctx.roomR_per_band;
+// Per-band {D, R} direct/reverb POWER accumulation at one listener position,
+// from a precomputed STIPA context. This is the shared core of computeSTIPA's
+// signal + MTF path. Extracted (2026-05-29) so computeSTIPA AND the precision
+// engine's signal-borrow (signalSPLPerBandAt → calcSTIFromIR noise term) build
+// on the SAME accumulation and cannot drift.
+//
+// GUARDED — this is the D/R-aware split behind feedback_stipa_dr_aware. The
+// body below is the exact form previously inlined in computeSTIPA; keep it
+// byte-identical (tests/stipa.test.mjs is the tripwire). The perf-critical
+// heatmap path computeSTIPAAt keeps its own inline copy on purpose (it returns
+// only the STI scalar and runs per-vertex at 10k+ samples).
+export function drPerBandAt(ctx, listenerPos) {
+  const { roomR_per_band, sourceCtx, room, materials, L_p_rev_inside_per_band } = ctx;
   // Split direct and reverb power per band so MTF can apply the reverb-
   // smearing m_rev ONLY to the reverb component (Bradley 1986 / ISO 9921).
   // Per-source wall crossings are geometry-only — compute once and reuse
   // across all bands, mirroring computeSTIPAAt.
   const perSourceWalls = (room && materials)
-    ? ctx.sourceCtx.map(s => wallsCrossedByPath(s.src.position, listenerPos, room))
+    ? sourceCtx.map(s => wallsCrossedByPath(s.src.position, listenerPos, room))
     : null;
   // Tier 1a — diffraction joins direct, re-radiation joins reverb.
   // Same flag-gated logic + module signatures as computeSTIPAAt.
   const useP15 = PHYSICS_P1_5_ENABLED && room && materials && perSourceWalls;
-  const L_p_rev_inside_per_band = ctx.L_p_rev_inside_per_band;
-  const dr_per_band = STIPA_BANDS.map((fhz, k) => {
+  return STIPA_BANDS.map((fhz, k) => {
     let D = 0, R_p = 0;
     const R = roomR_per_band[k];
     const L_p_rev_band = (useP15 && L_p_rev_inside_per_band)
       ? L_p_rev_inside_per_band[k] : -Infinity;
-    for (let i = 0; i < ctx.sourceCtx.length; i++) {
-      const s = ctx.sourceCtx[i];
+    for (let i = 0; i < sourceCtx.length; i++) {
+      const s = sourceCtx[i];
       const { r, azimuth_deg, elevation_deg } = localAngles(
         s.src.position, s.src.aim, listenerPos
       );
@@ -344,6 +348,32 @@ export function computeSTIPA({
     }
     return { D, R: R_p };
   });
+}
+
+// Per-band calibrated speech signal SPL (direct + Hopkins-Stryker reverberant,
+// dB re 20µPa) at a listener, from a precomputed context. Returns a length-7
+// array aligned to STIPA_BANDS.
+//
+// Exposed so the PRECISION STI noise term can borrow the draft engine's
+// calibrated signal LEVEL: the precision ray histogram is seeded with source
+// power but accumulated at volumetric receivers with no validated absolute-SPL
+// (re 20µPa) calibration, so it can't supply the SNR masking floor itself. The
+// precision MTF stays precision-derived; only the scalar SNR floor uses this.
+export function signalSPLPerBandAt(ctx, listenerPos) {
+  return drPerBandAt(ctx, listenerPos).map(({ D, R }) => {
+    const total = D + R;
+    return total > 0 ? 10 * Math.log10(total) : -Infinity;
+  });
+}
+
+export function computeSTIPA({
+  sources, getSpeakerDef, listenerPos, room, materials, zones = [], treatments = [],
+  ambientNoise_per_band = NC_35_PER_BAND,
+  temperature_C = 20,
+}) {
+  const ctx = precomputeSTIPAContext({ sources, getSpeakerDef, room, materials, zones, treatments });
+  const rt60_per_band = ctx.rt60_per_band;
+  const dr_per_band = drPerBandAt(ctx, listenerPos);
   const signalSPL_per_band = dr_per_band.map(({ D, R }) => {
     const total = D + R;
     return total > 0 ? 10 * Math.log10(total) : -Infinity;

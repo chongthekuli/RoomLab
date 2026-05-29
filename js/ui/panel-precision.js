@@ -13,11 +13,12 @@
 //   • listener:selected re-renders the display against the new receiver
 //     without re-running the trace
 
-import { state, getSelectedListener } from '../app-state.js';
+import { state, getSelectedListener, expandSources } from '../app-state.js';
 import { on, emit } from './events.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { runPrecisionRender } from '../physics/precision/precision-engine.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
+import { precomputeSTIPAContext, signalSPLPerBandAt } from '../physics/stipa.js';
 import { applyGlossary } from './glossary.js';
 import { startAudition, startOriginalPlayback, stopAudition, isAuditionPlaying, getAuditionMode, isAuditionInWalkMode, checkSampleAvailable, listAuditionSamplesForScene, getAuditionSampleId, setAuditionSample } from '../audio/audition.js';
 import { airAbsorptionDbPerM } from '../physics/air-absorption.js';
@@ -304,8 +305,30 @@ function renderResults() {
     return;
   }
 
+  // Precision STI noise term needs a calibrated per-band SIGNAL SPL at each
+  // receiver. The ray histogram is uncalibrated for absolute SPL, so borrow
+  // the draft STIPA engine's calibrated speech level (direct + Hopkins-Stryker
+  // reverberant) — the MTF stays precision-derived; only the SNR masking floor
+  // uses this level. Receiver z MUST match the snapshot (elevation + 1.2 m ear
+  // height). Without this the ambient-noise knob is dead in Precision mode.
+  const ambient = state.physics.ambientNoise?.per_band ?? null;
+  const stipaCtx = precomputeSTIPAContext({
+    sources: expandSources(state.sources ?? []),
+    getSpeakerDef: getCachedLoudspeaker,
+    room: state.room,
+    materials: materialsRef,
+    zones: state.zones ?? [],
+    treatments: state.treatments ?? [],
+  });
+  const signalSPL_per_receiver = state.listeners.map(lst => signalSPLPerBandAt(stipaCtx, {
+    x: lst.position.x,
+    y: lst.position.y,
+    z: (lst.elevation_m ?? 0) + 1.2,
+  }));
+
   const allMetrics = deriveMetrics(result, {
-    ambientNoise_per_band: state.physics.ambientNoise?.per_band,
+    ambientNoise_per_band: ambient,
+    signalSPL_per_band: signalSPL_per_receiver,
   });
   const m = allMetrics[selectedIdx];
   if (!m) {

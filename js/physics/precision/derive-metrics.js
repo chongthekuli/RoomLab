@@ -7,9 +7,13 @@
 // ENERGY (squared pressure × Δt). For ratio-based metrics (EDT, T20,
 // T30, C80, C50, D/R) the absolute scale cancels — the tracer's
 // normalisation choice doesn't affect the result. For STI-from-IR the
-// MTF is itself normalised (|FT{h}|/∫h), so noise correction is the
-// only path where an absolute SPL could matter; we default to noise-
-// free (high-SNR) conditions matching a loud-PA scenario.
+// MTF is itself normalised (|FT{h}|/∫h); the noise correction is the
+// only path where an absolute SPL matters. When the caller supplies a
+// per-band signal SPL (re 20µPa) — borrowed from the draft STIPA engine,
+// which IS calibrated — the SNR masking floor is applied; when it is
+// absent we fall back to noise-free (high-SNR) conditions matching a
+// loud-PA scenario. See signalSPLPerBandAt in stipa.js for why the level
+// is borrowed rather than read off the (uncalibrated) volumetric histogram.
 //
 // Public API:
 //   deriveMetrics(precisionResult, opts?)    — all metrics for all receivers
@@ -249,10 +253,14 @@ export function calcSTIFromIR(bandHistograms, bucketDtMs, opts = {}) {
     const mtfs = STI_MOD_FREQS_HZ.map(fm => computeMTF(h, bucketDtMs, fm));
     mtfPerBand[b] = mtfs;
 
-    // Noise correction only if caller supplied both vectors.
+    // Noise correction only if caller supplied both vectors. SNR enters as
+    // the IEC 60268-16 noise factor [1 + 10^(−SNR/10)]^−1 on the modulation
+    // index. The ±40 dB clamp is numerical-overflow hygiene (avoids
+    // pow(10,>4) on degenerate bands), NOT the standards clamp — the
+    // standards ±15 dB clamp is applied to the APPARENT SNR below.
     let noiseTerm = 1;
     if (signal && noise && isFinite(signal[b]) && isFinite(noise[b])) {
-      const snrDb = signal[b] - noise[b];
+      const snrDb = Math.max(-40, Math.min(40, signal[b] - noise[b]));
       noiseTerm = 1 / (1 + Math.pow(10, -snrDb / 10));
     }
     // Mean MTF across 14 modulation frequencies × noise term.
@@ -367,8 +375,13 @@ export function deriveMetrics(result, opts = {}) {
       dr_db: calcDR(broadband, bucketDtMs, drOpts),
       directArrivalMs: dirMs,
     };
+    // signalSPL_per_band may be a single shared per-band vector (number[])
+    // applied to every receiver, OR a per-receiver array (number[][]) indexed
+    // [receiverIdx][band]. Select this receiver's slice in the latter case.
+    const sig = opts.signalSPL_per_band;
+    const sigForR = Array.isArray(sig) && Array.isArray(sig[0]) ? sig[r] : sig;
     const sti = calcSTIFromIR(bandHistograms, bucketDtMs, {
-      signalSPL_per_band: opts.signalSPL_per_band,
+      signalSPL_per_band: sigForR,
       ambientNoise_per_band: opts.ambientNoise_per_band,
     });
     out.push({ receiverIdx: r, perBand, broadband: broadbandMetrics, sti });
