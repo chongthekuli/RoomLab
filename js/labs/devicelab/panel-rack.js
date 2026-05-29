@@ -779,7 +779,7 @@ function renderTargetRoomSelect() {
     const label = entry.roomName || 'Untitled';
     const proj = entry.projectName ? ` · ${entry.projectName}` : '';
     opts.push(
-      `<option value="${escapeAttr(entry.id)}">Saved: ${escapeHtml(label)}${escapeHtml(proj)} (${n} rack${n === 1 ? '' : 's'})</option>`
+      `<option value="${escapeHtml(entry.id)}">Saved: ${escapeHtml(label)}${escapeHtml(proj)} (${n} rack${n === 1 ? '' : 's'})</option>`
     );
   }
   sel.innerHTML = opts.join('');
