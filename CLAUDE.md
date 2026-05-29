@@ -39,7 +39,8 @@ js/
     speakerlab/         speaker browser/editor
     surfacelab/         material catalogue
     devicelab/          rack/amp/PA hardware browser
-  physics/              pure (Node-testable), no DOM
+  physics/              pure (Node-testable), no DOM — the "nymphysics" engine
+    nymphysics.js       PUBLIC API barrel (import from here) — Draft + Precision modes; see docs/NYMPHYSICS.md
     rt60.js             Sabine + Eyring, per band
     spl-calculator.js   computeSPLGrid, computeListenerBreakdown, computeMultiSourceSPL
     stipa.js            IEC 60268-16 STIPA

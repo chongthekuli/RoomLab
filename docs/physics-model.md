@@ -1,6 +1,13 @@
 # Physics Model — DEPRECATED
 
-This file is a Phase 2 skeleton kept for historical reference. The complete and current physics reference lives in **[CALCULATIONS.md](./CALCULATIONS.md)** — every formula, unit, assumption, and known simplification is documented there with source-code anchors and an audit protocol.
+This file is a Phase 2 skeleton kept for historical reference.
+
+The engine's front door is now **[NYMPHYSICS.md](./NYMPHYSICS.md)** — the
+umbrella reference for **nymphysics**, RoomLab's acoustics engine (Draft +
+Precision modes), with the public API map and the gap-tracker for
+undocumented models. The full draft-engine derivations live in
+**[CALCULATIONS.md](./CALCULATIONS.md)** — every formula, unit, assumption,
+and known simplification with source-code anchors and an audit protocol.
 
 ## Quick pointers
 

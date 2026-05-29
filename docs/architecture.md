@@ -24,7 +24,10 @@ RoomLab/
 
 ## Module boundaries
 
-- **physics/** never touches the DOM. Can be unit-tested headless.
+- **physics/** never touches the DOM. Can be unit-tested headless. Its
+  public API is the **nymphysics** engine — import from
+  [`js/physics/nymphysics.js`](../js/physics/nymphysics.js); derivations in
+  [`docs/NYMPHYSICS.md`](./NYMPHYSICS.md).
 - **graphics/** reads `app-state`, renders Three.js. Can be swapped out.
 - **ui/** dispatches changes to `app-state` via `events.js` pub/sub.
 - **main.js** is the only place that imports from all three.
