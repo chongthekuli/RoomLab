@@ -124,9 +124,21 @@
 // (verified IDENTICAL under both the old and the new interpolateAttenuation —
 // i.e. independent of the directivity frequency-interpolation fix, which is
 // inert for filled defs). The prior 115 understated reality because two of the
-// three probed bands were accidentally omni in the raw fixture. 154 + 4 buffer.
+// three probed bands were accidentally omni in the raw fixture.
+//
+// Re-baselined 158 → 188 (2026-05-30, v=727): the parent-wall TOP-edge diffrac-
+// tion fix dropped the flat 16 dB IL floor (Dr. Chen P1 — wrong band-shape; a
+// 100 mm wall provides ~0 thick-barrier bonus below 3.4 kHz) and replaced it
+// with raw Maekawa + thickBarrierIL. The flat floor had been cosmetically
+// SMOOTHING the (Phase-B-incomplete) raw-Maekawa shadow field behind walls; the
+// correct physics is rougher, so the violation count deterministically rises
+// 154 → 183. The CORRECTNESS tripwires hold (diffraction-interior-not-louder
+// re-blessed multi-band, diffraction-regression-surau-qibla green). The extra
+// roughness is the pre-existing Phase-B diffraction-model limitation now
+// un-masked, NOT a new defect. 183 + 5 buffer. (For Sam — snapshot owner; and
+// the Phase-B candidate-edge work would reduce these.)
 const PHASE_B_COMPLETE = false;
-const PHASE_B_PENDING_MAX_VIOLATIONS = 158;
+const PHASE_B_PENDING_MAX_VIOLATIONS = 188;
 
 import { readFileSync } from 'node:fs';
 

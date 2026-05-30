@@ -1,5 +1,5 @@
 import { interpolateAttenuation } from './loudspeaker.js';
-import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea, roomEffectiveBounds } from './room-shape.js';
+import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea, roomEffectiveBounds, roomSurfaces, maxCeilingHeightAt } from './room-shape.js';
 import { computeRT60Band } from './rt60.js';
 import {
   AIR_ABSORPTION_DB_PER_M as AIR_ABS_TABLE,
@@ -564,6 +564,12 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   const c = coherent ? speedOfSound(temperature_C) : 0;
   const angFreq = 2 * Math.PI * freq_hz;
   let reverbPowerSum = 0;
+  // Per-listener (source-independent): ceiling TL to add to any over-the-wall-
+  // TOP diffraction path when this receiver is inside the roofed interior.
+  // 0 for exterior / open-top receivers. See interiorRoofDiffractionTL_db.
+  const interiorRoofTL_db = (tier1aEnabled && room && materials)
+    ? interiorRoofDiffractionTL_db(listenerPos, room, materials, freq_hz)
+    : 0;
   // Tier 1a — diffraction + re-radiation. Both modules early-return
   // zero when PHYSICS_P1_5_ENABLED is false, so this block is a no-op
   // on public deploys. The bandIdx + per-band L_p_rev scalar are resolved
@@ -674,6 +680,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
         src, listener: listenerPos, room, wallsCrossed: d.wallsCrossed,
         materials, freq_hz, sourceLpFreeField_db, temperature_C, airAbsorption,
         groundG, groundPlaneZ: 0, enable: tier1aEnabled,
+        interiorTopEdgeTL_db: interiorRoofTL_db,
       });
       diffractionPowerSum += diff.totalPower;
       if (Number.isFinite(L_p_rev_inside_band_db)) {
@@ -811,6 +818,26 @@ function isListenerInsideBuildingInterior(listenerPos, room) {
   const inset = wallInsetPolygon(room);
   if (!inset || !Array.isArray(inset.inner) || inset.inner.length < 3) return null;
   return pointInPolygon2DLocal(listenerPos.x, listenerPos.y, inset.inner);
+}
+
+// Roof transmission loss (dB) to add to an over-the-wall-TOP diffraction path
+// when the receiver sits inside the building's ROOFED interior. The wall top is
+// capped by the ceiling, so the over-the-top path physically passes through the
+// roof slab — Maekawa over a free edge is invalid into a closed cavity (Dr.
+// Chen 2026-05-30). Routed through the RESOLVED ceiling material (roomSurfaces
+// forces 'open-air', TL=0, when room.enclosure==='outdoor'), so a roofless
+// courtyard self-corrects to 0 and the over-the-top path survives — the
+// roofed/open distinction falls out of the material, not a boolean. Returns 0
+// when the receiver is not in the interior or is at/above the roof.
+export function interiorRoofDiffractionTL_db(listenerPos, room, materials, freq_hz) {
+  if (!room || !materials || !listenerPos) return 0;
+  if (isListenerInsideBuildingInterior(listenerPos, room) !== true) return 0;
+  const ceilH = maxCeilingHeightAt(listenerPos.x, listenerPos.y, room);
+  if (Number.isFinite(ceilH) && Number.isFinite(listenerPos.z) && listenerPos.z >= ceilH) return 0;
+  const ceiling = roomSurfaces(room).find(s => s.id === 'ceiling');
+  if (!ceiling?.materialId) return 0;
+  const bandIdx = bandIndexForFreq(materials, freq_hz);
+  return transmissionLossDb([{ materialId: ceiling.materialId }], materials, bandIdx);
 }
 
 function pointInPolygon2DLocal(x, y, verts) {

@@ -1,24 +1,28 @@
-// Regression: listener INSIDE a closed building must NOT read louder
-// than a listener OUTSIDE in the adjacent corridor under an arcade
-// roof. The pre-fix bug (user-reported 2026-05-24): listener at
-// (1, 14, 1.7) just inside the west wall read 89 dB while a listener
-// at (-1.5, 9, 1.7) under the west arcade read 84 dB — INVERSION.
+// Regression: a listener INSIDE a closed (roofed) building must NOT read
+// louder than a listener OUTSIDE in the adjacent arcade — and, after the
+// 2026-05-30 fix, must read MUCH lower (transmission-loss-bound).
 //
-// Two compounding causes:
-//   (a) Maekawa over the BUILDING WALL TOP edge has near-zero IL for
-//       listeners just past the wall (shallow shadow → knife-edge
-//       formula returns ~3-5 dB, ignoring the wall's thickness and
-//       mass).
-//   (b) The arcade roof's INNER perimeter edge sits on the SAME
-//       physical eave line as the building wall's top edge, so the
-//       diffraction module counted the bypass path TWICE.
+// History:
+//   - Original bug (2026-05-24): interior at (1,14,1.7) read 89 dB vs
+//     arcade (-1.5,9,1.7) at 84 dB — INVERSION. The dominant path bent over
+//     the building WALL TOP edge into the interior with near-zero Maekawa IL.
+//   - v=647 band-aid: a flat 16 dB TOP_EDGE_IL_FLOOR clamped that path and an
+//     inner-eave dedupe removed a double-count. It hid the inversion (76 vs 78)
+//     but the interior was still ~37 dB too loud.
+//   - v=727 REAL fix (Dr. Chen 2026-05-30): the over-the-wall-TOP path into a
+//     ROOFED interior is unphysical — the wall top is capped by the ceiling, so
+//     that path must pay the ceiling transmission loss. interiorRoofDiffraction
+//     -TL_db (spl-calculator) resolves the ceiling material (open-air → 0 TL →
+//     path survives for a roofless courtyard; concrete → ~53 → path dies) and
+//     threads it into computeDiffractionContributions (interiorTopEdgeTL_db).
+//     The parent-wall TOP-edge 16 dB floor is DROPPED (it was masking this) and
+//     replaced by the band-shaped thickBarrierIL thickness bonus. The
+//     VERTICAL_EDGE floor and the arcade-roof overhead floor are RETAINED
+//     (different mechanisms, separate tasks).
 //
-// Fix (v=647):
-//   - TOP_EDGE_IL_FLOOR_DB = 16 dB on parent_wall_* top edges (was 10).
-//   - enumerateRoofPerimeterEdges skips the inner edge whose endpoints
-//     coincide with the building wall corresponding to refl.side.
-//   - TOP_EDGE_IL_FLOOR_DB also applied to arcade/portico roof
-//     perimeter edges (they're thick-concrete in real construction).
+// Result: roofed interior is TL-bound (~30-40 dB), arcade unchanged (~73-78),
+// and an OPEN-TOP courtyard interior stays loud (~83-86) — the (C) control
+// proves the penalty is gated on the ceiling MATERIAL, not bare geometry.
 
 import { readFileSync } from 'node:fs';
 
@@ -58,24 +62,22 @@ function check(name, cond, detail = '') {
 }
 
 // =============================================================================
-// (A) Source-grep: dedup of arcade-roof INNER edge present
+// (A) Source-grep: the v=727 roof-TL mechanism + inner-eave dedupe present
 // =============================================================================
 const diffSrc = readFileSync('./js/physics/diffraction.js', 'utf8');
+const splSrc = readFileSync('./js/physics/spl-calculator.js', 'utf8');
 check('(A) enumerateRoofPerimeterEdges takes a room arg (for inner-edge dedup)',
   /function enumerateRoofPerimeterEdges\s*\(\s*refl\s*,\s*room\s*\)/.test(diffSrc));
 check('(A) inner-edge dedupe: skipAxis/skipValue logic present',
   /skipAxis\s*=\s*['"](x|y)['"]/.test(diffSrc));
-check('(A) TOP_EDGE_IL_FLOOR_DB = 16 dB (raised from 10)',
-  /TOP_EDGE_IL_FLOOR_DB\s*=\s*16\.0/.test(diffSrc));
+check('(A) diffraction accepts the interior roof-TL term (interiorTopEdgeTL_db)',
+  /interiorTopEdgeTL_db/.test(diffSrc));
+check('(A) spl-calculator resolves the ceiling TL (interiorRoofDiffractionTL_db)',
+  /interiorRoofDiffractionTL_db/.test(splSrc));
 
-// =============================================================================
-// (B) End-to-end: surau-style geometry with all-concrete walls + arcade.
-//     Listener just INSIDE west wall must NOT read significantly higher
-//     than listener just OUTSIDE under west arcade.
-// =============================================================================
-{
-  const room = {
-    shape: 'rectangular', width_m: 18, height_m: 4.5, depth_m: 17.7,
+function surauRoom(enclosure) {
+  return {
+    shape: 'rectangular', width_m: 18, height_m: 4.5, depth_m: 17.7, enclosure,
     surfaces: {
       floor: 'carpet-heavy-underlay', ceiling: 'concrete-painted',
       wall_north: 'concrete-painted', wall_south: 'concrete-painted',
@@ -87,32 +89,57 @@ check('(A) TOP_EDGE_IL_FLOOR_DB = 16 dB (raised from 10)',
       podium: { extension_m: 3 },
     },
   };
-  // 4 azan horns at minaret (NW corner OUTSIDE building per surau preset).
-  const horns = [
-    { modelUrl: 'x', position: { x: -1.2, y: 19.9, z: 7 }, aim: { yaw: 0,   pitch: -12 }, power_watts: 80 },
-    { modelUrl: 'x', position: { x: -0.2, y: 18.9, z: 7 }, aim: { yaw: 90,  pitch: -12 }, power_watts: 80 },
-    { modelUrl: 'x', position: { x: -1.2, y: 17.9, z: 7 }, aim: { yaw: 180, pitch: -12 }, power_watts: 80 },
-    { modelUrl: 'x', position: { x: -2.2, y: 18.9, z: 7 }, aim: { yaw: 270, pitch: -12 }, power_watts: 80 },
-  ];
-  const R = computeRoomConstant(room, materials, 1000, []);
-  const splAt = (pos) => computeMultiSourceSPL({
-    sources: horns, getSpeakerDef: () => speaker, listenerPos: pos,
-    freq_hz: 1000, room, materials, roomConstantR: R,
-  });
-  const insideNearWestWall = splAt({ x: 1,    y: 14, z: 1.7 });
-  const outsideUnderWestArcade = splAt({ x: -1.5, y: 9,  z: 1.7 });
-  // Inside must not exceed outside by more than 1 dB. The two cells
-  // share the same dominant bypass path (eave diffraction); they should
-  // read approximately equal. Pre-fix it was inverted by ~5 dB.
-  check('(B) inside-near-west-wall ≤ outside-under-arcade + 1 dB (no inversion)',
-    insideNearWestWall <= outsideUnderWestArcade + 1.0,
-    `inside=${insideNearWestWall.toFixed(1)}, outside=${outsideUnderWestArcade.toFixed(1)}, Δ=${(insideNearWestWall - outsideUnderWestArcade).toFixed(1)} dB`);
-  // Sanity: both cells should be in a similar range (~75-90 dB), neither
-  // collapsed to silence by an over-aggressive floor.
-  check('(B) inside cell stays above 60 dB (eave diffraction still meaningful)',
-    insideNearWestWall > 60, `inside=${insideNearWestWall.toFixed(1)}`);
-  check('(B) outside cell stays above 60 dB (porch lift + diffraction)',
-    outsideUnderWestArcade > 60, `outside=${outsideUnderWestArcade.toFixed(1)}`);
+}
+// 4 azan horns at minaret (NW corner OUTSIDE building per surau preset).
+const horns = [
+  { modelUrl: 'x', position: { x: -1.2, y: 19.9, z: 7 }, aim: { yaw: 0,   pitch: -12 }, power_watts: 80 },
+  { modelUrl: 'x', position: { x: -0.2, y: 18.9, z: 7 }, aim: { yaw: 90,  pitch: -12 }, power_watts: 80 },
+  { modelUrl: 'x', position: { x: -1.2, y: 17.9, z: 7 }, aim: { yaw: 180, pitch: -12 }, power_watts: 80 },
+  { modelUrl: 'x', position: { x: -2.2, y: 18.9, z: 7 }, aim: { yaw: 270, pitch: -12 }, power_watts: 80 },
+];
+const INSIDE = { x: 1, y: 14, z: 1.7 };     // 1 m inside the west wall
+const OUTSIDE = { x: -1.5, y: 9, z: 1.7 };  // under the west arcade
+function splAt(room, pos, freq) {
+  const R = computeRoomConstant(room, materials, freq, []);
+  return computeMultiSourceSPL({ sources: horns, getSpeakerDef: () => speaker, listenerPos: pos, freq_hz: freq, room, materials, roomConstantR: R });
+}
+
+// =============================================================================
+// (B) Roofed building — interior must be TL-bound, far below the arcade, at
+//     every band. (Dr. Chen 2026-05-30 matrix.)
+// =============================================================================
+const roofed = surauRoom(undefined);   // closed: concrete ceiling
+for (const freq of [1000, 2000, 4000]) {
+  const inside = splAt(roofed, INSIDE, freq);
+  const outside = splAt(roofed, OUTSIDE, freq);
+  // B1 — strong isolation (the core regression): interior ≥ 15 dB below the
+  // arcade. Was the inversion (inside > outside) pre-fix; ~37 dB gap now.
+  check(`(B1 @${freq}Hz) inside ≤ outside − 15 dB (no inversion, strong isolation)`,
+    inside <= outside - 15, `inside=${inside.toFixed(1)}, outside=${outside.toFixed(1)}, Δ=${(inside - outside).toFixed(1)}`);
+  // B2 — interior is transmission-loss-bound, not diffraction-bound: high-30s/
+  // low-40s at 1k, falling at HF. < 50 → roof path suppressed; > 25 → not
+  // collapsed to silence (real through-TL-53 concrete field).
+  check(`(B2 @${freq}Hz) 25 < inside < 50 dB (TL-bound, not roof-diffraction-bound)`,
+    inside > 25 && inside < 50, `inside=${inside.toFixed(1)}`);
+  // B3 — arcade exterior cell UNCHANGED (porch lift + real open-edge diffraction
+  // intact). Blast-radius tripwire: the fix must not touch exterior paths.
+  check(`(B3 @${freq}Hz) outside > 60 dB (arcade unchanged)`,
+    outside > 60, `outside=${outside.toFixed(1)}`);
+}
+
+// =============================================================================
+// (C) OPEN-TOP control — a roofless courtyard interior must NOT be roof-
+//     penalised (the over-the-top path is physical there). Proves the penalty
+//     is gated on the resolved ceiling MATERIAL (open-air, TL 0), not geometry
+//     — i.e. mechanism (b) add-roof-TL, not (a) hard-reject.
+// =============================================================================
+{
+  const openTop = surauRoom('outdoor');  // ceiling forced to open-air (TL 0)
+  const insideOpen = splAt(openTop, INSIDE, 1000);
+  const insideClosed = splAt(roofed, INSIDE, 1000);
+  check('(C) open-top interior ≫ roofed interior (+10 dB): penalty is material-gated',
+    insideOpen > insideClosed + 10,
+    `open=${insideOpen.toFixed(1)}, roofed=${insideClosed.toFixed(1)}, Δ=${(insideOpen - insideClosed).toFixed(1)}`);
 }
 
 console.log(`\n${failed === 0 ? 'OK' : 'FAIL'}  ${failed === 0 ? 'all checks passed' : failed + ' failed'}`);

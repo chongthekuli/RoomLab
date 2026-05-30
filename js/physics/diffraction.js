@@ -83,6 +83,22 @@ import { isParentWall, parseWallId } from './wall-id.js';   // Phase A4
 // transmissionLossDb. No dependency cycle: wall-path.js doesn't import
 // diffraction.
 import { wallsCrossedByPath, transmissionLossDb, bandIndexForFreq } from './wall-path.js';
+// Wall construction thickness for the thick-barrier IL bonus on parent-wall
+// TOP edges (Dr. Chen 2026-05-30 — replaces the flat 16 dB TOP_EDGE floor).
+// room-shape.js imports nothing → no dependency cycle.
+import { normalizeWallSlot } from './room-shape.js';
+
+// Geometric thickness (m) of a parent cardinal wall, from its state slot
+// (string slot → DEFAULT_WALL_THICKNESS_M = 0.10). Used as the thick-barrier
+// width for top-edge diffraction. Non-cardinal / polygon walls fall back to
+// the default — a thicker custom wall would under-count the (small) HF bonus,
+// tracked as an edge case; the dominant physics is the raw Maekawa term.
+function parentWallThicknessM(room, wallId) {
+  if (typeof wallId !== 'string' || !wallId.startsWith('parent_wall_')) return 0.10;
+  const side = wallId.slice('parent_wall_'.length);
+  const slot = room?.surfaces?.[`wall_${side}`];
+  return normalizeWallSlot(slot).thickness_m ?? 0.10;
+}
 
 // Speed of sound at temperature T (°C). Inlined to avoid a circular
 // import with spl-calculator.js (which itself imports diffraction
@@ -440,6 +456,16 @@ export function computeDiffractionContributions({
   airAbsorption = true,
   groundG = 0,                  // NEW (h): ground absorption [0,1]; 0 = hard
   groundPlaneZ = 0,             // NEW (h): mirror plane for image source
+  // Roof transmission loss (dB) to add to an over-the-wall-TOP diffraction
+  // path when the RECEIVER is inside the building's ROOFED interior. The wall
+  // top is capped by the ceiling, so the over-the-top path physically passes
+  // through the roof slab — Maekawa-over-a-free-edge is invalid into a closed
+  // cavity (Dr. Chen 2026-05-30). The caller resolves this from the ceiling
+  // material (open-air → 0 → path survives; concrete → ~53 → path dies), so a
+  // roofless courtyard is handled by the material, not a boolean. 0 = receiver
+  // not in a roofed interior (the common case). Only applied to parent_wall_*
+  // TOP edges; vertical-corner and arcade-roof edges are unaffected.
+  interiorTopEdgeTL_db = 0,
   // Phase A5 (2026-05-24, Martina audit §1.7 + §2.B): `enable` is now
   // REQUIRED — no default. The pre-A5 default (`PHYSICS_P1_5_ENABLED`)
   // was load-bearing for any caller that omitted it, and the audit
@@ -643,17 +669,31 @@ export function computeDiffractionContributions({
     return transmissionLossDb(others, materials, bandIdx);
   }
 
-  // Helper: apply the thick-barrier IL floor to a knife-edge Maekawa
-  // result, based on edge type (top/left/right/roof_perim). Identical
-  // policy to the pre-B1 code; kept here so the algorithm is one piece.
+  // Helper: apply the thick-barrier IL floor to a knife-edge Maekawa result.
+  //
+  // Parent-wall TOP edges NO LONGER get the flat 16 dB floor (Dr. Chen
+  // 2026-05-30): that floor was masking the unphysical over-the-roofed-wall-top
+  // path, now fixed at source by interiorTopEdgeTL_db + replaced by the
+  // band-shaped thickBarrierIL thickness bonus below. The VERTICAL_EDGE floor
+  // (SW-corner exterior spike) and the arcade-roof overhead floor (thick
+  // concrete roof proxy) are RETAINED — different mechanisms, each tracked for
+  // its own thickBarrierIL replacement under its own diagnostic.
   function applyIlFloor(il, edge, wallTag, isOverheadEdge) {
     if (isParentWall(wallTag)) {
       if ((edge.id === 'left' || edge.id === 'right') && il < VERTICAL_EDGE_IL_FLOOR_DB) return VERTICAL_EDGE_IL_FLOOR_DB;
-      if (edge.id === 'top' && il < TOP_EDGE_IL_FLOOR_DB) return TOP_EDGE_IL_FLOOR_DB;
     } else if (isOverheadEdge && il < TOP_EDGE_IL_FLOOR_DB) {
       return TOP_EDGE_IL_FLOOR_DB;
     }
     return il;
+  }
+
+  // Thick-barrier IL bonus (dB) for a parent-wall TOP edge of construction
+  // thickness w: max(0, 10·log10(w/λ)) — the extra loss traversing the wall
+  // top (Maekawa 1968 / ISO 9613-2 §7.4 thick-screen). ~0 below ~3.4 kHz at
+  // a 0.10 m wall (correct band-shape), growing at HF. Replaces the flat floor.
+  function topEdgeThicknessBonusDb(wallId) {
+    const w = parentWallThicknessM(room, wallId);
+    return (Number.isFinite(w) && w > 0 && lambda > 0) ? Math.max(0, 10 * Math.log10(w / lambda)) : 0;
   }
 
   // 2. Evaluate each candidate. Per edge: compute direct + ground-reflected
@@ -669,6 +709,13 @@ export function computeDiffractionContributions({
     const wallTag = crossing.wallTag ?? parseWallId(crossing.wallId);
     il_db = applyIlFloor(il_db, edge, wallTag, isOverheadEdge);
 
+    // Parent-wall TOP edge: add the thick-barrier thickness bonus (replaces the
+    // dropped flat floor), and route the over-the-top path through the ceiling
+    // TL when the receiver is in the roofed interior (interiorTopEdgeTL_db).
+    const isParentTopEdge = isParentWall(wallTag) && edge.id === 'top';
+    if (isParentTopEdge) il_db += topEdgeThicknessBonusDb(crossing.wallId);
+    const roofTL = isParentTopEdge ? interiorTopEdgeTL_db : 0;
+
     // Bent-path secondary TL: walls the bent ray itself crosses.
     // Use the OPTIMAL diffraction point opt.E (the actual bend that
     // minimizes detour), NOT the edge centroid — for long edges (e.g.
@@ -677,7 +724,7 @@ export function computeDiffractionContributions({
     // would put the bent ray through walls the real bent path clears.
     const segATL = bentSegmentSecondaryTL(src.position, opt.E, crossing.wallId);
     const segBTL = bentSegmentSecondaryTL(opt.E, listener, crossing.wallId);
-    const bentPathTL = segATL + segBTL;
+    const bentPathTL = segATL + segBTL + roofTL;
 
     // Direct bent path through this edge.
     const detourAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * opt.detour : 0;
@@ -701,7 +748,8 @@ export function computeDiffractionContributions({
     let power_ground = 0;
     let groundPath = null;
     if (reflected && reflected.attenuationFactor > 0) {
-      const il_refl = applyIlFloor(reflected.il_db, edge, wallTag, isOverheadEdge);
+      let il_refl = applyIlFloor(reflected.il_db, edge, wallTag, isOverheadEdge);
+      if (isParentTopEdge) il_refl += topEdgeThicknessBonusDb(crossing.wallId);
       const reflectedAirAbs = airAbsorption ? airAbsorptionDbPerM(freq_hz) * reflected.detour_m : 0;
       const Lp_reflected = Lp_1m - 20 * Math.log10(reflected.detour_m) - reflectedAirAbs - il_refl - bentPathTL;
       if (Number.isFinite(Lp_reflected)) {
