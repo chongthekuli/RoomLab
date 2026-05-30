@@ -124,6 +124,47 @@ export function speedOfSound(T_C = DEFAULT_TEMPERATURE_C) {
   return 331.3 * Math.sqrt(1 + T_C / 273.15);
 }
 
+// Octave-band PARTIAL-coherence power of a set of direct contributions
+// {A (pressure amplitude), r (path length)} at one receiver.
+//
+// A naive all-coherent phasor sum |Σ Aᵢ·e^{jφᵢ}|² produces physically
+// unrealistic interference fringes above ~500 Hz for spatially separated
+// sources — real broadband program material decorrelates once the inter-path
+// time difference Δr/c exceeds the band's coherence time. A blanket "incoherent
+// above 500 Hz" cutoff is wrong the other way: co-located sources (Δr=0) stay
+// coherent at ALL frequencies and must still gain +6 dB.
+//
+// Model the per-pair magnitude coherence as the normalized cross-correlation
+// envelope of two octave-band-limited signals delayed by Δr/c:
+//     γ(Δr) = |sinc(π·B·Δr/c)|,  octave bandwidth B ≈ 0.707·f
+//           = |sinc(0.707·π·Δr/λ)|              (sinc x = sin x / x)
+// γ=1 at Δr=0 (full coherent gain) and decays/oscillates toward 0 as Δr grows
+// past ~λ, so widely-spaced HF sources sum incoherently. Power:
+//     P = Σ Aᵢ²  +  Σ_{i<j} 2·γᵢⱼ·Aᵢ·Aⱼ·cos(Δφᵢⱼ),  Δφ = 2π·Δr/λ
+// Reduces to the incoherent pressure² sum when every γ→0 and to |Σ A|² when
+// every γ→1 (co-located). Clamped to ≥ 0 (damped cross-terms can't make
+// physical power negative). See feedback_line_array_physics.
+function partialCoherentPower(srcs, angFreq, c, lambda) {
+  let p = 0;
+  for (let i = 0; i < srcs.length; i++) p += srcs[i].A * srcs[i].A;
+  if (!(lambda > 0) || !(c > 0)) {
+    // No wavelength (degenerate) → fall back to full in-phase coherent sum.
+    let sumA = 0;
+    for (const s of srcs) sumA += s.A;
+    return sumA * sumA;
+  }
+  for (let i = 0; i < srcs.length; i++) {
+    for (let j = i + 1; j < srcs.length; j++) {
+      const dr = Math.abs(srcs[i].r - srcs[j].r);
+      const x = 0.7071 * Math.PI * dr / lambda;
+      const gamma = x < 1e-9 ? 1 : Math.abs(Math.sin(x) / x);
+      const dphi = angFreq * dr / c;
+      p += 2 * gamma * srcs[i].A * srcs[j].A * Math.cos(dphi);
+    }
+  }
+  return Math.max(0, p);
+}
+
 // Hopkins-Stryker room constant at the given octave band.
 //
 // Basic form:  R = S · α̅ / (1 − α̅)
@@ -560,7 +601,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     ?? (room ? extractPorches(room) : []);
   const porchDrivesCache = ctx.porchDrives;   // null when not pre-computed
   let directPressureSum = 0;
-  let Re = 0, Im = 0;
+  const coherentSrcs = [];   // {A, r} per source — for the partial-coherence sum
   const c = coherent ? speedOfSound(temperature_C) : 0;
   const angFreq = 2 * Math.PI * freq_hz;
   let reverbPowerSum = 0;
@@ -614,10 +655,11 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
     const spl_db = d.spl_db;
     if (!isFinite(spl_db)) continue;
     if (coherent) {
-      const A = Math.pow(10, spl_db / 20);
-      const phase = angFreq * d.r / c;
-      Re += A * Math.cos(phase);
-      Im += A * Math.sin(phase);
+      // Collect amplitude + distance; the interference is resolved pairwise
+      // with octave-band partial coherence after the loop (a naive all-
+      // coherent phasor sum produces unphysical interference fringes above
+      // ~500 Hz for separated sources). See partialCoherentPower.
+      coherentSrcs.push({ A: Math.pow(10, spl_db / 20), r: d.r });
     } else {
       directPressureSum += Math.pow(10, spl_db / 10);
     }
@@ -776,7 +818,10 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
       porchReverbPowerSum += porchP;
     }
   }
-  const totalPower = (coherent ? (Re * Re + Im * Im) : directPressureSum)
+  const directTotal = coherent
+    ? partialCoherentPower(coherentSrcs, angFreq, c, c > 0 ? c / freq_hz : 0)
+    : directPressureSum;
+  const totalPower = directTotal
                    + reverbPowerSum + diffractionPowerSum + reradiationPowerSum
                    + overheadReflPowerSum + porchReverbPowerSum;
   return totalPower > 0 ? 10 * Math.log10(totalPower) : -Infinity;

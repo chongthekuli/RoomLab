@@ -131,17 +131,29 @@ Dr. Chen herself** after reading the actual code:
   would put the α=1 open faces in the same `A` sum and kill the roof-material
   lever (the v=641 finding). **Resolution: keep the code, fix the docs** (the
   header described the rejected formula). No heatmap change.
-- **P1 Diffraction floor → DEFERRED.** Two findings: (a) the correct thickness
-  for `thickBarrierIL` is the WALL's geometric `thickness_m` (already in state
-  — NO materials.json migration); (b) BUT a thin-wall (0.10 m) `thickBarrierIL`
-  gives ~0 dB bonus below 3.4 kHz, so a drop-in would drop ~11-13 dB at
-  125 Hz-2 kHz and **reintroduce the interior-louder-than-exterior inversion**
-  the floor fixes (verified at the break-band; would fail
-  `diffraction-interior-not-louder-than-exterior.test.mjs`). The floor is
-  masking a transmission-loss-budget bug for near-wall interior receivers, not
-  a diffraction error. **Resolution: documentation only this pass; a per-path
-  power-breakdown diagnostic at the guard positions must precede the band-shape
-  fix, and the TL fix + thickBarrierIL must land together.**
+- **P1 Diffraction floor → DONE (v=727).** The per-path diagnostic (floor=0)
+  showed the inversion is asymmetric: removing the floor added +9.6 dB to the
+  interior cell vs +1.3 dB to the exterior, because the interior's dominant path
+  bends over the building WALL TOP edge (δ≈0, raw Maekawa ~5.6 dB) **into a
+  roofed interior** — the wall top is capped by the ceiling, so that path must
+  pass through the roof slab (`bentTL=0` missed it: the secondary-TL check only
+  sees vertical walls). Fix (Dr. Chen sign-off): `interiorRoofDiffractionTL_db`
+  resolves the ceiling-material TL (via `roomSurfaces` → open-air TL 0 for a
+  roofless courtyard, concrete ~53 for a roofed building) and adds it to the
+  over-the-top path; the flat 16 dB parent-wall TOP floor is DROPPED (wrong
+  band-shape) and replaced with `thickBarrierIL` on the wall's geometric
+  thickness. Roofed interior now 40/35/31 dB @1/2/4k (TL-bound); arcade
+  unchanged; open-top courtyard interior stays loud (material-gated). Guard test
+  re-blessed (multi-band + open-top control); monotonicity snapshot re-baselined
+  158→188 (the flat floor was cosmetically smoothing the Phase-B raw-Maekawa
+  shadow field). **VERTICAL_EDGE floor + arcade overhead floor retained**
+  (different mechanisms — separate tasks).
+- **P2 Coherent gate → DONE (v=728).** Replaced the naive all-coherent phasor
+  sum with octave-band PARTIAL coherence: per source-pair `γ(Δr) =
+  |sinc(0.707π·Δr/λ)|` damps the cross-term by path-length difference. Co-located
+  sources (Δr=0) keep full +6 dB at all frequencies; separated sources at HF
+  decorrelate to incoherent +3 dB — no blanket >500 Hz cutoff (which would
+  wrongly kill co-located coherence). `partialCoherentPower` in spl-calculator.
 
 ## Validation goldens — STATUS
 - `tests/precision-sti-noise.test.mjs` — **LANDED** (with the P0 fix, ae… `4a091e6`).
@@ -149,14 +161,24 @@ Dr. Chen herself** after reading the actual code:
 - `tests/precision-iso3382-analytic.test.mjs` — **LANDED** (EDT/T20/T30 = 1.500 on analytic decay).
 - `tests/golden-spl-surau.test.mjs` — **LANDED** (6 pts × 2 bands frozen + scene orderings; the diffraction-fix tripwire).
 - `tests/nymphysics-no-outbound-imports.test.mjs` — **LANDED** (modularity decoupling guard).
-- Diffraction band-shape test — pending the deferred P1 work.
-- Coherent λ/4 decorrelation test — pending the deferred (spacing-aware) coherent gate.
+- `tests/diffraction-interior-not-louder-than-exterior.test.mjs` — **RE-BLESSED**
+  (v=727): multi-band isolation matrix + open-top control (the diffraction P1 guard).
+- `tests/coherent-decorrelation.test.mjs` — **LANDED** (v=728): co-located +6 at
+  all bands + separated-HF ≈ incoherent + LF partial coherence retained.
 
 ## Still deferred (next pass)
-- **Diffraction inversion diagnostic → thick-barrier-floor fix** (P1; needs the
-  TL-budget mechanism understood first — Dr. Chen will not sign off otherwise).
-- **Coherent-sum λ/4 gate** (P2): must be spacing-aware — a blanket >500 Hz
-  cutoff wrongly de-correlates co-located sources (+6 → +3 dB).
+- **VERTICAL_EDGE_IL_FLOOR_DB → thickBarrierIL** (the SW-corner exterior spike —
+  a DIFFERENT mechanism from the roofed-interior path; needs its own per-path
+  diagnostic at the corner cell. Retained for now).
+- **General horizontal-plane TL** — the roof-TL fix is a correct point-solution
+  for the interior ceiling; the general mechanism is a `horizontalPlanesCrossed
+  ByPath` so any bent ray piercing any roof/soffit/mezzanine slab accrues its TL
+  (clerestory, multi-storey). Dr. Chen P3 backlog.
+- **Flanking transmission (ISO 12354) disclosure** — interior transmitted level
+  is optimistic by 5-15 dB vs field DnT,w; documentation (route to Lin).
+- **STIPA roof-TL consistency** — the interior roof-TL fix is wired into the SPL
+  heatmap path; STIPA's own diffraction calls don't yet pass it, so an interior
+  STIPA readout could disagree with the SPL heatmap. Thread the same param.
 - **v2 extraction**: directory move, neutral `PhysicsScene` input schema,
   feature-flags → config object, loudspeaker-cache instance scoping, god-module
   splits under characterization tests.
