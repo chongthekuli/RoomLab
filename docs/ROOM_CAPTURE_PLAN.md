@@ -306,6 +306,37 @@ P3/WebXR are decision-gated and need no spine changes.
 
 ---
 
+## Ready-engine evaluation (2026-05-31) — DECISION: keep the hand-built capture
+
+The owner asked whether a ready open-source engine (GitHub) would be far better
+than the hand-built live capture, and must work Android/iOS/Windows. Surveyed
+GitHub + web. **Verdict: under the hard constraints (client-side browser, iOS
+Safari, no LiDAR, no native, no backend) NO ready engine beats the hand-built
+tap-to-scale optical-flow polygon — and the "far better" ones would WORSEN the
+cross-platform goal.**
+
+- **Browser SLAM:** only AlvaAR self-contains SLAM in iOS Safari — GPL-3,
+  abandoned since Jul 2023, jittery on iOS, outputs a non-metric camera pose
+  (not a floor polygon). 8th Wall open-sourced everything *except* SLAM (hosting
+  ends Feb 2027). MindAR/AR.js = image-target tracking only. WebXR world-tracking
+  is still **absent in iOS Safari (2026)**.
+- **In-browser ML:** Depth Anything V2 runs in iOS Safari 26 (transformers.js,
+  WASM/WebGPU) but is **relative depth, not metres** — it still needs our
+  one-known-dimension scale anchor. An *assist* at best, not a replacement.
+- **RoomPlan / Polycam / magicplan:** native + LiDAR + (often) cloud. RoomPlan is
+  Swift-only, LiDAR-only, **no web SDK**, iOS-Pro-only. Adopting any of these
+  loses Android, Windows, the browser, and non-Pro iPhones — the opposite of the
+  cross-platform goal.
+
+**The cross-platform irony:** the browser tap-to-scale approach IS the
+cross-platform one; the "better" engines are the *least* portable. Decision:
+keep the hand-built capture. Constraint-preserving upgrades, only if wanted
+later: (1) a transformers.js depth *assist* (corner-snap hints, still our scale
+anchor); (2) relax "no backend" → cloud SfM API (keeps browser reach, adds
+server + per-scan cost); (3) relax "browser-only" → native RoomPlan (best
+capture, iOS-LiDAR-only, separate app). 2027 re-evaluation trigger: a maintained
+WebGPU monocular room tracker (none exists today).
+
 ## Related
 - Source: the user's pasted "Room-LAB — Room Capture & Sketcher (Implementation Prompt)".
 - Existing flow: `js/graphics/room-2d.js`, `js/app-state.js`, `js/ui/panel-room.js`,
