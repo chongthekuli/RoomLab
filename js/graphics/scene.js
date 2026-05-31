@@ -21,7 +21,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { buildRackGroup } from './rack-render.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
-import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, isInsideRoom, normalizeWallSlot, applySurauOpeningsToSlot } from '../physics/room-shape.js';
+import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, isInsideRoom, normalizeWallSlot, applySurauOpeningsToSlot, defaultInsidePosition } from '../physics/room-shape.js';
 import { wallInsetPolygon } from '../physics/wall-inset.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
@@ -2060,8 +2060,14 @@ function hideAvatarLoadingOverlay() {
 
 function placeAvatarAtDefault() {
   const room = state.room;
-  const cx = (room.width_m ?? 20) / 2;
-  const cy = (room.depth_m ?? 20) / 2;
+  // Spawn at a point GUARANTEED inside the room footprint. For rectangular /
+  // polygon / round rooms this is (width/2, depth/2); for CUSTOM polygons the
+  // vertices are placed wherever the user drew them — NOT anchored to a
+  // width×depth box at the origin — so (width/2, depth/2) can land outside the
+  // polygon, spawning the avatar over the void with no floor beneath it →
+  // free-fall (the reported bug). defaultInsidePosition reads the actual
+  // vertices (centroid, with a concave-polygon inward-walk fallback).
+  const { x: cx, y: cy } = defaultInsidePosition(room);
   const gz = terrainHeightAt(cx, cy, room);
   // State frame (x=width, y=depth, z=height) → Three.js (x, z, y).
   // X negated — scene.scale.x = -1 (initScene). The avatar mesh is a
