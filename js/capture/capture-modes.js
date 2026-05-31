@@ -47,42 +47,58 @@ export async function isWebXrAvailable() {
 // photo/IMU/XR pays nothing for them. MVP ships with manual wired; the others
 // carry their probe + a lazy loader stub that later resolves to the real mode.
 //
-// @type {Array<{id:string,label:string,isAvailable:Function,load:() => Promise<any>}>}
+// `implemented` gates whether the picker OFFERS a mode: manual + photo ship
+// today; IMU (P3) + WebXR (far-future) carry their probe + label so the spine
+// is ready, but are not offered until built (their load() rejects). `hint` is a
+// one-line picker subtitle.
+// @type {Array<{id:string,label:string,hint:string,implemented:boolean,isAvailable:Function,load:() => Promise<any>}>}
 export const CAPTURE_MODES = [
   {
     id: 'manual',
     label: 'Draw it',
+    hint: 'Tap corners on a grid — works everywhere.',
+    implemented: true,
     isAvailable: isManualAvailable,
     load: () => import('./modes/manual-mode.js'),
   },
   {
     id: 'photo',
     label: 'From a photo',
+    hint: 'Shoot the floor, tap the corners, set one wall length.',
+    implemented: true,
     isAvailable: isPhotoAvailable,
     load: () => import('./modes/photo-trace-mode.js'),
   },
   {
     id: 'imu',
     label: 'Point at corners',
+    hint: 'Pivot and aim at each corner (rough).',
+    implemented: false,
     isAvailable: isImuAvailable,
     load: () => Promise.reject(new Error('IMU assist mode not yet implemented (P3)')),
   },
   {
     id: 'webxr',
     label: 'AR scan',
+    hint: 'Walk the room in AR (supported devices only).',
+    implemented: false,
     isAvailable: isWebXrAvailable,
     load: () => Promise.reject(new Error('WebXR mode not yet implemented (far-future)')),
   },
 ];
 
-// Resolve the modes actually offerable right now (awaits async probes). The
-// picker shows these; with only `manual` implemented today the others won't have
-// a loadable impl yet, so the orchestrator filters to modes whose load resolves
-// — but the registry + probes are the spine P2/P3 plug into without refactors.
-export async function availableModeIds() {
+// Resolve the modes actually offerable right now: implemented AND their runtime
+// probe passes (awaits async probes). The picker shows exactly these.
+export async function offerableModes() {
   const out = [];
   for (const m of CAPTURE_MODES) {
-    try { if (await m.isAvailable()) out.push(m.id); } catch { /* skip */ }
+    if (!m.implemented) continue;
+    try { if (await m.isAvailable()) out.push(m); } catch { /* skip */ }
   }
   return out;
+}
+
+// Ids form (handy for tests / telemetry).
+export async function availableModeIds() {
+  return (await offerableModes()).map(m => m.id);
 }

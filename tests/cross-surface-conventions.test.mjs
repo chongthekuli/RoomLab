@@ -55,6 +55,9 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { state } from '../js/app-state.js';
+import { buildRoomFields } from '../js/capture/capture-flow.js';
+import { wallInsetPolygon } from '../js/physics/wall-inset.js';
+import { roomEffectiveBounds } from '../js/physics/room-shape.js';
 import { buildFloorPlanSVG } from '../js/ui/print-plan-svg.js';
 import { buildHeatmapPageSVG, buildHeatmapLegend } from '../js/ui/print-heatmap.js';
 import { dilateGridForDisplay, buildSilhouetteMask } from '../js/physics/grid-display.js';
@@ -1484,6 +1487,191 @@ function assertRackFootprintParity() {
 }
 
 assertRackFootprintParity();
+
+// ---------------------------------------------------------------------------
+// Room Capture — captured / custom-polygon axis convention (Sam, 2026-05-31).
+//
+// Background. The Room Capture feature (docs/ROOM_CAPTURE_PLAN.md) commits
+// CUSTOM polygon rooms through ONE path: js/capture/capture-flow.js
+// buildRoomFields() → state.room.shape='custom' + custom_vertices +
+// surfaces.edges (one slot per vertex), written by commitCapturedRoom().
+// Manual sketch AND photo-trace both feed this path. A captured polygon
+// renders on three of the four surfaces this fixture owns — 2D viewport,
+// 3D top-down ortho, print plan SVG — so its +y=north / +x=east convention
+// is a cross-surface concept (CLAUDE.md §3) and MUST be guarded here.
+//
+// The gap this closes. Everything above only exercises a RECTANGULAR room
+// (shape:'rectangular', custom_vertices:null). The source/listener marker
+// projection is shape-INDEPENDENT (sx = x + offsetX, sy = anchorY - y),
+// so the existing parity assertions never touch the captured polygon's
+// OUTLINE. A Y-flip or X-mirror bug that only manifests on the custom
+// wall-polygon path (e.g. someone reads custom_vertices in screen-Y-down
+// order, or negates X for the outline but not the markers) would ship
+// green. This is precisely the recurring north-arrow / X-mirror failure
+// mode (v=504, v=515→525).
+//
+// Fixture polygon. An asymmetric L — taller on the WEST — so a flipped or
+// mirrored render is DETECTABLE (a symmetric square would pass either way):
+//
+//     custom_vertices (state-frame, metres, +y = north / UP):
+//       v0 (0,0)  v1 (8,0)  v2 (8,3)  v3 (3,3)  v4 (3,7)  v5 (0,7)
+//
+//   The "north notch": v4/v5 sit at y=7 (the tall WEST leg reaches north);
+//   the EAST half (x up to 8) only reaches y=3. So:
+//     • north-most vertices: v4 (3,7) / v5 (0,7)  — must render UP (smallest SVG y)
+//     • south-most vertices: v0 (0,0) / v1 (8,0)  — must render DOWN
+//     • east-most vertex:    v1 (8,0) / v2 (8,3)  — must render RIGHT (largest SVG x)
+//     • west-most vertices:  v0 (0,0) / v5 (0,7)  — must render LEFT
+//
+// We assert each surface renders the polygon outline with +y UP and +x
+// RIGHT, AND that the two surfaces AGREE on which screen-corner each named
+// vertex lands in.
+// ---------------------------------------------------------------------------
+
+const CAPTURE_VERTS = [
+  { x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 3 },
+  { x: 3, y: 3 }, { x: 3, y: 7 }, { x: 0, y: 7 },
+];
+
+// Apply a captured custom polygon to state.room the way commitCapturedRoom
+// does: derive the geometry fields with the REAL pure helper buildRoomFields
+// (origin shift + bbox), then write shape/custom_vertices/width/depth and one
+// surfaces.edges slot per vertex. This exercises the same code path the
+// feature ships, not a hand-rolled rectangle.
+function applyCapturedRoom() {
+  buildFixtureState();
+  const patch = buildRoomFields({
+    vertices: CAPTURE_VERTS,
+    scaleResolved: true,
+    provenance: 'manual',
+  });
+  const room = state.room;
+  room.shape = patch.shape;                 // 'custom'
+  room.custom_vertices = patch.custom_vertices;
+  room.width_m = patch.width_m;             // bbox: 8
+  room.depth_m = patch.depth_m;             // bbox: 7
+  const slot = room.surfaces?.walls ?? 'gypsum-board';
+  room.surfaces = room.surfaces || {};
+  room.surfaces.edges = patch.custom_vertices.map(() => slot);
+  return room;
+}
+
+// Print plan — project a state-frame point through the SAME mapping
+// buildFloorPlanSVG uses (sx = x + offsetX, sy = anchorY - y). Derived from
+// the room bbox + MARGIN_M (no podium extension here, so minX=minY=0).
+function projectionPrintPlan(room, pt) {
+  const MARGIN_M = 1.5; // matches print-plan-svg.js MARGIN_M
+  const offsetX = MARGIN_M - 0;                 // minX = 0 (no podium)
+  const anchorY = MARGIN_M + room.depth_m;      // maxY = depth_m
+  return { sx: pt.x + offsetX, sy: anchorY - pt.y };
+}
+
+function assertCapturedPolygonAxes() {
+  const room = applyCapturedRoom();
+
+  // (0) The capture commit path produced the expected custom room — guards
+  //     against buildRoomFields silently changing the origin/bbox contract.
+  ok(room.shape === 'custom' && Array.isArray(room.custom_vertices)
+     && room.custom_vertices.length === CAPTURE_VERTS.length,
+     'capture: buildRoomFields → shape "custom" with 6 vertices');
+  ok(Math.abs(room.width_m - 8) < 1e-9 && Math.abs(room.depth_m - 7) < 1e-9,
+     'capture: bbox width_m=8, depth_m=7 (vertex[0] already at origin → unchanged)',
+     `got width_m=${room.width_m}, depth_m=${room.depth_m}`);
+  ok(Array.isArray(room.surfaces.edges) && room.surfaces.edges.length === 6,
+     'capture: surfaces.edges has one slot per vertex (commitCapturedRoom shape)');
+
+  // The print-plan wall OUTLINE comes from wallInsetPolygon(room).outer,
+  // which for a custom room is custom_vertices verbatim. Confirm — if a
+  // future change rewinds / reorders the outer ring, the named-vertex
+  // assertions below would still hold by VALUE, so we also lock the source.
+  const outer = wallInsetPolygon(room).outer;
+  ok(outer.length === CAPTURE_VERTS.length,
+     'capture: wallInsetPolygon.outer traces the full 6-vertex custom outline');
+
+  // Project the named vertices on each surface.
+  const NORTH = { x: 3, y: 7 };  // v4 — tall west leg reaches north
+  const SOUTH = { x: 3, y: 0 };  // on the y=0 edge (a real point of the outline span)
+  const EAST  = { x: 8, y: 3 };  // v2 — east wall
+  const WEST  = { x: 0, y: 7 };  // v5 — west wall, north end
+
+  const print = {
+    north: projectionPrintPlan(room, NORTH),
+    south: projectionPrintPlan(room, SOUTH),
+    east:  projectionPrintPlan(room, EAST),
+    west:  projectionPrintPlan(room, WEST),
+  };
+  // 2D viewport uses the shared currentRoomGeom() formula: for any point
+  // sx = x0 + worldX * scale, sy = y0 - worldY * scale. projection2D()
+  // above already encodes this (it collapses pxW/width_m → scale for the
+  // no-extension case). Reuse it — it reads bounds from state.room, which
+  // applyCapturedRoom() has set to the custom polygon.
+  const v2d = {
+    north: projection2D(state, NORTH),
+    south: projection2D(state, SOUTH),
+    east:  projection2D(state, EAST),
+    west:  projection2D(state, WEST),
+  };
+
+  // (1) Per-surface Y convention: north vertex (y=7) renders ABOVE the
+  //     south edge (y=0) — "above" = SMALLER SVG y.
+  ok(print.north.sy < print.south.sy,
+     'capture print-plan: north vertex (y=7) renders ABOVE south edge (y=0) — +y is UP',
+     `north.sy=${print.north.sy.toFixed(3)} south.sy=${print.south.sy.toFixed(3)}`);
+  ok(v2d.north.sy < v2d.south.sy,
+     'capture 2d-viewport: north vertex (y=7) renders ABOVE south edge (y=0) — +y is UP',
+     `north.sy=${v2d.north.sy.toFixed(3)} south.sy=${v2d.south.sy.toFixed(3)}`);
+
+  // (2) Per-surface X convention: east vertex (x=8) renders to the RIGHT
+  //     of the west edge (x=0) — "right" = LARGER SVG x.
+  ok(print.east.sx > print.west.sx,
+     'capture print-plan: east vertex (x=8) renders RIGHT of west edge (x=0) — +x is RIGHT',
+     `east.sx=${print.east.sx.toFixed(3)} west.sx=${print.west.sx.toFixed(3)}`);
+  ok(v2d.east.sx > v2d.west.sx,
+     'capture 2d-viewport: east vertex (x=8) renders RIGHT of west edge (x=0) — +x is RIGHT',
+     `east.sx=${v2d.east.sx.toFixed(3)} west.sx=${v2d.west.sx.toFixed(3)}`);
+
+  // (3) Cross-surface AGREEMENT: both surfaces sort the four named vertices
+  //     into the SAME screen quadrants. If one surface mirrors or flips the
+  //     custom outline relative to the other, this trips even when each
+  //     surface is internally self-consistent.
+  const printYOrder = print.north.sy < print.south.sy ? 'north-up' : 'north-down';
+  const v2dYOrder   = v2d.north.sy   < v2d.south.sy   ? 'north-up' : 'north-down';
+  ok(printYOrder === v2dYOrder,
+     'capture cross-surface: print-plan and 2D viewport AGREE on Y orientation of the captured outline',
+     `print=${printYOrder} 2d=${v2dYOrder}`);
+  const printXOrder = print.east.sx > print.west.sx ? 'east-right' : 'east-left';
+  const v2dXOrder   = v2d.east.sx   > v2d.west.sx   ? 'east-right' : 'east-left';
+  ok(printXOrder === v2dXOrder,
+     'capture cross-surface: print-plan and 2D viewport AGREE on X orientation of the captured outline',
+     `print=${printXOrder} 2d=${v2dXOrder}`);
+
+  // (4) End-to-end: the FULL print-plan SVG actually emits the captured
+  //     outline (via the wall polygon) and the highest-y vertex sits at the
+  //     smallest SVG y in the rendered string. Parses the wall <polygon>
+  //     points so a projection regression in buildFloorPlanSVG itself —
+  //     not just our replicated formula — is caught.
+  const svg = buildFloorPlanSVG(state);
+  ok(svg && svg.length > 0, 'capture print-plan: buildFloorPlanSVG returns non-empty SVG for the captured room');
+  // Wall polygons are emitted as 4-corner trapezoids (outer+inner faces).
+  // Collect every emitted vertex y and assert the topmost rendered point
+  // corresponds to the northern leg (state y=7 → SVG y = anchorY - 7 ≈ 1.5),
+  // NOT the southern edge (y=0 → SVG y ≈ 8.5). A Y-flip regression would
+  // invert these.
+  const polyYs = [...svg.matchAll(/<polygon points="([^"]+)"/g)]
+    .flatMap(m => m[1].trim().split(/\s+/).map(p => parseFloat(p.split(',')[1])))
+    .filter(Number.isFinite);
+  ok(polyYs.length > 0, 'capture print-plan: wall polygons emit parseable vertices');
+  if (polyYs.length > 0) {
+    const minSvgY = Math.min(...polyYs);
+    const anchorY = 1.5 + room.depth_m;          // MARGIN_M + maxY
+    const northSvgY = anchorY - 7;               // ≈ 1.5
+    ok(Math.abs(minSvgY - northSvgY) < 0.5,
+       'capture print-plan: rendered outline TOP (min SVG y) is the north leg (state y=7), not the y=0 edge — no Y-flip',
+       `minSvgY=${minSvgY.toFixed(3)} expected≈${northSvgY.toFixed(3)}`);
+  }
+}
+
+assertCapturedPolygonAxes();
 
 // Diagnostic dump — printed before exit so failures carry context.
 if (failed > 0) {

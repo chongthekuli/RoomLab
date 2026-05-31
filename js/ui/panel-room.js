@@ -1,6 +1,7 @@
 import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToState, applyTemplateToState, applyBlankCustomRoom, serializeProject, deserializeProject } from '../app-state.js';
 import { emit, on } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
+import { beginCapture } from '../capture/capture-picker.js';
 import { importDxfFile } from '../physics/dxf-import.js';
 import { saveProjectAs, loadProjectFromFile } from '../io/project-file.js';
 import { encodeShareLink, buildShareUrl } from '../io/share-link.js';
@@ -1323,11 +1324,14 @@ function renderShapeParams() {
       <div class="field-group">
         <label>Height <input type="number" data-sf="height_m" value="${r.height_m}" min="0.5" step="0.1" /> <span class="unit">m</span></label>
       </div>
-      <button class="btn-draw" id="btn-draw-custom">${vcount >= 3 ? '✎ Redraw custom shape' : '✎ Draw custom shape'}</button>
-      ${vcount >= 3 ? `<div class="note-small">${vcount} vertices · bbox ${r.width_m.toFixed(1)} × ${r.depth_m.toFixed(1)} m</div>` : '<div class="note-small">Click the button above to draw a polygon by placing vertices.</div>'}
+      <button class="btn-draw" id="btn-draw-custom">${vcount >= 3 ? '📐 Re-capture room shape' : '📐 Capture room shape'}</button>
+      ${vcount >= 3 ? `<div class="note-small">${vcount} vertices · bbox ${r.width_m.toFixed(1)} × ${r.depth_m.toFixed(1)} m</div>` : '<div class="note-small">Draw it on a grid, or capture it from a photo — then drag corners to correct.</div>'}
       <div id="vertex-list"></div>
     `;
-    root.querySelector('#btn-draw-custom').addEventListener('click', () => startDrawCustomShape());
+    // Capture entry point — opens the mode picker (Draw it / From a photo).
+    // With one offerable mode it starts directly; the chosen mode commits the
+    // room itself via the single commit path (commitCapturedRoom).
+    root.querySelector('#btn-draw-custom').addEventListener('click', () => { beginCapture(); });
     renderVertexList();
   }
   wireShapeInputs();

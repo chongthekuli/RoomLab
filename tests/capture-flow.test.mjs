@@ -11,7 +11,7 @@
 import { state } from '../js/app-state.js';
 import { on } from '../js/ui/events.js';
 import { buildRoomFields, validateCaptureResult, commitCapturedRoom } from '../js/capture/capture-flow.js';
-import { CAPTURE_MODES, isManualAvailable } from '../js/capture/capture-modes.js';
+import { CAPTURE_MODES, isManualAvailable, offerableModes } from '../js/capture/capture-modes.js';
 import { defaultInsidePosition, isInsideRoom } from '../js/physics/room-shape.js';
 
 let failed = 0;
@@ -80,6 +80,19 @@ assert(!validateCaptureResult({ vertices: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 
       `mode '${m.id}' has id/label/isAvailable/load`);
   }
   assert(isManualAvailable() === true, 'manual mode is ALWAYS available (the baseline)');
+  // implemented flags gate the picker: manual + photo ship; imu + webxr don't yet.
+  const impl = Object.fromEntries(CAPTURE_MODES.map(m => [m.id, m.implemented]));
+  assert(impl.manual === true && impl.photo === true, 'manual + photo are implemented (offered)');
+  assert(impl.imu === false && impl.webxr === false, 'imu + webxr not yet implemented (not offered)');
+}
+{
+  // offerableModes = implemented AND runtime-available. In Node (no DOM) photo's
+  // probe is false, so only manual offers — but unimplemented modes are NEVER
+  // offered regardless of their probe.
+  const ids = (await offerableModes()).map(m => m.id);
+  assert(ids.includes('manual'), 'offerableModes always includes manual');
+  assert(!ids.includes('imu') && !ids.includes('webxr'),
+    'offerableModes never includes unimplemented modes (imu/webxr)');
 }
 
 if (failed) { console.log(`\n${failed} test(s) FAILED.`); process.exit(1); }

@@ -4116,6 +4116,23 @@ section h3 {
   border-color: var(--border, #2a2f38); cursor: not-allowed;
 }
 
+/* Room Capture — mode picker (Draw it / From a photo). Mirrors .rl-modal. */
+.rl-modal-sub {
+  font-size: 12px; color: var(--text-muted, #8a93a3); margin: 2px 0 12px;
+}
+.rl-capture-modes {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.rl-capture-mode {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 12px 14px; border-radius: 4px; cursor: pointer;
+  background: var(--bg, #14181f); color: var(--text, #e6edf3);
+  border: 1px solid var(--border, #2a2f38); width: 100%;
+}
+.rl-capture-mode:hover { border-color: #4a8ff0; background: rgba(74, 143, 240, 0.08); }
+.rl-capture-mode-label { font-size: 13px; font-weight: 600; }
+.rl-capture-mode-hint { font-size: 11px; color: var(--text-muted, #8a93a3); }
+
 /* Place-Saved-Room placement HUD — floats over the 3D viewport while
    the user is positioning a sub-room. Positioned bottom-centre so it
    doesn't fight the side panel or the SPL legend in the bottom-right. */
