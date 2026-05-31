@@ -62,12 +62,16 @@ export const CAPTURE_MODES = [
     load: () => import('./modes/manual-mode.js'),
   },
   {
+    // The live pan-and-tap mode REPLACES the static single-photo mode (a single
+    // frame can't fit a whole room's corners). Keeps id 'photo' so saved
+    // provenance + the capture-flow CaptureResult contract are unchanged; it
+    // still falls back to a single still photo when the camera is denied.
     id: 'photo',
-    label: 'From a photo',
-    hint: 'Shoot the floor, tap the corners, set one wall length.',
+    label: 'Scan with camera',
+    hint: 'Pan the room, tap each corner, set one wall length.',
     implemented: true,
     isAvailable: isPhotoAvailable,
-    load: () => import('./modes/photo-trace-mode.js'),
+    load: () => import('./modes/live-capture-mode.js'),
   },
   {
     id: 'imu',

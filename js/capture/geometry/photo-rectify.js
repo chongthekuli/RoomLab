@@ -48,7 +48,7 @@ import { solveHomography, applyHomography } from './homography.js';
 // The MODE is responsible for asking the user to tap corners starting at the
 // FAR-LEFT floor corner going CLOCKWISE in the image, so the rectified polygon
 // lands with the room's "far" wall toward +y. The mapping the mode applies, and
-// the +y=north contract, is documented in photo-trace-mode.js and flagged to Sam
+// the +y=north contract, is documented in live-capture-mode.js and flagged to Sam
 // for tests/cross-surface-conventions.test.mjs. This pure module only guarantees
 // a consistent, CCW-able, axis-aligned output for a given tap order.
 

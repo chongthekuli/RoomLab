@@ -3,7 +3,7 @@
 // This is the math core of the photo-trace capture mode: the user taps four
 // floor corners in a photo, and a homography maps that perspective-skewed quad
 // to a top-down plan. The MODE (camera/canvas/tap UI + the choice of what
-// destination rectangle to map to) is Viktor's photo-trace-mode.js on top of
+// destination rectangle to map to) is the live-capture-mode.js on top of
 // this primitive. See docs/ROOM_CAPTURE_PLAN.md §5.
 //
 // A homography H is a 3×3 matrix stored row-major as a flat length-9 array.
