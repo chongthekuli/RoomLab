@@ -185,6 +185,26 @@ ok(scene.furnitureReflective.count === 13,
     'under-table centre (2, 2, 0.35) is AIR — no reflective sub-bbox covers it');
 }
 
+// =====================================================================
+// Block — flat-pad height split (Dr. Chen 2026-05-31). A thin mat stays a
+// floor slab (≤0.04 m, doesn't shadow a standing talker); a tall occupied
+// audience block becomes a porous COLUMN to 0.92·h so the Beer-Lambert
+// direct-shadow acts at seated-ear height. Regression tripwire for the
+// audience-block free-pass-over bug.
+// =====================================================================
+{
+  const mat = getSubVolumes(row('t-mat', 'flat-pad', 'porous', { width_m: 1, depth_m: 1, height_m: 0.02 }));
+  ok(mat.length === 1 && mat[0].role === 'porous' && mat[0].bounds[5] <= 0.04,
+    `flat-pad thin mat (h=0.02): single floor slab ≤0.04 m (got zMax ${mat[0].bounds[5].toFixed(3)})`);
+
+  const aud = getSubVolumes(row('t-audience', 'flat-pad', 'porous', { width_m: 1, depth_m: 1, height_m: 1.20 }));
+  const zTop = aud[0].bounds[5];
+  ok(aud.length === 1 && aud[0].role === 'porous' && Math.abs(zTop - 1.2 * 0.92) < 1e-6,
+    `flat-pad audience (h=1.2): porous column to 0.92·h = ${(1.2 * 0.92).toFixed(3)} m (got ${zTop.toFixed(3)}), NOT a 4 cm mat`);
+  ok(zTop > 1.0,
+    `audience sub-volume reaches seated-ear height (${zTop.toFixed(3)} m > 1.0) so a direct ray is shadowed`);
+}
+
 if (failed > 0) {
   console.log(`\n${failed} test(s) FAILED`);
   process.exit(1);

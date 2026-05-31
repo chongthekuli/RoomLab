@@ -59,8 +59,14 @@ const RACK = row('test-rack', 'vertical-box', 'reflective',
 const CHAIR = row('test-chair', 'seat', 'hybrid',
   { width_m: 0.55, depth_m: 0.60, height_m: 1.20 },
   { '125': 0.15, '250': 0.19, '500': 0.23, '1000': 0.25, '2000': 0.23, '4000': 0.22 });
+// Occupied audience block, per m². flat-pad family, 1.2 m tall — its
+// sub-volume is a porous column floor→0.92·h (Dr. Chen 2026-05-31), so an
+// ear-height direct ray now attenuates (was 0 with the old 4 cm flat pad).
+const AUDIENCE = row('test-audience', 'flat-pad', 'porous',
+  { width_m: 1.0, depth_m: 1.0, height_m: 1.20 },
+  { '125': 0.62, '250': 0.70, '500': 0.80, '1000': 0.83, '2000': 0.85, '4000': 0.86 });
 
-_setFurnitureCatalogueForTests([BOOKSHELF, RACK, CHAIR]);
+_setFurnitureCatalogueForTests([BOOKSHELF, RACK, CHAIR, AUDIENCE]);
 
 // Source→listener path runs along state +y (depth into room). This matches
 // the natural orientation of a bookshelf placed "in front of" a speaker:
@@ -172,6 +178,36 @@ _setFurnitureCatalogueForTests([BOOKSHELF, RACK, CHAIR]);
     'null catalogue → 0 dB');
   ok(furnitureDirectPathLossDb({x:0,y:0,z:1.5}, {x:0,y:0,z:1.5}, [{id:'F1', catalogueId:'test-bookshelf', position:{x:0,y:2.5}}], getFurnitureCatalogue(), BANDS, 1000) === 0,
     'zero-length segment → 0 dB');
+}
+
+// =====================================================================
+// Block 7 — Occupied audience block grazing attenuation (Dr. Chen 2026-05-31).
+// The 1.2 m audience block's porous sub-volume is now a column to 0.92·h
+// (≈1.104 m), so a direct ray at seated-ear height crosses the bodies and
+// attenuates — it did NOT before (the old 4 cm flat pad let the ray sail over).
+// =====================================================================
+{
+  // One 1 m² audience block centred at (0, 2.5). Ray along +y at ear height.
+  const furniture = [{ id: 'A1', catalogueId: 'test-audience', position: { x: 0, y: 2.5 }, rotation_deg: 0 }];
+  const cat = getFurnitureCatalogue();
+
+  // Ear-height ray (z = 1.0 m) crosses ~1 m of audience → a few tenths of dB.
+  const earLoss = furnitureDirectPathLossDb({ x: 0, y: 0, z: 1.0 }, { x: 0, y: 5, z: 1.0 }, furniture, cat, BANDS, 1000);
+  console.log(`  audience grazing loss @ ear (z=1.0, 1k) = ${earLoss.toFixed(2)} dB`);
+  ok(earLoss > 0.3 && earLoss < 2.0,
+    `audience block attenuates the ear-height direct ray (0.3 < ${earLoss.toFixed(2)} < 2 dB; was 0 pre-fix)`);
+
+  // Listener whose ears CLEAR the ~1.104 m column (z = 1.3 m) → not shadowed.
+  const aboveLoss = furnitureDirectPathLossDb({ x: 0, y: 0, z: 1.3 }, { x: 0, y: 5, z: 1.3 }, furniture, cat, BANDS, 1000);
+  ok(aboveLoss < 0.05,
+    `ray above the crowd (z=1.3 > 1.104 m column) is NOT shadowed (${aboveLoss.toFixed(2)} ≈ 0 dB)`);
+
+  // Spectral shape: bulk absorption rises with frequency — it is NOT a low-mid
+  // seat-dip. Guards the model contract (a future "fix" that dips at 200 Hz
+  // would change the documented physics).
+  const pb = furnitureDirectPathLossPerBand({ x: 0, y: 0, z: 1.0 }, { x: 0, y: 5, z: 1.0 }, furniture, cat, BANDS);
+  ok(pb[0] < pb[5],
+    `audience loss is broadband-monotone (125 Hz ${pb[0].toFixed(2)} < 4 kHz ${pb[5].toFixed(2)}) — bulk absorption, not a seat-dip`);
 }
 
 if (failed > 0) {

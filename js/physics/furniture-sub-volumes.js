@@ -153,12 +153,41 @@ function VERTICAL_BOX_LAYOUT(w, d, h) {
 }
 
 // --- flat-pad family: audience blocks, prayer mats ---
-// Thin slab on the floor. Porous mode by default (these are uniformly
-// soft); reflective is unusual but supported via the routing fallback.
+// Porous slab, split into two regimes by catalogue height (Dr. Chen
+// 2026-05-31):
+//   • Thin mats / floor pads (height ≤ 0.10 m): a true floor-hugging slab.
+//     A direct ray at ear height passes ABOVE it — correct, a prayer mat
+//     doesn't shadow a standing talker.
+//   • Seated / occupied audience blocks (height > 0.10 m): a porous COLUMN
+//     from floor to ~0.92·height. The visible bodies stand ~1.1 m; the
+//     acoustically interacting mass (heads / shoulders / torsos of a SEATED
+//     occupied audience) fills floor→~1.1 m. Raising the box lets the
+//     Beer-Lambert direct-shadow act at ear height — reconciling this
+//     analytical helper with the PRECISION TRACER, which already uses the
+//     full footprint volume (μ = A_obj/(4·w·d·h)). A_obj is UNCHANGED: the
+//     same total ISO-354 absorption spread through a taller V gives a lower
+//     per-metre μ, but the now-non-zero in-box path length makes up for it
+//     (~0.85 dB grazing loss per 1 m block at 1 kHz). The top 0.08·h is air
+//     above the heads, so a listener whose ears clear the crowd (z > 1.1 m)
+//     is not shadowed.
+//
+// CAVEAT (do NOT claim otherwise): this models BULK GRAZING ABSORPTION, a
+// smooth broadband loss. It is NOT the seat-dip effect — the deep,
+// frequency-selective low-mid notch (~100-300 Hz, 10-15 dB) from interference
+// over periodic seat-row impedance (Schultz-Watters 1964; ISO 9613-2 §7.5).
+// The seat-dip needs row-spacing geometry this tier lacks (P3 backlog). This
+// model under-predicts LF loss over a deep raked audience and applies no notch.
 function FLAT_PAD_LAYOUT(w, d, h) {
-  const padThk = Math.min(0.04, Math.max(0.02, h));
+  if (h <= 0.10) {
+    const padThk = Math.min(0.04, Math.max(0.02, h));
+    return [{
+      bounds: [-w / 2 * 0.98, -d / 2 * 0.98, 0, w / 2 * 0.98, d / 2 * 0.98, padThk],
+      role: 'porous',
+    }];
+  }
+  const colTop = h * 0.92;
   return [{
-    bounds: [-w / 2 * 0.98, -d / 2 * 0.98, 0, w / 2 * 0.98, d / 2 * 0.98, padThk],
+    bounds: [-w / 2 * 0.98, -d / 2 * 0.98, 0, w / 2 * 0.98, d / 2 * 0.98, colTop],
     role: 'porous',
   }];
 }
