@@ -59,8 +59,7 @@ export const CAPTURE_MODES = [
     id: 'photo',
     label: 'From a photo',
     isAvailable: isPhotoAvailable,
-    // P2 — not yet implemented. Honest rejection (no 404) until the impl lands.
-    load: () => Promise.reject(new Error('photo-trace mode not yet implemented (P2)')),
+    load: () => import('./modes/photo-trace-mode.js'),
   },
   {
     id: 'imu',
