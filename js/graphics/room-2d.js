@@ -7,6 +7,7 @@ import { colorForReliability, reliabilityLegendRows } from '../labs/furniturelab
 import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
+import { commitCapturedRoom } from '../capture/capture-flow.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
 import { roomPlanVertices, isInsideRoom3D, roomEffectiveBounds } from '../physics/room-shape.js';
@@ -295,24 +296,14 @@ export function startDrawCustomShape() {
     mode: 'room-shape',
     label: 'Draw custom room shape',
     onFinish: (verts) => {
-      // Per user request 2026-05-17 (clarified): wherever the user's
-      // FIRST click landed becomes world (0, 0). Subsequent vertices
-      // get translated by the same amount so they sit at coords
-      // RELATIVE to the first click. Result: vertex[0] is always
-      // (0, 0) — predictable origin for saved-room library entries
-      // regardless of which corner the user started at.
-      const ox = verts[0].x;
-      const oy = verts[0].y;
-      const shifted = verts.map(v => ({ x: v.x - ox, y: v.y - oy }));
-      const minX = Math.min(...shifted.map(v => v.x));
-      const minY = Math.min(...shifted.map(v => v.y));
-      const maxX = Math.max(...shifted.map(v => v.x));
-      const maxY = Math.max(...shifted.map(v => v.y));
-      state.room.shape = 'custom';
-      state.room.custom_vertices = shifted;
-      state.room.width_m = Math.max(maxX - minX, 0.5);
-      state.room.depth_m = Math.max(maxY - minY, 0.5);
-      state.room.surfaces.edges = shifted.map(() => state.room.surfaces.walls || 'gypsum-board');
+      // Single commit path — capture-flow.commitCapturedRoom is the ONE writer
+      // of captured/drawn geometry (manual sketch + future photo/IMU/WebXR all
+      // funnel through it). It does the vertex[0]=(0,0) origin shift, bbox
+      // width_m/depth_m, per-edge wall material, self-intersection guard, and
+      // emits scene:reset (whole geometry arrays replaced) + room:changed.
+      // Manual draw is born in real metres → scaleResolved=true. finishDraw
+      // skips its own trailing room:changed for room-shape (commit emitted it).
+      commitCapturedRoom({ vertices: verts, scaleResolved: true, provenance: 'manual' });
     },
   };
   drawVertices = [];
@@ -371,7 +362,9 @@ function finishDraw() {
   destroyFloatCoordEl();
   removeWindowKeyHandler();
   cfg.onFinish(verts);
-  emit('room:changed');
+  // room-shape commits via commitCapturedRoom which already emits
+  // scene:reset + room:changed; other modes (zone, …) emit here.
+  if (!wasRoomShape) emit('room:changed');
   // After auto-close, prompt for room height directly on the canvas
   // (centered modal-style overlay). User types a number + Enter and
   // the height is set on state.room.height_m without them having to

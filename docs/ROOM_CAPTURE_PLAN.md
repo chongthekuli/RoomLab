@@ -257,14 +257,18 @@ the editor is a thin interactive layer over them.
 
 ---
 
-## 9. Decisions needed before build
+## 9. Decisions — RESOLVED (2026-05-31)
 
-1. **IMU assist (P3) — cut it?** Recommendation: **yes, cut** unless explicitly
-   wanted. Low-confidence, drifts; photo-trace covers the camera case better.
-2. **Photo path default on iOS — file-input vs live camera?** `getUserMedia` and
-   `DeviceOrientation.requestPermission` both need a user gesture (HTTPS already
-   satisfied by Pages, but the prompts are jarring on iOS). Recommendation: offer
-   **file-input/photo-pick as the default**, live camera as opt-in.
+1. **IMU assist (P3) — KEPT on the roadmap** (user decision). Built as a rough-
+   shape seed only: always user-correctable, labelled "estimated", never
+   presented as measured. Still last in phasing (after photo-trace) and needs no
+   spine changes.
+2. **Photo path default — LIVE CAMERA** (user decision). `photo-trace-mode` opens
+   `getUserMedia` live camera by default (permission prompt on first use; HTTPS
+   already satisfied by Pages), with file/photo-pick as the fallback when camera
+   permission is denied or unavailable.
+
+### Still open (lower-stakes, decide during build)
 3. **Photo-trace accuracy expectation** — single-photo 4-point homography assumes
    a flat floor; perspective error can be 10–20% on wide rooms (scale anchor fixes
    global scale, not skew). Set "rough — then drag" expectation (Maya copy). Want
