@@ -7109,7 +7109,7 @@ function _build_flatPad(w, d, h, broken) {
 // Materials reuse FURN_ACCENT for upholstery (sponge: roughness ≈ 0.97
 // reads as porous foam so the user SEES the absorption that the
 // catalogue's A_obj already encodes — physics unchanged, fidelity only).
-function _build_theaterSeat(w, d, h, broken) {
+function _build_theaterSeat(w, d, h, broken, opts = {}) {
   const group = new THREE.Group();
   const matPed   = _furnMat(broken ? FURN_BROKEN : 0x1A1A1A, 0.45);   // black plastic sled feet
   const matShell = _furnMat(broken ? FURN_BROKEN : 0x1F1F1F, 0.50);   // hard back shell
@@ -7448,8 +7448,364 @@ function _build_theaterSeat(w, d, h, broken) {
     }
   }
 
+  // Occupied variant — seated figure on the cushion (cushion top = cushY +
+  // cushThk). Mirrors the 2D glyph's occupied/empty switch so the 3D
+  // occupied↔empty rows differ as the catalogue cards do.
+  if (opts.occupied) {
+    const occ = new THREE.Group();
+    for (const m of _occupantMeshes(cushY + cushThk, { shirt: 0x55606E, broken })) occ.add(m);
+    occ.position.z = d * 0.48;   // align with cushion centre (figure is z-centred)
+    group.add(occ);
+  }
+
   return { group, activeMesh: cushion };
 }
+
+// ===================================================================
+// Per-id 3D builders (v=731). Mirror the 2D glyph per-id pattern in
+// js/labs/furniturelab/glyphs.js: a BUILDERS_BY_ID map keyed on the
+// catalogue id, checked in _buildFurnitureMesh BEFORE the family
+// dispatch — exactly like buildGlyph checks GLYPHS before FAMILY_GLYPHS.
+// Family builders stay as the fallback so catalogue.json visual.family
+// + the schema test are untouched.
+//
+// Why: the 2D catalogue glyphs were redesigned object-specific +
+// real-world-accurate (Maya, 2026-05-30), but 3D still rendered coarse
+// family shapes — a lectern came out a 4-leg stool, a bookshelf a plain
+// box, an audience block a flat 6 cm mat. These builders match BOTH the
+// real product AND the redesigned 2D silhouette.
+//
+// Builder signature is (w, d, h, broken, opts) where opts carries the
+// derived { occupied } flag (and the catalogue row if a builder ever
+// needs more). The family builders keep their original (w,d,h,broken)
+// signature — the trailing opts arg is ignored by them, so the family
+// fallback is untouched. _buildFurnitureMesh derives `occupied` from the
+// row's acoustics.occupancy_state (authoritative) with an id-suffix
+// fallback, then passes it to every builder uniformly.
+//
+// SUB-VOLUME COUPLING (js/physics/furniture-sub-volumes.js): every new
+// mesh below is sized to fit WITHIN the existing family sub-volume bbox
+// for its row, so the acoustic snapshot the precision tracer sees does
+// NOT change. No sub-volume edits are required by this pass. Notes per
+// object are inline at each builder. The one place worth flagging to
+// Dr. Chen / Sam is the audience block (see _build_audienceBlock).
+
+// Cheap seated-occupant proxy. Reused by the occupied theater seat,
+// occupied office chair, and the per-m² audience block. Built from a
+// small set of boxes + a sphere head to match the 2D occupantFigure
+// silhouette (thighs flat on the seat, shins dropping to the floor,
+// upright torso, head). ~ a dozen boxes worth of tris total (~700 tris
+// with the low-poly sphere); safe to instantiate several per m².
+//
+// Local frame: x = lateral (centred 0), y = height up, z = depth into
+// room (+z = toward the seat back, matching the furniture builders).
+// seatTopY = cushion-top height the figure sits on. The figure faces
+// -z (toward the room front / audience-facing), same as the chairs.
+function _occupantMeshes(seatTopY, { skin = 0xC9A98C, shirt = FURN_PAPER_MID, broken = false } = {}) {
+  const meshes = [];
+  const matBody = _furnMat(broken ? FURN_BROKEN : shirt, 0.92);
+  const matSkin = _furnMat(broken ? FURN_BROKEN : skin,  0.80);
+  const add = (geo, mat, x, y, z) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.castShadow = true; m.receiveShadow = true;
+    meshes.push(m);
+  };
+  // Thighs — flat block resting on the cushion, knees toward -z (front).
+  add(new THREE.BoxGeometry(0.34, 0.12, 0.40), matBody, 0, seatTopY + 0.06, 0.04);
+  // Shins — drop from the knee (front of the thighs) toward the floor.
+  add(new THREE.BoxGeometry(0.28, 0.42, 0.14), matBody, 0,
+      Math.max(0.21, seatTopY - 0.21), -0.14);
+  // Torso — upright box rising from the hips, set toward the back.
+  add(new THREE.BoxGeometry(0.36, 0.50, 0.24), matBody, 0, seatTopY + 0.37, 0.10);
+  // Head — low-poly sphere atop the torso.
+  add(new THREE.SphereGeometry(0.10, 10, 8), matSkin, 0, seatTopY + 0.72, 0.10);
+  return meshes;
+}
+
+// --- Office task chair (office-chair-padded-*) -----------------------
+// Real task chair, NOT a 4-leg stool. Built to a Herman-Miller-class
+// reference: 5-star caster base (~0.66 m / 27" dia per Office Star /
+// Herman Miller spec), gas-lift column, swivel seat pad (~0.45 m wide,
+// seat-top ~0.48 m), low contoured back rising ~0.50 m above the seat,
+// short arms. Matches glyph_officeChairGlyph (5 spokes + casters +
+// column + seat + low back + arms).
+//   refs: Office Star task chair (base ~22.5-28", seat 17.5"W×15"D,
+//         back 17"W×13"H from seat); Herman Miller "About A Chair" AAC.
+// SUB-VOLUME: row family is 'seat' → SEAT_LAYOUT (cushion porous + 4
+// legs + 2 arms + back). The mesh's seat pad / arms / back sit within
+// that bbox; the star base lives below the cushion where the leg frame
+// bboxes already are. Effective occupied volume unchanged → no sub-vol
+// edit needed.
+function _build_officeChair(w, d, h, broken, opts = {}) {
+  const group = new THREE.Group();
+  const matBase = _furnMat(broken ? FURN_BROKEN : FURN_METAL,      0.45, 0.6);
+  const matCol  = _furnMat(broken ? FURN_BROKEN : 0x2A2D33,        0.40, 0.4);
+  const matSeat = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT,     0.92);
+  const matBack = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_MID,  0.85);
+  const matArm  = _furnMat(broken ? FURN_BROKEN : 0x2A2D33,        0.55);
+
+  const seatTop_z = Math.min(0.50, h * 0.44);   // ~0.48 m seat-top
+  const seatThk   = 0.07;
+  const seatLo_z  = seatTop_z - seatThk;
+  const armHi_z   = seatTop_z + 0.18;
+  const backLo_z  = seatTop_z + 0.06;
+  const backHi_z  = Math.min(h, seatTop_z + 0.52);
+  const cx = 0, cz = d / 2;                       // chair centre (z into room)
+
+  // 5-star caster base: 5 spokes radiating from the column foot, each
+  // capped with a small caster wheel. spokeR ~0.30 → ~0.60-0.66 m base.
+  const spokeR = Math.min(0.30, w * 0.5 - 0.02);
+  const spokeGeo  = new THREE.BoxGeometry(0.05, 0.035, spokeR);
+  const casterGeo = new THREE.CylinderGeometry(0.026, 0.026, 0.05, 10);
+  for (let i = 0; i < 5; i++) {
+    const ang = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+    const ex = Math.cos(ang) * spokeR, ez = Math.sin(ang) * spokeR;
+    const spoke = _addMesh(group, spokeGeo, matBase, cx + ex / 2, 0.05, cz + ez / 2);
+    spoke.rotation.y = -ang;                       // point the spoke outward
+    // caster wheel at the spoke tip (axle horizontal → rotate the cylinder)
+    const caster = _addMesh(group, casterGeo, matCol, cx + ex, 0.03, cz + ez);
+    caster.rotation.x = Math.PI / 2;
+  }
+  // Gas-lift column.
+  _addMesh(group, new THREE.CylinderGeometry(0.035, 0.045, seatLo_z - 0.04, 12),
+           matCol, cx, (seatLo_z + 0.04) / 2 + 0.02, cz);
+  // Swivel seat pad — accent active surface, slightly rounded read via bevel-free box.
+  const seat = _addMesh(group, new THREE.BoxGeometry(w * 0.72, seatThk, d * 0.72),
+                        matSeat, cx, (seatLo_z + seatTop_z) / 2, cz);
+  // Low contoured back, set at the rear, tilted slightly back.
+  const back = _addMesh(group, new THREE.BoxGeometry(w * 0.62, backHi_z - backLo_z, 0.07),
+                        matBack, cx, (backLo_z + backHi_z) / 2, d - 0.06);
+  back.rotation.x = -0.10;
+  // Short arms.
+  for (const sx of [-1, +1]) {
+    _addMesh(group, new THREE.BoxGeometry(0.055, armHi_z - seatTop_z, d * 0.46),
+             matArm, sx * (w / 2 - 0.04), (seatTop_z + armHi_z) / 2, cz);
+    _addMesh(group, new THREE.BoxGeometry(0.06, 0.04, d * 0.40),
+             matArm, sx * (w / 2 - 0.04), armHi_z, cz);   // arm pad
+  }
+  // Occupied → seated figure on the seat pad.
+  if (opts.occupied) {
+    const occ = new THREE.Group();
+    for (const m of _occupantMeshes(seatTop_z, { shirt: 0x6B7A8F, broken })) occ.add(m);
+    occ.position.z = cz - d / 2;   // _occupantMeshes is centred on its own z; shift to chair centre
+    group.add(occ);
+  }
+  return { group, activeMesh: seat };
+}
+
+// --- Lectern, free-standing (lectern-wood) ---------------------------
+// A podium, NOT a table. Tapered pedestal body + base plinth + an ANGLED
+// reading top (~17° slope, the common lectern angle) with a front lip /
+// paper-stop. Matches glyph_lectern.
+//   refs: standard lectern ~45" (1.14 m) tall — catalogue is 1.15 m;
+//         reading-surface angle 17° with pen/paper stop; width ~24"
+//         (0.6 m), depth ~18-23" (0.45 m). Podiums Direct / Podium Pros.
+// SUB-VOLUME: row family is 'slab-on-legs' → SLAB_ON_LEGS_LAYOUT (top
+// slab full-footprint + 4 thin legs). The podium body is a single solid
+// column that sits INSIDE that footprint, and the reading top occupies
+// the same top-slab band. The pedestal fills more of the mid-volume than
+// 4 thin legs would, but it stays within the footprint bbox and the row
+// is 'reflective' (specular outer surface) — the wall-BVH only sees the
+// top-slab + leg bboxes, both of which the mesh still covers. No silent
+// divergence: the visible solid is a SUPERSET of the leg frame, never
+// pokes outside the footprint. Flagging to Dr. Chen as informational
+// only; A_obj is negligible (lectern α ≈ 0.02-0.05).
+function _build_lectern(w, d, h, broken, _opts = {}) {
+  const group = new THREE.Group();
+  const matWood   = _furnMat(broken ? FURN_BROKEN : 0x8A6A47, 0.55);   // wood
+  const matDark   = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_DARK, 0.70);
+  const matTop    = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.80); // reading surface = active
+  const cz = d / 2;
+
+  // Base plinth — full-ish footprint, low.
+  _addMesh(group, new THREE.BoxGeometry(w * 0.9, 0.06, d * 0.9), matDark, 0, 0.03, cz);
+  // Tapered pedestal body: a couple of stacked boxes narrowing upward so
+  // it reads as a tapered column (cheaper + more robust than a lathe).
+  const bodyTop_z = h - 0.14;
+  _addMesh(group, new THREE.BoxGeometry(w * 0.78, bodyTop_z * 0.55, d * 0.7),
+           matWood, 0, 0.06 + bodyTop_z * 0.275, cz);
+  _addMesh(group, new THREE.BoxGeometry(w * 0.64, bodyTop_z * 0.45, d * 0.58),
+           matWood, 0, 0.06 + bodyTop_z * 0.55 + bodyTop_z * 0.225, cz);
+
+  // Angled reading top — a thin slab tilted ~17° so the back edge is
+  // higher than the front. Built as a flat box rotated about its lateral
+  // (x) axis, sitting on top of the pedestal. activeMesh = this.
+  const slabThk = 0.035;
+  const slabLen = d * 0.86;                 // depth of the sloped top
+  const tilt    = 17 * Math.PI / 180;       // 17° reading angle
+  const topCz   = cz;
+  const topCy   = h - 0.07;
+  const top = _addMesh(group, new THREE.BoxGeometry(w * 0.92, slabThk, slabLen),
+                       matTop, 0, topCy, topCz);
+  top.rotation.x = tilt;                    // back edge rises, front dips
+  // Front lip / paper-stop — small bar along the front (low) edge of the
+  // sloped top so notes don't slide off. Positioned at the down-slope edge.
+  const lipZ = topCz - (slabLen / 2) * Math.cos(tilt);
+  const lipY = topCy - (slabLen / 2) * Math.sin(tilt) + 0.025;
+  const lip = _addMesh(group, new THREE.BoxGeometry(w * 0.92, 0.05, 0.03),
+                       matWood, 0, lipY, lipZ);
+  lip.rotation.x = tilt;
+  return { group, activeMesh: top };
+}
+
+// --- Bookshelf, loaded (bookshelf-loaded-1x2) ------------------------
+// Open-front case with 5 shelves carrying book rows — NOT a plain box.
+// Matches glyph_bookshelf (5 shelves + varied book spines).
+//   refs: standard shelf spacing 10-12" (0.25-0.30 m); a ~2 m case
+//         carries 5-6 shelves. 1 m wide × 0.30 m deep × 2 m tall.
+// SUB-VOLUME: row family is 'vertical-box' → VERTICAL_BOX_LAYOUT (whole
+// bbox reflective_main — "loaded shelves are a solid filled box"). The
+// new mesh keeps a solid carcass (sides + back + shelves) PLUS books
+// that fill the bays, so the occupied volume the tracer sees (the full
+// bbox) still matches what the eye sees as solid. No sub-vol edit needed.
+function _build_bookshelf(w, d, h, broken, _opts = {}) {
+  const group = new THREE.Group();
+  const matCase = _furnMat(broken ? FURN_BROKEN : 0x6E5638, 0.70);   // case wood
+  const matBack = _furnMat(broken ? FURN_BROKEN : FURN_PAPER_DARK, 0.80);
+  const cz = d / 2;
+  const sideThk = 0.03, shelfThk = 0.03;
+  // Two side panels + top + bottom + back panel = the carcass.
+  for (const sx of [-1, +1]) {
+    _addMesh(group, new THREE.BoxGeometry(sideThk, h, d), matCase, sx * (w / 2 - sideThk / 2), h / 2, cz);
+  }
+  _addMesh(group, new THREE.BoxGeometry(w, shelfThk, d), matCase, 0, h - shelfThk / 2, cz);  // top
+  _addMesh(group, new THREE.BoxGeometry(w, shelfThk, d), matCase, 0, shelfThk / 2, cz);      // bottom
+  _addMesh(group, new THREE.BoxGeometry(w, h, 0.02), matBack, 0, h / 2, d - 0.01);           // back
+
+  const SHELVES = 5;
+  const innerW = w - 2 * sideThk;
+  const bookColors = broken
+    ? [FURN_BROKEN]
+    : [0x7A3B2E, 0x355E7A, 0x4A6B3A, 0x8A6A2E, 0x5A4A6B, 0x86402E];
+  let activeMesh = null;
+  for (let s = 0; s < SHELVES; s++) {
+    const zLo = (s / SHELVES) * h;
+    const zHi = ((s + 1) / SHELVES) * h;
+    // Shelf board between bays (skip the very bottom — that's the carcass bottom).
+    if (s > 0) {
+      _addMesh(group, new THREE.BoxGeometry(innerW, shelfThk, d * 0.94), matCase, 0, zLo, cz);
+    }
+    // Book row — a strip of thin upright boxes of varied height + colour
+    // filling the bay near the front face (small z). Cheap: ~10 boxes/bay.
+    const bayH = zHi - zLo - shelfThk;
+    const nBooks = 10;
+    const bookW = (innerW - 0.04) / nBooks;
+    for (let b = 0; b < nBooks; b++) {
+      const hb = bayH * (0.72 + (((b * 7 + s * 3) % 5) * 0.05));   // varied height
+      const xb = -innerW / 2 + 0.02 + (b + 0.5) * bookW;
+      const mat = _furnMat(bookColors[(b + s) % bookColors.length], 0.85);
+      const book = _addMesh(group, new THREE.BoxGeometry(bookW * 0.86, hb, d * 0.62),
+                            mat, xb, zLo + shelfThk + hb / 2, d * 0.32);
+      if (!activeMesh) activeMesh = book;   // a book is the loaded active surface
+    }
+  }
+  return { group, activeMesh: activeMesh || group.children[0] };
+}
+
+// --- Server rack, 42U (server-rack-42u-perforated) -------------------
+// 42U rack frame: cabinet shell + two 19" mounting rails + a dense
+// perforated front (fine U-rows). Matches glyph_serverRack.
+//   refs: EIA-310 — 1U = 44.45 mm; 19" panel; rail-hole spacing 450.85 mm
+//         (17.75"); 42U interior ≈ 1.867 m; cabinet ≈ 2 m on casters.
+//         Footprint 0.6 m W × 1.0 m D × 2.0 m H (catalogue).
+// SUB-VOLUME: row family is 'vertical-box' → VERTICAL_BOX_LAYOUT (whole
+// bbox reflective_main). The rack shell + filled front read as a solid
+// box filling the footprint, so the tracer's solid bbox matches the eye.
+// No sub-vol edit needed.
+function _build_serverRack(w, d, h, broken, _opts = {}) {
+  const group = new THREE.Group();
+  const matShell = _furnMat(broken ? FURN_BROKEN : 0x2C3038, 0.55, 0.5);  // painted steel
+  const matRail  = _furnMat(broken ? FURN_BROKEN : 0x9AA0AA, 0.40, 0.7);  // bright rail
+  const matFace  = _furnMat(broken ? FURN_BROKEN : 0x15171B, 0.65, 0.3);  // dark perf front
+  const cz = d / 2;
+  const wallThk = 0.025;
+  // Cabinet shell: sides, top, bottom, back. Front left open for the perf face.
+  for (const sx of [-1, +1]) {
+    _addMesh(group, new THREE.BoxGeometry(wallThk, h, d), matShell, sx * (w / 2 - wallThk / 2), h / 2, cz);
+  }
+  _addMesh(group, new THREE.BoxGeometry(w, wallThk, d), matShell, 0, h - wallThk / 2, cz);  // top
+  _addMesh(group, new THREE.BoxGeometry(w, wallThk, d), matShell, 0, wallThk / 2, cz);      // bottom
+  _addMesh(group, new THREE.BoxGeometry(w, h, wallThk), matShell, 0, h / 2, d - wallThk / 2); // back
+  // Dark perforated front face (the acoustically active perf door) inset
+  // slightly from the front plane. activeMesh = this.
+  const face = _addMesh(group, new THREE.BoxGeometry(w * 0.92, h * 0.97, 0.02), matFace, 0, h / 2, 0.02);
+  // Two 19" mounting rails — slim vertical bars set 0.4508 m apart
+  // (EIA-310 hole spacing), just behind the front face.
+  const railGap = Math.min(0.4508, w * 0.84);
+  for (const sx of [-1, +1]) {
+    _addMesh(group, new THREE.BoxGeometry(0.016, h * 0.94, 0.05), matRail, sx * railGap / 2, h / 2, 0.06);
+  }
+  // U-row ticks across the front face — 21 fine slats (reads as a dense
+  // 42U front without drawing all 42 at viewport distance). Thin dark
+  // recesses on top of the perf face.
+  const ROWS = 21;
+  const railInnerW = railGap - 0.02;
+  for (let i = 1; i < ROWS; i++) {
+    const z = (i / ROWS) * (h - 0.10) + 0.05;
+    _addMesh(group, new THREE.BoxGeometry(railInnerW, 0.012, 0.008), matShell, 0, z, 0.035);
+  }
+  return { group, activeMesh: face };
+}
+
+// --- Audience block, per m² (audience-block-per-m2-occupied) ---------
+// A per-m² seated-audience proxy reading as occupied BODIES at ~1.2 m,
+// NOT a flat 6 cm mat. Matches glyph_audienceBlock (2×2 seated cluster
+// on a 1 m² tile). Cheap: a thin floor tile + 4 seated figures (~3k tris
+// total) so it stays affordable when placed many times across a hall.
+// SUB-VOLUME COUPLING — FLAG FOR Dr. Chen / Sam:
+//   The row's family is 'flat-pad' → FLAT_PAD_LAYOUT, which returns a
+//   SINGLE porous sub-volume only ~0.04 m TALL (a thin floor slab),
+//   while the catalogue footprint height is 1.2 m and the NEW mesh now
+//   stands ~1.2 m tall (seated bodies). The acoustic A_obj is correct
+//   either way (it's an equivalent-absorption-area number, height-
+//   independent), and 'porous' Beer-Lambert μ = A_obj/(4·V_box) is
+//   computed from the sub-volume box — so the PHYSICS is unchanged by
+//   this visual fix. BUT the visible mesh (1.2 m of bodies) now extends
+//   well ABOVE the 0.04 m porous bbox the precision tracer sees. A ray
+//   passing 0.8 m above the floor will visually clip through a seated
+//   torso while acoustically passing through empty air. This is the
+//   classic "rays pass through a visible solid" coupling concern the
+//   furniture-sub-volumes.js header warns about. I did NOT change the
+//   acoustic model. RECOMMENDATION (route to Dr. Chen): give the
+//   audience-block flat-pad row a taller porous sub-volume (e.g. a
+//   ~1.1 m porous box) so the Beer-Lambert volume matches the seated
+//   bodies — this is an acoustic-model change and must not be made
+//   silently here. Until then, the 3D look is correct and the Sabine/
+//   Eyring A_obj is correct; only the precision-tracer ray-vs-body
+//   visual coincidence is imperfect for this one row.
+function _build_audienceBlock(w, d, h, broken, _opts = {}) {
+  const group = new THREE.Group();
+  const matTile = _furnMat(broken ? FURN_BROKEN : FURN_ACCENT, 0.95);
+  // Thin floor tile = the acoustically-active occupied area (accent).
+  const tile = _addMesh(group, new THREE.BoxGeometry(w * 0.98, 0.04, d * 0.98), matTile, 0, 0.02, d / 2);
+  // 2×2 seated cluster. Each figure sits ~0.45 m seat-height.
+  const SEAT_Y = Math.min(0.45, h * 0.38);
+  const cols = [-w * 0.22, w * 0.22];
+  const rows = [d * 0.28, d * 0.72];
+  const shirts = [0x6B7A8F, 0x8F6B6B, 0x6B8F73, 0x8F856B];
+  let k = 0;
+  for (const rz of rows) {
+    for (const cxn of cols) {
+      const occ = new THREE.Group();
+      for (const m of _occupantMeshes(SEAT_Y, { shirt: shirts[k % shirts.length], broken })) occ.add(m);
+      occ.position.set(cxn, 0, rz - d / 2);   // shift figure to its cell (figure is z-centred)
+      occ.rotation.y = (k % 2 === 0) ? 0.12 : -0.12;  // tiny yaw variation
+      group.add(occ);
+      k++;
+    }
+  }
+  return { group, activeMesh: tile };
+}
+
+const BUILDERS_BY_ID = {
+  'office-chair-padded-occupied':   _build_officeChair,
+  'office-chair-padded-empty':      _build_officeChair,
+  'lectern-wood':                   _build_lectern,
+  'bookshelf-loaded-1x2':           _build_bookshelf,
+  'server-rack-42u-perforated':     _build_serverRack,
+  'audience-block-per-m2-occupied': _build_audienceBlock,
+};
 
 const FAMILY_BUILDERS = {
   'seat': _build_seat,
@@ -7468,9 +7824,20 @@ function _buildFurnitureMesh(f, row) {
   const h = Math.max(0.1, row?.footprint?.height_m ?? 1.20);
   const broken = !row;
 
+  // Occupancy flag — authoritative source is acoustics.occupancy_state;
+  // fall back to the id suffix for safety. Passed uniformly to every
+  // builder via opts; family builders ignore the trailing arg.
+  const occupied = row?.acoustics?.occupancy_state === 'occupied'
+    || (typeof f.catalogueId === 'string' && f.catalogueId.endsWith('-occupied'));
+  const opts = { occupied, row };
+
+  // Per-id builder takes priority over family dispatch (mirrors the 2D
+  // glyph GLYPHS-before-FAMILY_GLYPHS pattern). v=731.
   const family = row?.visual?.family || 'seat';
-  const builder = FAMILY_BUILDERS[family] || FAMILY_BUILDERS['seat'];
-  const { group, activeMesh } = builder(w, d, h, broken);
+  const builder = BUILDERS_BY_ID[f.catalogueId]
+    || FAMILY_BUILDERS[family]
+    || FAMILY_BUILDERS['seat'];
+  const { group, activeMesh } = builder(w, d, h, broken, opts);
 
   group.name = `furniture:${f.id}`;
   group.userData.furnitureId = f.id;
@@ -7486,9 +7853,14 @@ function _buildFurnitureMesh(f, row) {
   return group;
 }
 
+let _furnBuildLogged = false;
 function rebuildFurniture() {
   shadowsNeedRefresh = true;
   if (!scene) return;
+  if (!_furnBuildLogged) {
+    _furnBuildLogged = true;
+    console.info('[furniture] build 2026-05-31 v731 — per-id 3D builders (office chair / lectern / bookshelf / 42U rack / audience block) + seated occupants');
+  }
   if (!furnitureGroup) {
     furnitureGroup = new THREE.Group();
     furnitureGroup.name = 'furniture';
