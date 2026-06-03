@@ -23,8 +23,8 @@ export function doorWidthDefault(region) {
 
 // Length of edge i: from vertices[i] to vertices[(i+1) % n].
 export function edgeLength(vertices, edgeIndex) {
+  if (!Array.isArray(vertices) || vertices.length < 2) return 0;
   const n = vertices.length;
-  if (!Array.isArray(vertices) || n < 2) return 0;
   const a = vertices[((edgeIndex % n) + n) % n];
   const b = vertices[((edgeIndex + 1) % n + n) % n];
   return Math.hypot(b.x - a.x, b.y - a.y);

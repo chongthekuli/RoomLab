@@ -71,38 +71,57 @@ let activeSession = null;   // so a second begin() cancels the first
  * itself via commitCapturedRoom; the caller doesn't need to await `done` unless
  * it wants to react to completion.
  */
+let beginInFlight = false;   // re-entrancy guard — a double-tap must not start two camera sessions
+
 export async function beginCapture(ctx = {}) {
-  // Cancel any in-flight capture (e.g. user re-clicks while a camera is open).
-  if (activeSession && typeof activeSession.cancel === 'function') {
-    try { activeSession.cancel(); } catch { /* ignore */ }
-    activeSession = null;
-  }
-
-  const modes = await offerableModes();
-  if (modes.length === 0) return null;             // manual is always implemented, so this is defensive
-
-  const chosen = modes.length === 1 ? modes[0] : await chooseCaptureMode(modes);
-  if (!chosen) return null;                         // user cancelled the picker
-
-  let mod;
+  // Re-entrancy guard (Martina P0-3): beginCapture is async and `activeSession`
+  // isn't assigned until AFTER `await chosen.load()`. A double-tap on a phone
+  // (no instant feedback while the camera permission spins up) would re-enter,
+  // see activeSession===null, and start a SECOND getUserMedia session whose
+  // stream then leaks with no handle to stop it (camera LED stays on). Guard
+  // the whole async span, not just activeSession.
+  if (beginInFlight) return null;
+  beginInFlight = true;
   try {
-    mod = await chosen.load();
-  } catch (err) {
-    console.warn(`[capture] mode '${chosen.id}' failed to load:`, err);
-    return null;
-  }
-  const modeImpl = mod.default ?? mod[`${chosen.id}Mode`];
-  if (!modeImpl || typeof modeImpl.start !== 'function') {
-    console.warn(`[capture] mode '${chosen.id}' has no start()`);
-    return null;
-  }
+    // Cancel any in-flight capture (e.g. user re-clicks after a session is open).
+    if (activeSession && typeof activeSession.cancel === 'function') {
+      try { activeSession.cancel(); } catch { /* ignore */ }
+      activeSession = null;
+    }
 
-  const session = modeImpl.start(document.body, ctx);
-  activeSession = session;
-  // Clear the active-session handle when the mode finishes/cancels so a later
-  // begin() doesn't try to cancel a dead session.
-  if (session && session.done && typeof session.done.then === 'function') {
-    session.done.finally(() => { if (activeSession === session) activeSession = null; });
+    const modes = await offerableModes();
+    if (modes.length === 0) return null;           // manual is always implemented, so this is defensive
+
+    const chosen = modes.length === 1 ? modes[0] : await chooseCaptureMode(modes);
+    if (!chosen) return null;                       // user cancelled the picker
+
+    let mod;
+    try {
+      mod = await chosen.load();
+    } catch (err) {
+      console.warn(`[capture] mode '${chosen.id}' failed to load:`, err);
+      return null;
+    }
+    // Resolve the CaptureMode: prefer the default export, else any named export
+    // that looks like a CaptureMode (has start()). Robust to a renamed export
+    // (Martina P3: the old `mod[`${id}Mode`]` only worked via the default).
+    const modeImpl = (mod.default && typeof mod.default.start === 'function')
+      ? mod.default
+      : Object.values(mod).find(v => v && typeof v.start === 'function');
+    if (!modeImpl || typeof modeImpl.start !== 'function') {
+      console.warn(`[capture] mode '${chosen.id}' has no start()`);
+      return null;
+    }
+
+    const session = modeImpl.start(document.body, ctx);
+    activeSession = session;
+    // Clear the active-session handle when the mode finishes/cancels so a later
+    // begin() doesn't try to cancel a dead session.
+    if (session && session.done && typeof session.done.then === 'function') {
+      session.done.finally(() => { if (activeSession === session) activeSession = null; });
+    }
+    return session;
+  } finally {
+    beginInFlight = false;
   }
-  return session;
 }

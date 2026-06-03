@@ -70,7 +70,7 @@ import { rescalePolygonToEdgeLength, doorWidthDefault } from '../geometry/scale-
 import { trackPoints, medianTranslation, rgbaToGray } from '../geometry/optical-flow.js';
 import { levelPlaneFromGravity, applyHeadingToPolygon } from '../geometry/orientation.js';
 
-const BUILD = '[live-capture] build 2026-05-31 v737 — sensor-fusion (gravity+compass) + guided coaching overlay + iframe guard';
+const BUILD = '[live-capture] build 2026-05-31 v738 — sensor-fusion (gravity+compass) + guided coaching overlay + iframe guard';
 
 const MARKER_R = 20;          // visual radius (CSS px)
 const HIT_R = 30;             // touch hit radius (CSS px) — fat-finger friendly
@@ -98,6 +98,14 @@ function isFramed() {
 function isPermissionError(err) {
   const n = err && err.name;
   return n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError';
+}
+
+// Clamp a dead-reckoned off-screen marker coordinate to a sane envelope around the
+// frame ([−span, 2·span]) so the carry accumulator stays BOUNDED — a marker that
+// pans off-screen can drift one frame-width past the edge and no further, then
+// reappears when the user pans back, instead of flying to x=50000 (P2-1).
+function clampEnvelope(v, span) {
+  return Math.max(-span, Math.min(2 * span, v));
 }
 
 /** @type {import('../capture-flow.js').CaptureMode} */
@@ -130,7 +138,10 @@ class LiveCaptureSession {
     this.raf = 0;             // requestAnimationFrame id (fallback loop)
     this.rvfcHandle = 0;      // requestVideoFrameCallback handle
     this.objectUrls = [];
-    this.disposers = [];
+    this.disposers = [];        // SESSION-lifetime listeners (header/footer buttons, sensors)
+    this.phaseDisposers = [];   // PHASE-scoped listeners (window resize + canvas pointer
+                                // binds) — drained on every rescan so retrying the scan
+                                // can't accumulate stale resize/pointer handlers (P0-1).
     this.video = null;
     this.torn = false;
 
@@ -269,6 +280,21 @@ class LiveCaptureSession {
   _on(el, type, fn, opts) {
     el.addEventListener(type, fn, opts);
     this.disposers.push(() => el.removeEventListener(type, fn, opts));
+  }
+
+  // PHASE-scoped listener bind. Use this (not _on) for anything created inside a
+  // scan/tap phase that is re-entered on rescan — the window 'resize' handler and
+  // the canvas pointer handlers. _clearPhase() drains these at every phase exit so
+  // a Lock→reject→rescan (or "↺ Rescan") loop can't leave a stale resize handler
+  // bound to a discarded canvas/dispScale on each cycle (P0-1).
+  _onPhase(el, type, fn, opts) {
+    el.addEventListener(type, fn, opts);
+    this.phaseDisposers.push(() => el.removeEventListener(type, fn, opts));
+  }
+
+  _clearPhase() {
+    for (const d of this.phaseDisposers) { try { d(); } catch {} }
+    this.phaseDisposers.length = 0;
   }
 
   _setBanner(text) { this.banner.textContent = text; }
@@ -465,13 +491,14 @@ class LiveCaptureSession {
     this.trackCtx = tc.getContext('2d', { willReadFrequently: true });
 
     this._fitCanvas();
-    this._on(window, 'resize', () => this._fitCanvas());
+    // PHASE-scoped (drained on rescan) — see _onPhase / P0-1.
+    this._onPhase(window, 'resize', () => this._fitCanvas());
 
     // Tap = place a new corner (in video-frame coords). Tap-near = grab to drag.
-    this._on(canvas, 'pointerdown', (e) => this._onPointerDown(e));
-    this._on(canvas, 'pointermove', (e) => this._onPointerMove(e));
-    this._on(canvas, 'pointerup', (e) => this._onPointerUp(e));
-    this._on(canvas, 'pointercancel', (e) => this._onPointerUp(e));
+    this._onPhase(canvas, 'pointerdown', (e) => this._onPointerDown(e));
+    this._onPhase(canvas, 'pointermove', (e) => this._onPointerMove(e));
+    this._onPhase(canvas, 'pointerup', (e) => this._onPointerUp(e));
+    this._onPhase(canvas, 'pointercancel', (e) => this._onPointerUp(e));
 
     this._refreshFooter();
     this._updateCounter();
@@ -553,10 +580,15 @@ class LiveCaptureSession {
           this.corners[i].y = r.y / this.trackScale;
           this.corners[i].valid = true;
         } else if (pan.n > 0) {
-          // Off-screen (or lost) → carry by the median pan so it stays roughly placed.
-          this.corners[i].x += pan.dx / this.trackScale;
-          this.corners[i].y += pan.dy / this.trackScale;
-          this.corners[i].valid = onScreen ? false : this.corners[i].valid;
+          // Off-screen (or lost) → carry by the median pan so it stays roughly
+          // placed. CLAMP to a sane envelope so an off-screen marker can't drift to
+          // x=50000 and never reappear (and can't feed a wild ref corner into the
+          // lock homography) — makes the "BOUNDED accumulator" claim above true
+          // (P2-1). Carried markers are DEAD-RECKONED, not tracked, so flag them
+          // invalid → drawn dimmed (the drift honesty cue) (P2-5).
+          this.corners[i].x = clampEnvelope(this.corners[i].x + pan.dx / this.trackScale, this.frameW);
+          this.corners[i].y = clampEnvelope(this.corners[i].y + pan.dy / this.trackScale, this.frameH);
+          this.corners[i].valid = false;
         } else {
           this.corners[i].valid = false;    // no motion estimate, flag as drifting
         }
@@ -726,12 +758,17 @@ class LiveCaptureSession {
     const first4 = this.refCorners.slice(0, 4);
     let planRaw;
     if (this.refCorners.length === 3) {
-      // A triangle: synthesise a 4th corner to seat the homography, then drop it.
-      // Use the parallelogram completion of the first three (p0 + p2 − p1).
-      const [a, b, c] = this.refCorners;
-      const fourth = { x: a.x + c.x - b.x, y: a.y + c.y - b.y };
-      const quad = rectifyFloorQuad([a, b, c, fourth]);
-      planRaw = quad ? quad.slice(0, 3) : null;
+      // A triangle (the advertised MIN_CORNERS=3): do NOT route through the 4-point
+      // homography. Three points under-determine an 8-DOF homography, and the
+      // synthesised-4th-corner trick makes a near-collinear quad that
+      // isDegenerateQuad rightly rejects for MANY valid triangles — bouncing the
+      // user off the smallest legal room with "too flat, spread them out" (P1-1).
+      // Instead pass the raw tapped triangle straight to the scale step: it's
+      // already a "rough, drag-to-fix" plan and no perspective rectification is
+      // possible from 3 points anyway. Flip image-y (origin top-left, y↓) so the
+      // image-far direction becomes plan +y = north, matching the rectify path's
+      // DST_UNIT convention.
+      planRaw = this.refCorners.map(p => ({ x: p.x, y: -p.y }));
     } else if (this.refCorners.length === 4) {
       planRaw = rectifyFloorQuad(first4);
     } else {
@@ -755,6 +792,7 @@ class LiveCaptureSession {
   }
 
   _restartCamera() {
+    this._clearPhase();   // drop the previous phase's resize + pointer handlers (P0-1)
     if (this.canvas) { this.canvas.remove(); this.canvas = null; }
     this.corners = []; this.prevGray = null; this.dragIndex = -1;
     if (this.counter) this.counter.style.display = '';
@@ -763,6 +801,9 @@ class LiveCaptureSession {
 
   // ── Phase 4: scale anchor (one known edge length) → commit ──────────────────
   _enterScalePhase() {
+    // Leaving the tap phase for good — drop its resize + pointer handlers so they
+    // don't outlive the canvas they referenced (P0-1).
+    this._clearPhase();
     // Scale anchor is MANDATORY — a browser can't get metric scale automatically
     // (no LiDAR / no exposed VIO), so ONE known real measurement is the accuracy
     // linchpin. State it plainly and don't let the user finish without it.
@@ -899,6 +940,9 @@ class LiveCaptureSession {
     this.heading = null; this.gravity = null;
     for (const dispose of this.disposers) { try { dispose(); } catch {} }
     this.disposers.length = 0;
+    // Drain phase-scoped listeners too (resize + pointer binds) — they may not have
+    // been cleared yet if teardown fires mid-scan (cancel / commit). Idempotent.
+    this._clearPhase();
     for (const url of this.objectUrls) { try { URL.revokeObjectURL(url); } catch {} }
     this.objectUrls.length = 0;
     if (this.frozenBitmap && typeof this.frozenBitmap.close === 'function') {
@@ -959,11 +1003,12 @@ class LiveCaptureSession {
     ];
     this.isStill = true;
     this._fitCanvas();
-    this._on(window, 'resize', () => { this._fitCanvas(); this._drawStill(); });
-    this._on(canvas, 'pointerdown', (e) => this._onStillPointerDown(e));
-    this._on(canvas, 'pointermove', (e) => this._onPointerMove(e));
-    this._on(canvas, 'pointerup', (e) => this._onPointerUp(e));
-    this._on(canvas, 'pointercancel', (e) => this._onPointerUp(e));
+    // PHASE-scoped (drained on rescan / "choose another") — see _onPhase / P0-1.
+    this._onPhase(window, 'resize', () => { this._fitCanvas(); this._drawStill(); });
+    this._onPhase(canvas, 'pointerdown', (e) => this._onStillPointerDown(e));
+    this._onPhase(canvas, 'pointermove', (e) => this._onPointerMove(e));
+    this._onPhase(canvas, 'pointerup', (e) => this._onPointerUp(e));
+    this._onPhase(canvas, 'pointercancel', (e) => this._onPointerUp(e));
     this._setFooter(
       this._button('↺ Choose another', () => this._restartStill()),
       this._button('✓ Use these corners', () => this._lockReferenceFrame(), true),
@@ -972,6 +1017,7 @@ class LiveCaptureSession {
   }
 
   _restartStill() {
+    this._clearPhase();   // drop the still phase's resize + pointer handlers (P0-1)
     if (this.canvas) { this.canvas.remove(); this.canvas = null; }
     this.frozenBitmap = null; this.corners = []; this.isStill = false;
     this._useFileFallback();

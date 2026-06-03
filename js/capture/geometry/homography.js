@@ -79,8 +79,11 @@ export function applyHomography(H, p) {
 }
 
 /** Invert a 3×3 homography (length-9 row-major). Returns a length-9 array, or
- *  null if singular. Useful to map plan→image (e.g. to overlay the rectified
- *  grid back on the photo). */
+ *  null if singular. Maps plan→image (the inverse direction of solveHomography's
+ *  image→plan H). NOTE: not currently wired into any capture mode — the live
+ *  preview draws the rectified plan in its own canvas rather than overlaying a
+ *  plan→image grid on the photo. Kept as a tested primitive for a future
+ *  on-photo grid overlay; it is exercised by tests/capture-homography.test.mjs. */
 export function invertHomography(H) {
   const a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7], i = H[8];
   const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;

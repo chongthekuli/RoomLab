@@ -43,14 +43,22 @@
 
 import { solveHomography, applyHomography } from './homography.js';
 
-// Orientation note (+y = north): the destination rectangle is laid out with
-// corner[0] at plan-origin and +Y increasing toward corner[3] (see DST_UNIT).
-// The MODE is responsible for asking the user to tap corners starting at the
-// FAR-LEFT floor corner going CLOCKWISE in the image, so the rectified polygon
-// lands with the room's "far" wall toward +y. The mapping the mode applies, and
-// the +y=north contract, is documented in live-capture-mode.js and flagged to Sam
-// for tests/cross-surface-conventions.test.mjs. This pure module only guarantees
-// a consistent, CCW-able, axis-aligned output for a given tap order.
+// Orientation note: the destination rectangle is laid out with corner[0] at
+// plan-origin and +Y increasing toward corner[3] (see DST_UNIT). The MODE asks the
+// user to tap corners starting at the FAR-LEFT floor corner going CLOCKWISE in the
+// image, so THIS module lands the room's "far" (camera-distant) wall toward +y —
+// i.e. +y = the CAMERA-FAR wall, a camera-relative frame.
+//
+// The MODE (live-capture-mode.js _lockReferenceFrame) then RE-ORIENTS that polygon
+// to TRUE north when a compass heading was available at lock time, via
+// applyHeadingToPolygon(plan, lockHeading) — so the committed plan's +y points at
+// real-world north (the cross-surface +y=north convention; flagged to Sam for
+// tests/cross-surface-conventions.test.mjs, heading sign covered by
+// tests/capture-orientation.test.mjs). When heading is UNAVAILABLE (permission
+// denied / no magnetometer) applyHeadingToPolygon returns the polygon unchanged, so
+// the fallback is exactly this module's camera-far +y frame. This pure module only
+// guarantees a consistent, CCW-able, axis-aligned output for a given tap order; it
+// makes no claim about true north — that re-orientation lives in the mode.
 
 /**
  * Canonical destination quad: a UNIT square in plan space. Tap order is
@@ -128,8 +136,8 @@ export function rectifyFloorQuad(imageCorners4, opts = {}) {
   if (isDegenerateQuad(imageCorners4)) return null;
   // Solve H: image quad → unit plan square. (Note the direction — we map the
   // image corners to the KNOWN destination, so applying H to any image point
-  // lands it in plan space. invertHomography(H) draws the plan grid back onto
-  // the photo for the live preview — that's done in the mode, not here.)
+  // lands it in plan space. invertHomography(H) would map plan→image for an
+  // on-photo grid overlay; no mode wires that today — see homography.js.)
   const H = solveHomography(imageCorners4.slice(0, 4), DST_UNIT);
   if (!H) return null;
 
