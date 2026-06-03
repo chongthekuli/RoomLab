@@ -68,14 +68,37 @@ import { rectifyFloorQuad } from '../geometry/photo-rectify.js';
 import { ensureCCW } from '../geometry/polygon-ops.js';
 import { rescalePolygonToEdgeLength, doorWidthDefault } from '../geometry/scale-anchor.js';
 import { trackPoints, medianTranslation, rgbaToGray } from '../geometry/optical-flow.js';
+import { levelPlaneFromGravity, applyHeadingToPolygon } from '../geometry/orientation.js';
 
-const BUILD = '[live-capture] build 2026-05-31 v736 — pan+tap LK marker-stick + single-ref rectify';
+const BUILD = '[live-capture] build 2026-05-31 v737 — sensor-fusion (gravity+compass) + guided coaching overlay + iframe guard';
 
 const MARKER_R = 20;          // visual radius (CSS px)
 const HIT_R = 30;             // touch hit radius (CSS px) — fat-finger friendly
 const TRACK_W = 160;          // tracking raster width (px) — downsampled, iOS-cheap
 const MIN_CORNERS = 3;        // a triangle is the smallest committable room
 const CORNER_HINT = ['far-left', 'far-right', 'near-right', 'near-left'];
+
+// Coaching thresholds (cheap, frame-rate; one cue at a time, least-intrusive).
+const DARK_LUMA = 55;         // mean frame luma (0..255) below this ⇒ "too dark"
+const SHAKE_ACCEL = 3.2;      // |linear accel| m/s² above this ⇒ "hold steadier"
+const CUE_MIN_MS = 900;       // don't flip the cue more often than this (anti-flicker)
+
+// Standalone full-screen URL surfaced when the camera is blocked inside an
+// iframe (Google Sites embed). Same origin/repo as the deploy.
+const STANDALONE_URL = 'https://chongthekuli.github.io/RoomLab/#/room';
+
+// Are we running inside an <iframe> (e.g. the Google Sites embed)? getUserMedia
+// + DeviceOrientation need the PARENT to grant allow="camera; gyroscope;
+// accelerometer" AND the gesture inside the frame; when that's missing the calls
+// reject with NotAllowedError/SecurityError and the user sees a black screen
+// unless we explain it.
+function isFramed() {
+  try { return window.self !== window.top; } catch { return true; }  // cross-origin access throws ⇒ framed
+}
+function isPermissionError(err) {
+  const n = err && err.name;
+  return n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError';
+}
 
 /** @type {import('../capture-flow.js').CaptureMode} */
 export const liveCaptureMode = {
@@ -126,10 +149,25 @@ class LiveCaptureSession {
     this.trackCanvas = null;                // offscreen canvas for the small raster
     this.frozenBitmap = null;               // reference-frame snapshot (lock step)
 
+    // ── Sensor fusion (DeviceOrientation/Motion) — all OPTIONAL, never blocks ──
+    // Listeners are removed in teardown (new leak surface). Values are nullable:
+    // null ⇒ unavailable / denied ⇒ graceful degrade to today's behaviour.
+    this.sensorRemovers = [];               // listener disposers (also pushed to disposers)
+    this.heading = null;                    // deg, compass heading (0=N, CW), live
+    this.gravity = null;                    // { x,y,z } accelerationIncludingGravity, live
+    this.accelMag = 0;                      // |linear accel| m/s² (shake detector)
+    this.lastFrameLuma = 255;               // mean frame luminance (dark detector)
+    this.coachCue = '';                     // current coaching string ('' = none)
+    this._coachAt = 0;                      // last cue-change timestamp (anti-flicker)
+
     this._resolve = null;
     this.done = new Promise((res) => { this._resolve = res; });
 
     this._buildOverlay();
+    // Request motion/orientation permission FIRST, still inside the start gesture
+    // (iOS 13+ gates the data behind a user-gesture prompt). Fire-and-forget — the
+    // camera path does not wait on it; sensors are pure enhancement.
+    this._requestSensors();
     this._startCamera();
   }
 
@@ -189,6 +227,19 @@ class LiveCaptureSession {
     this.counter = counter;
     stage.append(counter);
 
+    // Coaching cue chip (bottom-centre) — at most one cue at a time, unobtrusive.
+    // Amber so it reads as advice, not an error. Hidden when there's no cue.
+    const coach = document.createElement('div');
+    Object.assign(coach.style, {
+      position: 'absolute', bottom: '8px', left: '50%', transform: 'translateX(-50%)',
+      padding: '5px 12px', background: 'rgba(40,30,8,0.88)', color: '#ffd27a',
+      border: '1px solid #5a4416', borderRadius: '8px', fontSize: '12px',
+      pointerEvents: 'none', zIndex: '6', display: 'none', maxWidth: '70%',
+      textAlign: 'center',
+    });
+    this.coach = coach;
+    stage.append(coach);
+
     const footer = document.createElement('div');
     Object.assign(footer.style, {
       display: 'flex', gap: '10px', padding: '12px 14px', flex: '0 0 auto',
@@ -224,13 +275,101 @@ class LiveCaptureSession {
   _setFooter(...nodes) { this.footer.replaceChildren(...nodes.filter(Boolean)); }
   _updateCounter() {
     const n = this.corners.length;
-    this.counter.textContent = n === 0 ? 'Tap a corner to begin'
-      : `${n} corner${n === 1 ? '' : 's'} placed${n >= MIN_CORNERS ? ' — Lock when done' : ''}`;
+    // Per-corner prompt (RoomPlan-style): name the next corner for the first 4,
+    // then a generic prompt; surface the loop-close hint once ≥ MIN_CORNERS.
+    let prompt;
+    if (n === 0) prompt = 'Point at the FAR-LEFT floor corner, then tap';
+    else if (n < 4) prompt = `Point at the ${CORNER_HINT[n]} corner, then tap`;
+    else prompt = 'Point at the next corner, then tap';
+    const placed = n === 0 ? '' : ` · ${n} placed`;
+    const lockHint = n >= MIN_CORNERS ? ' · Lock when the loop is closed' : '';
+    this.counter.textContent = prompt + placed + lockHint;
+  }
+
+  // Coaching cue: dark / shaky scene. One cue at a time, least-intrusive wins,
+  // rate-limited so it doesn't strobe. Sensors absent ⇒ shake cue simply never
+  // fires (graceful). Called once per frame.
+  _updateCoach() {
+    let cue = '';
+    if (this.lastFrameLuma < DARK_LUMA) cue = '💡 Too dark — turn on more light';
+    else if (this.accelMag > SHAKE_ACCEL) cue = '✋ Hold steadier';
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (cue !== this.coachCue && (now - this._coachAt) >= CUE_MIN_MS) {
+      this.coachCue = cue; this._coachAt = now;
+      if (this.coach) {
+        this.coach.textContent = cue;
+        this.coach.style.display = cue ? 'block' : 'none';
+      }
+    }
+  }
+
+  // ── Sensor fusion: DeviceOrientation (compass) + DeviceMotion (gravity/shake) ─
+  // ALL optional. iOS 13+ gates the data behind a permission prompt that must be
+  // called from a user gesture (the start tap, satisfied — see constructor).
+  // Android / desktop Chrome / older iOS expose the events without a prompt
+  // (feature-detected). Permission denial / no sensors → we never attach the
+  // listeners and the whole pipeline degrades to today's camera-relative plan.
+  async _requestSensors() {
+    const OE = (typeof window !== 'undefined') ? window.DeviceOrientationEvent : null;
+    const ME = (typeof window !== 'undefined') ? window.DeviceMotionEvent : null;
+    if (!OE && !ME) return;                          // no sensors at all
+    try {
+      // iOS gate: requestPermission() exists only there. Promise → 'granted'|'denied'.
+      const needsOriPerm = OE && typeof OE.requestPermission === 'function';
+      const needsMotPerm = ME && typeof ME.requestPermission === 'function';
+      let oriOk = true, motOk = true;
+      if (needsOriPerm) oriOk = (await OE.requestPermission()) === 'granted';
+      if (needsMotPerm) motOk = (await ME.requestPermission()) === 'granted';
+      if (this.torn) return;                         // cancelled mid-prompt
+      if (OE && oriOk) this._attachOrientation();
+      if (ME && motOk) this._attachMotion();
+    } catch (err) {
+      // requestPermission throws inside a cross-origin iframe (SecurityError) —
+      // not fatal; the camera path surfaces the iframe guidance. Sensors just
+      // stay off (graceful degrade).
+      if (!isPermissionError(err)) console.warn('[live-capture] sensor permission:', err);
+    }
+  }
+
+  _attachOrientation() {
+    const onOri = (e) => {
+      // iOS exposes a TRUE compass heading via webkitCompassHeading (0=N, CW).
+      // Elsewhere, `alpha` is the Z-axis rotation; absolute orientation gives a
+      // compass-like value (browser-dependent). Prefer the iOS field; fall back
+      // to alpha when the event is flagged absolute (or as a best-effort).
+      const wk = (typeof e.webkitCompassHeading === 'number') ? e.webkitCompassHeading : null;
+      if (wk != null && Number.isFinite(wk)) {
+        this.heading = wk;
+      } else if (typeof e.alpha === 'number' && Number.isFinite(e.alpha)) {
+        // alpha grows counter-clockwise from the device's reference; a compass
+        // heading is clockwise from north → 360 − alpha as a best-effort.
+        this.heading = (360 - e.alpha) % 360;
+      }
+    };
+    window.addEventListener('deviceorientation', onOri);
+    const rm = () => window.removeEventListener('deviceorientation', onOri);
+    this.sensorRemovers.push(rm); this.disposers.push(rm);
+  }
+
+  _attachMotion() {
+    const onMot = (e) => {
+      const g = e.accelerationIncludingGravity;
+      if (g && (g.x != null || g.y != null || g.z != null)) {
+        this.gravity = { x: g.x || 0, y: g.y || 0, z: g.z || 0 };
+      }
+      const a = e.acceleration;                       // gravity-removed (when available)
+      if (a && (a.x != null || a.y != null || a.z != null)) {
+        this.accelMag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+      }
+    };
+    window.addEventListener('devicemotion', onMot);
+    const rm = () => window.removeEventListener('devicemotion', onMot);
+    this.sensorRemovers.push(rm); this.disposers.push(rm);
   }
 
   // ── Phase 1: live camera (default) → file fallback ──────────────────────────
   async _startCamera() {
-    this._setBanner('Point at a floor corner and tap it. Pan slowly to the next corner — markers follow the walls.');
+    this._setBanner('Rough shape — pan slowly and tap each floor corner. You’ll set one real measurement next (not survey-grade).');
     const md = (typeof navigator !== 'undefined') && navigator.mediaDevices;
     if (!md || typeof md.getUserMedia !== 'function') {
       this._useFileFallback('Live camera is not available on this browser. Pick a photo instead.');
@@ -251,8 +390,52 @@ class LiveCaptureSession {
       if (this.torn) { this._stopStream(); return; }
       this._enterLiveTapPhase();
     } catch (err) {
-      this._useFileFallback('Camera permission denied or unavailable. Pick a photo instead.');
+      // Inside a Google Sites iframe the camera is blocked unless the parent set
+      // allow="camera; gyroscope; accelerometer". Don't leave a black screen —
+      // explain it and offer the standalone full-screen URL. A genuine on-device
+      // denial (not framed) still falls back to the file picker.
+      if (isFramed() && isPermissionError(err)) {
+        this._showIframeBlock();
+      } else {
+        this._useFileFallback('Camera permission denied or unavailable. Pick a photo instead.');
+      }
     }
+  }
+
+  // Camera blocked because we're embedded in an iframe without camera permission.
+  // Surface a clear message + a link to open RoomLab standalone (where the
+  // gesture + getUserMedia work). Also offers the photo-file fallback so the
+  // user isn't fully stuck inside the frame.
+  _showIframeBlock() {
+    this._stopStream();
+    this._setBanner('The camera can’t open inside this embedded view.');
+    const card = document.createElement('div');
+    Object.assign(card.style, {
+      maxWidth: '340px', textAlign: 'center', padding: '18px',
+      background: '#12161d', border: '1px solid #232a35', borderRadius: '12px',
+      lineHeight: '1.5',
+    });
+    const msg = document.createElement('div');
+    msg.textContent = 'Open RoomLab in full screen (a new browser tab) to scan with the camera. Embedded views block camera access.';
+    msg.style.marginBottom = '14px';
+    const link = document.createElement('a');
+    link.href = STANDALONE_URL; link.target = '_blank'; link.rel = 'noopener';
+    link.textContent = '↗ Open RoomLab in a new tab';
+    Object.assign(link.style, {
+      display: 'inline-block', padding: '11px 16px', borderRadius: '8px',
+      background: '#4c8bf5', color: '#fff', textDecoration: 'none', fontWeight: '600',
+      minHeight: '44px', boxSizing: 'border-box',
+    });
+    card.append(msg, link);
+    // Replace the stage contents with the guidance card.
+    for (const n of Array.from(this.stage.children)) {
+      if (n !== this.banner && n !== this.counter) n.remove();
+    }
+    this.stage.insertBefore(card, this.banner);
+    this._setFooter(
+      this._button('Use a photo instead', () => { card.remove(); this._useFileFallback(); }),
+      this._button('Close', () => this.teardown(null)),
+    );
   }
 
   // ── Phase 2 (LIVE): pan + tap corners; LK keeps markers stuck ──────────────
@@ -347,6 +530,13 @@ class LiveCaptureSession {
     catch { this._draw(); return; }            // not ready / cross-origin guard
     const rgba = tctx.getImageData(0, 0, tc.width, tc.height);
     const gray = rgbaToGray(rgba);
+
+    // Cheap coaching signal: mean luma of the (already-downsampled) gray raster.
+    // Subsample (every 4th px) so even the small raster stays nearly free.
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < gray.data.length; i += 4) { sum += gray.data[i]; cnt++; }
+    this.lastFrameLuma = cnt ? sum / cnt : 255;
+    this._updateCoach();
 
     if (this.prevGray && this.corners.length > 0 && this.dragIndex < 0) {
       // Track in RASTER space: video → raster on the way in, raster → video out.
@@ -454,7 +644,33 @@ class LiveCaptureSession {
     const W = this.canvas.width, H = this.canvas.height;
     ctx.clearRect(0, 0, W, H);                // transparent — the <video> shows through
 
+    // Centre crosshair / target reticle (live aim only — not on the still image).
+    if (!this.isStill) {
+      const cx = W / 2, cy = H / 2, r = 14 * this._dpr;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2 * this._dpr;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 1.7, cy); ctx.lineTo(cx - r * 0.5, cy);
+      ctx.moveTo(cx + r * 0.5, cy); ctx.lineTo(cx + r * 1.7, cy);
+      ctx.moveTo(cx, cy - r * 1.7); ctx.lineTo(cx, cy - r * 0.5);
+      ctx.moveTo(cx, cy + r * 0.5); ctx.lineTo(cx, cy + r * 1.7);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     const pc = this.corners.map(c => this._imgToCanvas(c));
+
+    // Loop-closure hint: once ≥ MIN_CORNERS, pulse a ring on corner 1 so the
+    // user knows tapping/locking near it closes the room.
+    if (!this.isStill && pc.length >= MIN_CORNERS) {
+      const m0 = pc[0];
+      ctx.save();
+      ctx.strokeStyle = 'rgba(76,245,160,0.9)'; ctx.lineWidth = 2.5 * this._dpr;
+      ctx.setLineDash([5 * this._dpr, 5 * this._dpr]);
+      ctx.beginPath(); ctx.arc(m0.x, m0.y, (MARKER_R + 8) * this._dpr, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
     if (pc.length >= 2) {
       ctx.beginPath();
       ctx.moveTo(pc[0].x, pc[0].y);
@@ -489,6 +705,16 @@ class LiveCaptureSession {
     // to let the user place corners that didn't fit in one view.
     this.refCorners = this.corners.map(c => ({ x: c.x, y: c.y }));
 
+    // Snapshot the sensor state AT LOCK TIME: the compass heading the camera
+    // faced (→ orient the plan to true north) and the gravity vector (→ was the
+    // phone level enough to trust the rectify?). Both may be null (degrade).
+    this.lockHeading = this.heading;
+    this.lockLevel = this.gravity ? levelPlaneFromGravity(this.gravity) : null;
+
+    // Hide the live-only coaching/counter chips — we're leaving the scan phase.
+    if (this.coach) { this.coach.style.display = 'none'; this.coachCue = ''; }
+    if (this.counter) this.counter.style.display = 'none';
+
     // Stop the live loop + camera now — we have what we need (LED off promptly).
     this._stopFrameLoop();
     this._stopStream();
@@ -519,19 +745,32 @@ class LiveCaptureSession {
       this._restartCamera();
       return;
     }
-    this.planUnscaled = ensureCCW(planRaw);
+    // Orient to TRUE NORTH using the compass heading at lock time. The rectify
+    // lands the camera-far wall along +y; applyHeadingToPolygon rotates the whole
+    // shape so +y points at real-world north (cross-surface +y=north convention —
+    // flagged to Sam). Null heading ⇒ returns a copy unchanged (camera-relative).
+    const oriented = applyHeadingToPolygon(planRaw, this.lockHeading);
+    this.planUnscaled = ensureCCW(oriented);
     this._enterScalePhase();
   }
 
   _restartCamera() {
     if (this.canvas) { this.canvas.remove(); this.canvas = null; }
     this.corners = []; this.prevGray = null; this.dragIndex = -1;
+    if (this.counter) this.counter.style.display = '';
     this._startCamera();
   }
 
   // ── Phase 4: scale anchor (one known edge length) → commit ──────────────────
   _enterScalePhase() {
-    this._setBanner('Pick one wall whose real length you know, type its length, then Done. Default is a standard door width.');
+    // Scale anchor is MANDATORY — a browser can't get metric scale automatically
+    // (no LiDAR / no exposed VIO), so ONE known real measurement is the accuracy
+    // linchpin. State it plainly and don't let the user finish without it.
+    let banner = 'Required: set one real measurement. Tap the wall you know, type its length, then Done. This rough plan is not survey-grade.';
+    if (this.lockLevel && this.lockLevel.level === false) {
+      banner = 'Heads-up: the phone was tilted at lock, so the shape may be skewed — drag corners to fix it later. ' + banner;
+    }
+    this._setBanner(banner);
 
     // Show a still preview of the rectified plan so the scale step isn't blind.
     if (this.canvas) { this.canvas.remove(); this.canvas = null; }
@@ -653,6 +892,11 @@ class LiveCaptureSession {
     this._stopFrameLoop();
     this._stopStream();                                   // camera LED OFF
     if (this.video) { try { this.video.srcObject = null; } catch {} this.video = null; }
+    // Remove sensor listeners explicitly too (they were also pushed to disposers,
+    // but clearing here makes the new leak surface unmistakable + idempotent).
+    for (const rm of this.sensorRemovers) { try { rm(); } catch {} }
+    this.sensorRemovers.length = 0;
+    this.heading = null; this.gravity = null;
     for (const dispose of this.disposers) { try { dispose(); } catch {} }
     this.disposers.length = 0;
     for (const url of this.objectUrls) { try { URL.revokeObjectURL(url); } catch {} }
