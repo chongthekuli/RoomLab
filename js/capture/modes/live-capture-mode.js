@@ -70,7 +70,7 @@ import { rescalePolygonToEdgeLength, doorWidthDefault } from '../geometry/scale-
 import { trackPoints, medianTranslation, rgbaToGray } from '../geometry/optical-flow.js';
 import { levelPlaneFromGravity, applyHeadingToPolygon } from '../geometry/orientation.js';
 
-const BUILD = '[live-capture] build 2026-05-31 v738 — sensor-fusion (gravity+compass) + guided coaching overlay + iframe guard';
+const BUILD = '[live-capture] build 2026-05-31 v739 — sensor-fusion (gravity+compass) + guided coaching overlay + iframe guard';
 
 const MARKER_R = 20;          // visual radius (CSS px)
 const HIT_R = 30;             // touch hit radius (CSS px) — fat-finger friendly
@@ -222,9 +222,13 @@ class LiveCaptureSession {
     Object.assign(banner.style, {
       position: 'absolute', top: '8px', left: '50%', transform: 'translateX(-50%)',
       maxWidth: '92%', textAlign: 'center', padding: '6px 12px',
-      background: 'rgba(10,14,20,0.82)', borderRadius: '8px', fontSize: '13px',
+      // Scrim + text-shadow so the cue stays legible over ANY camera frame
+      // (a bright wall would otherwise wash out white text).
+      background: 'rgba(10,14,20,0.92)', borderRadius: '8px', fontSize: '13px',
+      textShadow: '0 1px 2px rgba(0,0,0,0.9)',
       pointerEvents: 'none', zIndex: '5',
     });
+    banner.setAttribute('aria-live', 'polite');
     this.banner = banner;
     stage.append(banner);
 
@@ -232,9 +236,12 @@ class LiveCaptureSession {
     const counter = document.createElement('div');
     Object.assign(counter.style, {
       position: 'absolute', bottom: '8px', left: '8px', padding: '4px 10px',
-      background: 'rgba(10,14,20,0.82)', borderRadius: '8px', fontSize: '12px',
+      maxWidth: 'calc(100% - 16px)',
+      background: 'rgba(10,14,20,0.92)', borderRadius: '8px', fontSize: '12px',
+      textShadow: '0 1px 2px rgba(0,0,0,0.9)',
       pointerEvents: 'none', zIndex: '5',
     });
+    counter.setAttribute('aria-live', 'polite');
     this.counter = counter;
     stage.append(counter);
 
@@ -243,8 +250,9 @@ class LiveCaptureSession {
     const coach = document.createElement('div');
     Object.assign(coach.style, {
       position: 'absolute', bottom: '8px', left: '50%', transform: 'translateX(-50%)',
-      padding: '5px 12px', background: 'rgba(40,30,8,0.88)', color: '#ffd27a',
+      padding: '5px 12px', background: 'rgba(40,30,8,0.92)', color: '#ffd27a',
       border: '1px solid #5a4416', borderRadius: '8px', fontSize: '12px',
+      textShadow: '0 1px 2px rgba(0,0,0,0.9)',
       pointerEvents: 'none', zIndex: '6', display: 'none', maxWidth: '70%',
       textAlign: 'center',
     });
@@ -304,11 +312,11 @@ class LiveCaptureSession {
     // Per-corner prompt (RoomPlan-style): name the next corner for the first 4,
     // then a generic prompt; surface the loop-close hint once ≥ MIN_CORNERS.
     let prompt;
-    if (n === 0) prompt = 'Point at the FAR-LEFT floor corner, then tap';
-    else if (n < 4) prompt = `Point at the ${CORNER_HINT[n]} corner, then tap`;
-    else prompt = 'Point at the next corner, then tap';
+    if (n === 0) prompt = 'Aim at the far-left floor corner and tap';
+    else if (n < 4) prompt = `Nice. Now the ${CORNER_HINT[n]} corner — aim and tap`;
+    else prompt = 'Keep going — aim at the next corner and tap';
     const placed = n === 0 ? '' : ` · ${n} placed`;
-    const lockHint = n >= MIN_CORNERS ? ' · Lock when the loop is closed' : '';
+    const lockHint = n >= MIN_CORNERS ? ' · back to corner 1? tap Lock' : '';
     this.counter.textContent = prompt + placed + lockHint;
   }
 
@@ -317,8 +325,8 @@ class LiveCaptureSession {
   // fires (graceful). Called once per frame.
   _updateCoach() {
     let cue = '';
-    if (this.lastFrameLuma < DARK_LUMA) cue = '💡 Too dark — turn on more light';
-    else if (this.accelMag > SHAKE_ACCEL) cue = '✋ Hold steadier';
+    if (this.lastFrameLuma < DARK_LUMA) cue = '💡 A bit dark — more light helps the tracking';
+    else if (this.accelMag > SHAKE_ACCEL) cue = '✋ Move a little slower';
     const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     if (cue !== this.coachCue && (now - this._coachAt) >= CUE_MIN_MS) {
       this.coachCue = cue; this._coachAt = now;
@@ -395,10 +403,10 @@ class LiveCaptureSession {
 
   // ── Phase 1: live camera (default) → file fallback ──────────────────────────
   async _startCamera() {
-    this._setBanner('Rough shape — pan slowly and tap each floor corner. You’ll set one real measurement next (not survey-grade).');
+    this._setBanner('Pan slowly across the floor and tap each corner. A rough shape is all we need — you’ll set one real measurement next.');
     const md = (typeof navigator !== 'undefined') && navigator.mediaDevices;
     if (!md || typeof md.getUserMedia !== 'function') {
-      this._useFileFallback('Live camera is not available on this browser. Pick a photo instead.');
+      this._useFileFallback('This browser can’t open the live camera — pick a photo of the room instead.');
       return;
     }
     try {
@@ -423,7 +431,7 @@ class LiveCaptureSession {
       if (isFramed() && isPermissionError(err)) {
         this._showIframeBlock();
       } else {
-        this._useFileFallback('Camera permission denied or unavailable. Pick a photo instead.');
+        this._useFileFallback('No camera access this time — pick a photo of the room instead.');
       }
     }
   }
@@ -434,25 +442,29 @@ class LiveCaptureSession {
   // user isn't fully stuck inside the frame.
   _showIframeBlock() {
     this._stopStream();
-    this._setBanner('The camera can’t open inside this embedded view.');
+    this._setBanner('Almost there — the camera just needs a full browser tab.');
     const card = document.createElement('div');
     Object.assign(card.style, {
       maxWidth: '340px', textAlign: 'center', padding: '18px',
       background: '#12161d', border: '1px solid #232a35', borderRadius: '12px',
       lineHeight: '1.5',
     });
+    const heading = document.createElement('div');
+    heading.textContent = 'Open the camera in full screen';
+    Object.assign(heading.style, { fontWeight: '600', fontSize: '15px', marginBottom: '6px' });
     const msg = document.createElement('div');
-    msg.textContent = 'Open RoomLab in full screen (a new browser tab) to scan with the camera. Embedded views block camera access.';
+    msg.textContent = 'This page is embedded, and embedded views can’t use the camera. Open RoomLab in its own tab, then come back to Scan with camera. You can also keep going with a photo instead.';
     msg.style.marginBottom = '14px';
     const link = document.createElement('a');
     link.href = STANDALONE_URL; link.target = '_blank'; link.rel = 'noopener';
     link.textContent = '↗ Open RoomLab in a new tab';
     Object.assign(link.style, {
-      display: 'inline-block', padding: '11px 16px', borderRadius: '8px',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      padding: '11px 16px', borderRadius: '8px',
       background: '#4c8bf5', color: '#fff', textDecoration: 'none', fontWeight: '600',
       minHeight: '44px', boxSizing: 'border-box',
     });
-    card.append(msg, link);
+    card.append(heading, msg, link);
     // Replace the stage contents with the guidance card.
     for (const n of Array.from(this.stage.children)) {
       if (n !== this.banner && n !== this.counter) n.remove();
@@ -777,7 +789,7 @@ class LiveCaptureSession {
 
     if (!planRaw) {
       // Re-enter live tapping so the user can spread the corners.
-      this._setBanner('Those corners are too flat/collinear to form a room — spread them out and tap again.');
+      this._setBanner('Those corners line up too straight to be a room. Spread them around the floor and tap again.');
       this.refCorners = null;
       this._restartCamera();
       return;
@@ -807,9 +819,9 @@ class LiveCaptureSession {
     // Scale anchor is MANDATORY — a browser can't get metric scale automatically
     // (no LiDAR / no exposed VIO), so ONE known real measurement is the accuracy
     // linchpin. State it plainly and don't let the user finish without it.
-    let banner = 'Required: set one real measurement. Tap the wall you know, type its length, then Done. This rough plan is not survey-grade.';
+    let banner = 'One measurement locks the scale. Pick a wall you know, type its real length, then Done. No tape measure? Use a door — they’re a standard width.';
     if (this.lockLevel && this.lockLevel.level === false) {
-      banner = 'Heads-up: the phone was tilted at lock, so the shape may be skewed — drag corners to fix it later. ' + banner;
+      banner = 'Heads-up: the phone was tilted, so the shape may lean — you can drag corners straight afterward. ' + banner;
     }
     this._setBanner(banner);
 
@@ -842,8 +854,9 @@ class LiveCaptureSession {
     Object.assign(lenInput.style, { padding: '10px', width: '90px', borderRadius: '8px', minHeight: '44px', background: '#1b212b', color: '#e8edf3', border: '1px solid #3a4350' });
 
     const unit = document.createElement('span'); unit.textContent = 'm';
-    const doorBtn = this._button('🚪 Door (default)', () => { lenInput.value = String(doorWidthDefault(this.region)); });
+    const doorBtn = this._button(`🚪 Use a door (${doorWidthDefault(this.region)} m)`, () => { lenInput.value = String(doorWidthDefault(this.region)); });
     doorBtn.style.minHeight = '44px';
+    doorBtn.title = 'Fill in a standard door width as the known length';
 
     wrap.append(document.createTextNode('Length of'), edgeSel, document.createTextNode('='), lenInput, unit, doorBtn);
 
@@ -880,12 +893,12 @@ class LiveCaptureSession {
     ctx.lineWidth = 3 * dpr; ctx.strokeStyle = '#4c8bf5'; ctx.stroke();
     ctx.fillStyle = '#9fb4d6'; ctx.font = `${12 * dpr}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('rough plan (drag to fix after)', canvas.width / 2, 18 * dpr);
+    ctx.fillText('your rough plan — fine-tune by dragging after', canvas.width / 2, 18 * dpr);
   }
 
   _commit(lengthM) {
     if (!(lengthM > 0) || !Number.isFinite(lengthM)) {
-      this._setBanner('Enter a positive wall length in metres (e.g. 3.2).');
+      this._setBanner('Type the wall’s real length in metres to set the scale — for example, 3.2.');
       return;
     }
     const scaled = rescalePolygonToEdgeLength(this.planUnscaled, this.scaleEdgeIndex, lengthM);
@@ -905,7 +918,7 @@ class LiveCaptureSession {
 
     const ok = commitCapturedRoom(result);
     if (!ok) {
-      this._setBanner('That shape was rejected (self-intersecting or too few corners). Rescan or adjust.');
+      this._setBanner('That shape crosses itself or has too few corners. Tap ↺ Rescan to redo the corners.');
       return;
     }
     this.teardown(result);
@@ -960,7 +973,7 @@ class LiveCaptureSession {
   _useFileFallback(msg) {
     this._stopStream();
     if (this.video) { try { this.video.srcObject = null; } catch {} this.video.remove(); this.video = null; }
-    this._setBanner(msg || 'Pick a photo of the room floor with the corners visible.');
+    this._setBanner(msg || 'Pick a photo of the room with the floor corners visible.');
     const input = document.createElement('input');
     input.type = 'file'; input.accept = 'image/*';
     input.setAttribute('capture', 'environment');
@@ -991,7 +1004,7 @@ class LiveCaptureSession {
   // Still-image tap (no tracking): seed a centred quad the user nudges, like the
   // old photo mode. Shares the draw + scale + commit path.
   _enterStillTapPhase() {
-    this._setBanner('Drag dots onto the floor corners (far-left, far-right, near-right, near-left). Rough is fine; fix it later.');
+    this._setBanner('Drag each dot onto a floor corner — far-left, far-right, near-right, near-left. Rough is fine; you’ll fine-tune after.');
     const canvas = document.createElement('canvas');
     Object.assign(canvas.style, { position: 'absolute', maxWidth: '100%', maxHeight: '100%', touchAction: 'none', display: 'block' });
     this.canvas = canvas;

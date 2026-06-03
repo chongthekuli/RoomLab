@@ -1324,8 +1324,8 @@ function renderShapeParams() {
       <div class="field-group">
         <label>Height <input type="number" data-sf="height_m" value="${r.height_m}" min="0.5" step="0.1" /> <span class="unit">m</span></label>
       </div>
-      <button class="btn-draw" id="btn-draw-custom">${vcount >= 3 ? '📐 Re-capture room shape' : '📐 Capture room shape'}</button>
-      ${vcount >= 3 ? `<div class="note-small">${vcount} vertices · bbox ${r.width_m.toFixed(1)} × ${r.depth_m.toFixed(1)} m</div>` : '<div class="note-small">Draw it on a grid, or capture it from a photo — then drag corners to correct.</div>'}
+      <button class="btn-draw" id="btn-draw-custom" title="${vcount >= 3 ? 'Re-capture the floor shape — replaces the current vertices' : 'Capture a rough floor shape, then fine-tune it'}">${vcount >= 3 ? '📐 Re-capture room shape' : '📐 Capture room shape'}</button>
+      ${vcount >= 3 ? `<div class="note-small">${vcount} vertices · bbox ${r.width_m.toFixed(1)} × ${r.depth_m.toFixed(1)} m</div>` : '<div class="note-small">Draw it on a grid or scan it with your camera — then drag corners to fine-tune.</div>'}
       <div id="vertex-list"></div>
     `;
     // Capture entry point — opens the mode picker (Draw it / From a photo).

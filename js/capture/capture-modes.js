@@ -55,8 +55,8 @@ export async function isWebXrAvailable() {
 export const CAPTURE_MODES = [
   {
     id: 'manual',
-    label: 'Draw it',
-    hint: 'Tap corners on a grid — works everywhere.',
+    label: '✏️ Draw it',
+    hint: 'Best if you know the rough dimensions. Tap corners on a grid — works on any device.',
     implemented: true,
     isAvailable: isManualAvailable,
     load: () => import('./modes/manual-mode.js'),
@@ -67,8 +67,8 @@ export const CAPTURE_MODES = [
     // provenance + the capture-flow CaptureResult contract are unchanged; it
     // still falls back to a single still photo when the camera is denied.
     id: 'photo',
-    label: 'Scan with camera',
-    hint: 'Pan the room, tap each corner, set one wall length.',
+    label: '📷 Scan with camera',
+    hint: "Best if you're standing in the room. Pan across the floor, tap each corner, set one wall length.",
     implemented: true,
     isAvailable: isPhotoAvailable,
     load: () => import('./modes/live-capture-mode.js'),

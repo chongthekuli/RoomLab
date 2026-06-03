@@ -27,7 +27,8 @@ function chooseCaptureMode(modes) {
     const modal = document.createElement('div');
     modal.className = 'rl-modal rl-capture-picker';
     modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-label', 'Capture room');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'rl-capture-title');
 
     const buttons = modes.map((m, i) => `
       <button type="button" class="rl-capture-mode" data-idx="${i}">
@@ -36,8 +37,8 @@ function chooseCaptureMode(modes) {
       </button>`).join('');
 
     modal.innerHTML = `
-      <h3>Capture your room</h3>
-      <p class="rl-modal-sub">Rough shape — you'll drag corners to correct it after.</p>
+      <h3 id="rl-capture-title">Capture a rough shape</h3>
+      <p class="rl-modal-sub">We'll fine-tune it together — you set one real measurement, then drag corners to fit.</p>
       <div class="rl-capture-modes">${buttons}</div>
       <div class="rl-modal-actions">
         <button type="button" class="rl-modal-cancel">Cancel</button>
@@ -46,11 +47,20 @@ function chooseCaptureMode(modes) {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
+    // Return focus to whatever the user came from (the Capture button) on close.
+    const prevFocus = document.activeElement;
+    // Land focus on the first mode so the picker is keyboard-drivable from open.
+    const firstMode = modal.querySelector('.rl-capture-mode');
+    if (firstMode) firstMode.focus();
+
     let done = false;
     const close = (result) => {
       if (done) return; done = true;
       document.removeEventListener('keydown', onKey);
       overlay.remove();
+      if (prevFocus && typeof prevFocus.focus === 'function') {
+        try { prevFocus.focus(); } catch { /* ignore */ }
+      }
       resolve(result);
     };
     const onKey = (e) => { if (e.key === 'Escape') close(null); };

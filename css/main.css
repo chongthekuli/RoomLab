@@ -4124,14 +4124,20 @@ section h3 {
   display: flex; flex-direction: column; gap: 8px;
 }
 .rl-capture-mode {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-  text-align: left; padding: 12px 14px; border-radius: 4px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  text-align: left; padding: 12px 14px; min-height: 44px; border-radius: 4px;
+  cursor: pointer;
   background: var(--bg, #14181f); color: var(--text, #e6edf3);
   border: 1px solid var(--border, #2a2f38); width: 100%;
+  transition: border-color 140ms ease-out, background 140ms ease-out;
 }
 .rl-capture-mode:hover { border-color: #4a8ff0; background: rgba(74, 143, 240, 0.08); }
+.rl-capture-mode:focus-visible {
+  outline: 2px solid #6aa8ff; outline-offset: 2px; border-color: #4a8ff0;
+}
 .rl-capture-mode-label { font-size: 13px; font-weight: 600; }
-.rl-capture-mode-hint { font-size: 11px; color: var(--text-muted, #8a93a3); }
+/* Hint contrast lifted to ≥4.5:1 on the modal bg — #9aa6b6 over #14181f. */
+.rl-capture-mode-hint { font-size: 11px; line-height: 1.35; color: #9aa6b6; }
 
 /* Place-Saved-Room placement HUD — floats over the 3D viewport while
    the user is positioning a sub-room. Positioned bottom-centre so it
