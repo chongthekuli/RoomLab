@@ -157,6 +157,24 @@ applyPresetToState('auditorium');
   assert(html.includes('Audience zone'), 'legend has Audience zone row');
 }
 
+// 11b. Legend GLYPHS must match the plan body: sources draw as aim-direction
+//      <polygon> triangles, listeners as <circle> (print-plan-svg.js:306/320).
+//      The legend once had these inverted — a circle labelled "Source" and a
+//      triangle labelled "Listener" — which mislabels every marker on the
+//      printed plan. Guard the glyph↔label pairing, not just the text.
+{
+  const html = buildFloorPlanLegend();
+  const rows = [...html.matchAll(/<div class="pr-plan-legend-row">([\s\S]*?)<\/div>/g)].map(m => m[1]);
+  const sourceRow = rows.find(r => /Source/.test(r));
+  const listenerRow = rows.find(r => /Listener/.test(r));
+  assert(!!sourceRow && /<polygon/.test(sourceRow) && !/<circle/.test(sourceRow),
+    'legend Source row uses a triangle (polygon), matching the plan body');
+  assert(!!listenerRow && /<circle/.test(listenerRow) && !/<polygon/.test(listenerRow),
+    'legend Listener row uses a circle, matching the plan body');
+  // The developer-jargon "(state coords)" note must not leak to the client.
+  assert(!/state coords/.test(html), 'legend note has no internal "state coords" jargon');
+}
+
 if (failed > 0) {
   console.log(`\n${failed} test(s) FAILED`);
   process.exit(1);

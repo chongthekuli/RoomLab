@@ -12,6 +12,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { computeSPLGrid } from '../physics/spl-calculator.js';
 import { roomPlanVertices, isInsideRoom3D, roomEffectiveBounds } from '../physics/room-shape.js';
 import { dilateGridForDisplay } from '../physics/grid-display.js';
+import { colorForMetric } from './colour-ramps.js';
 import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader, getRampDomain, formatDataBracket, dataBracketPosition } from './legend-ticks.js';
 import { computePerListenerMetrics, formatListenerMetricsLabel } from '../physics/per-listener-metrics.js';
 import { wallInsetPolygon, wallLabelAnchor, WALL_LABEL_MAX_CHARS } from '../physics/wall-inset.js';
@@ -109,25 +110,15 @@ function colorFor(alpha) {
   return COLOR_BANDS[COLOR_BANDS.length - 1].color;
 }
 
-function splColor(spl_db) {
-  // Domain [30, 110] dB — wider than the legacy [60, 110] so per-band
-  // outside-room SPL (typically 58-71 dB at 1 m behind a wall with
-  // Tier 1a diffraction physics) shows visible gradient instead of
-  // clamping to deep navy. Keep in lock-step with splColorRGB in
-  // colour-ramps.js + SPL_MIN_DB in heatmap-shader.js.
-  const t = Math.max(0, Math.min(1, (spl_db - 30) / 80));
-  if (t < 0.25) return interp('#1a1a4a', '#0066cc', t / 0.25);
-  if (t < 0.50) return interp('#0066cc', '#00cc66', (t - 0.25) / 0.25);
-  if (t < 0.75) return interp('#00cc66', '#ffcc00', (t - 0.50) / 0.25);
-  return interp('#ffcc00', '#ff3300', (t - 0.75) / 0.25);
-}
-
-function interp(hex1, hex2, t) {
-  const p1 = parseInt(hex1.slice(1), 16);
-  const p2 = parseInt(hex2.slice(1), 16);
-  const r = Math.round(((p1 >> 16) & 0xff) * (1 - t) + ((p2 >> 16) & 0xff) * t);
-  const g = Math.round(((p1 >> 8)  & 0xff) * (1 - t) + ((p2 >> 8)  & 0xff) * t);
-  const b = Math.round((p1 & 0xff) * (1 - t) + (p2 & 0xff) * t);
+// SPL/STI cell fill — delegates to the SHARED ramp in colour-ramps.js so the
+// on-screen 2D heatmap, the 3D viewport, and the printed PDF all map the same
+// value to the same colour. Previously a PRIVATE ramp here used divergent hex
+// stops (#1a1a4a/#0066cc/…), so the on-screen field disagreed with BOTH the
+// legend bar (already on the shared #1428b4/… stops) and the PDF the client
+// received. Keep this a thin wrapper — no colour literals here. Guarded by
+// tests/cross-surface-conventions.test.mjs (assertHeatmapRampParity).
+function splFill(value, metric) {
+  const [r, g, b] = colorForMetric(value, metric ?? 'spl');
   return `rgb(${r},${g},${b})`;
 }
 
@@ -2256,7 +2247,7 @@ function renderHeatmapSVG(splResult, x0, y0, pxW, pxD, room) {
       // but `<rect y="...">` is the TOP-LEFT corner, so subtract a full
       // cell height to anchor the rect's BOTTOM at that line.
       const sy = y0 - wym * syPerM - chPx;
-      s += `<rect x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" width="${(cwPx + 0.5).toFixed(2)}" height="${(chPx + 0.5).toFixed(2)}" fill="${splColor(spl)}" fill-opacity="0.55" />`;
+      s += `<rect x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" width="${(cwPx + 0.5).toFixed(2)}" height="${(chPx + 0.5).toFixed(2)}" fill="${splFill(spl, splResult.metric)}" fill-opacity="0.55" />`;
     }
   }
   return s;

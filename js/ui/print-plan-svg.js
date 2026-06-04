@@ -451,17 +451,17 @@ export function buildFloorPlanLegend() {
   return `
     <div class="pr-plan-legend">
       <div class="pr-plan-legend-row">
-        <svg class="pr-plan-legend-icon" viewBox="0 0 1 1"><circle cx="0.5" cy="0.5" r="0.42" fill="#1f5faa" stroke="#000" stroke-width="0.06" /></svg>
+        <svg class="pr-plan-legend-icon" viewBox="0 0 1 1"><polygon points="0.5,0.1 0.93,0.85 0.07,0.85" fill="#1f5faa" stroke="#000" stroke-width="0.06" /></svg>
         <span>Source (per element)</span>
       </div>
       <div class="pr-plan-legend-row">
-        <svg class="pr-plan-legend-icon" viewBox="0 0 1 1"><polygon points="0.5,0.1 0.93,0.85 0.07,0.85" fill="#0a8a4a" stroke="#000" stroke-width="0.06" /></svg>
+        <svg class="pr-plan-legend-icon" viewBox="0 0 1 1"><circle cx="0.5" cy="0.5" r="0.42" fill="#0a8a4a" stroke="#000" stroke-width="0.06" /></svg>
         <span>Listener</span>
       </div>
       <div class="pr-plan-legend-row">
         <svg class="pr-plan-legend-icon" viewBox="0 0 1 1"><rect x="0.1" y="0.1" width="0.8" height="0.8" fill="#a855f7" fill-opacity="0.3" stroke="#a855f7" stroke-width="0.05" /></svg>
         <span>Audience zone</span>
       </div>
-      <div class="pr-plan-legend-note">North = +y (state coords). Distances in metres. Scale bar drawn in plan units.</div>
+      <div class="pr-plan-legend-note">North is up. Distances in metres.</div>
     </div>`;
 }

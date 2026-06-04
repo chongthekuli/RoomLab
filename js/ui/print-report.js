@@ -286,8 +286,19 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
   const cached = state.results?.splGrid;
   const hasSources = (state.sources ?? []).length > 0;
   if (!hasSources) return null;
+  // Only reuse the on-screen grid when it matches the report's REQUIRED
+  // parameters. The 2D/3D viewports write the live heatmap mode into this
+  // same cache (outdoor field-extent grid, or STI metric). The print
+  // report is ALWAYS room-only SPL @ the report frequency — reusing an
+  // outdoor or STI grid would print the wrong field under a contradictory
+  // "SPL, room-only" caption. `outdoor !== true` is the load-bearing check.
+  // Enforced by tests/outdoor-report-exclusion.test.mjs.
+  const reportFreq = state.physics?.freq_hz ?? 1000;
   if (cached && cached.grid && cached.cellsX > 0 && cached.cellsY > 0
-      && (cached.sourceCount ?? 0) > 0) {
+      && (cached.sourceCount ?? 0) > 0
+      && cached.outdoor !== true
+      && (cached.metric ?? 'spl') === 'spl'
+      && (cached.freq_hz ?? 1000) === reportFreq) {
     return cached;
   }
   // Compute fresh. Match the same parameters the 2D viewport uses so
@@ -299,8 +310,21 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
     const airAbs = state.physics?.airAbsorption !== false;
     let R = 0;
     if (includeReverb && t60_1k && t60_1k > 0 && materials) {
-      try { R = computeRoomConstant({ room: state.room, materials, T60_s: t60_1k }); }
-      catch (_) { R = 0; }
+      // computeRoomConstant is POSITIONAL — (room, materials, freq, zones, opts).
+      // Match per-listener-metrics.js exactly so the printed heatmap, the dot
+      // labels, and the live 2D viewport all share the same reverberant field.
+      // (The earlier object-arg form silently landed `materials` as undefined,
+      // tripped the guard, and returned R=0 — dropping reverb from the print.)
+      try {
+        R = computeRoomConstant(state.room, materials, state.physics?.freq_hz ?? 1000, state.zones ?? [], {
+          airAbsorption: airAbs,
+          treatments: state.treatments,
+          furniture: state.furniture,
+          furnitureCatalogue: getFurnitureCatalogue(),
+          racks: state.rackSystem?.racks ?? [],
+          rackCatalogue: getRackCatalogue(),
+        });
+      } catch (_) { R = 0; }
     }
     return computeSPLGrid({
       sources: state.sources ?? [],
@@ -837,11 +861,50 @@ function fmtBand(hz) {
   return hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`;
 }
 
+// Human-readable date for client-facing surfaces: "2026-06-04" → "4 June 2026".
+// Parsed from the explicit Y-M-D parts (no Date() timezone drift) so the
+// printed date always matches the ISO stamp in model.project.date. Falls
+// back to the raw string if it doesn't look like an ISO date.
+const _MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+function fmtHumanDate(iso) {
+  if (typeof iso !== 'string') return '';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if (!(mo >= 1 && mo <= 12)) return iso;
+  return `${d} ${_MONTHS[mo - 1]} ${y}`;
+}
+
 function escapeHtml(s) {
   if (s == null) return '';
   return String(s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+// Copyright holder for the client-facing report footer. Matches the
+// repository copyright (v=751) — keep in sync if the holder changes.
+const REPORT_COPYRIGHT_HOLDER = 'Amperes Electronics SDN BHD';
+
+// Confidentiality + copyright running footer for a client proposal.
+//
+// Rendered into the @page BOTTOM-LEFT margin box (alongside the page-number
+// box at bottom-right) rather than as an in-flow element. The margin box
+// lives in the reserved page margin, so it prints on every page WITHOUT
+// consuming content-flow height — earlier it was an in-flow <p> that pushed
+// the dense methodology page onto a second sheet. The report prints via
+// native window.print(), so @page margin boxes are honoured (same path the
+// page numbers already rely on). Year is derived from the report date so it
+// never goes stale; @page is static CSS, so we inject it from JS to carry
+// the dynamic year. No user input reaches the CSS string (holder is a
+// constant, year is a 4-digit slice), so it is safe to interpolate.
+function confidentialityPageStyle(projectDate) {
+  const y = (typeof projectDate === 'string' && /^\d{4}/.test(projectDate))
+    ? projectDate.slice(0, 4)
+    : '';
+  const line = `${y ? `© ${y}` : '©'} ${REPORT_COPYRIGHT_HOLDER} · Confidential — not for redistribution`;
+  return `<style>@media print{@page{@bottom-left{content:"${line}";font-family:system-ui,sans-serif;font-size:6.5pt;color:#8a929c;margin-top:4mm;}}}</style>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -894,7 +957,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     ? `<img class="pr-cover-hero-image" src="${coverImage}" alt="3D perspective view of the room" />`
     : (planSvg
         ? `<div class="pr-cover-hero-plan">${planSvg}</div>`
-        : '<p class="pr-empty-state" style="margin:0">3D preview unavailable — visit AuraLAB before printing.</p>');
+        : '<p class="pr-empty-state" style="margin:0">3D preview unavailable — open the 3D view once before printing to include a perspective render.</p>');
   // Inset — only show the 2D plan as an inset when we actually have a
   // 3D render to sit on top of. Without the 3D the plan IS the hero;
   // showing it twice would be redundant.
@@ -944,7 +1007,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     <div class="pr-page pr-page-cover">
       <div class="pr-cover-titleblock">
         <div class="pr-cover-titleblock-rule">
-          <span class="pr-eyebrow">AuraLAB · Redefine Simulation</span>
+          <span class="pr-eyebrow">Acoustic simulation report${model.project.date ? ` · Generated ${escapeHtml(fmtHumanDate(model.project.date))}` : ''}</span>
         </div>
         <div class="pr-cover-titleblock-right">
           <img class="pr-cover-logo" src="assets/logo/AuraLAB-logo-1024.png" alt="AuraLAB" />
@@ -1249,7 +1312,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   const sourceRows = model.sources.map(s => `
     <tr>
       <td>${s.index}</td>
-      <td>${s.kind === 'line-array' ? 'Line array' : (s.category ? speakerCategoryLabel(s.category) : 'Speaker')}</td>
+      <td>${s.kind === 'line-array' ? 'Line array' : (s.category ? escapeHtml(speakerCategoryLabel(s.category)) : 'Speaker')}</td>
       <td class="pr-mono">${escapeHtml(s.modelLabel)}</td>
       <td>${fmt(s.x, 2)} m</td>
       <td>${fmt(s.y, 2)} m</td>
@@ -1761,8 +1824,14 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // "engineering responsibility for the application of these results
   // rests with the named author and their organisation" verbosity was
   // collapsed into the closing paragraph.
+  // When the operator name is missing, don't splice the "Not on record"
+  // placeholder into the sentence subject — it reads as broken English in
+  // the one block whose job is a clean legal trail. Fall back to a neutral
+  // subject; the per-field placeholders still surface the gap in the grid.
+  const hasOperatorName = !!(acceptanceRecord?.operatorName);
+  const acceptanceSubject = hasOperatorName ? escapeHtml(operatorName) : 'The operator';
   const acceptanceParagraphs = [
-    `${escapeHtml(operatorName)} accessed AuraLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown. All predictions in this document — reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance.`,
+    `${acceptanceSubject} accessed AuraLAB Suite (“AuraLAB”) from the network address recorded above and accepted its terms of use at the timestamp shown. All predictions in this document — reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance.`,
     `AuraLAB is a browser-side simulation engine, not a measurement instrument. The standards cited in the methodology block above are implemented, not certified. Engineering responsibility for applying these results rests with the named author.`,
     `Where this report informs an emergency public-address, voice-alarm or safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is mandatory before commissioning.`,
   ];
@@ -1977,6 +2046,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   }
 
   const reportHtml = `
+    ${confidentialityPageStyle(model.project.date)}
     ${cover}
     ${heatmapPage}
     ${acousticResultsPage}

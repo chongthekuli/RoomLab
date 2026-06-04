@@ -493,9 +493,14 @@ export function buildHeatmapLegend(splGrid) {
       <span class="pr-heatmap-legend-tick-line"></span>
     </div>`;
   }).join('');
-  const tickRows = ticks.map(t => {
+  const tickRows = ticks.map((t, i) => {
     const pct = Math.max(0, Math.min(100, t.position01 * 100)).toFixed(2);
-    return `<div class="pr-heatmap-legend-tick" style="left:${pct}%">
+    // End labels would centre on the bar ends and clip at the legend edge
+    // (same bug as the strip legend) — anchor first left / last right.
+    const edge = i === 0 ? ' pr-heatmap-legend-tick--first'
+      : i === ticks.length - 1 ? ' pr-heatmap-legend-tick--last'
+      : '';
+    return `<div class="pr-heatmap-legend-tick${edge}" style="left:${pct}%">
       <span class="pr-heatmap-legend-tick-line"></span>
       <span class="pr-heatmap-legend-tick-label">${formatTickLabel(t.value, tickMode)}</span>
     </div>`;
@@ -596,11 +601,21 @@ export function buildHeatmapStripLegend({ minDb, maxDb, stepDb = 5, header = 'SP
     <div class="pr-strip-legend-tick minor" style="left:${t.pct.toFixed(2)}%">
       <span class="pr-strip-legend-tick-line"></span>
     </div>`).join('');
-  const tickEls = ticks.map(t => `
-    <div class="pr-strip-legend-tick" style="left:${t.pct.toFixed(2)}%">
+  // The first / last labels would centre on the bar ends and overflow the
+  // legend edge — the "60 dB" left half and the "100 dB" right half get
+  // clipped, printing "dB" and "100". Tag the end ticks so the CSS anchors
+  // the first label left-aligned and the last right-aligned (tick LINE stays
+  // exactly on the bar end; only the label text moves inward).
+  const tickEls = ticks.map((t, i) => {
+    const edge = i === 0 ? ' pr-strip-legend-tick--first'
+      : i === ticks.length - 1 ? ' pr-strip-legend-tick--last'
+      : '';
+    return `
+    <div class="pr-strip-legend-tick${edge}" style="left:${t.pct.toFixed(2)}%">
       <span class="pr-strip-legend-tick-line"></span>
       <span class="pr-strip-legend-tick-label">${Math.round(t.value)} dB</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return `
     <div class="pr-strip-legend">
       <div class="pr-strip-legend-header">${escapeText(header)}</div>

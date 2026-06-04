@@ -61,6 +61,7 @@ import { roomEffectiveBounds } from '../js/physics/room-shape.js';
 import { buildFloorPlanSVG } from '../js/ui/print-plan-svg.js';
 import { buildHeatmapPageSVG, buildHeatmapLegend, heatmapPageViewBox } from '../js/ui/print-heatmap.js';
 import { dilateGridForDisplay, buildSilhouetteMask } from '../js/physics/grid-display.js';
+import { splColorRGB, stiColorRGB, colorForMetric, SPL_DOMAIN_MIN_DB, SPL_DOMAIN_MAX_DB } from '../js/graphics/colour-ramps.js';
 
 // --------------------------------------------------------------------
 // Registry — the four surfaces this fixture guards.
@@ -1350,6 +1351,159 @@ function assertPhase11aLegendConvention() {
 }
 
 assertPhase11aLegendConvention();
+
+// ---------------------------------------------------------------------------
+// Heatmap cell-FILL colour ramp parity (Sam, 2026-06-04).
+//
+// Background. The heatmap CELL FILL renders on 3 of the 4 surfaces — 2D
+// viewport (room-2d.js), 3D scalar shader (heatmap-shader.js), print heatmap
+// (print-heatmap.js). The shared ramp is js/graphics/colour-ramps.js
+// (splColorRGB / stiColorRGB / colorForMetric, fixed domain 30–110 dB).
+//
+// The leak this guards. room-2d.js carried a PRIVATE `function splColor`
+// returning `rgb(r,g,b)` strings off its OWN inlined 4-stop hex ramp
+// ('#1a1a4a' → '#0066cc' → '#00cc66' → '#ffcc00' → '#ff3300'), with a comment
+// pleading "keep in lock-step with splColorRGB in colour-ramps.js". That
+// hand-sync is exactly the drift mode this fixture exists to kill: a hex-stop
+// ramp interpolated as packed ints rounds differently from the RGB-array ramp,
+// so 2D cells could read a visibly different colour for "85 dB" than the 3D /
+// print cells — and NOTHING tripped, because phase11a only guards the legend
+// DOMAIN (getRampDomain caption), never the cell-FILL colour. assertPhase11a
+// asserts "the legend says 30–110", this asserts "every surface paints the
+// same colour at 70 dB".
+//
+// The fix (Viktor + Maya sign-off pending): delete room-2d's private splColor
+// + its inline hex ramp, import colorForMetric/splColorRGB from
+// ./colour-ramps.js, keep the 2D per-surface 0.55 fill-opacity at the call
+// site (opacity is a 2D-only convention, NOT part of the shared ramp).
+//
+// TWO gates, same shape as the rack-footprint / scene.scale.x=-1 anti-leak:
+//
+//   (a) GREP GATE — all three fill surfaces import a colour function from
+//       colour-ramps.js, AND room-2d.js no longer defines a private
+//       `function splColor` or an inline SPL hex ramp. A re-inline trips it.
+//   (b) VALUE GATE — lock the shared value→RGB mapping at sample dB / STI
+//       points so the ramp itself can't silently drift, and so any future
+//       re-inlined private ramp would have to reproduce these exact triples.
+//
+// IMPORTANT (Sam, 2026-06-04): the GREP GATE half FAILS until the room-2d.js
+// edit lands (the file still defines `function splColor` + the hex ramp at the
+// time this assertion was written). The VALUE GATE half passes today (it tests
+// the shared module directly). Written against the POST-fix expected state.
+// ---------------------------------------------------------------------------
+
+function assertHeatmapRampParity() {
+  // (a) GREP GATE — every cell-fill surface imports a colour function from
+  //     the shared colour-ramps.js. Same import-presence shape as the
+  //     rack-2d / legend-ticks gates above.
+  const FILL_SURFACES = [
+    ['2d-viewport',   'js/graphics/room-2d.js'],
+    ['3d-shader',     'js/graphics/heatmap-shader.js'],
+    ['print-heatmap', 'js/ui/print-heatmap.js'],
+  ];
+  for (const [id, file] of FILL_SURFACES) {
+    let src = '';
+    try { src = readFileSync(file, 'utf8'); } catch (e) {
+      fail(`heatmap-ramp: ${id} unreadable (${file})`, String(e));
+      continue;
+    }
+    // Import line references colour-ramps.js …
+    ok(/from\s+['"][^'"]*colour-ramps(?:\.js)?['"]/.test(src),
+       `heatmap-ramp: ${id} imports from colour-ramps.js`);
+    // … and pulls in at least one of the shared colour functions by name.
+    ok(/\b(?:colorForMetric|splColorRGB|stiColorRGB)\b/.test(src),
+       `heatmap-ramp: ${id} consumes a shared ramp fn (colorForMetric / splColorRGB / stiColorRGB)`);
+  }
+
+  // (a, anti-leak) room-2d.js must NOT re-define a private SPL ramp. The
+  //     private `function splColor` and the inline 4-stop hex ramp are the
+  //     exact leak that motivated this gate; a drive-by re-inline trips here.
+  const room2dSrc = readFileSync('js/graphics/room-2d.js', 'utf8');
+  ok(!/function\s+splColor\b/.test(room2dSrc),
+     'heatmap-ramp anti-leak: room-2d.js does NOT define a private function splColor (use colorForMetric from colour-ramps.js)',
+     'a private SPL ramp re-introduces the 2D↔3D↔print colour-drift this gate kills');
+  // The specific hex stops the deleted private ramp used. If a refactor
+  // re-inlines ANY SPL hex ramp into room-2d.js, at least one of these
+  // navy / red endpoints reappears and trips the gate. Strip comments so the
+  // docstring above (which names the stops as a warning) doesn't self-trip.
+  const room2dCode = room2dSrc
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '')
+    .replace(/[ \t]+\/\/.*$/gm, '');
+  const SPL_HEX_STOPS = ['#1a1a4a', '#0066cc', '#00cc66', '#ffcc00', '#ff3300'];
+  const leakedHex = SPL_HEX_STOPS.filter(h => new RegExp(h, 'i').test(room2dCode));
+  ok(leakedHex.length === 0,
+     'heatmap-ramp anti-leak: room-2d.js carries no inline SPL hex ramp stops (#1a1a4a … #ff3300)',
+     leakedHex.length ? `found ${leakedHex.join(', ')} — delete the private ramp, call colorForMetric()` : '');
+  // The 2D per-surface fill-opacity stays at the call site (0.55) — it is a
+  // 2D-only convention, NOT something the shared ramp owns. Confirm it
+  // survives the refactor so the fix doesn't accidentally drop it.
+  ok(/fill-opacity="0\.55"/.test(room2dSrc),
+     'heatmap-ramp: room-2d.js keeps the 2D-only 0.55 cell fill-opacity at the paint call site');
+
+  // (b) VALUE GATE — lock the shared ramp's value→RGB mapping. These triples
+  //     are the contract every surface now shares; if the ramp itself drifts
+  //     (a stop colour edit) OR a re-inlined private ramp produces different
+  //     numbers, this trips. Sample points chosen on segment boundaries and
+  //     midpoints so a single-stop edit is caught:
+  //       50 dB → t=0.25 boundary (blue→cyan stop)
+  //       70 dB → t=0.50 boundary (cyan→green stop)
+  //       85 dB → t≈0.6875 inside the green→yellow segment
+  //      105 dB → t=0.9375 inside the yellow→red segment
+  const SPL_SAMPLES = [
+    [50,  [0, 140, 230]],
+    [70,  [30, 220, 80]],
+    [85,  [199, 216, 20]],
+    [105, [244, 76, 23]],
+  ];
+  for (const [db, expect] of SPL_SAMPLES) {
+    const rgb = splColorRGB(db);
+    ok(rgb.length === 3 && rgb[0] === expect[0] && rgb[1] === expect[1] && rgb[2] === expect[2],
+       `heatmap-ramp value: splColorRGB(${db}) === [${expect.join(', ')}]`,
+       `got [${rgb.join(', ')}]`);
+    // colorForMetric('spl') MUST route to the same ramp — the surfaces that
+    // use the metric-parameterised entry point get the identical colour.
+    const viaMetric = colorForMetric(db, 'spl');
+    ok(viaMetric[0] === expect[0] && viaMetric[1] === expect[1] && viaMetric[2] === expect[2],
+       `heatmap-ramp value: colorForMetric(${db}, 'spl') matches splColorRGB(${db})`,
+       `got [${viaMetric.join(', ')}]`);
+  }
+
+  // Domain endpoints + clamp behaviour — values outside [30, 110] clamp to
+  // the endpoint colours (NOT wrap, NOT NaN). Locks the fixed-domain contract
+  // the shader + legend depend on.
+  ok(SPL_DOMAIN_MIN_DB === 30 && SPL_DOMAIN_MAX_DB === 110,
+     'heatmap-ramp value: shared SPL domain is [30, 110] dB (fixed-domain contract)',
+     `got [${SPL_DOMAIN_MIN_DB}, ${SPL_DOMAIN_MAX_DB}]`);
+  const lo = splColorRGB(SPL_DOMAIN_MIN_DB), loClamp = splColorRGB(SPL_DOMAIN_MIN_DB - 50);
+  const hi = splColorRGB(SPL_DOMAIN_MAX_DB), hiClamp = splColorRGB(SPL_DOMAIN_MAX_DB + 90);
+  ok(lo[0] === 20 && lo[1] === 40 && lo[2] === 180,
+     'heatmap-ramp value: splColorRGB(30) === [20, 40, 180] (ramp-min navy)', `got [${lo.join(', ')}]`);
+  ok(hi[0] === 240 && hi[1] === 30 && hi[2] === 30,
+     'heatmap-ramp value: splColorRGB(110) === [240, 30, 30] (ramp-max red)', `got [${hi.join(', ')}]`);
+  ok(loClamp.join(',') === lo.join(','),
+     'heatmap-ramp value: SPL below 30 dB clamps to the ramp-min colour (no wrap / NaN)',
+     `got [${loClamp.join(', ')}] vs [${lo.join(', ')}]`);
+  ok(hiClamp.join(',') === hi.join(','),
+     'heatmap-ramp value: SPL above 110 dB clamps to the ramp-max colour (no wrap / NaN)',
+     `got [${hiClamp.join(', ')}] vs [${hi.join(', ')}]`);
+
+  // STI ramp value lock — the OTHER metric the same surfaces paint via
+  // colorForMetric('sti'). One boundary + the midpoint guard a stop edit.
+  const stiLo = stiColorRGB(0), stiMid = stiColorRGB(0.5), stiHi = stiColorRGB(1);
+  ok(stiLo[0] === 210 && stiLo[1] === 20 && stiLo[2] === 20,
+     'heatmap-ramp value: stiColorRGB(0) === [210, 20, 20] (STI-min red)', `got [${stiLo.join(', ')}]`);
+  ok(stiMid[0] === 190 && stiMid[1] === 213 && stiMid[2] === 20,
+     'heatmap-ramp value: stiColorRGB(0.5) === [190, 213, 20]', `got [${stiMid.join(', ')}]`);
+  ok(stiHi[0] === 0 && stiHi[1] === 170 && stiHi[2] === 220,
+     'heatmap-ramp value: stiColorRGB(1) === [0, 170, 220] (STI-max teal)', `got [${stiHi.join(', ')}]`);
+  const stiViaMetric = colorForMetric(0.5, 'sti');
+  ok(stiViaMetric.join(',') === stiMid.join(','),
+     "heatmap-ramp value: colorForMetric(0.5, 'sti') routes to stiColorRGB",
+     `got [${stiViaMetric.join(', ')}]`);
+}
+
+assertHeatmapRampParity();
 
 // ---------------------------------------------------------------------------
 // DeviceLAB rack upgrade — slice 6 (Sam, 2026-05-27). Rack footprint

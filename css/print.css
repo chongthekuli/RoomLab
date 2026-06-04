@@ -986,6 +986,17 @@ body.is-pdf-export .vp-tabs {
     height: 4pt;
     background: var(--ink);
   }
+  /* End ticks: keep the tick line on the exact bar end but anchor the
+     first label left / last label right so they don't clip at the edge
+     (same fix as the strip legend). */
+  #print-report .pr-heatmap-legend-tick--first {
+    transform: translateX(0);
+    align-items: flex-start;
+  }
+  #print-report .pr-heatmap-legend-tick--last {
+    transform: translateX(-100%);
+    align-items: flex-end;
+  }
   /* Minor (unlabeled) graduation — shorter line, fainter ink. */
   #print-report .pr-heatmap-legend-tick.minor .pr-heatmap-legend-tick-line {
     height: 2.5pt;
@@ -1145,6 +1156,19 @@ body.is-pdf-export .vp-tabs {
     font-variant-numeric: tabular-nums;
     line-height: 1;
     white-space: nowrap;
+  }
+  /* End ticks: keep the tick LINE on the exact bar end (0% / 100%) but
+     left/right-align the LABEL so "60 dB" / "100 dB" don't overflow the
+     legend edge and get clipped to "dB" / "100". The div anchors its
+     left edge at 0% (first) or right edge at 100% (last); the flex
+     column then aligns line + label to that edge. */
+  #print-report .pr-strip-legend-tick--first {
+    transform: translateX(0);
+    align-items: flex-start;
+  }
+  #print-report .pr-strip-legend-tick--last {
+    transform: translateX(-100%);
+    align-items: flex-end;
   }
 
   /* KPI band — 2026-06-04 (Maya): the 12 KPI tiles are a full-width

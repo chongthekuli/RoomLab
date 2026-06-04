@@ -186,6 +186,61 @@ const roomD = roomBounds.maxY - roomBounds.minY;
   // construction; reading state.outdoor is the first step toward leaking it).
   ok(!/state\.outdoor/.test(src),
     'C: print-report.js never reads state.outdoor');
+
+  // computeRoomConstant is POSITIONAL — (room, materials, freq, zones, opts).
+  // The print path once called it with an object literal, which silently
+  // landed `materials` as undefined and returned R=0, dropping the
+  // reverberant field from the freshly-computed print heatmap. Guard that
+  // the call is never made with a leading object argument.
+  ok(!/computeRoomConstant\(\s*\{/.test(src),
+    'C: print-report.js calls computeRoomConstant positionally, not with an object arg');
+}
+
+// =========================================================================
+// D. CACHE GUARD — a STALE on-screen grid (outdoor field, or STI metric, or
+//    wrong frequency) must NOT be reused by the print report. The report
+//    reuses state.results.splGrid ONLY when it is room-only SPL at the
+//    report frequency; otherwise it recomputes. (ensurePrintSplGrid is not
+//    exported, so we drive it through buildPrintModel + model.heatmap.)
+// =========================================================================
+{
+  applyPresetToState(presetKey);              // reset to a scene with sources
+  state.outdoor.enabled = false;
+  state.physics = state.physics || {};
+  state.physics.freq_hz = 1000;
+  state.results = state.results || {};
+
+  const sentinelGrid = (over) => ({
+    grid: [[42]], cellsX: 1, cellsY: 1, cellW_m: 1, cellD_m: 1,
+    originX_m: 0, originY_m: 0, sourceCount: 1, metric: 'spl', freq_hz: 1000,
+    minSPL_db: 42, maxSPL_db: 42, avgSPL_db: 42, earHeight_m: 1.2, outdoor: false,
+    ...over,
+  });
+
+  // D1 — outdoor cached grid is rejected (sentinel avgSPL_db=42 must not survive).
+  state.results.splGrid = sentinelGrid({ outdoor: true });
+  let m = buildPrintModel({ materials });
+  ok(!m.heatmap || m.heatmap.avgSPL_db !== 42,
+    'D1: an OUTDOOR cached grid is not reused by the print report');
+
+  // D2 — STI cached grid is rejected; the printed heatmap metric stays SPL.
+  state.results.splGrid = sentinelGrid({ metric: 'sti' });
+  m = buildPrintModel({ materials });
+  ok(!m.heatmap || m.heatmap.metric !== 'sti',
+    'D2: an STI cached grid is not reused; print heatmap metric is not sti');
+
+  // D3 — wrong-frequency cached grid is rejected.
+  state.results.splGrid = sentinelGrid({ freq_hz: 4000 });
+  m = buildPrintModel({ materials });
+  ok(!m.heatmap || m.heatmap.avgSPL_db !== 42,
+    'D3: a wrong-frequency cached grid is not reused');
+
+  // D4 — POSITIVE CONTROL: a valid room-only SPL grid at the report frequency
+  //      IS reused (sentinel survives), so the guard does not defeat the cache.
+  state.results.splGrid = sentinelGrid({ avgSPL_db: 88, minSPL_db: 88, maxSPL_db: 88 });
+  m = buildPrintModel({ materials });
+  ok(m.heatmap && m.heatmap.avgSPL_db === 88,
+    'D4: a valid room-only SPL grid at the report frequency IS reused');
 }
 
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
