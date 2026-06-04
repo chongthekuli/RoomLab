@@ -22,6 +22,7 @@ import { colorForMetric, splColorRGB } from '../graphics/colour-ramps.js';
 import { computeTicks, computeMinorTicks, formatTickLabel, legendHeader, getRampDomain, formatDataBracket, dataBracketPosition } from '../graphics/legend-ticks.js';
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
 import { dilateGridForDisplay } from '../physics/grid-display.js';
+import { roomEffectiveBounds } from '../physics/room-shape.js';
 
 // 1.5m margin gives the North arrow + scale bar enough room to live
 // fully inside the margin band without overlapping the room outline,
@@ -201,10 +202,20 @@ export function heatmapPageViewBox(state, splGrid) {
   const gridOY = splGrid.originY_m ?? 0;
   const gridW = (splGrid.cellW_m ?? 0) * splGrid.cellsX || room.width_m;
   const gridD = (splGrid.cellD_m ?? 0) * splGrid.cellsY || room.depth_m;
-  const minX = Math.min(0, gridOX);
-  const minY = Math.min(0, gridOY);
-  const maxX = Math.max(room.width_m, gridOX + gridW);
-  const maxY = Math.max(room.depth_m, gridOY + gridD);
+  // Union the room's TRUE effective bounds with the grid extent. Do NOT
+  // assume the bbox starts at world (0,0) — a custom polygon carries
+  // absolute vertex coords that can start anywhere (drawn at an offset,
+  // or a corner dragged into negative space). The old
+  // Math.min(0,…)/Math.max(width_m,…) padded a phantom dead-band from the
+  // origin to an offset room, shoving it to the top of the frame after the
+  // Y-flip and distorting the aspect (the "doesn't fit the frame" bug,
+  // 2026-06-04). roomEffectiveBounds collapses to (0,0)→(width,depth) for
+  // rectangular/polygon/round rooms, so legacy layouts are byte-identical.
+  const b = roomEffectiveBounds(room);
+  const minX = Math.min(b.minX, gridOX);
+  const minY = Math.min(b.minY, gridOY);
+  const maxX = Math.max(b.maxX, gridOX + gridW);
+  const maxY = Math.max(b.maxY, gridOY + gridD);
   const viewW = (maxX - minX) + 2 * MARGIN_M;
   const viewH = (maxY - minY) + 2 * MARGIN_M;
   return { viewW, viewH };
@@ -227,11 +238,16 @@ export function buildHeatmapPageSVG(state, splGrid, { compact = false, listenerM
   const gridOY = splGrid.originY_m ?? 0;
   const gridW = (splGrid.cellW_m ?? 0) * splGrid.cellsX || room.width_m;
   const gridD = (splGrid.cellD_m ?? 0) * splGrid.cellsY || room.depth_m;
-  const minX = Math.min(0, gridOX);
-  const minY = Math.min(0, gridOY);
-  const maxX = Math.max(room.width_m, gridOX + gridW);
-  const maxY = Math.max(room.depth_m, gridOY + gridD);
-  const offsetX = MARGIN_M - minX;   // shift world (0,0) so minX maps to MARGIN_M
+  // True effective bounds unioned with the grid extent — NOT min/max'd
+  // against (0, width_m). See heatmapPageViewBox above for why; this MUST
+  // match it byte-for-byte so the exported aspect ratio agrees with the
+  // rendered viewBox. (Bug fix 2026-06-04 — offset custom rooms.)
+  const b = roomEffectiveBounds(room);
+  const minX = Math.min(b.minX, gridOX);
+  const minY = Math.min(b.minY, gridOY);
+  const maxX = Math.max(b.maxX, gridOX + gridW);
+  const maxY = Math.max(b.maxY, gridOY + gridD);
+  const offsetX = MARGIN_M - minX;   // shift world minX so it maps to MARGIN_M
   const viewW = (maxX - minX) + 2 * MARGIN_M;
   const viewH = (maxY - minY) + 2 * MARGIN_M;
   // Y-flip anchor: SVG pixel where world-Y=0 lands. World-Y=maxY (north

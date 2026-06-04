@@ -42,7 +42,7 @@ export function engineInfo() {
     name: 'nymphysics',
     version: NYMPHYSICS_VERSION,
     modes: NYMPHYSICS_MODES,
-    description: "RoomLab's acoustics engine — Draft (analytical) + Precision (ray-traced).",
+    description: "AuraLab's acoustics engine — Draft (analytical) + Precision (ray-traced).",
   });
 }
 

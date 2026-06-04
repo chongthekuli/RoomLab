@@ -18,6 +18,7 @@
 
 import { expandSources, colorForGroup, colorForZone } from '../app-state.js';
 import { wallInsetPolygon, wallLabelAnchor, WALL_LABEL_MAX_CHARS } from '../physics/wall-inset.js';
+import { roomEffectiveBounds } from '../physics/room-shape.js';
 import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
 import { renderRackFootprintSVG, lookupRackDef } from '../graphics/rack-2d.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
@@ -239,15 +240,24 @@ export function buildFloorPlanSVG(state, opts = {}) {
   const room = state.room;
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
 
-  // Surau podium pushes the visible footprint past the room walls
-  // (state-x can go negative when podium.extension_m > 0; arcade
-  // speakers/listeners live at negative or past-wall coords). Expand
-  // the SVG viewBox to capture everything; non-surau presets keep
-  // the legacy minX=0, maxX=width_m bounds so this is a no-op.
-  const podiumExt = room?.surauStructure?.podium?.extension_m;
-  const ext = Number.isFinite(podiumExt) && podiumExt > 0 ? podiumExt : 0;
-  const minX = -ext, minY = -ext;
-  const maxX = room.width_m + ext, maxY = room.depth_m + ext;
+  // Size the viewBox to the room's TRUE effective bounds so nothing
+  // renders off-page AND the room sits centered with equal margins.
+  // roomEffectiveBounds folds in the surau podium extension (state-x goes
+  // negative when podium.extension_m > 0; arcade speakers/listeners live
+  // at negative or past-wall coords) AND any custom-polygon vertex in
+  // negative space (the 2D editor allows it; see clampVertexDragTarget).
+  //
+  // Use b.min/b.max DIRECTLY — do NOT min/max against (0, width_m). That
+  // origin assumption padded a phantom dead-band from world (0,0) to a
+  // custom room drawn/dragged at an offset, pushing it to one edge of the
+  // page and distorting the aspect (the "doesn't fit the frame" bug,
+  // 2026-06-04 — same fix applied to print-heatmap.js). For a plain
+  // rectangular room b collapses to (0,0)→(width,depth), so this is
+  // byte-identical to the legacy layout. (No podiumExt re-add —
+  // roomEffectiveBounds already includes it.)
+  const b = roomEffectiveBounds(room);
+  const minX = b.minX, minY = b.minY;
+  const maxX = b.maxX, maxY = b.maxY;
   const offsetX = MARGIN_M - minX;
   const viewW = (maxX - minX) + 2 * MARGIN_M;
   const viewH = (maxY - minY) + 2 * MARGIN_M;

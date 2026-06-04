@@ -1,4 +1,4 @@
-// Project save/load — single `.roomlab.json` file containing the entire
+// Project save/load — single `.auralab.json` file containing the entire
 // editable scene (room geometry, speakers, listeners, audience zones,
 // ambient noise, master EQ, current selections). Versioned via
 // `formatVersion` so future schema changes can migrate older files.
@@ -18,7 +18,12 @@
 import { state, serializeProject, deserializeProject } from '../app-state.js';
 import { emit } from '../ui/events.js';
 
-const FILE_EXTENSION = '.roomlab.json';
+// New saves use `.auralab.json` (the RoomLAB→AuraLAB rebrand, 2026-06-04).
+// LOAD stays extension-agnostic — loadProjectFromFile parses any selected
+// JSON, and the picker's accept list (header-nav.js) includes the legacy
+// `.roomlab.json` too, so existing saved projects keep opening unchanged.
+const FILE_EXTENSION = '.auralab.json';
+const LEGACY_FILE_EXTENSION = '.roomlab.json';
 const MIME_TYPE = 'application/json';
 
 // --- Pure helpers (Node-testable; no DOM / browser API) ---------------
@@ -27,7 +32,7 @@ const MIME_TYPE = 'application/json';
 // `date` is injectable so tests are deterministic; defaults to now.
 export function defaultSaveFilename(filenameHint, date = new Date()) {
   const stamp = date.toISOString().replace(/[:.]/g, '-').replace(/T/, '_').slice(0, 19);
-  const base = (filenameHint && String(filenameHint).trim()) || 'roomlab';
+  const base = (filenameHint && String(filenameHint).trim()) || 'auralab';
   return `${base}_${stamp}${FILE_EXTENSION}`;
 }
 
@@ -87,7 +92,7 @@ export async function saveProjectAs(filenameHint) {
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName,
-        types: [{ description: 'RoomLAB project', accept: { [MIME_TYPE]: ['.json'] } }],
+        types: [{ description: 'AuraLAB project', accept: { [MIME_TYPE]: ['.json'] } }],
       });
       const writable = await handle.createWritable();
       await writable.write(blob);
@@ -137,7 +142,7 @@ export function loadProjectFromFile(file) {
       try {
         parsed = JSON.parse(String(reader.result));
       } catch (e) {
-        reject(new Error('Not a valid RoomLAB project file (JSON parse failed).'));
+        reject(new Error('Not a valid AuraLAB project file (JSON parse failed).'));
         return;
       }
       try {

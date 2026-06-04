@@ -1458,7 +1458,7 @@ function compositeEquationHTML(primaryCat, insetCat, st) {
       <li><strong>Formula:</strong> ISO 12354-3:2017 §17 (Eq. 17) — area-weighted τ-bar. Reproduced Bies &amp; Hansen 4th ed. Eq. 8.27.</li>
       <li><strong>Primary TL:</strong> ${primaryModelLabel}.</li>
       <li><strong>Inset TL:</strong> ${insetModelLabel} — catalogue defaults (no slider tweaks on the inset row).</li>
-      <li class="wall-cite-sep"><strong>Field vs lab:</strong> the catalogue ratings are from lab partitions. Real installations typically lose 5–15&nbsp;dB through flanking transmission via floor/ceiling/junction paths (ISO 12354). RoomLAB does not model flanking — treat the displayed TL as an upper bound.</li>
+      <li class="wall-cite-sep"><strong>Field vs lab:</strong> the catalogue ratings are from lab partitions. Real installations typically lose 5–15&nbsp;dB through flanking transmission via floor/ceiling/junction paths (ISO 12354). AuraLAB does not model flanking — treat the displayed TL as an upper bound.</li>
     </ul>
   `;
 }
@@ -1622,7 +1622,7 @@ function massLawEquationHTML(cat, meta, st, ctx) {
     <ul class="wall-cites">
       <li><strong>Computed line:</strong> field-incidence mass law, TL = 20·log₁₀(m·f) − 47 dB. Beranek &amp; Vér, <em>Noise and Vibration Control Engineering</em> 2nd ed. §10.3; Sharp 1973. Valid for single-leaf panels below the coincidence frequency.</li>
       <li><strong>Catalogue anchor:</strong> ${measuredLine}</li>
-      <li class="wall-cite-sep"><strong>Field vs lab:</strong> the catalogue rating is from a lab partition. Real installations typically lose 5–15&nbsp;dB through flanking transmission via floor/ceiling/junction paths (ISO 12354). RoomLAB does not model flanking — treat the displayed TL as an upper bound.</li>
+      <li class="wall-cite-sep"><strong>Field vs lab:</strong> the catalogue rating is from a lab partition. Real installations typically lose 5–15&nbsp;dB through flanking transmission via floor/ceiling/junction paths (ISO 12354). AuraLAB does not model flanking — treat the displayed TL as an upper bound.</li>
       <li class="wall-cite-sep"><strong>Separate model:</strong> sound bending <em>over</em> a wall is edge diffraction — see the over-wall mode.</li>
     </ul>
   `;
@@ -1659,7 +1659,7 @@ function formulaEquationHTML(cat, st, tl) {
       <li><strong>Sharp three-region:</strong> Sharp 1973; reproduced Bies &amp; Hansen, <em>Engineering Noise Control</em> 4th ed. Eq.&nbsp;8.41a/b. The constant 60 in f_mam absorbs ρ₀&nbsp;=&nbsp;1.21&nbsp;kg/m³, c&nbsp;=&nbsp;343&nbsp;m/s, factor 1/(2π·√(ρ₀c²)) for normal-incidence air cavities (Eq.&nbsp;8.40).</li>
       <li><strong>Stud bridging:</strong> Sharp 1973 Fig.&nbsp;6; Cremer-Heckl-Müller §11.4; Gypsum Association GA-600. The +5 / +8&nbsp;dB caps are empirical and cap predicted TL above 250&nbsp;Hz; below that the cap relaxes to mass-law of total mass.</li>
       <li><strong>Catalogue anchor:</strong> ${escapeHtml(source)}</li>
-      <li class="wall-cite-sep"><strong>Field vs lab:</strong> the catalogue rating is from a lab partition. Real installations typically lose 5–15&nbsp;dB through flanking transmission via floor/ceiling/junction paths (ISO 12354). RoomLAB does not model flanking — treat the displayed TL as an upper bound.</li>
+      <li class="wall-cite-sep"><strong>Field vs lab:</strong> the catalogue rating is from a lab partition. Real installations typically lose 5–15&nbsp;dB through flanking transmission via floor/ceiling/junction paths (ISO 12354). AuraLAB does not model flanking — treat the displayed TL as an upper bound.</li>
     </ul>
   `;
 }
@@ -1675,13 +1675,13 @@ function catalogueEquationHTML(cat) {
       Some wall systems (resilient channel, laminated/IGU glazing, proprietary
       acoustic doors) have no closed-form predictor at engineering precision —
       their isolation depends on installation details the formula can't see
-      (fastener length, panel overlap, gasket condition). RoomLAB treats these
+      (fastener length, panel overlap, gasket condition). AuraLAB treats these
       as catalogue-only: the user picks the row, the engine reads the measured
       curve.
     </p>
     <ul class="wall-cites">
       <li><strong>Measured anchor:</strong> ${escapeHtml(source)}</li>
-      <li class="wall-cite-sep"><strong>Field vs lab:</strong> the catalogue rating is from a lab partition. Real installations typically lose 5–15&nbsp;dB through flanking transmission via floor/ceiling/junction paths (ISO 12354). RoomLAB does not model flanking — treat the displayed TL as an upper bound.</li>
+      <li class="wall-cite-sep"><strong>Field vs lab:</strong> the catalogue rating is from a lab partition. Real installations typically lose 5–15&nbsp;dB through flanking transmission via floor/ceiling/junction paths (ISO 12354). AuraLAB does not model flanking — treat the displayed TL as an upper bound.</li>
     </ul>
   `;
 }
@@ -1764,7 +1764,7 @@ function diffractionMethodHTML(delta, shadowed, groundIsHard) {
       ${groundLine}
       <li><strong>Air absorption:</strong> per-band attenuation along the detour path. ISO 9613-1 standard atmosphere — small at low frequencies, dominant above ~2 kHz on detours of 20 m+.</li>
       <li class="wall-cite-sep"><strong>Net IL</strong> in the table below is the energy-sum of both diffracted paths after their respective air-absorption losses, expressed as level reduction vs the no-wall direct reference.</li>
-      <li class="wall-cite-sep"><strong>Note:</strong> a schematic two-path model (one source, one straight wall, one receiver, single ground bounce). The full RoomLAB engine adds finite-wall edges, re-radiation, and meteorological correction — that's the "over-wall acoustics" toggle (left).</li>
+      <li class="wall-cite-sep"><strong>Note:</strong> a schematic two-path model (one source, one straight wall, one receiver, single ground bounce). The full AuraLAB engine adds finite-wall edges, re-radiation, and meteorological correction — that's the "over-wall acoustics" toggle (left).</li>
     </ul>
   `;
 }

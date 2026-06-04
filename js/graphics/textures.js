@@ -32,6 +32,8 @@ const METERS_PER_TILE = {
   'glass-window':     1.6,
   'brick':            1.0,
   'steel':            0.8,
+  // A door reads as one grain panel, not tiled drywall — tile ≈ the door.
+  'door-solid-wood':  1.0,
 };
 
 function getCanvas(materialId) {
@@ -80,6 +82,7 @@ function paintMaterial(ctx, id) {
     case 'glass-window':     paintGlass(ctx); break;
     case 'brick':            paintBrick(ctx); break;
     case 'steel':            paintSteel(ctx); break;
+    case 'door-solid-wood':  paintSolidWoodDoor(ctx); break;
     default:                 paintGypsumBoard(ctx); break;
   }
 }
@@ -125,6 +128,58 @@ function paintWoodFloor(ctx) {
     ctx.fillRect(0, y + plankH - 2, CANVAS_SIZE, 2);
     const jointX = (p % 2 === 0) ? 170 : 85;
     ctx.fillRect(jointX, y, 2, plankH - 2);
+  }
+}
+
+// Solid-wood door — dark walnut veneer, VERTICAL grain (doors read
+// vertical), with faint stile/rail seams suggesting a panel door. The
+// palette carries clearcoat fields so buildSurfaceMat upgrades to
+// MeshPhysicalMaterial for the satin veneer sheen. Albedo authored a touch
+// brighter than the target since ACES tone mapping darkens mids.
+function paintSolidWoodDoor(ctx) {
+  paletteCache.set('door-solid-wood', {
+    tint: 0xffffff,            // canvas carries the brown; tint neutral like every entry
+    roughness: 0.38,           // satin veneer — smooth, not raw timber
+    metalness: 0.0,
+    clearcoat: 0.6,            // veneer gloss coat
+    clearcoatRoughness: 0.25,  // diffused reflection, not a mirror
+  });
+  const rand = mulberry(1212);
+  // Base dark-walnut fill.
+  ctx.fillStyle = '#4a2f1c';
+  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  // Vertical grain streaks — thin near-vertical bezier lines, alternating
+  // a darker and lighter walnut so the grain reads under the IBL.
+  for (let i = 0; i < 46; i++) {
+    const x = rand() * CANVAS_SIZE;
+    ctx.strokeStyle = (i % 2 === 0)
+      ? 'rgba(58, 36, 20, 0.55)'   // #3a2414 darker
+      : 'rgba(92, 60, 36, 0.45)';  // #5c3c24 lighter
+    ctx.lineWidth = 0.8 + rand() * 1.6;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.bezierCurveTo(
+      x + (rand() - 0.5) * 6, 64,
+      x + (rand() - 0.5) * 6, 192,
+      x + (rand() - 0.5) * 4, CANVAS_SIZE,
+    );
+    ctx.stroke();
+  }
+  // Two faint vertical seams → stiles framing a central panel.
+  ctx.strokeStyle = 'rgba(30, 18, 10, 0.6)';
+  ctx.lineWidth = 2;
+  for (const sx of [CANVAS_SIZE * 0.22, CANVAS_SIZE * 0.78]) {
+    ctx.beginPath();
+    ctx.moveTo(sx, 0);
+    ctx.lineTo(sx, CANVAS_SIZE);
+    ctx.stroke();
+  }
+  // Two horizontal rails (top + bottom) to complete the panel-door read.
+  for (const sy of [CANVAS_SIZE * 0.14, CANVAS_SIZE * 0.86]) {
+    ctx.beginPath();
+    ctx.moveTo(0, sy);
+    ctx.lineTo(CANVAS_SIZE, sy);
+    ctx.stroke();
   }
 }
 

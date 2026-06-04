@@ -922,7 +922,7 @@ export function serializeProject(src = state) {
   return {
     formatVersion: PROJECT_FORMAT_VERSION,
     meta: {
-      app: 'RoomLAB',
+      app: 'AuraLAB',
       savedAt: new Date().toISOString(),
     },
     projectName: src.projectName ?? null,
@@ -972,10 +972,10 @@ export function serializeProject(src = state) {
 
 export function deserializeProject(obj) {
   if (!obj || typeof obj !== 'object') {
-    throw new Error('Not a valid RoomLAB project file.');
+    throw new Error('Not a valid AuraLAB project file.');
   }
   if (typeof obj.formatVersion !== 'number') {
-    throw new Error('Not a valid RoomLAB project file (missing formatVersion).');
+    throw new Error('Not a valid AuraLAB project file (missing formatVersion).');
   }
   if (obj.formatVersion > PROJECT_FORMAT_VERSION) {
     throw new Error(`Unsupported file version (got ${obj.formatVersion}, expected ≤ ${PROJECT_FORMAT_VERSION}).`);

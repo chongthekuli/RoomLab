@@ -1,7 +1,7 @@
 {
   "schema_version": "1.1",
   "id": "compact-6inch-v1",
-  "manufacturer": "RoomLAB Open",
+  "manufacturer": "AuraLAB Open",
   "model": "Compact 6\" 2-way monitor",
   "license": "CC-BY-4.0",
   "note": "Small 2-way: 6\" paper-cone mid-woofer + 1\" dome tweeter. Sealed cabinet, ~90 Hz -3 dB. Broader dispersion than the 12\", limited max SPL.",

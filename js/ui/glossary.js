@@ -84,7 +84,7 @@ export const GLOSSARY = {
     'Stud bridging — mechanical short-circuit through a wall\'s studs that caps TL regardless of leaf mass or cavity depth. Wood studs cap TL around 55 dB; steel studs flex and reach 60+ dB; resilient channel (RC-1) or a fully decoupled double-stud frame removes the bridge and unlocks Rw 60-70 dB. Adding GWB layers past Rw ~45 is wasted unless the stud path is broken.',
 
   composite_wall:
-    'Composite wall — any wall with two or more leaves separated by a cavity. TL is not the sum of its leaves; it is governed by leaf mass, cavity depth, fill, and stud coupling. RoomLAB computes composite-wall TL via the Sharp three-region formula when stud type is wood, steel, staggered, or double; resilient-channel and proprietary assemblies use measured 1/3-octave data (catalogue model).',
+    'Composite wall — any wall with two or more leaves separated by a cavity. TL is not the sum of its leaves; it is governed by leaf mass, cavity depth, fill, and stud coupling. AuraLAB computes composite-wall TL via the Sharp three-region formula when stud type is wood, steel, staggered, or double; resilient-channel and proprietary assemblies use measured 1/3-octave data (catalogue model).',
 
   coincidence_dip:
     'Coincidence dip — a frequency band where bending waves in a leaf match the airborne wavelength and TL drops sharply. For 13 mm GWB the critical frequency is around 2500 Hz; for 6 mm float glass around 2000 Hz. Visible as a notch in the TL curve. Two leaves with different masses (asymmetric IGU 6-16-8) shift their dips apart and smooth the combined curve.',
@@ -96,10 +96,10 @@ export const GLOSSARY = {
     'IGU — insulating glass unit. Two or more glass panes bonded around a sealed cavity (air, argon, or krypton). Acoustic IGUs use asymmetric panes (6-16-8, 6-20-10) to displace the coincidence dip and laminated glass (PVB interlayer) to damp it. A symmetric 4-12-4 unit performs worse than a single 8 mm pane at speech frequencies.',
 
   resilient_channel:
-    'Resilient channel (RC-1) — hat-shaped sheet-metal furring screwed to studs to decouple one wall leaf from the frame. Adds 6-12 dB to Rw when installed correctly (single screw per stud, no bridging). RC performance is sensitive to fastener length and panel overlap, so RoomLAB treats RC walls as catalogue-only — no closed-form prediction.',
+    'Resilient channel (RC-1) — hat-shaped sheet-metal furring screwed to studs to decouple one wall leaf from the frame. Adds 6-12 dB to Rw when installed correctly (single screw per stud, no bridging). RC performance is sensitive to fastener length and panel overlap, so AuraLAB treats RC walls as catalogue-only — no closed-form prediction.',
 
   wall_hatch_family:
-    'Wall hatch family — the plan-drawing convention RoomLAB uses to render wall materials on the 2D viewport and printed plan: solid fill for dense masonry, diagonal hatch for framed and lightweight partitions, outline only for glazing, blank for openings. Buckets are monochrome-safe so the print reads correctly on a black-and-white office machine; an unknown materialId draws as a dotted outline rather than silently as concrete.',
+    'Wall hatch family — the plan-drawing convention AuraLAB uses to render wall materials on the 2D viewport and printed plan: solid fill for dense masonry, diagonal hatch for framed and lightweight partitions, outline only for glazing, blank for openings. Buckets are monochrome-safe so the print reads correctly on a black-and-white office machine; an unknown materialId draws as a dotted outline rather than silently as concrete.',
 
   // --- FurnitureLAB glossary (Phase 4, 2026-05-27, Lin docs-writer
   // debt list from the FurnitureLAB brainstorm + Phase 2 additions) ---

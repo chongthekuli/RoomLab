@@ -79,7 +79,7 @@ if (typeof window !== 'undefined') {
         const result = await window.__roomlabWorkerSmoke({ log: true });
         const closeBtn = '<button style="position:absolute;top:8px;right:12px;background:#2a2f38;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;" onclick="this.parentElement.remove()">×</button>';
         const summaryLines = [
-          `<strong style="color:#4aa3ff;font-size:14px;">RoomLab worker smoke test — ${result.startedAt}</strong>`,
+          `<strong style="color:#4aa3ff;font-size:14px;">AuraLab worker smoke test — ${result.startedAt}</strong>`,
           closeBtn,
           '',
           '<strong style="color:#89c0ff">Environment</strong>',
@@ -151,7 +151,7 @@ if (typeof window !== 'undefined') {
           Number.isFinite(v) ? `${v.toFixed(decimals)}${unit}` : '—';
 
         const summaryLines = [
-          `<strong style="color:#4aa3ff;font-size:14px;">RoomLab precision render — ${render.generatedAt}</strong>`,
+          `<strong style="color:#4aa3ff;font-size:14px;">AuraLab precision render — ${render.generatedAt}</strong>`,
           closeBtn,
           '',
           '<strong style="color:#89c0ff">Pipeline</strong>',

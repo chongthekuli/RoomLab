@@ -52,7 +52,7 @@ function describeSceneContext() {
   if (!hasScene) {
     return {
       name: 'No room scene yet',
-      meta: 'Click RoomLAB to start a scene — racks are tied to the active room.',
+      meta: 'Click AuraLAB to start a scene — racks are tied to the active room.',
     };
   }
   const proj = (typeof state.projectName === 'string' && state.projectName.trim())
@@ -119,7 +119,7 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
             <div class="rack-vp-ctx" title="${escapeHtml(ctx.name)} — ${escapeHtml(ctx.meta)}">
               <span class="rack-vp-ctx-label">Editing racks for</span>
               <span class="rack-vp-ctx-name">${escapeHtml(ctx.name)}</span>
-              <a class="rack-vp-ctx-back" href="#/room" title="Open RoomLAB">View room →</a>
+              <a class="rack-vp-ctx-back" href="#/room" title="Open AuraLAB">View room →</a>
             </div>
             <div class="rack-vp-door-segment">
               <button class="rack-vp-door-tab" id="rack-mid-door-toggle" style="display:none" title="Open or close the FRONT door (mesh-glass)">Open front</button>
@@ -156,7 +156,7 @@ export function mountRackPanel({ rackCatalogue, ampCatalog }) {
         <div class="rack-mid-actions">
           <label class="rack-target-label" for="rack-target-room">Place in:</label>
           <select id="rack-target-room" class="rack-target-room"
-                  title="Pick which room receives this rack. The current scene shows it live in 3D the moment you click Place. A saved custom room stores the rack inside that room's saved entry — it appears in 3D when you click that room's chip in RoomLAB.">
+                  title="Pick which room receives this rack. The current scene shows it live in 3D the moment you click Place. A saved custom room stores the rack inside that room's saved entry — it appears in 3D when you click that room's chip in AuraLAB.">
             <option value="__current__">Current scene</option>
           </select>
           <button class="rack-action rack-action-place" id="rack-action-place" disabled>Place in room</button>
@@ -859,8 +859,8 @@ function renderSystemOverview() {
   if (racks.length === 0) {
     root.innerHTML = `
       <p class="rack-empty">No racks placed in this room yet.</p>
-      <a class="rack-go-roomlab" href="#/room" title="Open RoomLAB to see the room you're designing for">
-        Open RoomLAB →
+      <a class="rack-go-roomlab" href="#/room" title="Open AuraLAB to see the room you're designing for">
+        Open AuraLAB →
       </a>
     `;
     return;
@@ -868,8 +868,8 @@ function renderSystemOverview() {
   // With placed racks: prepend a clear handoff CTA so the user knows
   // exactly where to look at the rack in 3D context.
   root.innerHTML = `
-    <a class="rack-go-roomlab" href="#/room" title="Open RoomLAB to see these racks placed in the 3D room">
-      View in RoomLAB →
+    <a class="rack-go-roomlab" href="#/room" title="Open AuraLAB to see these racks placed in the 3D room">
+      View in AuraLAB →
     </a>
   ` + racks.map((r, i) => {
     const def = _rackCatalogue?.racks?.[r.rackModelKey];
@@ -948,7 +948,7 @@ function showHandoffToast(target = '__current__') {
     // Live placement: rack is already in state, prompt user to view it.
     el.innerHTML = `
       <span class="rl-toast-msg">Rack placed in current scene.</span>
-      <a class="rl-toast-action" href="#/room">View in RoomLAB →</a>
+      <a class="rl-toast-action" href="#/room">View in AuraLAB →</a>
     `;
   } else {
     // Saved-room placement: rack lives in that room's saved entry,
@@ -956,8 +956,8 @@ function showHandoffToast(target = '__current__') {
     const entry = listCustomRooms().find(e => e.id === target);
     const name = entry?.roomName || 'Saved room';
     el.innerHTML = `
-      <span class="rl-toast-msg">Rack saved to <strong>${escapeHtml(name)}</strong>. Click that room's chip in RoomLAB to load it.</span>
-      <a class="rl-toast-action" href="#/room">Open RoomLAB →</a>
+      <span class="rl-toast-msg">Rack saved to <strong>${escapeHtml(name)}</strong>. Click that room's chip in AuraLAB to load it.</span>
+      <a class="rl-toast-action" href="#/room">Open AuraLAB →</a>
     `;
   }
   document.body.appendChild(el);

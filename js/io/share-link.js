@@ -107,7 +107,7 @@ export function decodeShareLink(hashString) {
   // Reject anything obviously not base64-url before atob throws a less
   // useful 'InvalidCharacterError'.
   if (!/^[A-Za-z0-9\-_]+$/.test(h)) {
-    throw new Error('Share link is corrupted or from an older RoomLAB version.');
+    throw new Error('Share link is corrupted or from an older AuraLAB version.');
   }
 
   let bytes;

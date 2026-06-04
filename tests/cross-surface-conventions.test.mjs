@@ -59,7 +59,7 @@ import { buildRoomFields } from '../js/capture/capture-flow.js';
 import { wallInsetPolygon } from '../js/physics/wall-inset.js';
 import { roomEffectiveBounds } from '../js/physics/room-shape.js';
 import { buildFloorPlanSVG } from '../js/ui/print-plan-svg.js';
-import { buildHeatmapPageSVG, buildHeatmapLegend } from '../js/ui/print-heatmap.js';
+import { buildHeatmapPageSVG, buildHeatmapLegend, heatmapPageViewBox } from '../js/ui/print-heatmap.js';
 import { dilateGridForDisplay, buildSilhouetteMask } from '../js/physics/grid-display.js';
 
 // --------------------------------------------------------------------
@@ -752,6 +752,135 @@ function assertSilhouetteMask() {
 }
 
 // --------------------------------------------------------------------
+// Negative-coordinate geometry must stay ON-PAGE in the print plan
+// (2026-06-04). The 2D custom-room editor now lets a user drag a polygon
+// corner into negative coordinate space (the floor-at-0 in
+// clampVertexDragTarget was removed). buildFloorPlanSVG must size its
+// viewBox from roomEffectiveBounds (true vertex min/max) so the negative
+// geometry isn't clipped off the printed plan — the silent cross-surface
+// parity break Viktor flagged during the fix review. Pre-fix the viewBox
+// ran 0..width_m and a vertex/marker at x=-2 projected to a negative
+// SVG-x, off the left edge of the page.
+// --------------------------------------------------------------------
+
+function assertPrintPlanCapturesNegativeGeometry() {
+  buildFixtureState();
+  // Custom polygon with a corner pulled into negative X and Y.
+  state.room.shape = 'custom';
+  state.room.custom_vertices = [
+    { x: -2, y: -1 }, { x: 6, y: -1 }, { x: 6, y: 8 }, { x: -2, y: 8 },
+  ];
+  // True-bbox span that recomputeRoomDimsFromPolygon would write:
+  // x ∈ [-2, 6] → 8, y ∈ [-1, 8] → 9.
+  state.room.width_m = 8;
+  state.room.depth_m = 9;
+  // Park a listener ON the negative corner so we can read its projected
+  // position straight out of the SVG.
+  state.listeners = [{ id: 'L1', label: 'L1', position: { x: -2, y: -1, z: 1.2 }, posture: 'standing' }];
+  state.sources = [];
+
+  const svg = buildFloorPlanSVG(state);
+  const vb = svg.match(/viewBox="0 0 (\S+) (\S+)"/);
+  ok(!!vb, 'neg-geom: print-plan SVG carries a viewBox');
+  const viewW = vb ? parseFloat(vb[1]) : 0;
+  const viewH = vb ? parseFloat(vb[2]) : 0;
+  const lst = svg.match(/<circle cx="([^"]+)" cy="([^"]+)" r="0\.26" fill="#0a8a4a"/);
+  ok(!!lst, 'neg-geom: listener marker present in print-plan SVG');
+  if (lst) {
+    const cx = parseFloat(lst[1]), cy = parseFloat(lst[2]);
+    ok(cx >= 0 && cx <= viewW,
+       `neg-geom: listener at state x=-2 lands ON-PAGE (0 ≤ cx=${cx.toFixed(2)} ≤ viewW=${viewW.toFixed(2)})`,
+       'negative-X geometry must not clip off the print plan');
+    ok(cy >= 0 && cy <= viewH,
+       `neg-geom: listener at state y=-1 lands ON-PAGE (0 ≤ cy=${cy.toFixed(2)} ≤ viewH=${viewH.toFixed(2)})`,
+       'negative-Y geometry must not clip off the print plan');
+  }
+}
+
+// --------------------------------------------------------------------
+// Offset custom room must FIT + CENTER in the print frame (2026-06-04).
+// A custom polygon carries absolute vertex coords that may start far from
+// world (0,0) (drawn at an offset, or a corner dragged negative). The old
+// viewBox math did Math.min(0, gridOX) / Math.max(width_m, …), padding a
+// phantom dead-band from the origin to the room — so the room jammed
+// against one edge of the frame and the aspect distorted ("2D view
+// doesn't fit the frame", user report). Both print SVG surfaces must size
+// the viewBox to the room's TRUE effective bounds so the room sits
+// centered with equal MARGIN_M bands, and both must agree.
+// --------------------------------------------------------------------
+
+function assertOffsetCustomRoomFitsFrame() {
+  installCanvasShim();
+  buildFixtureState();
+  // Irregular pentagon translated to bbox (10,30)→(38,52): 28 m × 22 m,
+  // center (24, 41). NOT at the origin — this is what trips the bug.
+  state.room.shape = 'custom';
+  state.room.custom_vertices = [
+    { x: 10, y: 30 }, { x: 38, y: 30 }, { x: 38, y: 46 }, { x: 24, y: 52 }, { x: 10, y: 46 },
+  ];
+  state.room.width_m = 28;   // true-bbox span (recomputeRoomDimsFromPolygon)
+  state.room.depth_m = 22;
+  // A listener parked at the bbox CENTER must land at the viewBox center
+  // once the frame fits the room.
+  state.listeners = [{ id: 'L1', label: 'L1', position: { x: 24, y: 41, z: 1.2 }, posture: 'standing' }];
+  state.sources = [];
+  // Grid origin + extent = the room's effective bounds (what computeSPLGrid
+  // produces for a custom room).
+  const splGrid = {
+    grid: [[60, 70], [50, 80]], cellsX: 2, cellsY: 2,
+    originX_m: 10, originY_m: 30, cellW_m: 14, cellD_m: 11,
+    metric: 'spl', minSPL_db: 50, maxSPL_db: 80, avgSPL_db: 65, sourceCount: 0,
+  };
+
+  const MARGIN = 1.5;                       // print-{plan,heatmap} MARGIN_M
+  const expectAspect = (28 + 2 * MARGIN) / (22 + 2 * MARGIN);  // 31/25 = 1.24
+
+  const parse = (svg, label) => {
+    const vb = svg.match(/viewBox="0 0 (\S+) (\S+)"/);
+    const lst = svg.match(/<circle cx="([^"]+)" cy="([^"]+)" r="0\.26" fill="#0a8a4a"/);
+    ok(!!vb, `${label}: viewBox present`);
+    ok(!!lst, `${label}: listener marker present`);
+    if (!vb || !lst) return null;
+    return {
+      viewW: parseFloat(vb[1]), viewH: parseFloat(vb[2]),
+      cx: parseFloat(lst[1]), cy: parseFloat(lst[2]),
+    };
+  };
+
+  const plan = parse(buildFloorPlanSVG(state), 'fit-plan');
+  const heat = parse(buildHeatmapPageSVG(state, splGrid), 'fit-heatmap');
+
+  for (const [label, p] of [['fit-plan', plan], ['fit-heatmap', heat]]) {
+    if (!p) continue;
+    // (a) Room centered: the bbox-center listener lands at the viewBox
+    //     center (pre-fix it was shoved toward one edge).
+    ok(Math.abs(p.cx - p.viewW / 2) < 0.05,
+       `${label}: room horizontally centered (listener cx=${p.cx.toFixed(2)} ≈ viewW/2=${(p.viewW / 2).toFixed(2)})`);
+    ok(Math.abs(p.cy - p.viewH / 2) < 0.05,
+       `${label}: room vertically centered (listener cy=${p.cy.toFixed(2)} ≈ viewH/2=${(p.viewH / 2).toFixed(2)})`);
+    // (b) viewBox aspect matches the room bbox aspect (pre-fix it was
+    //     distorted to ~0.56 by the phantom dead-band).
+    const aspect = p.viewW / p.viewH;
+    ok(Math.abs(aspect - expectAspect) < 0.02,
+       `${label}: viewBox aspect ${aspect.toFixed(3)} ≈ room aspect ${expectAspect.toFixed(3)}`);
+  }
+
+  // (c) Plan ↔ heatmap parity — both pages size the same viewBox.
+  if (plan && heat) {
+    ok(Math.abs(plan.viewW - heat.viewW) < 0.01 && Math.abs(plan.viewH - heat.viewH) < 0.01,
+       `fit: plan and heatmap emit the same viewBox (${plan.viewW}×${plan.viewH} vs ${heat.viewW}×${heat.viewH})`);
+  }
+
+  // (d) heatmapPageViewBox (drives the stage aspect-ratio CSS) agrees with
+  //     the rendered heatmap viewBox — so the frame can't silently drift.
+  const vbHelper = heatmapPageViewBox(state, splGrid);
+  if (vbHelper && heat) {
+    ok(Math.abs(vbHelper.viewW - heat.viewW) < 0.01 && Math.abs(vbHelper.viewH - heat.viewH) < 0.01,
+       'fit: heatmapPageViewBox matches the rendered heatmap viewBox (stage aspect ↔ SVG)');
+  }
+}
+
+// --------------------------------------------------------------------
 // Run.
 // --------------------------------------------------------------------
 
@@ -778,6 +907,12 @@ assertRegistryComplete();
 assertDilateUnit();
 assertHeatmapFillParity();
 assertSilhouetteMask();
+
+// Negative-coordinate custom-room geometry on the print plan (2026-06-04).
+assertPrintPlanCapturesNegativeGeometry();
+
+// Offset custom room fits + centers in the print frame (2026-06-04).
+assertOffsetCustomRoomFitsFrame();
 
 // ---------------------------------------------------------------------------
 // Phase 7 — WallLAB thickness flowing into RoomLAB rendering.

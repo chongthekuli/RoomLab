@@ -494,7 +494,11 @@ export function mountRoomPanel({ materials }) {
       ];
       state.room.width_m = 5;
       state.room.depth_m = 5;
-      state.room.surfaces.edges = state.room.custom_vertices.map(() => state.room.surfaces.walls || 'gypsum-board');
+      // Deep-clone the seed per edge — `.map(() => surfaces.walls)` would
+      // alias ONE object reference into every edge, so a later door add on
+      // one wall leaked to all (2026-06-04). cloneSlotSeed keeps strings
+      // as-is, deep-copies objects.
+      state.room.surfaces.edges = state.room.custom_vertices.map(() => cloneSlotSeed(state.room.surfaces.walls));
     }
     syncBoundingBoxToShape();
     // Manual shape change drops any active template association — the
@@ -1467,6 +1471,14 @@ function readSlotOpenings(slot) {
   if (slot && typeof slot === 'object' && Array.isArray(slot.openings)) return slot.openings;
   return [];
 }
+// Clone a wall-slot SEED for assigning into multiple edge slots. Strings
+// are immutable so pass through; objects are deep-copied so the edges
+// don't share one reference (the door-leaks-to-all-walls aliasing bug,
+// 2026-06-04). Mirrors the local cloneSlot idiom in convertToCustom.
+function cloneSlotSeed(slot) {
+  if (typeof slot === 'string') return slot;
+  return slot ? JSON.parse(JSON.stringify(slot)) : 'gypsum-board';
+}
 function readSlotThickness(slot) {
   if (slot && typeof slot === 'object') {
     const t = Number(slot.thickness_m);
@@ -1476,11 +1488,21 @@ function readSlotThickness(slot) {
 }
 // Always returns an object — caller may freely mutate it. If the original
 // was a string, returns a fresh object that the caller should write back.
-function readSlotAsObject(slot, fallback = 'gypsum-board') {
+//
+// CRITICAL: the openings array AND each opening object are deep-cloned
+// (shallow per-entry is enough — openings are flat primitive objects).
+// Without this, readSlotOpenings() handed back the live slot array by
+// reference, so an add/edit on one wall mutated any OTHER wall slot that
+// happened to share the same array reference (born at the polygon-"walls"
+// → custom-edge convert seam, panel-room.js convertToCustom sites). That
+// was the "add a door to one wall, it appears on ALL walls" bug
+// (2026-06-04). Cloning here also HEALS an already-aliased scene on the
+// first mutation of any kind. Exported for tests/openings-no-leak.test.mjs.
+export function readSlotAsObject(slot, fallback = 'gypsum-board') {
   return {
     materialId: readSlotMatId(slot, fallback),
     thickness_m: readSlotThickness(slot),
-    openings: readSlotOpenings(slot),
+    openings: readSlotOpenings(slot).map(o => ({ ...o })),
   };
 }
 // If the slot has no openings AND thickness is the default, write back the
@@ -1501,8 +1523,10 @@ function compactSlot(slot) {
   return slot;
 }
 
-const DEFAULT_DOOR    = { kind: 'door',   width_m: 0.9, height_m: 2.1, x_m: 0.5, z_m: 0,   materialId: 'door-solid-wood', state: 'closed' };
-const DEFAULT_WINDOW  = { kind: 'window', width_m: 1.5, height_m: 1.2, x_m: 0.5, z_m: 1.0, materialId: 'glass-window',    state: 'closed' };
+// thickness_m (depth) defaults to 50 mm — door leaf / window+frame depth,
+// rendered as a real slab in the 3D preview (scene.js attachOpeningMesh).
+const DEFAULT_DOOR    = { kind: 'door',   width_m: 0.9, height_m: 2.1, x_m: 0.5, z_m: 0,   thickness_m: 0.05, materialId: 'door-solid-wood', state: 'closed' };
+const DEFAULT_WINDOW  = { kind: 'window', width_m: 1.5, height_m: 1.2, x_m: 0.5, z_m: 1.0, thickness_m: 0.05, materialId: 'glass-window',    state: 'closed' };
 
 let _opIdCounter = 1;
 function newOpeningId() { return 'op-' + (_opIdCounter++).toString(36) + Math.random().toString(36).slice(2, 5); }
@@ -2121,6 +2145,36 @@ function renderOpeningRow(surfaceId, op, idx, getSlot, setSlot) {
     fieldLabel.append(span, input);
     dims.appendChild(fieldLabel);
   }
+
+  // Opening depth (thickness) — its OWN handler, in millimetres (matches
+  // the per-wall thickness control convention; the generic loop above
+  // writes raw metres at step 0.1, too coarse for a 50 mm door). Stored as
+  // metres. Clamped 10–300 mm: thin glazing through a deep framed window.
+  // Drives the 3D slab depth in attachOpeningMesh; legacy openings with no
+  // field fall back to 50 mm there.
+  {
+    const tLabel = document.createElement('label');
+    tLabel.title = 'Opening depth (door leaf / window frame thickness), shown in the 3D preview';
+    const tSpan = document.createElement('span');
+    tSpan.textContent = 'depth (mm)';
+    const tInput = document.createElement('input');
+    tInput.type = 'number';
+    tInput.step = '5';
+    tInput.min = '10';
+    tInput.max = '300';
+    tInput.value = String(Math.round((Number(op.thickness_m) || 0.05) * 1000));
+    tInput.addEventListener('input', e => {
+      const mm = parseFloat(e.target.value);
+      if (!Number.isFinite(mm)) return;
+      const clamped = Math.min(300, Math.max(10, mm));
+      const next = readSlotAsObject(getSlot());
+      next.openings[idx].thickness_m = clamped / 1000;
+      setSlot(next);
+      emit('room:changed');
+    });
+    tLabel.append(tSpan, tInput);
+    dims.appendChild(tLabel);
+  }
   row.appendChild(dims);
 
   return row;
@@ -2194,7 +2248,9 @@ async function handleDxfImport(file) {
     state.room.custom_vertices = verts;
     state.room.width_m = w;
     state.room.depth_m = d;
-    state.room.surfaces.edges = verts.map(() => state.room.surfaces.walls || 'gypsum-board');
+    // Deep-clone per edge so the shared `surfaces.walls` object isn't
+    // aliased across every edge (the door-leaks-to-all-walls bug).
+    state.room.surfaces.edges = verts.map(() => cloneSlotSeed(state.room.surfaces.walls));
     activeTemplateKey = null;
 
     render();

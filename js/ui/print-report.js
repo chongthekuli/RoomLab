@@ -32,7 +32,7 @@ import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { speakerCategoryLabel } from '../shared/speaker-catalog.js';
 import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
-import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend } from './print-heatmap.js';
+import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend, heatmapPageViewBox } from './print-heatmap.js';
 import { buildFloorPlanSVG } from './print-plan-svg.js';
 import { computePerListenerMetrics } from '../physics/per-listener-metrics.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
@@ -894,7 +894,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     ? `<img class="pr-cover-hero-image" src="${coverImage}" alt="3D perspective view of the room" />`
     : (planSvg
         ? `<div class="pr-cover-hero-plan">${planSvg}</div>`
-        : '<p class="pr-empty-state" style="margin:0">3D preview unavailable — visit RoomLAB before printing.</p>');
+        : '<p class="pr-empty-state" style="margin:0">3D preview unavailable — visit AuraLAB before printing.</p>');
   // Inset — only show the 2D plan as an inset when we actually have a
   // 3D render to sit on top of. Without the 3D the plan IS the hero;
   // showing it twice would be redundant.
@@ -944,10 +944,10 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     <div class="pr-page pr-page-cover">
       <div class="pr-cover-titleblock">
         <div class="pr-cover-titleblock-rule">
-          <span class="pr-eyebrow">RoomLAB · Acoustic simulation</span>
+          <span class="pr-eyebrow">AuraLAB · Redefine Simulation</span>
         </div>
         <div class="pr-cover-titleblock-right">
-          <img class="pr-cover-logo" src="assets/logo/RoomLAB-logo-1024.png" alt="RoomLAB" />
+          <img class="pr-cover-logo" src="assets/logo/AuraLAB-logo-1024.png" alt="AuraLAB" />
         </div>
       </div>
       <div class="pr-cover-hero-wrap">
@@ -1279,7 +1279,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
             <thead><tr><th>Model</th><th>Qty</th><th>Max power (per element)</th><th>Total power</th><th>Group(s)</th></tr></thead>
             <tbody>${bomRows}</tbody>
           </table>
-          <p class="pr-note">Power figures are rated input per element; total = qty × per-element. RoomLAB does not own pricing data; consult vendor quotations for cost.</p>
+          <p class="pr-note">Power figures are rated input per element; total = qty × per-element. AuraLAB does not own pricing data; consult vendor quotations for cost.</p>
         `}
       `)}
       ${sec('', 'Source placement (per element)', `
@@ -1349,7 +1349,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     // understands WHY this section exists before reading any numbers.
     const chenFrame = `Speech intelligibility and reverberation control are programme-level safety items in this venue; the treatment package below is a quantified intervention against the bare-room baseline — not a marketing description.`;
 
-    const compareCaption = `Fig. 03.1 — Octave-band RT60 (Eyring per ISO 3382-1) for the bare room (grey) versus the proposed treatment package (red). ${compare.panels_n} panel${compare.panels_n === 1 ? '' : 's'} folded in via the per-wall overlap-clamped Sabine budget (RoomLAB v2). The Sabine reference row in the KPI table is bounded by the ᾱ<0.2 assumption; once ᾱ exceeds 0.2 the Eyring values are the physical answer.`;
+    const compareCaption = `Fig. 03.1 — Octave-band RT60 (Eyring per ISO 3382-1) for the bare room (grey) versus the proposed treatment package (red). ${compare.panels_n} panel${compare.panels_n === 1 ? '' : 's'} folded in via the per-wall overlap-clamped Sabine budget (AuraLAB v2). The Sabine reference row in the KPI table is bounded by the ᾱ<0.2 assumption; once ᾱ exceeds 0.2 the Eyring values are the physical answer.`;
 
     const ch04a = `
       <div class="pr-page pr-page-treatment-hero" data-running-title="Acoustic treatment">
@@ -1485,7 +1485,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
               <thead>${alphaMatrixHead}</thead>
               <tbody>${alphaMatrixRows}</tbody>
             </table>
-            <p class="pr-note">Values per ISO 354 reverberation-room measurements as supplied by the manufacturer. Mounting condition shown in the schedule above governs the α curve (Type-A flush vs spaced); RoomLAB assumes Type-A flush unless the catalogue entry specifies otherwise. Where a panel's catalogue area exceeded the host wall's remaining area, the panel was clamped (badged in the schedule) and the absorption contribution scaled accordingly.</p>
+            <p class="pr-note">Values per ISO 354 reverberation-room measurements as supplied by the manufacturer. Mounting condition shown in the schedule above governs the α curve (Type-A flush vs spaced); AuraLAB assumes Type-A flush unless the catalogue entry specifies otherwise. Where a panel's catalogue area exceeded the host wall's remaining area, the panel was clamped (badged in the schedule) and the absorption contribution scaled accordingly.</p>
           </section>` : ''}
       </div>`;
 
@@ -1504,11 +1504,20 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // heatLegend are rebuilt locally here so the heatmap-detail page
   // (and the operating-range strip below) remain unchanged.
   const heatSvg = (model.heatmap && splGrid) ? buildHeatmapPageSVG(state, splGrid, { listenerMetrics: model.listenerMetrics }) : '';
-  // 2026-05-19: stage is now a fixed-square slot in print.css so wide /
-  // landscape rooms (pavilion) don't render a very wide, very short
-  // heatmap that crowds the SPL legend label underneath. The SVG inside
-  // the square uses preserveAspectRatio="xMidYMid meet" to letterbox.
-  const heatStageStyle = '';
+  // Match the stage's aspect ratio to the ROOM's viewBox so the coverage
+  // map fills the frame instead of letterboxing inside a fixed square
+  // (2026-06-04). The CSS default is aspect-ratio:1/1 + max-height:128mm;
+  // this inline override wins. Clamp to [3/4 .. 16/9] so a very tall room
+  // can't blow past the page (capped portrait) and a very wide room can't
+  // collapse to a sliver — the SVG's preserveAspectRatio="…meet"
+  // letterboxes the residual without ever clipping. max-height:128mm in
+  // the CSS keeps the absolute height bounded for portrait rooms.
+  const heatVB = (model.heatmap && splGrid) ? heatmapPageViewBox(state, splGrid) : null;
+  let heatStageStyle = '';
+  if (heatVB && heatVB.viewW > 0 && heatVB.viewH > 0) {
+    const aspect = Math.max(0.75, Math.min(16 / 9, heatVB.viewW / heatVB.viewH));
+    heatStageStyle = ` style="aspect-ratio:${aspect.toFixed(4)}"`;
+  }
   const rt60_1k = model.rt60[3];
 
   // ------ Page 2 restructure (Maya, 2026-05-22) -----------------------
@@ -1565,22 +1574,25 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     let sharedLegend = '';
     let scaleNote = '';
     if (splGrid && heatmapIsSpl) {
+      // Lower-drive minis ONLY. The full-coverage hero map above already
+      // IS the Max (0 dB rel. rated) state, so a third "Max" mini just
+      // duplicated it (user, 2026-06-04 — removed). The shared scale's
+      // ceiling still comes from the hero/Max grid (splGrid) so the legend
+      // spans the true full-drive maximum.
       const LEVELS = [
         { offsetDb: -20, label: 'Background', sub: '−20 dB rel. rated' },
         { offsetDb: -10, label: 'Programme',  sub: '−10 dB rel. rated' },
-        { offsetDb:   0, label: 'Max',        sub: '0 dB rel. rated' },
       ];
       const shifted = LEVELS.map(L => ({
         ...L,
         grid: shiftSplGridByDb(splGrid, L.offsetDb),
       }));
-      // Shared integer envelope: −20 dB plot floor → 0 dB plot ceiling,
+      // Shared integer envelope: −20 dB plot floor → hero/Max ceiling,
       // rounded out to 5 dB ticks at both ends. This same envelope colours
       // the legend ticks/gradient; the cell colours are already on the
       // fixed splColorRGB domain (see SHARED-SCALE note above).
-      const topGrid = shifted[shifted.length - 1].grid;
       const sharedMin = Math.floor(shifted[0].grid.minSPL_db / 5) * 5;
-      const sharedMax = Math.ceil(topGrid.maxSPL_db / 5) * 5;
+      const sharedMax = Math.ceil(splGrid.maxSPL_db / 5) * 5;
       const stripCells = shifted.map((L, idx) => {
         const svg = buildHeatmapPageSVG(state, L.grid, { compact: true });
         const sub = `${fmt(L.grid.minSPL_db, 0)} / ${fmt(L.grid.avgSPL_db, 0)} / ${fmt(L.grid.maxSPL_db, 0)} dB · ${L.sub}`;
@@ -1601,7 +1613,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
         stepDb: 5,
         header: `SPL @ 1 kHz · shared scale, ${sharedMin}–${sharedMax} dB`,
       });
-      scaleNote = ` The colour scale is absolute and fixed at ${sharedMin}–${sharedMax} dB, shared across the full-coverage map and all three drive states (Background −20 / Programme −10 / Max 0 dB rel. rated); its lower end is reached only by the lower-drive plots.`;
+      scaleNote = ` The colour scale is absolute and fixed at ${sharedMin}–${sharedMax} dB, shared across the full-coverage map (Max · 0 dB rel. rated) and the two lower-drive states beside it (Background −20 / Programme −10 dB rel. rated); its lower end is reached only by the lower-drive plots.`;
     } else {
       // STI (or any non-SPL): no drive-shifted minis. Single map keeps
       // its own auto-ranged legend.
@@ -1612,31 +1624,49 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <div class="pr-page pr-page-heatmap" data-running-title="Coverage map · top-down view">
         <!-- Drawing-register eyebrow removed v=562 — the running header
              carries the page title; the descriptive subtitle was redundant. -->
+        <!-- 2026-06-04 (Maya) restructure #2: the two operating-range minis
+             move from BELOW the hero to a narrow column on the RIGHT of it
+             (user, 2026-06-04). The top of the page is now a ROW:
+                [ hero coverage map (left, flex:1) | minis column (right,
+                  46mm fixed — Background top, Programme bottom) ]
+             The shared legend, caption, and 6-col KPI band stay FULL-WIDTH
+             below that row. Reading order: hero+minis row → shared legend
+             → caption → KPI band (footer). .pr-heatmap-grid is the flex
+             ROW; .pr-heatmap-main holds only the hero stage; .pr-strip is
+             the right flex child (now a vertical 1-col stack, was a 2-col
+             grid under the hero). The shared legend moved OUT of
+             .pr-heatmap-main to a full-width wrap below the grid.
+             Height budget (A4 ≈247mm content), worst case PORTRAIT hero:
+             top row = max(hero 138mm cap, minis col ~96mm) = 138mm
+             + legend ~10mm + caption ~14mm + 6-col×2-row KPI band ~26mm
+             + gaps ~12mm ≈ 200mm. Fits one page with margin. WIDE room
+             (16/9 hero ≈73mm tall): top row = max(73, 96) = 96mm (minis
+             dominate) → total ≈158mm. -->
         <div class="pr-heatmap-grid">
           <div class="pr-heatmap-main">
             <div class="pr-heatmap-stage"${heatStageStyle}>${heatSvg}</div>
-            ${minisStrip}
-            <div class="pr-strip-legend-wrap">${sharedLegend}</div>
-            <p class="pr-caption">
-              ${escapeHtml(metricLabel)} ${escapeHtml(earTxt)} across
-              ${model.heatmap.sourceCount} element${model.heatmap.sourceCount === 1 ? '' : 's'}.
-              ${escapeHtml(valueRange)}, ${escapeHtml(meanTxt)}.${escapeHtml(scaleNote)} Grey is outside the room footprint.
-            </p>
           </div>
-          <div class="pr-tilegrid">
-            ${tile('Volume',                  `${fmt(room.volume_m3, 0)} m³`)}
-            ${tile('Floor area',              `${fmt(room.baseArea_m2, 1)} m²`)}
-            ${tile('Surface area',            `${fmt(room.totalArea_m2, 0)} m²`)}
-            ${tile('Mean α @ 1 kHz',          fmt(room.meanAbsorption_1k, 3))}
-            ${tile('RT60 @ 1 kHz · Sabine',   rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
-            ${tile('RT60 @ 1 kHz · Eyring',   rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
-            ${tile('Sources (raw / elements)', `${model.sourceFlat.raw} / ${model.sourceFlat.total}`)}
-            ${tile('Listeners',               `${model.listeners.length}`)}
-            ${tile('Audience zones',          `${model.zones.length}`)}
-            ${tile('Schroeder cutoff',        model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—')}
-            ${tile('Critical distance',       model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
-            ${tile('Ambient preset',          escapeHtml(model.ambient.preset))}
-          </div>
+          ${minisStrip}
+        </div>
+        <div class="pr-strip-legend-wrap pr-strip-legend-wrap-full">${sharedLegend}</div>
+        <p class="pr-caption pr-caption-full">
+          ${escapeHtml(metricLabel)} ${escapeHtml(earTxt)} across
+          ${model.heatmap.sourceCount} element${model.heatmap.sourceCount === 1 ? '' : 's'}.
+          ${escapeHtml(valueRange)}, ${escapeHtml(meanTxt)}.${escapeHtml(scaleNote)} Grey is outside the room footprint.
+        </p>
+        <div class="pr-tilegrid">
+          ${tile('Volume',                  `${fmt(room.volume_m3, 0)} m³`)}
+          ${tile('Floor area',              `${fmt(room.baseArea_m2, 1)} m²`)}
+          ${tile('Surface area',            `${fmt(room.totalArea_m2, 0)} m²`)}
+          ${tile('Mean α @ 1 kHz',          fmt(room.meanAbsorption_1k, 3))}
+          ${tile('RT60 @ 1 kHz · Sabine',   rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
+          ${tile('RT60 @ 1 kHz · Eyring',   rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
+          ${tile('Sources (raw / elements)', `${model.sourceFlat.raw} / ${model.sourceFlat.total}`)}
+          ${tile('Listeners',               `${model.listeners.length}`)}
+          ${tile('Audience zones',          `${model.zones.length}`)}
+          ${tile('Schroeder cutoff',        model.derived.schroederCutoff_hz != null ? `${fmt(model.derived.schroederCutoff_hz, 0)} Hz` : '—')}
+          ${tile('Critical distance',       model.derived.criticalDistance_m != null ? `${fmt(model.derived.criticalDistance_m, 2)} m` : '—')}
+          ${tile('Ambient preset',          escapeHtml(model.ambient.preset))}
         </div>
       </div>`;
   }
@@ -1732,8 +1762,8 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   // rests with the named author and their organisation" verbosity was
   // collapsed into the closing paragraph.
   const acceptanceParagraphs = [
-    `${escapeHtml(operatorName)} accessed RoomLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown. All predictions in this document — reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance.`,
-    `RoomLAB is a browser-side simulation engine, not a measurement instrument. The standards cited in the methodology block above are implemented, not certified. Engineering responsibility for applying these results rests with the named author.`,
+    `${escapeHtml(operatorName)} accessed AuraLAB Suite from the network address recorded above and accepted its terms of use at the timestamp shown. All predictions in this document — reverberation time, speech transmission index, sound pressure level and coverage maps — were generated under that acceptance.`,
+    `AuraLAB is a browser-side simulation engine, not a measurement instrument. The standards cited in the methodology block above are implemented, not certified. Engineering responsibility for applying these results rests with the named author.`,
     `Where this report informs an emergency public-address, voice-alarm or safety-of-life installation — including work falling under BS 5839-8, EN 54-16, IEC 60849 or MS IEC 60849 — independent on-site STIPA and SPL verification with calibrated instruments is mandatory before commissioning.`,
   ];
   const acceptanceProse = acceptanceParagraphs.map(p => `<p class="pg-prose">${p}</p>`).join('');
@@ -1812,7 +1842,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <div class="pr-running-header-rule">
         <span class="pr-eyebrow">${escapeHtml(title)}</span>
       </div>
-      <img class="pr-running-logo" src="assets/logo/RoomLAB-logo-1024.png"
+      <img class="pr-running-logo" src="assets/logo/AuraLAB-logo-1024.png"
            alt="" aria-hidden="true">
     </div>`;
 
@@ -2599,7 +2629,7 @@ export function mountPrintReport({ materials }) {
   // any <img src> referencing it later resolves from cache instantly.
   try {
     const preload = new Image();
-    preload.src = 'assets/logo/RoomLAB-logo-1024.png';
+    preload.src = 'assets/logo/AuraLAB-logo-1024.png';
   } catch (_) { /* SSR or sandbox without Image — harmless */ }
 
   window.addEventListener('beforeprint', () => {

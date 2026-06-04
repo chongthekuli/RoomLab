@@ -29,7 +29,7 @@ const DEFAULT_ROUTE = 'room';
 // so "Loading SpeakerLAB…" reads identically to the tab pill the user
 // just clicked.
 const ROUTE_LABELS = {
-  room:      'RoomLAB',
+  room:      'AuraLAB',
   speaker:   'SpeakerLAB',
   device:    'DeviceLAB',
   surface:   'SurfaceLAB',

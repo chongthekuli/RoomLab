@@ -1,4 +1,5 @@
-// Round-trip tests for the .roomlab.json project file format.
+// Round-trip tests for the .auralab.json project file format (legacy
+// .roomlab.json files still load — see normalizeSaveFilename back-compat).
 // Every preset's state must survive serialize → JSON → parse → deserialize
 // → re-serialize without changing field-by-field. Catches silent data loss
 // when a future state field gets added but isn't wired into the schema.
@@ -106,7 +107,7 @@ try {
   deserializeProject('not an object');
   assert(false, 'Non-object payload should throw');
 } catch (err) {
-  assert(/valid RoomLAB/.test(err.message), 'Non-object payload rejected');
+  assert(/valid AuraLAB/.test(err.message), 'Non-object payload rejected');
 }
 try {
   deserializeProject({});
@@ -232,35 +233,40 @@ assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
 //    anchor download) aren't unit-testable in Node, but these are.
 {
   const fixedDate = new Date('2026-05-29T14:30:05.123Z');
-  // 8a. Auto-suggested name: <base>_<stamp>.roomlab.json, ':'/'.' → '-'.
-  assert(defaultSaveFilename('surau', fixedDate) === 'surau_2026-05-29_14-30-05.roomlab.json',
+  // 8a. Auto-suggested name: <base>_<stamp>.auralab.json, ':'/'.' → '-'.
+  // (RoomLAB→AuraLAB rebrand 2026-06-04: new saves use .auralab.json; the
+  // loader still opens legacy .roomlab.json — see 8d.)
+  assert(defaultSaveFilename('surau', fixedDate) === 'surau_2026-05-29_14-30-05.auralab.json',
     'defaultSaveFilename: hint + stamp, colons/dots stripped');
-  // 8b. Blank / missing hint falls back to 'roomlab'.
-  assert(defaultSaveFilename('', fixedDate) === 'roomlab_2026-05-29_14-30-05.roomlab.json',
-    'defaultSaveFilename: blank hint → roomlab');
-  assert(defaultSaveFilename(undefined, fixedDate).startsWith('roomlab_'),
-    'defaultSaveFilename: undefined hint → roomlab');
-  assert(defaultSaveFilename('  ', fixedDate).startsWith('roomlab_'),
-    'defaultSaveFilename: whitespace-only hint → roomlab');
+  // 8b. Blank / missing hint falls back to 'auralab'.
+  assert(defaultSaveFilename('', fixedDate) === 'auralab_2026-05-29_14-30-05.auralab.json',
+    'defaultSaveFilename: blank hint → auralab');
+  assert(defaultSaveFilename(undefined, fixedDate).startsWith('auralab_'),
+    'defaultSaveFilename: undefined hint → auralab');
+  assert(defaultSaveFilename('  ', fixedDate).startsWith('auralab_'),
+    'defaultSaveFilename: whitespace-only hint → auralab');
 
   // 8c. normalizeSaveFilename: appends extension when the user omits it.
-  assert(normalizeSaveFilename('Hospital Serdang', 'fallback.roomlab.json') === 'Hospital Serdang.roomlab.json',
-    'normalizeSaveFilename: appends .roomlab.json when missing');
-  // 8d. A typed .json (or full .roomlab.json) is left intact.
-  assert(normalizeSaveFilename('mine.json', 'fallback.roomlab.json') === 'mine.json',
+  assert(normalizeSaveFilename('Hospital Serdang', 'fallback.auralab.json') === 'Hospital Serdang.auralab.json',
+    'normalizeSaveFilename: appends .auralab.json when missing');
+  // 8d. A typed .json (new .auralab.json OR legacy .roomlab.json) is left
+  // intact — back-compat: re-saving an opened legacy file keeps its name.
+  assert(normalizeSaveFilename('mine.json', 'fallback.auralab.json') === 'mine.json',
     'normalizeSaveFilename: keeps a .json the user typed');
-  assert(normalizeSaveFilename('mine.roomlab.json', 'fallback.roomlab.json') === 'mine.roomlab.json',
-    'normalizeSaveFilename: keeps a full .roomlab.json');
+  assert(normalizeSaveFilename('mine.auralab.json', 'fallback.auralab.json') === 'mine.auralab.json',
+    'normalizeSaveFilename: keeps a full .auralab.json');
+  assert(normalizeSaveFilename('mine.roomlab.json', 'fallback.auralab.json') === 'mine.roomlab.json',
+    'normalizeSaveFilename: keeps a legacy .roomlab.json intact (back-compat)');
   // 8e. Blank / null typed value → fallback (used when prompt returns '').
-  assert(normalizeSaveFilename('', 'fallback.roomlab.json') === 'fallback.roomlab.json',
+  assert(normalizeSaveFilename('', 'fallback.auralab.json') === 'fallback.auralab.json',
     'normalizeSaveFilename: blank → fallback');
-  assert(normalizeSaveFilename('   ', 'fallback.roomlab.json') === 'fallback.roomlab.json',
+  assert(normalizeSaveFilename('   ', 'fallback.auralab.json') === 'fallback.auralab.json',
     'normalizeSaveFilename: whitespace → fallback');
   // 8f. Surrounding whitespace is trimmed.
-  assert(normalizeSaveFilename('  trimmed  ', 'fallback.roomlab.json') === 'trimmed.roomlab.json',
+  assert(normalizeSaveFilename('  trimmed  ', 'fallback.auralab.json') === 'trimmed.auralab.json',
     'normalizeSaveFilename: trims surrounding whitespace');
   // 8g. Extension match is case-insensitive (don't double-append).
-  assert(normalizeSaveFilename('LOUD.JSON', 'fallback.roomlab.json') === 'LOUD.JSON',
+  assert(normalizeSaveFilename('LOUD.JSON', 'fallback.auralab.json') === 'LOUD.JSON',
     'normalizeSaveFilename: case-insensitive extension check');
 }
 

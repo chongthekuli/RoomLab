@@ -2727,7 +2727,7 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     }
     const tex = getMaterialTexture(materialId, widthM, heightM);
     const palette = getMaterialPalette(materialId);
-    return new THREE.MeshStandardMaterial({
+    const common = {
       map: tex,
       color: palette.tint,
       roughness: palette.roughness,
@@ -2735,7 +2735,19 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
       transparent: opacity < 0.99,
       opacity,
       side: doubleSide ? THREE.DoubleSide : THREE.FrontSide,
-    });
+    };
+    // A palette with clearcoat (e.g. solid-wood door veneer) upgrades to
+    // MeshPhysicalMaterial for the satin gloss coat. MeshPhysicalMaterial
+    // extends MeshStandardMaterial, so every param above is identical and
+    // non-clearcoat materials are unaffected.
+    if (palette.clearcoat) {
+      return new THREE.MeshPhysicalMaterial({
+        ...common,
+        clearcoat: palette.clearcoat,
+        clearcoatRoughness: palette.clearcoatRoughness ?? 0.3,
+      });
+    }
+    return new THREE.MeshStandardMaterial(common);
   };
   const floorMat = buildSurfaceMat(surfaces.floor, w, d, { opacity: 0.95 });
   const ceilMat  = buildSurfaceMat(surfaces.ceiling, w, d, { opacity: 0.55 });
@@ -2801,12 +2813,28 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     if (!Number.isFinite(ow) || !Number.isFinite(oh) || ow <= 0 || oh <= 0) return;
     const isOpen = op?.state === 'open';
     const matId = isOpen ? 'open-air' : (op?.materialId || 'glass-window');
-    const opGeo = new THREE.PlaneGeometry(ow, oh);
-    const opMat = buildSurfaceMat(matId, ow, oh, { opacity: isOpen ? 0 : 0.85 });
+    // Per-opening thickness (default 50 mm). Renders the door/window as a
+    // real-depth slab so it reads as a 3D object in the preview — replaces
+    // the old zero-depth plane (Phase 7 C2 "reveal-depth" TODO). The slab
+    // runs along the wall mesh's LOCAL +Z (its facing normal), inheriting
+    // orientation from the parent wall (rect rotation OR custom-edge basis)
+    // AND the scene.scale.x = -1 mirror for free — same as the old plane.
+    const depth = Number(op?.thickness_m) || 0.05;
+    // Glass stays translucent so the interior shows through a window; a
+    // solid door reads fully opaque. Open openings are invisible.
+    const opacity = isOpen ? 0 : (matId === 'glass-window' ? 0.85 : 1.0);
+    const opGeo = new THREE.BoxGeometry(ow, oh, depth);
+    const opMat = buildSurfaceMat(matId, ow, oh, { opacity });
     const opMesh = new THREE.Mesh(opGeo, opMat);
     const offsetX = (Number(op.x_m) || 0) + ow / 2 - ww / 2;
     const offsetY = (Number(op.z_m) || 0) + oh / 2 - wh / 2;
-    opMesh.position.set(offsetX, offsetY, 0.001);
+    // Center the slab ON the wall face plane (faces at ±depth/2). At 50 mm
+    // that's ±25 mm — inside any ≥100 mm wall, never pokes through either
+    // face, and symmetric, so the per-wall inward-normal SIGN ambiguity
+    // (rect walls' local +Z points in or out depending on their rotation)
+    // doesn't matter. No z-fight bump needed — the box faces sit well clear
+    // of the punched hole's edge plane.
+    opMesh.position.set(offsetX, offsetY, 0);
     opMesh.userData.tag = `opening_${op.kind || 'opening'}`;
     opMesh.userData.opening_id = op.id || `${baseSurfaceId}_op_${opIdx}`;
     opMesh.userData.acoustic_material = matId;

@@ -56,10 +56,10 @@ export function mountSpeakerView() {
         <div id="sv-body" class="sv-body">
           <div class="sv-empty">
             <h3>Loudspeaker workbench</h3>
-            <p>Open the <strong>Catalogue</strong> rail icon on the left to pick a speaker, or click a speaker in the 3D view of RoomLAB to deep-link here.</p>
+            <p>Open the <strong>Catalogue</strong> rail icon on the left to pick a speaker, or click a speaker in the 3D view of AuraLAB to deep-link here.</p>
             <p>Or <strong>import a file</strong> (top-right) to add a new model to the catalogue:</p>
             <ul>
-              <li><strong>.json</strong> — RoomLAB / EASE-JSON</li>
+              <li><strong>.json</strong> — AuraLAB / EASE-JSON</li>
               <li><strong>.clf</strong> — Common Loudspeaker Format (AES CLF TC)</li>
               <li><strong>.xhn</strong> / <strong>.xml</strong> — EASE SpeakerLab text export</li>
               <li><strong>.gll</strong> — not browser-parseable; see the prompt on import.</li>

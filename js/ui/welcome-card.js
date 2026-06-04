@@ -267,12 +267,12 @@ function buildScrim() {
   scrim.setAttribute('aria-labelledby', 'terms-modal-heading');
   scrim.innerHTML = `
     <div class="terms-card" id="terms-card">
-      <h2 id="terms-modal-heading" class="terms-heading">Terms of use — RoomLAB Suite</h2>
+      <h2 id="terms-modal-heading" class="terms-heading">Terms of use — AuraLAB Suite</h2>
       <div class="terms-divider"></div>
       <ul class="terms-bullets">
         <li>
           <strong>Predictions are simulations, not measurements.</strong>
-          RoomLAB computes RT60, STIPA, SPL coverage and related metrics from a browser-side physics engine.
+          AuraLAB computes RT60, STIPA, SPL coverage and related metrics from a browser-side physics engine.
           Any application involving safety of life or regulatory compliance — including voice-alarm and emergency PA under
           BS 5839-8, EN 54-16, IEC 60849 and MS IEC 60849 — requires independent on-site verification with calibrated instruments before sign-off.
           <div class="terms-callout">BS 5839-8 · EN 54-16 · IEC 60849 · MS IEC 60849</div>
@@ -281,12 +281,12 @@ function buildScrim() {
           <strong>Standards are referenced, not certified.</strong>
           The engine implements published methods (ISO 3382-1, ISO 9613-1, IEC 60268-16:2020, ISO 17497-2, Sabine, Eyring, Schroeder, Beranek) with documented simplifications — including diffuse-field assumptions in draft mode, catalogue absorption coefficients taken as ASTM C423 Type-A flush mounting, and flat directivity indices for unspecified sources.
           Scattering coefficients for placed treatments are applied per ISO 17497-2 in the precision ray tracer.
-          Full methodology is printed in every generated report. RoomLAB itself is not certified against any of the standards it cites.
+          Full methodology is printed in every generated report. AuraLAB itself is not certified against any of the standards it cites.
           <div class="terms-callout">ISO 3382-1 · ISO 9613-1 · IEC 60268-16:2020 · ISO 17497-2 · ASTM C423 · Sabine · Beranek</div>
         </li>
         <li>
           <strong>No warranty; engineering judgement remains with you.</strong>
-          The operator of this service provides RoomLAB on an as-is basis, without warranty of fitness for any purpose, and accepts no liability for design decisions made using its output.
+          The operator of this service provides AuraLAB on an as-is basis, without warranty of fitness for any purpose, and accepts no liability for design decisions made using its output.
           By continuing, you affirm that you are a competent acoustics, AV, architectural or engineering professional, or are working under the supervision of one, and will not present these predictions as commissioning-grade measurements.
         </li>
         <li>
@@ -387,7 +387,7 @@ function spawnHeroMark() {
   hero.id = 'terms-hero-mark';
   hero.className = 'terms-hero-mark';
   hero.setAttribute('aria-hidden', 'true');
-  hero.innerHTML = '<img src="assets/logo/RoomLAB-animated.svg" alt="" />';
+  hero.innerHTML = '<img src="assets/logo/AuraLAB-animated.svg" alt="" />';
   document.body.appendChild(hero);
   // Force a reflow then add the visible class so the fade-in transition fires.
   void hero.offsetHeight;
@@ -405,7 +405,7 @@ function renderAckHtml(record, staggered, reducedMotion) {
   //   card. No hero overlay, no extended timing.
   const inlineMarkHtml = reducedMotion
     ? '<div class="terms-ack-mark" aria-hidden="true">' +
-      '<img src="assets/logo/RoomLAB-logo.svg" alt="" width="88" height="88" /></div>'
+      '<img src="assets/logo/AuraLAB-logo-1024.png" alt="" width="88" height="88" /></div>'
     : '';
   const cls = staggered ? 'terms-ack-line terms-ack-stagger' : 'terms-ack-line';
   const rows = [

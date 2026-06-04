@@ -1,7 +1,7 @@
 {
   "schema_version": "1.1",
   "id": "generic-12inch-v1",
-  "manufacturer": "RoomLAB Open",
+  "manufacturer": "AuraLAB Open",
   "model": "Generic 12\" 2-way",
   "license": "CC-BY-4.0",
   "note": "12\" woofer + waveguide-loaded 1.4\" compression driver, bass-reflex cabinet tuned ~55 Hz. Waveguide keeps HF dispersion controlled. Typical small-venue PA box.",

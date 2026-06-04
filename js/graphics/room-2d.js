@@ -242,20 +242,25 @@ export function clampDragTargetToBounds({ targetX, targetY, startX, startY, boun
   };
 }
 
-// Pure clamp helper for 2D drag of room vertices. Floor at 0 (the
-// heatmap grid and SVG coord mapping only cover the positive quadrant —
-// vertices in negative space leave heatmap rows uncovered), no ceiling.
-// Same start-position expansion as clampDragTargetToBounds so a vertex
-// already at negative coords (legacy / programmatic state mutation)
-// can be dragged without snapping to 0 on first nudge. Exported for
-// tests/room-2d-negative-drag.test.mjs.
+// Pure clamp helper for 2D drag of room vertices. Vertices are NOT
+// clamped — the user is reshaping the footprint and may legitimately
+// drag a corner into negative coordinate space (e.g. extending the
+// room west/south past the origin).
+//
+// 2026-06-04: removed the old floor-at-0. The justifying comment ("the
+// heatmap grid and SVG coord mapping only cover the positive quadrant")
+// was STALE — both currentRoomGeom() and computeSPLGrid() now derive
+// their extent from roomEffectiveBounds() (true vertex min/max, the
+// same path that renders the surau podium at world x=-3.5), so negative
+// vertices render and sample correctly. The floor was the only thing
+// preventing it. recomputeRoomDimsFromPolygon() (below) now tracks the
+// true bbox so width_m/depth_m stay correct when a vertex goes negative.
+// Validated GO by Viktor (render paths) + Dr. Chen (RT60 volume is
+// shoelace polygon area, translation-invariant). Signature kept stable
+// (startX/startY/halo unused) for the call site + tests that import it.
+// Exported for tests/room-2d-negative-drag.test.mjs.
 export function clampVertexDragTarget({ targetX, targetY, startX, startY, halo = DRAG_OUTSIDE_HALO_M }) {
-  const floorX = (startX < 0) ? Math.min(0, startX - halo) : 0;
-  const floorY = (startY < 0) ? Math.min(0, startY - halo) : 0;
-  return {
-    x: Math.max(floorX, targetX),
-    y: Math.max(floorY, targetY),
-  };
+  return { x: targetX, y: targetY };
 }
 // Unified drag state for BOTH speakers and listeners. The `kind` field
 // is 'source' or 'listener'; for sources we keep sourceIdx + posKey
@@ -3074,19 +3079,28 @@ function onPickablePointerMove(e) {
 //
 // We round UP to the 0.5 m grid so widths land on clean numbers and
 // floor at 1 m so a degenerate polygon doesn't produce a zero-size
-// room. Negative coords are not considered — vertex drags are clamped
-// to >= 0 above.
+// room. width_m/depth_m are the true bbox SPAN (maxX-minX, maxY-minY),
+// not just the positive extent — a vertex dragged into negative space
+// (2026-06-04, floor removed in clampVertexDragTarget) must still grow
+// the reported dimensions, or downstream consumers that read width_m
+// raw (camera framing, print-plan viewBox, panel readout) under-size
+// the room. The custom-room render formulas cancel width_m, and RT60
+// volume uses the shoelace polygon area, so this value is a render/UI
+// extent — but it must reflect the real span.
 function recomputeRoomDimsFromPolygon(room) {
   if (!room) return;
   const verts = room.custom_vertices;
   if (!Array.isArray(verts) || verts.length < 3) return;
-  let maxX = 0, maxY = 0;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const v of verts) {
+    if (v.x < minX) minX = v.x;
     if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
     if (v.y > maxY) maxY = v.y;
   }
-  room.width_m = Math.max(1, Math.ceil(maxX * 2) / 2);
-  room.depth_m = Math.max(1, Math.ceil(maxY * 2) / 2);
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+  room.width_m = Math.max(1, Math.ceil((maxX - minX) * 2) / 2);
+  room.depth_m = Math.max(1, Math.ceil((maxY - minY) * 2) / 2);
 }
 
 function onPickablePointerUp() {

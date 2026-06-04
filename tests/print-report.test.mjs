@@ -227,6 +227,28 @@ applyTemplateToState('hifi');
     `generatedAt is yyyy-mm-dd hh:mm:ss (got "${m.project.generatedAt}")`);
 }
 
+// 12. Coverage-map operating-range minis — source tripwire (2026-06-04).
+//     The page-2 strip is rendered inside a DOM-dependent template (not
+//     buildPrintModel), so guard the composition by source grep — the
+//     same pattern as tests/scene-x-mirror.test.mjs. The hero map IS the
+//     Max (0 dB rel. rated) state, so the strip must show ONLY the two
+//     lower-drive minis (Background −20, Programme −10); a third Max mini
+//     duplicated the hero and was removed. The shared-scale ceiling must
+//     come from the hero grid (splGrid), not a Max-offset mini.
+{
+  const src = readFileSync('./js/ui/print-report.js', 'utf8');
+  // Isolate the minis LEVELS array.
+  const levelsBlock = src.match(/const LEVELS = \[([\s\S]*?)\];/);
+  assert(!!levelsBlock, 'minis: LEVELS array found in print-report.js');
+  const levels = levelsBlock ? levelsBlock[1] : '';
+  assert(/label: 'Background'/.test(levels) && /label: 'Programme'/.test(levels),
+    'minis: LEVELS keeps Background + Programme');
+  assert(!/label: 'Max'/.test(levels) && !/offsetDb:\s*0\b/.test(levels),
+    'minis: LEVELS has NO Max / 0 dB mini (hero map already IS the Max state)');
+  assert(/const sharedMax = Math\.ceil\(splGrid\.maxSPL_db \/ 5\) \* 5;/.test(src),
+    'minis: shared-scale ceiling sourced from the hero grid (splGrid), not a Max mini');
+}
+
 if (failed > 0) {
   console.log(`\n${failed} test(s) FAILED`);
   process.exit(1);

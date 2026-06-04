@@ -453,11 +453,11 @@ class LiveCaptureSession {
     heading.textContent = 'Open the camera in full screen';
     Object.assign(heading.style, { fontWeight: '600', fontSize: '15px', marginBottom: '6px' });
     const msg = document.createElement('div');
-    msg.textContent = 'This page is embedded, and embedded views can’t use the camera. Open RoomLab in its own tab, then come back to Scan with camera. You can also keep going with a photo instead.';
+    msg.textContent = 'This page is embedded, and embedded views can’t use the camera. Open AuraLab in its own tab, then come back to Scan with camera. You can also keep going with a photo instead.';
     msg.style.marginBottom = '14px';
     const link = document.createElement('a');
     link.href = STANDALONE_URL; link.target = '_blank'; link.rel = 'noopener';
-    link.textContent = '↗ Open RoomLab in a new tab';
+    link.textContent = '↗ Open AuraLab in a new tab';
     Object.assign(link.style, {
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       padding: '11px 16px', borderRadius: '8px',

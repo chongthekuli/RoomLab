@@ -1,7 +1,7 @@
 {
   "schema_version": "1.1",
   "id": "line-array-element-v1",
-  "manufacturer": "RoomLAB Open",
+  "manufacturer": "AuraLAB Open",
   "model": "Line-array element (single box)",
   "license": "CC-BY-4.0",
   "note": "Single cabinet of a K2 / J8 / STM class line array. Inherently narrow vertical (±10°) from two flanking LF cones, plus shaped horizontal via waveguide. A single element is LF-limited — full range only when 4+ elements are flown together (coherent summation below ~500 Hz).",

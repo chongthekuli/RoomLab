@@ -744,66 +744,106 @@ body.is-pdf-export .vp-tabs {
      vertical legend column with numeric ticks shared with the 2D
      and 3D viewports via computeTicks(). */
   #print-report .pr-heatmap-grid {
-    /* 2026-05-22 (Maya) restructure: two-column composition.
-       LEFT  (.pr-heatmap-main, flex:1) — full-size map, then the three
-             operating-range minis, then ONE shared legend, then caption.
-       RIGHT (.pr-tilegrid, fixed rail) — the 12 KPI tiles stacked.
-       History: was a single full-width column (legend under a 15cm
-       centred square). The minis used to live on a separate Drawing 02
-       page; they now fold into the bottom-left of this column and share
-       this page's one legend. */
+    /* 2026-06-04 (Maya) restructure #2: flex ROW — hero map (left, flex:1)
+       beside the two operating-range minis (right, narrow fixed column,
+       stacked Background-over-Programme). User asked the minis move from
+       BELOW the hero to the RIGHT of it, 2026-06-04. The shared legend
+       moved OUT of this grid to a full-width wrap below (see
+       .pr-strip-legend-wrap-full). The 12 KPI tiles remain a full-width
+       6-col band at the page bottom. History: 2026-06-04 #1 was a single
+       full-width column (map → minis → legend); 2026-05-22 a two-column
+       flex-row (hero + KPI rail); before that a single column. */
     display: flex;
     flex-direction: row;
     align-items: flex-start;
-    gap: 8pt;
-    margin: 4pt 0 8pt 0;
+    gap: 6pt;
+    margin: 4pt 0 0 0;
     width: 100%;
   }
-  /* Left column — map + minis + shared legend + caption, top-aligned. */
+  /* Left column — the hero map only now (minis + legend left this column
+     in restructure #2). flex:1 so the hero takes all width the right-side
+     minis column doesn't claim. */
   #print-report .pr-heatmap-main {
     flex: 1 1 auto;
-    min-width: 0;          /* let the square stage shrink to the column */
+    min-width: 0;          /* let the stage shrink to the column */
     display: flex;
     flex-direction: column;
     gap: 6pt;
   }
-  /* Minis + shared legend live in the narrower left column now, not on a
-     full-width standalone page — tighten the spacing/type so the three
-     thumbnails + their one legend fit under the square map. (2026-05-22) */
-  #print-report .pr-heatmap-main .pr-strip {
-    gap: 4pt;
+  /* Operating-range minis — now a NARROW RIGHT COLUMN beside the hero
+     (2026-06-04 restructure #2). Fixed 46mm wide, vertical 1-col stack:
+     Background on top, Programme below. flex:0 0 46mm so it never grows
+     to rival the hero; the hero (.pr-heatmap-main, flex:1) keeps the rest
+     of the page width. align-self:stretch is NOT set — the column is only
+     as tall as its two minis, the row is top-aligned (grid align-items:
+     flex-start), so a tall portrait hero simply extends below the minis. */
+  #print-report .pr-heatmap-grid > .pr-strip {
+    flex: 0 0 46mm;
+    display: flex;
+    flex-direction: column;
+    gap: 6pt;
     margin: 0;
+    /* override the base .pr-strip 2-col grid template — it's a flex column
+       here, the grid-template-columns is inert but cleared for clarity. */
+    grid-template-columns: none;
   }
-  #print-report .pr-heatmap-main .pr-strip-cell-title { font-size: 8pt; }
-  #print-report .pr-heatmap-main .pr-strip-cell-tag   { font-size: 6.5pt; }
-  #print-report .pr-heatmap-main .pr-strip-cell-label { padding-bottom: 1.5pt; margin-bottom: 2pt; }
-  #print-report .pr-heatmap-main .pr-strip-cell-sub   { font-size: 6.5pt; margin-top: 2pt; line-height: 1.25; }
-  #print-report .pr-heatmap-main .pr-strip-cell-stage svg { max-height: 5cm; }
-  /* Suppress the per-mini north arrow in this context — the full-size map
-     directly above already establishes north for the whole column, and
-     four "N" kites clustered in one column reads as clutter. (2026-05-22) */
-  #print-report .pr-heatmap-main .pr-strip-cell-stage::after { content: none !important; }
-  /* Shared legend spans the full left-column width here (the standalone
-     page centred it at 70%). */
-  #print-report .pr-heatmap-main .pr-strip-legend-wrap { justify-content: stretch; margin: 0; }
-  #print-report .pr-heatmap-main .pr-strip-legend { width: 100%; max-width: none; }
-  #print-report .pr-heatmap-main .pr-caption { margin-top: 2pt; }
+  #print-report .pr-heatmap-grid > .pr-strip .pr-strip-cell-title { font-size: 8pt; }
+  #print-report .pr-heatmap-grid > .pr-strip .pr-strip-cell-tag   { font-size: 6.5pt; }
+  #print-report .pr-heatmap-grid > .pr-strip .pr-strip-cell-label { padding-bottom: 1.5pt; margin-bottom: 2pt; }
+  #print-report .pr-heatmap-grid > .pr-strip .pr-strip-cell-sub   { font-size: 6.5pt; margin-top: 2pt; line-height: 1.25; }
+  /* 40mm: each mini is now ~42mm wide (46mm col − 2×2mm padding). Two
+     stacked at 40mm tall + labels + subs ≈ 96mm column height — well under
+     the 138mm hero cap, so the minis never drive the page past one A4. */
+  #print-report .pr-heatmap-grid > .pr-strip .pr-strip-cell-stage svg { max-height: 40mm; }
+  /* Suppress the per-mini north arrow — the hero map beside them already
+     establishes north for the page; two extra "N" kites read as clutter
+     (carried over from the previous layout). (2026-05-22) */
+  #print-report .pr-heatmap-grid > .pr-strip .pr-strip-cell-stage::after { content: none !important; }
+  /* Shared SPL legend — now a FULL-WIDTH row BELOW the hero+minis row
+     (2026-06-04 restructure #2; was nested in .pr-heatmap-main before).
+     Stretch it the whole page width so the gradient + ticks span the same
+     width as the caption + KPI band below it, reading as one footer block.
+     The base .pr-strip-legend-wrap centres at 70%; this override stretches
+     the full-page variant. */
+  #print-report .pr-page-heatmap > .pr-strip-legend-wrap-full {
+    display: flex;
+    justify-content: stretch;
+    margin: 6pt 0 0 0;
+    width: 100%;
+  }
+  #print-report .pr-page-heatmap > .pr-strip-legend-wrap-full .pr-strip-legend {
+    width: 100%;
+    max-width: none;
+  }
+  /* Full-width caption: lives BELOW the hero+minis row + shared legend
+     so it spans the whole page. User, 2026-06-04. */
+  #print-report .pr-page-heatmap > .pr-caption-full {
+    margin-top: 8pt;
+    width: 100%;
+  }
   #print-report .pr-heatmap-stage {
     border: 1pt solid var(--rule);
     padding: 4mm;
     background: var(--paper);
     /* position: relative so the north-arrow ::after overlay anchors here. */
     position: relative;
-    /* Fixed square slot so room aspect ratio doesn't change the page
-       layout. SVG inside uses preserveAspectRatio="xMidYMid meet" so
-       wide / tall rooms letterbox cleanly inside this square.
-       2026-05-22: the stage now fills the LEFT column width (it used to
-       be a 15cm centred slot). max-height caps it so the column (square
-       map + 3 minis + shared legend + caption) fits one A4 page even
-       when the tile rail is narrow and the column is wide. */
+    /* aspect-ratio is normally OVERRIDDEN by an inline style the report
+       sets per-room (heatStageStyle in print-report.js → the room's
+       viewBox aspect, clamped 3/4..16/9) so the coverage map FILLS the
+       frame instead of letterboxing in a square (2026-06-04). The 1/1
+       here is only the fallback when no heatmap/grid exists. The SVG's
+       preserveAspectRatio="xMidYMid meet" still letterboxes any residual
+       so nothing clips. max-height caps the height so the page fits one A4
+       even for a PORTRAIT room — the worst case for height. With the minis
+       now a 46mm column BESIDE the hero (restructure #2, 2026-06-04), the
+       top-row height = max(hero, minis-col ~96mm). Worst case PORTRAIT:
+       138 hero cap + ~10 legend + ~14 caption + ~26 KPI band + ~12 gaps
+       ≈ 200mm — fits A4 ≈247mm content with margin. WIDE room (16/9 hero
+       ≈73mm): top row = max(73, 96) = 96mm (minis dominate) → ~158mm. The
+       138mm cap is unchanged from restructure #1. (2026-06-04) */
     aspect-ratio: 1 / 1;
     width: 100%;
-    max-height: 128mm;
+    max-height: 138mm;
     /* overflow: hidden — clip the north-arrow ::after to the stage's
        printed box. WHY: Chrome's print-paginator can render a
        `position: absolute` ::after on EVERY printable page that the
@@ -981,8 +1021,12 @@ body.is-pdf-export .vp-tabs {
     margin-bottom: 6pt;
   }
   #print-report .pr-strip {
+    /* BASE rule — used by the standalone .pr-page-operating-range page as a
+       side-by-side 2-col grid. On the heatmap page (.pr-heatmap-grid >
+       .pr-strip) this is OVERRIDDEN to a narrow vertical flex column to the
+       RIGHT of the hero (2026-06-04 restructure #2 — see that rule above). */
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 6pt;
     margin: 2pt 0 8pt 0;
     page-break-inside: avoid;
@@ -1103,18 +1147,21 @@ body.is-pdf-export .vp-tabs {
     white-space: nowrap;
   }
 
-  /* Tile rail — 2026-05-22 (Maya): the 12 KPI tiles were a full-width
-     4-col grid BELOW the heatmap; now a single vertical column to the
-     RIGHT of the map (see .pr-heatmap-grid). Fixed 46mm rail keeps the
-     left map column as large as the page allows while the labels still
-     fit on ≤ 2 lines at 7pt. */
-  #print-report .pr-heatmap-grid > .pr-tilegrid {
-    display: flex;
-    flex-direction: column;
+  /* KPI band — 2026-06-04 (Maya): the 12 KPI tiles are a full-width
+     horizontal band at the BOTTOM of the heatmap page (was a 46mm
+     vertical rail to the RIGHT of the map 2026-05-22; before that a
+     4-col band). 6 columns → 2 rows of 6 = ~26mm tall, shorter than
+     4-col's 3 rows, so it fits under the enlarged hero. Page-scoped
+     (.pr-page-heatmap >) so it beats the legacy 4-col .pr-tilegrid rule
+     below in specificity without touching other callers. break-inside
+     avoid on the band keeps all 12 tiles on the same page as the map. */
+  #print-report .pr-page-heatmap > .pr-tilegrid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
     gap: 4pt;
-    margin: 0;
-    flex: 0 0 46mm;
-    width: 46mm;
+    margin: 8pt 0 0 0;
+    width: 100%;
+    break-inside: avoid;
   }
   /* Legacy 4-col grid kept for any other caller of .pr-tilegrid. */
   #print-report .pr-tilegrid {
