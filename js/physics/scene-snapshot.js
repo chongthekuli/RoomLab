@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-PolyForm-Shield-1.0.0
+// Copyright (c) 2026 Chong Ching Yong (chongthekuli). All rights reserved.
+// Part of nymphysics — licensed under PolyForm Shield 1.0.0 (see
+// js/physics/LICENSE): read / study / adapt for any NON-competing use; you
+// may NOT use it to provide a product that competes with AuraLAB.
+
 // PhysicsScene — immutable, flat, worker-transferable snapshot of every
 // physics input. Both engines (current Sabine/Hopkins-Stryker draft + the
 // future ISM+ray-traced precision) consume this instead of reading from

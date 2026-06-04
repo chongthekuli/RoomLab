@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-PolyForm-Shield-1.0.0
+// Copyright (c) 2026 Chong Ching Yong (chongthekuli). All rights reserved.
+// Part of nymphysics — licensed under PolyForm Shield 1.0.0 (see
+// js/physics/LICENSE): read / study / adapt for any NON-competing use; you
+// may NOT use it to provide a product that competes with AuraLAB.
+
 // Thin worker shell around the ray-tracer kernel.
 // All the physics lives in tracer-core.js — this file is just the
 // message adapter between the main-thread worker pool and that kernel.

@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-PolyForm-Shield-1.0.0
+// Copyright (c) 2026 Chong Ching Yong (chongthekuli). All rights reserved.
+// Part of nymphysics — licensed under PolyForm Shield 1.0.0 (see
+// js/physics/LICENSE): read / study / adapt for any NON-competing use; you
+// may NOT use it to provide a product that competes with AuraLAB.
+
 // Phase C — derive time-domain metrics from the precision engine's
 // impulse-response histogram. Pure math, no engine dependencies. All
 // formulas per ISO 3382-1 (reverberation, clarity) and IEC 60268-16

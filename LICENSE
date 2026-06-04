@@ -1,0 +1,32 @@
+AuraLAB — Proprietary License
+Copyright (c) 2026 Chong Ching Yong (chongthekuli). All rights reserved.
+
+This repository contains the AuraLAB application (a web-based acoustic
+simulator). Except where a different license is explicitly provided, ALL
+RIGHTS ARE RESERVED.
+
+No license, right, or permission — express or implied — is granted to any
+person or entity to copy, reproduce, modify, adapt, translate, publish,
+distribute, sublicense, sell, host, or create derivative works from any part
+of this application, in whole or in part, by any means, without the prior
+written permission of the copyright holder.
+
+The application is delivered to web browsers as part of normal operation.
+Being able to view the served source in a browser does NOT grant any license
+to reuse it. Viewing for the sole purpose of using the hosted application as
+an end user is permitted; everything else requires written permission.
+
+EXCEPTION — the acoustic engine:
+  Every file under `js/physics/` (the "nymphysics" engine) is licensed
+  SEPARATELY under the PolyForm Shield License 1.0.0. See `js/physics/LICENSE`.
+  Under that license you MAY read, study, and adapt the engine for any purpose
+  EXCEPT providing a product that competes with AuraLAB. That carve-out does
+  not extend to the rest of this application, which remains all-rights-reserved.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+Contact: https://github.com/chongthekuli/RoomLab

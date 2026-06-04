@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-PolyForm-Shield-1.0.0
+// Copyright (c) 2026 Chong Ching Yong (chongthekuli). All rights reserved.
+// Part of nymphysics — licensed under PolyForm Shield 1.0.0 (see
+// js/physics/LICENSE): read / study / adapt for any NON-competing use; you
+// may NOT use it to provide a product that competes with AuraLAB.
+
 import { interpolateAttenuation } from './loudspeaker.js';
 import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea, roomEffectiveBounds, roomSurfaces, maxCeilingHeightAt } from './room-shape.js';
 import { computeRT60Band } from './rt60.js';

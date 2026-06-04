@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-PolyForm-Shield-1.0.0
+// Copyright (c) 2026 Chong Ching Yong (chongthekuli). All rights reserved.
+// Part of nymphysics — licensed under PolyForm Shield 1.0.0 (see
+// js/physics/LICENSE): read / study / adapt for any NON-competing use; you
+// may NOT use it to provide a product that competes with AuraLAB.
+
 // Walk-mode avatar collision against placed racks (v=699, 2026-05-27).
 //
 // User UAT: "now the avatar can walk through this rack."
