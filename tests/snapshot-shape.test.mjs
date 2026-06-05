@@ -143,6 +143,13 @@ ok('furniture' in snap, "snapshot.furniture exists (FurnitureLAB POROUS placemen
 // reflection + absorption. Added 2026-05-27 Phase 2.2.
 ok('furnitureReflective' in snap, "snapshot.furnitureReflective exists (FurnitureLAB REFLECTIVE placements with bboxes + materialIdx)");
 
+// structures: frozen object — building structures (pillars/half-walls/
+// partitions/beams/platforms) as prism occluders (footprint × [base,top] +
+// materialIdx). Feeds triangulateStructures so the ray viz + precision tracer
+// reflect off them. Added 2026-06-05 to fix the recurring "rays shoot through
+// the new object type" bug; guarded by tests/occluder-registry.test.mjs.
+ok('structures' in snap, "snapshot.structures exists (building-structure prism occluders)");
+
 // physics: frozen object — toggle state at build time.
 // THE FIELD THAT WAS DROPPED FOR WEEKS (d302d0d). Optional chaining in
 // tracer-core.js:230 (`scene.physics?.airAbsorption !== false`) masked
@@ -171,6 +178,7 @@ ok('bvh' in snap, "snapshot.bvh exists (null placeholder for Phase B)");
 const EXPECTED_TOP_LEVEL_KEYS = new Set([
   'version', 'createdAt', 'bands_hz', 'materials', 'room', 'zones',
   'sources', 'receivers', 'treatments', 'furniture', 'furnitureReflective',
+  'structures',
   'physics', 'eq',
   'triangles', 'bvh',
 ]);

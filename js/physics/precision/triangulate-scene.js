@@ -56,6 +56,7 @@ const TAG_ZONE = 4;
 const TAG_SCOREBOARD = 5;
 const TAG_TREATMENT = 6;
 const TAG_FURNITURE = 7;
+const TAG_STRUCTURE = 8;
 
 export const SURFACE_TAGS = {
   FLOOR: TAG_FLOOR,
@@ -65,6 +66,7 @@ export const SURFACE_TAGS = {
   SCOREBOARD: TAG_SCOREBOARD,
   TREATMENT: TAG_TREATMENT,
   FURNITURE: TAG_FURNITURE,
+  STRUCTURE: TAG_STRUCTURE,
 };
 
 // Treatment quads sit this many metres in FRONT of the host wall /
@@ -130,8 +132,67 @@ export function triangulateScene(scene, opts = {}) {
   triangulateWallSegments(scene, tris);
   triangulateTreatments(scene, tris);
   triangulateFurnitureReflective(scene, tris);
+  triangulateStructures(scene, tris);
 
   return finalizeBuffer(tris);
+}
+
+// --- Building structures (pillars/half-walls/partitions/beams/platforms) ----
+// Each structure is a prism: a rotated footprint polygon extruded over its
+// vertical [base, top] range (scene.structures, built by scene-snapshot.js).
+// We emit the vertical side faces (one quad per footprint edge) plus a top cap,
+// and a bottom cap only when the prism floats (base > 0, e.g. beams). This is
+// the SAME triangle BVH the room walls feed, so the ray viz + precision tracer
+// reflect off pillars/walls automatically — no per-system wiring. The BVH is
+// two-sided and the specular reflection r = d − 2(d·n)n is sign-invariant in n,
+// so winding/normal-sign don't affect occlusion or the bounce; we still point
+// side normals outward for cleanliness.
+//
+// This is the fix for the recurring "rays shoot through the new object type"
+// bug (furniture → racks → structures). The occluder-registry test guards that
+// every placeable solid type reaches this soup.
+function triangulateStructures(scene, tris) {
+  const block = scene.structures;
+  if (!block || block.count === 0) return;
+  for (const it of block.items) {
+    const fp = it.footprint;            // Float32Array [x0,y0, x1,y1, ...]
+    const n = fp.length / 2;
+    if (n < 3) continue;
+    const base = it.base, top = it.top;
+    const matIdx = Number.isFinite(it.materialIdx) ? it.materialIdx : -1;
+    const tag = `structure_${it.id ?? ''}`;
+    // Plan centroid — to orient side normals outward.
+    let cgx = 0, cgy = 0;
+    for (let k = 0; k < n; k++) { cgx += fp[k * 2]; cgy += fp[k * 2 + 1]; }
+    cgx /= n; cgy /= n;
+    // Vertical side faces.
+    for (let k = 0; k < n; k++) {
+      const ax = fp[k * 2], ay = fp[k * 2 + 1];
+      const bIdx = (k + 1) % n;
+      const bx = fp[bIdx * 2], by = fp[bIdx * 2 + 1];
+      let nx = -(by - ay), ny = (bx - ax);   // perpendicular to edge a→b
+      const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      if (nx * (mx - cgx) + ny * (my - cgy) < 0) { nx = -nx; ny = -ny; }   // outward
+      pushQuad(tris,
+        [ax, ay, base], [bx, by, base], [bx, by, top], [ax, ay, top],
+        [nx, ny, 0], matIdx, TAG_STRUCTURE, tag);
+    }
+    // Top cap (fan from vertex 0), normal +z.
+    for (let k = 1; k < n - 1; k++) {
+      pushTri(tris,
+        [fp[0], fp[1], top], [fp[k * 2], fp[k * 2 + 1], top], [fp[(k + 1) * 2], fp[(k + 1) * 2 + 1], top],
+        [0, 0, 1], matIdx, TAG_STRUCTURE, `${tag}_top`);
+    }
+    // Bottom cap only when the prism floats above the floor (beams, plinths).
+    if (base > 1e-3) {
+      for (let k = 1; k < n - 1; k++) {
+        pushTri(tris,
+          [fp[0], fp[1], base], [fp[(k + 1) * 2], fp[(k + 1) * 2 + 1], base], [fp[k * 2], fp[k * 2 + 1], base],
+          [0, 0, -1], matIdx, TAG_STRUCTURE, `${tag}_bot`);
+      }
+    }
+  }
 }
 
 // --- FurnitureLAB reflective items (Phase 2, 2026-05-27) --------------

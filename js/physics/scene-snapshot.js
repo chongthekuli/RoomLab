@@ -25,8 +25,9 @@
 // favour of `PhysicsScene`-accepting signatures.
 
 import { expandSources } from './source-expand.js';
-import { getCachedCatalogue, getFurnitureCatalogue, getRackCatalogue } from './providers.js';
+import { getCachedCatalogue, getFurnitureCatalogue, getRackCatalogue, getStructureMaterial } from './providers.js';
 import { getSubVolumes } from './furniture-sub-volumes.js';
+import { STRUCTURE_TYPES, structureFootprintCorners, structureHeightRange } from './building-structures.js';
 
 export const PHYSICS_SCENE_VERSION = 1;
 
@@ -591,6 +592,79 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     }
   }
 
+  // v=760 — Building structures (pillars/half-walls/partitions/beams/platforms)
+  // enter the SAME triangle-soup occluder set the ray viz + precision tracer
+  // consume, so rays reflect off them like any wall. They are NOT AABBs (a
+  // rotated half-wall's AABB is a huge wrong box) — each becomes a prism from
+  // its rotated footprint polygon × [base, top], triangulated in
+  // triangulate-scene.js::triangulateStructures. Material resolves from the
+  // raw materials.json row via the provider; an UNRESOLVED material falls back
+  // to a generic REFLECTIVE solid (never transmissive) so a structure can
+  // never silently become a hole rays pass through.
+  const stateStructures = Array.isArray(state.structures) ? state.structures : [];
+  const structureItems = [];
+  let _structureFallbackMatIdx = -1;
+  const _structureMatByMaterialId = new Map();
+  function registerStructureMaterial(materialId) {
+    if (typeof materialId === 'string' && _structureMatByMaterialId.has(materialId)) {
+      return _structureMatByMaterialId.get(materialId);
+    }
+    const row = typeof materialId === 'string' ? getStructureMaterial(materialId) : null;
+    if (!row || !Array.isArray(row.absorption)) {
+      // Generic reflective fallback (painted-concrete-ish): low α, mild
+      // scattering. Solid, so rays still reflect — the no-silent-hole rule.
+      if (_structureFallbackMatIdx < 0) {
+        const absArr = new Float32Array(BANDS);
+        const scaArr = new Float32Array(BANDS);
+        for (let k = 0; k < BANDS; k++) { absArr[k] = 0.05; scaArr[k] = 0.15; }
+        _structureFallbackMatIdx = materialsTable.length;
+        materialsTable.push(Object.freeze({
+          index: _structureFallbackMatIdx, id: 'structure:_fallback',
+          name: 'Structure (unresolved material)', absorption: absArr, scattering: scaArr,
+        }));
+      }
+      if (typeof materialId === 'string') _structureMatByMaterialId.set(materialId, _structureFallbackMatIdx);
+      return _structureFallbackMatIdx;
+    }
+    const absArr = new Float32Array(BANDS);
+    const scaArr = new Float32Array(BANDS);
+    for (let k = 0; k < BANDS; k++) {
+      const a = row.absorption[k];
+      // Clamp to [0, 0.95]; α≥0.95 is the tracer's "open-air opening" marker —
+      // a solid wall/pillar must stay below it so it reflects, never transmits.
+      absArr[k] = Number.isFinite(a) ? Math.max(0, Math.min(0.95, a)) : 0.05;
+      const s = Array.isArray(row.scattering) ? row.scattering[k] : null;
+      scaArr[k] = Number.isFinite(s) ? s : 0.15;
+    }
+    const idx = materialsTable.length;
+    materialsTable.push(Object.freeze({
+      index: idx, id: `structure:${materialId}`, name: row.name ?? materialId,
+      absorption: absArr, scattering: scaArr,
+    }));
+    _structureMatByMaterialId.set(materialId, idx);
+    return idx;
+  }
+  for (const s of stateStructures) {
+    if (!s || !s.position || !STRUCTURE_TYPES.includes(s.type)) continue;
+    const corners = structureFootprintCorners(s);
+    if (!Array.isArray(corners) || corners.length < 3) continue;
+    const { base, top } = structureHeightRange(s, state.room ?? {});
+    if (!(top > base)) continue;
+    const fp = new Float32Array(corners.length * 2);
+    for (let k = 0; k < corners.length; k++) { fp[k * 2] = corners[k].x; fp[k * 2 + 1] = corners[k].y; }
+    structureItems.push(Object.freeze({
+      id: s.id ?? `S${structureItems.length + 1}`,
+      type: s.type,
+      footprint: fp,
+      base, top,
+      materialIdx: registerStructureMaterial(s.materialId),
+    }));
+  }
+  const structuresBlock = Object.freeze({
+    count: structureItems.length,
+    items: Object.freeze(structureItems),
+  });
+
   const furnitureBlock = Object.freeze({
     count: porousIds.length,
     bboxes: new Float32Array(porousBboxes),
@@ -739,6 +813,13 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     // item, joining the wall BVH; from there the existing wall-bounce
     // machinery handles reflection + absorption with no tracer change.
     furnitureReflective: furnitureReflectiveBlock,
+
+    // Building structures — pillars/half-walls/partitions/beams/platforms as
+    // prism occluders (rotated footprint × [base,top]) + resolved materialIdx.
+    // triangulate-scene.js::triangulateStructures emits the prism faces into
+    // the SAME triangle BVH the walls use, so the ray viz + precision tracer
+    // reflect off them automatically. Guarded by tests/occluder-registry.
+    structures: structuresBlock,
 
     // Physics toggles + master EQ — built above at L419-434. Production
     // callers (tracer-core.js:230) used `scene.physics?.airAbsorption !==
