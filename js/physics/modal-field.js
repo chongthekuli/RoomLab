@@ -107,10 +107,19 @@ export function computeModalField({ room, sources, freq_hz, t60_s, f_s, cells, e
   const srcs = (Array.isArray(sources) ? sources : []).filter(s => s && Number.isFinite(s.x));
   if (srcs.length === 0) return null;
 
-  // Per-mode excitation + denominator (constant across cells).
+  // Per-mode excitation + denominator (constant across cells) + the CLOSED-FORM
+  // volume-mean weight 2^(−p_m), where p_m = number of non-zero mode indices
+  // (axial=1, tangential=2, oblique=3). The volume mean of ψ_m² over a rigid-
+  // wall box is exactly 1/2^(p_m) because ∫cos²(nπx/L)dx = L/2 for n≥1 (L for
+  // n=0). Cross-modal terms integrate to zero (orthogonality), so the mean of
+  // the whole relative field is Σ exc·invDenom·2^(−p). This analytic mean is
+  // the CORRECT normalisation anchor (Dr. Chen 2026-06-05) — it cancels the
+  // mode-truncation deficit exactly and is grid-resolution-independent, unlike
+  // a mean taken over sampled cells.
   const f2 = freq_hz * freq_hz;
   const exc = new Float64Array(modes.length);
   const invDenom = new Float64Array(modes.length);
+  const meanW = new Float64Array(modes.length);   // 2^(−p_m)
   for (let m = 0; m < modes.length; m++) {
     const { nx, ny, nz, freq: fm, Q } = modes[m];
     let e = 0;
@@ -122,7 +131,13 @@ export function computeModalField({ room, sources, freq_hz, t60_s, f_s, cells, e
     exc[m] = e;
     const denom = (f2 - fm * fm) * (f2 - fm * fm) + (freq_hz * fm / (Q || 1)) * (freq_hz * fm / (Q || 1));
     invDenom[m] = denom > 0 ? 1 / denom : 0;
+    const p = (nx !== 0 ? 1 : 0) + (ny !== 0 ? 1 : 0) + (nz !== 0 ? 1 : 0);
+    meanW[m] = Math.pow(2, -p);
   }
+
+  // Analytic volume-mean of the relative field (the normalisation anchor).
+  let analyticMean = 0;
+  for (let m = 0; m < modes.length; m++) analyticMean += exc[m] * invDenom[m] * meanW[m];
 
   const p2 = new Float64Array(cells.length);
   for (let c = 0; c < cells.length; c++) {
@@ -136,7 +151,7 @@ export function computeModalField({ room, sources, freq_hz, t60_s, f_s, cells, e
     }
     p2[c] = sum;
   }
-  return { p2, weight, modeCount: modes.length };
+  return { p2, weight, modeCount: modes.length, analyticMean };
 }
 
 /**
@@ -161,17 +176,22 @@ export function blendModalIntoBaseline(baselineDb, modal) {
   const n = out.length;
   if (p2.length !== n) return out;            // shape mismatch — leave baseline
 
-  // Energy means over finite cells.
-  let baseEnergySum = 0, modalEnergySum = 0, count = 0;
+  // Baseline (statistical) energy mean over finite cells — the statistical
+  // field is ~spatially flat so its grid-cell mean ≈ its true mean to <0.1 dB
+  // regardless of resolution.
+  let baseEnergySum = 0, count = 0;
   for (let i = 0; i < n; i++) {
     if (!Number.isFinite(out[i])) continue;
     baseEnergySum += Math.pow(10, out[i] / 10);
-    modalEnergySum += p2[i];
     count++;
   }
-  if (count === 0 || modalEnergySum <= 0) return out;
+  // Modal mean is the CLOSED-FORM analytic volume-mean (grid-independent,
+  // truncation-cancelling) — NOT a mean over sampled cells, which excludes the
+  // -Infinity wall-annulus cells and so dropped the hottest near-wall
+  // antinodes, biasing the LF heatmap ~1-2 dB high (Dr. Chen 2026-06-05).
+  const modalMean = modal.analyticMean;
+  if (count === 0 || !(modalMean > 0)) return out;
   const baseMean = baseEnergySum / count;
-  const modalMean = modalEnergySum / count;
   const scale = baseMean / modalMean;          // normalise modal mean → baseline mean
 
   for (let i = 0; i < n; i++) {
