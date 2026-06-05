@@ -21,7 +21,7 @@
 // mounted on a wall vs overhead.
 
 import { runTrustFlagAudit } from './trust-flags.js';
-import { setSurfaceCatalogueProvider } from '../../physics/providers.js';
+import { setSurfaceCatalogueProvider, setStructureMaterialProvider } from '../../physics/providers.js';
 
 // Wire this catalogue into the engine's provider registry so nymphysics can
 // read treatment absorption/scattering without importing js/labs/. labs →
@@ -29,6 +29,12 @@ import { setSurfaceCatalogueProvider } from '../../physics/providers.js';
 // hoisted function declaration, so registering its reference here (at module
 // import) is safe; the engine reads it live on every call.
 setSurfaceCatalogueProvider(getCachedCatalogue);
+
+// Building-structure materials read the RAW materials.json rows (TL +
+// surface density are dropped by the surface-catalogue mapping below, but
+// the structure physics needs them). Register a getter over the raw-row
+// Map cache that loadSurfaceCatalogue() populates. Live read, same pattern.
+setStructureMaterialProvider(getRawMaterialsById);
 
 // Rail navigation order — Sofia's "most-used first" arrangement.
 const RAIL_ORDER = ['absorber', 'bass', 'diffuser', 'ceiling', 'surface', 'opening', 'system'];
@@ -44,6 +50,12 @@ const RAIL_LABELS = {
 };
 
 let _cached = null;
+// Raw materials.json rows keyed by id — used ONLY by the building-structure
+// physics (which needs transmission_loss_db + surface_density_kg_m2, fields
+// the finishEntries mapping below intentionally drops). Hoisted-function
+// getter so providers.js can register a live reference at module import.
+let _rawMaterialsById = new Map();
+export function getRawMaterialsById() { return _rawMaterialsById; }
 
 export async function loadSurfaceCatalogue() {
   if (_cached) return _cached;
@@ -52,6 +64,10 @@ export async function loadSurfaceCatalogue() {
     fetch('./data/materials.json').then(r => r.json()),
     fetch('./data/treatment-products.json').then(r => r.json()),
   ]);
+
+  // Cache the untouched material rows for the structure physics before the
+  // lossy finishEntries mapping below strips TL + density.
+  _rawMaterialsById = new Map((materials.materials || []).map(m => [m.id, m]));
 
   // Plain materials → surface.{hard,soft,wood} or absorber.* /
   // bass.* / etc. inferred from the id pattern. Existing entries

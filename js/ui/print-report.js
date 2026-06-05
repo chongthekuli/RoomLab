@@ -37,6 +37,7 @@ import { buildFloorPlanSVG } from './print-plan-svg.js';
 import { computePerListenerMetrics } from '../physics/per-listener-metrics.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
+import { getStructureMaterialCatalogue } from '../physics/providers.js';
 import { sumFurnitureAbsorption } from '../physics/furniture-absorption.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
 import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
@@ -122,6 +123,7 @@ export function buildPrintModel({ materials, nameHint } = {}) {
     furnitureCatalogue: getFurnitureCatalogue(),
     racks: state.rackSystem?.racks ?? [],
     rackCatalogue: getRackCatalogue(),
+    structures: state.structures,
   });
   const totalArea = rt60Bands[0]?.totalArea_m2 ?? 0;
   const volume = roomVolume(state.room);
@@ -323,6 +325,7 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
           furnitureCatalogue: getFurnitureCatalogue(),
           racks: state.rackSystem?.racks ?? [],
           rackCatalogue: getRackCatalogue(),
+          structures: state.structures,
         });
       } catch (_) { R = 0; }
     }
@@ -353,6 +356,10 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
       furnitureCatalogue: getFurnitureCatalogue(),
       racks: state.rackSystem?.racks ?? [],
       rackCatalogue: getRackCatalogue(),
+      // v=756 — building structures obstruct the direct field; printed
+      // heatmap matches the live viewports.
+      structures: state.structures,
+      structureMaterials: getStructureMaterialCatalogue(),
     });
   } catch (err) {
     console.warn('[print-report] heatmap grid compute failed:', err);
@@ -2604,7 +2611,7 @@ export async function triggerPrint() {
   }
   // Compute the grid ONCE here (so buildPrintModel's metadata and the
   // renderer's hero heatmap come from the same data) instead of twice.
-  const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments });
+  const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments, structures: state.structures });
   const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
   const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
   // 3D viewport snapshot for the cover hero. Lazily imports scene.js
@@ -2705,7 +2712,7 @@ export function mountPrintReport({ materials }) {
   window.addEventListener('beforeprint', () => {
     if (!_printMaterialsRef) return;
     if (document.getElementById('print-report')) return;
-    const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments });
+    const rt60Bands = computeAllBands({ room: state.room, materials: _printMaterialsRef, zones: state.zones, treatments: state.treatments, structures: state.structures });
     const t60_1k = rt60Bands[3]?.eyring_s ?? rt60Bands[3]?.sabine_s ?? null;
     const splGrid = ensurePrintSplGrid({ materials: _printMaterialsRef, t60_1k });
     // 3D viewport snapshot for the cover hero. _captureFn is populated

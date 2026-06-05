@@ -4,6 +4,7 @@ import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { computeListenerBreakdown, computeRoomConstant } from '../physics/spl-calculator.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
+import { getStructureMaterialCatalogue } from '../physics/providers.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { applyGlossary } from './glossary.js';
@@ -63,6 +64,9 @@ export function mountResultsPanel({ materials }) {
   // a new chair / drape / sofa must re-trigger the rt60 + Hopkins-Stryker
   // recompute the same way a source or treatment change does.
   on('furniture:changed', render);
+  // Building structures affect SPL (direct-path obstruction) + RT60 (parallel-A
+  // absorption) — re-render the breakdown + RT60 when one changes.
+  on('structure:changed', render);
   // Precision engine completed / invalidated / cleared — re-render so
   // the Precision column tracks the latest state.
   on('precision:changed', render);
@@ -145,11 +149,14 @@ function renderListenerSection() {
           furnitureCatalogue: getFurnitureCatalogue(),
           racks: state.rackSystem?.racks ?? [],
           rackCatalogue: getRackCatalogue(),
+          structures: state.structures,
         }) : 0,
     furniture: state.furniture,
     furnitureCatalogue: getFurnitureCatalogue(),
     racks: state.rackSystem?.racks ?? [],
     rackCatalogue: getRackCatalogue(),
+    structures: state.structures,
+    structureMaterials: getStructureMaterialCatalogue(),
   });
 
   const postureLabel = POSTURE_LABELS[lst.posture] ?? lst.posture;
@@ -213,6 +220,7 @@ function renderRT60() {
     furnitureCatalogue: getFurnitureCatalogue(),
     racks: state.rackSystem?.racks ?? [],
     rackCatalogue: getRackCatalogue(),
+    structures: state.structures,
   });
   const f500 = bands.find(b => b.frequency_hz === 500);
   const f1k  = bands.find(b => b.frequency_hz === 1000);

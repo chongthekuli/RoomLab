@@ -3,6 +3,9 @@ import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
+import { getStructureMaterialCatalogue } from '../physics/providers.js';
+import { structureFootprintCorners, structureFootprintCircle } from '../physics/building-structures.js';
+import { makeStructure } from '../ui/panel-structure.js';
 import { colorForReliability, reliabilityLegendRows } from '../labs/furniturelab/reliability-colors.js';
 import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
 import { computeRoomConstant } from '../physics/spl-calculator.js';
@@ -879,6 +882,8 @@ export function mount2DViewport({ materials }) {
   on('furniture-confidence:changed', render);
   on('treatment:selected', render);
   on('rack:changed', render);
+  on('structure:changed', render);
+  on('structure:selected', render);
   on('scene:reset', render);
   // OUTDOOR SIMULATION MODE (Phase 3b) — the UI panel mutates
   // state.outdoor.{enabled,field_size_m,temperature_C,humidity_pct} then emits
@@ -1555,6 +1560,7 @@ function renderNormal(vp) {
             furnitureCatalogue: getFurnitureCatalogue(),
             racks: state.rackSystem?.racks ?? [],
             rackCatalogue: getRackCatalogue(),
+            structures: state.structures,
           }) : 0,
       // OUTDOOR pass-through — must match the 3D call site (scene.js ~10605).
       // When outdoorOn is false these revert to computeSPLGrid's defaults
@@ -1576,6 +1582,11 @@ function renderNormal(vp) {
       // footprint). Same as furniture but rotated by rack.yaw_deg.
       racks: state.rackSystem?.racks ?? [],
       rackCatalogue: getRackCatalogue(),
+      // v=756 — building structures (pillars/half-walls/etc.) attenuate the
+      // direct field (diffraction + transmission). Matches the 3D grid call
+      // so 2D + 3D heatmaps agree. structureMaterials = raw materials.json rows.
+      structures: state.structures,
+      structureMaterials: getStructureMaterialCatalogue(),
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;
@@ -1631,6 +1642,9 @@ function renderNormal(vp) {
     : '';
   const furnitureSvg = (state.furniture && state.furniture.length > 0)
     ? renderFurnitureSVG(state.furniture, state.selectedFurnitureId, x0, y0, pxW, pxD, state.room, labelScale)
+    : '';
+  const structureSvg = (state.structures && state.structures.length > 0)
+    ? renderStructuresSVG(state.structures, state.selectedStructureId, x0, y0, pxW, pxD, state.room, labelScale)
     : '';
   // PA equipment racks — closed-footprint top-down via the shared
   // helper in rack-2d.js (also used by print-plan-svg.js, so the two
@@ -1689,6 +1703,7 @@ function renderNormal(vp) {
         ${encSvg}
         ${wsegSvg}
         ${minaretSvg}
+        ${structureSvg}
         ${treatmentSvg}
         ${furnitureSvg}
         ${rackSvg}
@@ -2408,22 +2423,42 @@ function placeFurnitureAt(catalogueId, pos) {
   emit('furniture:selected', { id: state.selectedFurnitureId });
 }
 
-// Reflect state.furnitureArmed onto the viewport DOM — crosshair
-// cursor + a floating hint over the floor plan. Called at viewport
-// mount and on `furniture:armed` events (from FurnitureLAB).
+// Place a default building structure of `type` at world {x,y}, select it,
+// and broadcast. Mirrors placeFurnitureAt; the default factory lives in
+// panel-structure.js (makeStructure) so the panel + the click-placement path
+// agree on every default field.
+function placeStructureAt(type, pos) {
+  if (!Array.isArray(state.structures)) state.structures = [];
+  const st = makeStructure(type, snapToGrid(pos.x), snapToGrid(pos.y));
+  state.structures.push(st);
+  state.selectedStructureId = st.id;
+  emit('structure:changed', { id: st.id });
+  emit('structure:selected', { id: st.id });
+}
+
+// Reflect state.furnitureArmed / state.structureArmed onto the viewport DOM —
+// crosshair cursor + a floating hint over the floor plan. Called at viewport
+// mount and on arm/cancel events.
 function applyArmedCursorState() {
   const vp = document.querySelector('#view-2d');
   if (!vp) return;
-  const armed = state.furnitureArmed && typeof state.furnitureArmed.catalogueId === 'string';
+  const furnArmed = state.furnitureArmed && typeof state.furnitureArmed.catalogueId === 'string';
+  const structArmed = state.structureArmed && typeof state.structureArmed.type === 'string';
+  const armed = furnArmed || structArmed;
   vp.classList.toggle('r2d-armed', armed);
   vp.querySelector('.r2d-armed-hint')?.remove();
-  if (armed) {
+  if (furnArmed) {
     const catalogue = getFurnitureCatalogue();
     const row = catalogue.get(state.furnitureArmed.catalogueId);
     const name = row?.name || state.furnitureArmed.catalogueId;
     const hint = document.createElement('div');
     hint.className = 'r2d-armed-hint';
     hint.textContent = `Click in the room to place “${name}”  ·  ESC to cancel  ·  hover for RT60 preview`;
+    vp.appendChild(hint);
+  } else if (structArmed) {
+    const hint = document.createElement('div');
+    hint.className = 'r2d-armed-hint';
+    hint.textContent = `Click in the room to place this structure  ·  ESC to cancel`;
     vp.appendChild(hint);
   } else {
     // Arm just dropped — clear any leftover ghost.
@@ -2506,11 +2541,13 @@ function renderFurnitureGhost(hoverWorldXY) {
         room: state.room, materials: materialsRef,
         zones: state.zones, treatments: state.treatments,
         furniture: state.furniture || [], furnitureCatalogue: cat,
+        structures: state.structures,
       });
       const ghBands = computeAllBands({
         room: state.room, materials: materialsRef,
         zones: state.zones, treatments: state.treatments,
         furniture: [...(state.furniture || []), ghostEntry], furnitureCatalogue: cat,
+        structures: state.structures,
       });
       const curr1k = currBands.find(b => b.frequency_hz === 1000);
       const gh1k   = ghBands.find(b => b.frequency_hz === 1000);
@@ -2576,6 +2613,8 @@ function renderFurnitureGhost(hoverWorldXY) {
 }
 
 on('furniture:armed', applyArmedCursorState);
+on('structure:arm_placement', applyArmedCursorState);
+on('structure:cancel_placement', applyArmedCursorState);
 // router.js emits `route:change` via document.dispatchEvent (not the
 // shared events bus) so the listener has to attach to document.
 // Guarded for Node-side test imports (tests/room-2d-*.test.mjs) where
@@ -2584,7 +2623,10 @@ on('furniture:armed', applyArmedCursorState);
 if (typeof document !== 'undefined') {
   document.addEventListener('route:change', applyArmedCursorState);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') cancelFurnitureArming();
+    if (e.key === 'Escape') {
+      cancelFurnitureArming();
+      if (state.structureArmed) { state.structureArmed = null; applyArmedCursorState(); }
+    }
     // Delete / Backspace removes the currently-selected furniture
     // entry. Guarded so a delete keystroke while a text input has
     // focus (room-name field, listener-label, etc.) doesn't accidentally
@@ -2600,6 +2642,15 @@ if (typeof document !== 'undefined') {
           state.furniture.splice(idx, 1);
           state.selectedFurnitureId = null;
           emit('furniture:changed', { removed: id });
+          e.preventDefault();
+        }
+      } else if (state.selectedStructureId && location.hash === '#/room') {
+        const id = state.selectedStructureId;
+        const idx = state.structures.findIndex(x => x.id === id);
+        if (idx >= 0) {
+          state.structures.splice(idx, 1);
+          state.selectedStructureId = null;
+          emit('structure:changed', { removed: id });
           e.preventDefault();
         }
       }
@@ -2649,6 +2700,13 @@ function findPickableFromEvent(e) {
   if (rackEl) {
     const id = rackEl.dataset.rackId;
     if (id) return { kind: 'rack', el: rackEl, rackId: id };
+  }
+  // Building structures — lowest priority (large architectural footprints;
+  // a source/listener/treatment on top of a pillar still claims the click).
+  const structEl = target.closest('.r2d-structure');
+  if (structEl) {
+    const id = structEl.dataset.structureId;
+    if (id) return { kind: 'structure', el: structEl, structureId: id };
   }
   return null;
 }
@@ -2731,6 +2789,23 @@ function onPickablePointerDown(e) {
     return;
   }
 
+  // Building-structure armed-placement intercept — same protocol as
+  // furniture. state.structureArmed is set by panel-structure.js
+  // armStructurePlacement(). Drop a default structure of that type at the
+  // click, select it, broadcast.
+  if (state.structureArmed && typeof state.structureArmed.type === 'string') {
+    const armedType = state.structureArmed.type;
+    const world = clientToWorldXY(e.currentTarget, e.clientX, e.clientY);
+    state.structureArmed = null;
+    applyArmedCursorState();
+    if (world && Number.isFinite(world.x) && Number.isFinite(world.y)) {
+      placeStructureAt(armedType, world);
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+
   const pick = findPickableFromEvent(e);
   if (!pick) {
     // Click on empty 2D area — close any open context menu AND clear
@@ -2752,6 +2827,10 @@ function onPickablePointerDown(e) {
     if (state.selectedTreatmentId != null) {
       state.selectedTreatmentId = null;
       emit('treatment:selected', { id: null });
+    }
+    if (state.selectedStructureId != null) {
+      state.selectedStructureId = null;
+      emit('structure:selected', { id: null });
     }
     return;
   }
@@ -2850,6 +2929,23 @@ function onPickablePointerDown(e) {
       startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
       pointerId: e.pointerId, didMove: false,
     };
+  } else if (pick.kind === 'structure') {
+    const st = state.structures?.find(x => x.id === pick.structureId);
+    if (!st || !st.position) return;
+    try { openPanel('left', 'structure'); } catch (_) {}
+    if (state.selectedStructureId !== pick.structureId) {
+      state.selectedStructureId = pick.structureId;
+      emit('structure:selected', { id: pick.structureId });
+    }
+    startWorldX = st.position.x;
+    startWorldY = st.position.y;
+    pickableDrag = {
+      kind: 'structure',
+      structureId: pick.structureId,
+      startClientX: e.clientX, startClientY: e.clientY,
+      startSrcWorldX: startWorldX, startSrcWorldY: startWorldY,
+      pointerId: e.pointerId, didMove: false,
+    };
   } else { // 'vertex'
     // Resolve the vertex's CURRENT world position from whatever shape
     // the room is in right now. If/when the user actually drags, the
@@ -2910,6 +3006,7 @@ function onPickablePointerMove(e) {
                    : pickableDrag.kind === 'treatment' ? 'treatment:changed'
                    : pickableDrag.kind === 'furniture' ? 'furniture:changed'
                    : pickableDrag.kind === 'rack'      ? 'rack:changed'
+                   : pickableDrag.kind === 'structure' ? 'structure:changed'
                    : 'source:changed';
     emit(firstEvt);
   }
@@ -2998,6 +3095,16 @@ function onPickablePointerMove(e) {
       r.position.x = nx;
       r.position.y = ny;
       emit('rack:changed');
+    }
+  } else if (pickableDrag.kind === 'structure') {
+    // Building structures — same free X/Y drag as furniture/racks, snapped
+    // to the SOURCE_SNAP_M grid and clamped to room bounds.
+    const st = state.structures?.find(x => x.id === pickableDrag.structureId);
+    if (!st || !st.position) return;
+    if (st.position.x !== nx || st.position.y !== ny) {
+      st.position.x = nx;
+      st.position.y = ny;
+      emit('structure:changed');
     }
   } else if (pickableDrag.kind === 'treatment') {
     // Treatments are constrained to their anchored surface plane —
@@ -3513,6 +3620,48 @@ function renderFurnitureSVG(furniture, selectedId, x0, y0, pxW, pxD, room, label
                   width="${wPx.toFixed(1)}" height="${dPx.toFixed(1)}"
                   ${rectStyle} />
             <text class="r2d-furniture-label" x="0" y="${(dPx/2 + lblOffset).toFixed(1)}" text-anchor="middle" style="font-size:${lblFontPx}px">${escapeXml(lblText)}</text>
+          </g>`;
+  }
+  return s;
+}
+
+// Building structures (pillars / half-walls / partitions / beams / platforms)
+// top-down footprints. Uses the SAME geometry helpers the physics engine + the
+// print plan SVG consume (structureFootprintCorners / Circle from
+// building-structures.js) so the three surfaces cannot drift — cross-surface
+// convention (Sam). Y is flipped here (state +y = north renders UP) exactly
+// like every other 2D element.
+function renderStructuresSVG(structures, selectedId, x0, y0, pxW, pxD, room, labelScale = 1.0) {
+  if (!Array.isArray(structures) || structures.length === 0) return '';
+  const stateToSvgX = (x) => x0 + (x / room.width_m) * pxW;
+  const stateToSvgY = (y) => y0 - (y / room.depth_m) * pxD;
+  const px_per_m_x = pxW / Math.max(0.01, room.width_m);
+  const px_per_m_y = pxD / Math.max(0.01, room.depth_m);
+  const lblFontPx = (10 * labelScale).toFixed(1);
+  const lblOffset = 11 * labelScale;
+
+  let s = '';
+  for (const st of structures) {
+    if (!st || !st.position) continue;
+    const isSel = st.id === selectedId;
+    const cls = `r2d-structure r2d-structure-${st.type} ${isSel ? 'selected' : ''}`;
+    let shape;
+    const circle = structureFootprintCircle(st);
+    if (circle) {
+      const r = Math.max(circle.r * px_per_m_x, circle.r * px_per_m_y);
+      shape = `<circle class="r2d-structure-footprint" cx="${stateToSvgX(circle.cx).toFixed(1)}" cy="${stateToSvgY(circle.cy).toFixed(1)}" r="${r.toFixed(1)}" />`;
+    } else {
+      const pts = structureFootprintCorners(st)
+        .map(c => `${stateToSvgX(c.x).toFixed(1)},${stateToSvgY(c.y).toFixed(1)}`)
+        .join(' ');
+      shape = `<polygon class="r2d-structure-footprint" points="${pts}" />`;
+    }
+    const cx = stateToSvgX(st.position.x);
+    const cy = stateToSvgY(st.position.y);
+    const lbl = st.label || st.id;
+    s += `<g class="${cls}" data-structure-id="${escapeXml(st.id)}">
+            ${shape}
+            <text class="r2d-structure-label" x="${cx.toFixed(1)}" y="${(cy + lblOffset + 6).toFixed(1)}" text-anchor="middle" style="font-size:${lblFontPx}px">${escapeXml(lbl)}</text>
           </g>`;
   }
   return s;

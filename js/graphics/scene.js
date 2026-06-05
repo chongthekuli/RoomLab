@@ -42,6 +42,8 @@ import {
 import { findCatalogueEntry, loadSurfaceCatalogue } from '../labs/surfacelab/catalog.js';
 import { buildSampleGroup } from '../labs/surfacelab/surface-3d-preview.js';
 import { getFurnitureCatalogue as getFurnitureCatalogueMap } from '../labs/furniturelab/catalog.js';
+import { getStructureMaterialCatalogue } from '../physics/providers.js';
+import { structureHeightRange, structurePlanSize } from '../physics/building-structures.js';
 
 let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
@@ -398,6 +400,7 @@ export async function mount3DViewport({ materials }) {
   const REBUILD_RACKS = 1 << 7;
   const REBUILD_TREATMENTS = 1 << 8;
   const REBUILD_FURNITURE  = 1 << 9;
+  const REBUILD_STRUCTURES = 1 << 10;
   const queueRebuild = (flags) => {
     _pendingRebuild = (_pendingRebuild ?? 0) | flags;
     if (_rebuildRAF) return;
@@ -415,6 +418,7 @@ export async function mount3DViewport({ materials }) {
       if (f & REBUILD_RACKS) rebuildRacks();
       if (f & REBUILD_TREATMENTS) rebuildTreatments();
       if (f & REBUILD_FURNITURE) rebuildFurniture();
+      if (f & REBUILD_STRUCTURES) rebuildStructures();
     });
   };
 
@@ -444,6 +448,10 @@ export async function mount3DViewport({ materials }) {
   // changes invalidate the cache.
   on('furniture:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_FURNITURE); });
   on('furniture:selected', () => queueRebuild(REBUILD_FURNITURE));
+  // Building structures affect the heatmap (direct-path obstruction) + RT60,
+  // so rebuild the structures group AND re-run the heatmap on any change.
+  on('structure:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_STRUCTURES | REBUILD_HEATMAP); });
+  on('structure:selected', () => queueRebuild(REBUILD_STRUCTURES));
   // Treatments panel asks the 3D viewport to arm placement mode — the
   // next click on a wall or the ceiling will drop a new entry of the
   // chosen productId at the hit point.
@@ -505,7 +513,7 @@ export async function mount3DViewport({ materials }) {
     // calling synchronously here is correct — the camera lands the same
     // frame the rebuild renders.
     frameCameraToRoom();
-    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_RACKS | REBUILD_TREATMENTS | REBUILD_FURNITURE);
+    queueRebuild(REBUILD_ROOM | REBUILD_SOURCES | REBUILD_LISTENERS | REBUILD_ZONES | REBUILD_HEATMAP | REBUILD_RACKS | REBUILD_TREATMENTS | REBUILD_FURNITURE | REBUILD_STRUCTURES);
   });
   // Rack-builder edits — user added/removed an amp or moved/rotated a
   // rack. v=700: also rebuild the heatmap so direct-path attenuation
@@ -1556,6 +1564,7 @@ function drawFrequencyResponse(canvas, sources, listenerPos) {
           furnitureCatalogue: getFurnitureCatalogueMap(),
           racks: state.rackSystem?.racks ?? [],
           rackCatalogue: _rackCatalogue,
+          structures: state.structures,
         }),
       }))
     : null;
@@ -7927,6 +7936,89 @@ function rebuildFurniture() {
 }
 
 // ---------------------------------------------------------------------------
+// Building structures — pillars / half-walls / partitions / beams / platforms.
+// Procedural extrusions built from the shared geometry helpers (structurePlanSize
+// / structureHeightRange in building-structures.js) so the 3D mesh, the 2D
+// footprint, and the physics prism all derive from one source. Coordinate
+// convention matches furniture: state +y → Three +z, state height → Three +y,
+// scene.scale.x = -1 handles the X mirror, so state.x/position.y are used
+// directly (no negation here).
+// ---------------------------------------------------------------------------
+let structuresGroup = null;
+
+// Approximate surface colour for a construction material id (visual only — the
+// acoustics read the real material row, not this colour).
+function _structureColour(materialId) {
+  const id = String(materialId || '').toLowerCase();
+  if (id.includes('glass') || id.includes('window')) return { color: 0xaaccdd, opacity: 0.35, transparent: true };
+  if (id.includes('gypsum') || id.includes('plaster') || id.includes('drywall')) return { color: 0xd8d4c8, opacity: 1, transparent: false };
+  if (id.includes('wood') || id.includes('timber')) return { color: 0x9a7b53, opacity: 1, transparent: false };
+  if (id.includes('brick') || id.includes('cmu') || id.includes('masonry') || id.includes('block')) return { color: 0x9a6450, opacity: 1, transparent: false };
+  if (id.includes('metal') || id.includes('steel')) return { color: 0x9097a0, opacity: 1, transparent: false };
+  return { color: 0x8a8d92, opacity: 1, transparent: false };   // concrete / default slate
+}
+
+function _buildStructureMesh(s, room) {
+  const { base, top } = structureHeightRange(s, room);
+  const h = Math.max(0.05, top - base);
+  let geo;
+  if (s.type === 'pillar' && s.crossSection === 'round') {
+    const r = Math.max(0.02, (Number(s.diameter_m) || 0.4) / 2);
+    geo = new THREE.CylinderGeometry(r, r, h, 24);
+  } else if (s.type === 'pillar' && s.crossSection === 'polygon') {
+    const r = Math.max(0.02, (Number(s.diameter_m) || 0.4) / 2);
+    const n = Math.max(3, Math.min(12, Number(s.sides) || 6));
+    geo = new THREE.CylinderGeometry(r, r, h, n);
+  } else {
+    const { lx, ly } = structurePlanSize(s);
+    geo = new THREE.BoxGeometry(Math.max(0.02, lx), h, Math.max(0.02, ly));
+  }
+  const c = _structureColour(s.materialId);
+  const mat = new THREE.MeshStandardMaterial({
+    color: c.color, roughness: 0.85, metalness: 0.0,
+    transparent: c.transparent, opacity: c.opacity,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+
+  const group = new THREE.Group();
+  group.add(mesh);
+  group.name = `structure:${s.id}`;
+  group.userData.structureId = s.id;
+  // Centre vertically between base and top; plan-centre at the footprint anchor.
+  group.position.set(s.position.x, base + h / 2, s.position.y);
+  group.rotation.y = ((s.rotation_deg || 0) * Math.PI) / 180;
+
+  if (state.selectedStructureId === s.id) {
+    const ring = _selectionRingFor(mesh);
+    if (ring) group.add(ring);
+  }
+  return group;
+}
+
+function rebuildStructures() {
+  shadowsNeedRefresh = true;
+  if (!scene) return;
+  if (!structuresGroup) {
+    structuresGroup = new THREE.Group();
+    structuresGroup.name = 'structures';
+    scene.add(structuresGroup);
+  } else {
+    disposeGroup(structuresGroup);
+  }
+  const structures = Array.isArray(state.structures) ? state.structures : [];
+  if (structures.length === 0) return;
+  const matCat = getStructureMaterialCatalogue();
+  for (const s of structures) {
+    if (!s || !s.position) continue;
+    const row = matCat && typeof matCat.get === 'function' ? matCat.get(s.materialId) : null;
+    if (row) s._cachedSpec = row;
+    structuresGroup.add(_buildStructureMesh(s, state.room));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Treatment placement — armed by the panel, the next click on a wall (or
 // the ceiling) drops a new treatment of the chosen productId at that
 // surface coord. Lives entirely in scene.js because the raycast against
@@ -8599,6 +8691,7 @@ function currentPhysicsOpts(room) {
           furnitureCatalogue: getFurnitureCatalogueMap(),
           racks: state.rackSystem?.racks ?? [],
           rackCatalogue: _rackCatalogue,
+          structures: state.structures,
         })
       : 0,
     // Per-band room constant — drives the Tier 1a Kuttruff wall
@@ -8614,6 +8707,7 @@ function currentPhysicsOpts(room) {
             furnitureCatalogue: getFurnitureCatalogueMap(),
             racks: state.rackSystem?.racks ?? [],
             rackCatalogue: _rackCatalogue,
+            structures: state.structures,
           }))
       : null,
     // Excludes outdoor sources (e.g. surau arcade speakers on the
@@ -12008,6 +12102,11 @@ function rebuildHeatmap() {
     // segment-AABB barrier model on the rack's outer footprint.
     racks: state.rackSystem?.racks ?? [],
     rackCatalogue: _rackCatalogue,
+    // v=756 — building structures (pillars/half-walls/etc.) attenuate the
+    // direct field via the diffraction + transmission model. structureMaterials
+    // resolves the raw materials.json rows (TL + α) the surface catalogue drops.
+    structures: state.structures,
+    structureMaterials: getStructureMaterialCatalogue(),
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
   // Publish the grid for the 3D legend to read (with metric tag so the

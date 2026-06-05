@@ -172,6 +172,8 @@ function buildFixtureState() {
   }];
   state.zones = [];
   state.treatments = [];
+  state.structures = [];
+  state.selectedStructureId = null;
   state.results = { splGrid: null };
 }
 
@@ -882,6 +884,65 @@ function assertOffsetCustomRoomFitsFrame() {
 }
 
 // --------------------------------------------------------------------
+// Building-structure footprint parity (2026-06-05).
+//
+// Pillars / half-walls / partitions / beams / platforms render on the 2D
+// viewport, the 3D viewport, AND the print plan SVG (and the print heatmap
+// FIELD reflects them via the physics). The cross-surface guarantee: every
+// surface derives the footprint from the SAME shared helpers in
+// js/physics/building-structures.js (structureFootprintCorners /
+// structureFootprintCircle / structurePlanSize / structureHeightRange) — never
+// a per-surface re-implementation. This is the 5th-rendering-concept guard
+// CLAUDE.md §3 calls out (the north-arrow-leak failure mode).
+// --------------------------------------------------------------------
+
+function assertStructureParity() {
+  // (1) Shared-helper grep gate — each render surface must import the geometry
+  //     from building-structures.js, not roll its own footprint math.
+  const grepGate = (file, helpers, label) => {
+    let src = '';
+    try { src = readFileSync(file, 'utf8'); } catch (e) { fail(`structure-parity: ${label} unreadable (${file})`, String(e)); return; }
+    ok(/from\s+['"][^'"]*physics\/building-structures(?:\.js)?['"]/.test(src),
+       `structure-parity: ${label} imports from physics/building-structures.js`);
+    for (const h of helpers) {
+      ok(new RegExp(`\\b${h}\\s*\\(`).test(src), `structure-parity: ${label} calls ${h}()`);
+    }
+  };
+  grepGate('js/graphics/room-2d.js', ['structureFootprintCorners'], '2d-viewport');
+  grepGate('js/ui/print-plan-svg.js', ['structureFootprintCorners'], 'print-plan');
+  grepGate('js/graphics/scene.js', ['structureHeightRange', 'structurePlanSize'], '3d-viewport');
+
+  // (2) Functional Y-flip parity — a round pillar placed at the SOURCE position
+  //     must project (in the print plan) to the SAME screen point as the source
+  //     triangle. Proves the structure footprint shares projectXY (offset +
+  //     Y-flip), not a divergent transform.
+  buildFixtureState();
+  state.structures = [{
+    id: 'S1', type: 'pillar', crossSection: 'round', diameter_m: 0.5,
+    materialId: 'concrete-painted', position: { x: SOURCE_POS.x, y: SOURCE_POS.y },
+    rotation_deg: 0, fullHeight: true,
+  }];
+  const svg = buildFloorPlanSVG(state);
+  // The structure circle is the grey one (fill #cfd2d6); the listener circle is
+  // green (#0a8a4a) so the regexes don't collide.
+  const pillar = svg.match(/<circle cx="([^"]+)" cy="([^"]+)" r="[^"]+" fill="#cfd2d6"/);
+  ok(!!pillar, 'structure-parity: pillar footprint circle present in print-plan SVG');
+  const srcPoly = svg.match(/<polygon points="([^"]+)" fill="[^"]+" stroke="#000" stroke-width="0\.04" \/>/);
+  if (pillar && srcPoly) {
+    const pcx = parseFloat(pillar[1]), pcy = parseFloat(pillar[2]);
+    const pts = srcPoly[1].split(/\s+/).map(p => p.split(',').map(Number));
+    const scx = pts.reduce((a, p) => a + p[0], 0) / 3;
+    const scy = pts.reduce((a, p) => a + p[1], 0) / 3;
+    ok(Math.abs(pcx - scx) < 0.1,
+       'structure-parity: pillar at source-X projects to the source screen-X (shared projectXY)',
+       `pillar cx=${pcx.toFixed(3)} vs source cx=${scx.toFixed(3)}`);
+    ok(Math.abs(pcy - scy) < 0.1,
+       'structure-parity: pillar at source-Y projects to the source screen-Y (shared Y-flip)',
+       `pillar cy=${pcy.toFixed(3)} vs source cy=${scy.toFixed(3)}`);
+  }
+}
+
+// --------------------------------------------------------------------
 // Run.
 // --------------------------------------------------------------------
 
@@ -914,6 +975,9 @@ assertPrintPlanCapturesNegativeGeometry();
 
 // Offset custom room fits + centers in the print frame (2026-06-04).
 assertOffsetCustomRoomFitsFrame();
+
+// Building-structure footprint parity (2026-06-05).
+assertStructureParity();
 
 // ---------------------------------------------------------------------------
 // Phase 7 — WallLAB thickness flowing into RoomLAB rendering.

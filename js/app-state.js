@@ -83,6 +83,46 @@ export function duplicateTreatment(id) {
   return copy.id;
 }
 
+// Building-structure selection — used by the 2D + 3D viewports'
+// click-to-select and the structures panel's selected-card highlight.
+// Holds the structure's `id` string ("S1", "S2"…) parallel to
+// selectedTreatmentId.
+export function getSelectedStructure() {
+  if (!state.selectedStructureId) return null;
+  return state.structures?.find(s => s.id === state.selectedStructureId) || null;
+}
+
+// Next free structure id ("S1", "S2"…), unique within the scene.
+export function nextStructureId() {
+  const used = new Set((state.structures ?? []).map(s => s.id).filter(Boolean));
+  let n = (state.structures?.length ?? 0) + 1;
+  while (used.has(`S${n}`)) n++;
+  return `S${n}`;
+}
+
+// Duplicate the structure with id `id`. Mirrors duplicateTreatment:
+// deep-copies every parametric field, strips the session-only material
+// cache, generates a fresh unique id, bumps the label, and nudges the
+// footprint +0.5 m on X so the copy doesn't render exactly on top.
+// Returns the new id, or null on failure.
+export function duplicateStructure(id) {
+  if (!Array.isArray(state.structures)) return null;
+  const idx = state.structures.findIndex(s => s.id === id);
+  if (idx < 0) return null;
+  const copy = JSON.parse(JSON.stringify(state.structures[idx]));
+  if (copy._cachedSpec) delete copy._cachedSpec;
+  const n = nextStructureId();
+  copy.id = n;
+  if (typeof copy.label === 'string' && copy.label.length > 0) {
+    copy.label = /\d+$/.test(copy.label)
+      ? copy.label.replace(/\d+$/, n.slice(1))
+      : `${copy.label} copy`;
+  }
+  if (copy.position) copy.position.x = (copy.position.x ?? 0) + 0.5;
+  state.structures.push(copy);
+  return copy.id;
+}
+
 // Source selection — used by the 2D viewport click-select + drag-to-move
 // interaction and the matching highlight on the sources panel cards.
 // Index into state.sources (NOT into the expanded element list); line
@@ -556,6 +596,46 @@ export const state = {
   // Currently-selected furniture id (parallel to selectedTreatmentId).
   // null = no item selected. Cleared by scene:reset and project load.
   selectedFurnitureId: null,
+  // Building structures placed inside the room — pillars/columns, half-wall
+  // partitions, full-height interior partitions, overhead beams/soffits, and
+  // raised platforms. Unlike furniture (a lumped absorber) these are
+  // structural obstructions that affect the acoustic result on THREE parallel
+  // energy-summed paths (Dr. Chen's spec): (1) diffraction around/over the
+  // obstacle (Maekawa/thick-barrier, js/physics/diffraction.js), (2) mass-law
+  // transmission THROUGH the obstacle (js/physics/wall-path.js), and (3) added
+  // absorbing/scattering surface area into RT60 + the Hopkins-Stryker room
+  // constant (js/physics/building-structures.js → rt60.js + spl-calculator.js).
+  // Every acoustic quantity derives from the material row in data/materials.json
+  // (α[], TL[], surface density, scattering) — material is mandatory, no
+  // hardcoded mean-α. 2D footprint in room-2d.js, 3D mesh in scene.js.
+  //
+  // Shape per entry (fields used depend on `type`):
+  //   {
+  //     id: "S1",                  // unique within scene
+  //     type: 'pillar'|'half_wall'|'partition'|'beam'|'platform',
+  //     label: string,             // display name
+  //     position: { x: m, y: m },  // plan footprint anchor (state +y = north)
+  //     rotation_deg: 0,           // yaw around vertical axis
+  //     materialId: "concrete-painted", // → data/materials.json row
+  //     elev_m: 0,                 // base above floor (plinths / stubs)
+  //     // pillar:
+  //     crossSection: 'round'|'square'|'polygon',
+  //     diameter_m, width_m, depth_m, sides,
+  //     // half_wall / partition:
+  //     length_m, height_m, thickness_m, fullHeight: bool,
+  //     openings: [ { x_m, z_m, width_m, height_m, state, materialId } ],
+  //     // beam: length_m, width_m, depth_m, soffitDrop_m
+  //     // platform: width_m, depth_m, height_m
+  //     _cachedSpec: object | undefined // session-only material row — NOT serialized
+  //   }
+  structures: [],
+  // Currently-selected structure id (parallel to selectedFurnitureId).
+  // null = no item selected. Cleared by scene:reset and project load.
+  selectedStructureId: null,
+  // Transient placement flag — { type } while the user has armed a structure
+  // type from the panel and the next 2D click will drop it. Not serialized;
+  // cleared on placement / cancel (mirrors furnitureArmed).
+  structureArmed: null,
   // Currently-selected placed rack id (parallel to selectedFurnitureId).
   // Drives the 2D viewport's selection ring + the DeviceLAB editor's
   // "edit placed rack" flow. Null when nothing is selected.
@@ -819,6 +899,13 @@ export function applyPresetToState(key) {
   if (Array.isArray(p.zones))     state.zones     = p.zones.map(deepClone);
   if (Array.isArray(p.sources))   state.sources   = p.sources.map(deepClone);
   if (Array.isArray(p.listeners)) state.listeners = p.listeners.map(deepClone);
+  // Building structures + treatments + furniture — preset-plumbing pattern
+  // (CLAUDE.md §3): a preset that ships structures must propagate them here,
+  // and tests/preset.test.mjs asserts it. resetSceneState already cleared
+  // these to [] above, so a preset with no entry leaves them empty.
+  if (Array.isArray(p.structures)) state.structures = p.structures.map(deepClone);
+  if (Array.isArray(p.treatments)) state.treatments = p.treatments.map(deepClone);
+  if (Array.isArray(p.furniture))  state.furniture  = p.furniture.map(deepClone);
   state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
   state.selectedSourceIdx  = null;
@@ -897,6 +984,9 @@ export function applyTemplateToState(key, dimsOverride) {
   if (Array.isArray(generated.zones))     state.zones     = generated.zones.map(deepClone);
   if (Array.isArray(generated.sources))   state.sources   = generated.sources.map(deepClone);
   if (Array.isArray(generated.listeners)) state.listeners = generated.listeners.map(deepClone);
+  if (Array.isArray(generated.structures)) state.structures = generated.structures.map(deepClone);
+  if (Array.isArray(generated.treatments)) state.treatments = generated.treatments.map(deepClone);
+  if (Array.isArray(generated.furniture))  state.furniture  = generated.furniture.map(deepClone);
   state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
   state.selectedVertexIdx  = null;
@@ -950,6 +1040,15 @@ export function serializeProject(src = state) {
       return deepClone(persistent);
     }),
     selectedFurnitureId: src.selectedFurnitureId ?? null,
+    // Building structures (pillars, half-walls, partitions, beams,
+    // platforms). Strip the session-only _cachedSpec (resolved material
+    // row — re-resolved from data/materials.json on first physics pass
+    // / render after load).
+    structures: (src.structures ?? []).map(s => {
+      const { _cachedSpec, ...persistent } = s;
+      return deepClone(persistent);
+    }),
+    selectedStructureId: src.selectedStructureId ?? null,
     physics: {
       reverberantField: !!src.physics?.reverberantField,
       coherent:         !!src.physics?.coherent,
@@ -1145,6 +1244,33 @@ export function deserializeProject(obj) {
     state.selectedFurnitureId = obj.selectedFurnitureId;
   } else {
     state.selectedFurnitureId = null;
+  }
+
+  // --- Building structures (pillars/half-walls/partitions/beams/platforms) ---
+  // Filter malformed entries defensively: id + a recognised type +
+  // position + materialId are mandatory. _cachedSpec is re-resolved from
+  // data/materials.json on first physics pass / render after load.
+  if (Array.isArray(obj.structures)) {
+    const VALID_TYPES = new Set(['pillar', 'half_wall', 'partition', 'beam', 'platform']);
+    state.structures = obj.structures
+      .filter(s => s && typeof s === 'object'
+        && typeof s.id === 'string'
+        && VALID_TYPES.has(s.type)
+        && typeof s.materialId === 'string'
+        && s.position && Number.isFinite(s.position.x)
+        && Number.isFinite(s.position.y))
+      .map(s => {
+        const { _cachedSpec, ...persistent } = s;
+        return deepClone(persistent);
+      });
+  } else {
+    state.structures = [];
+  }
+  if (typeof obj.selectedStructureId === 'string'
+      && state.structures.some(s => s.id === obj.selectedStructureId)) {
+    state.selectedStructureId = obj.selectedStructureId;
+  } else {
+    state.selectedStructureId = null;
   }
 
   // --- Physics + ambient + EQ — overlay scalars; arrays full replace ---

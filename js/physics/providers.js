@@ -31,10 +31,19 @@
 let _surfaceCatalogueGetter = null;   // () => { all: [{ id, absorption[], scattering_coefficient[] }], groups } | null
 let _furnitureCatalogueGetter = null; // () => Map<catalogueId, row>
 let _rackCatalogueGetter = null;      // () => { schema_version, racks: {...} } | null
+let _structureMaterialGetter = null;  // () => Map<materialId, rawMaterialRow>
 
 export function setSurfaceCatalogueProvider(fn) { _surfaceCatalogueGetter = typeof fn === 'function' ? fn : null; }
 export function setFurnitureCatalogueProvider(fn) { _furnitureCatalogueGetter = typeof fn === 'function' ? fn : null; }
 export function setRackCatalogueProvider(fn) { _rackCatalogueGetter = typeof fn === 'function' ? fn : null; }
+// Building-structure materials. Structures (pillars/half-walls/partitions/
+// beams/platforms) need the RAW materials.json row — absorption[],
+// scattering[], transmission_loss_db[], surface_density_kg_m2,
+// reference_thickness_m — because the surface (treatment) catalogue mapping
+// in surfacelab/catalog.js drops the TL + density fields the structure
+// physics depends on. So this is a SEPARATE provider that returns the
+// untouched materials.json rows keyed by id.
+export function setStructureMaterialProvider(fn) { _structureMaterialGetter = typeof fn === 'function' ? fn : null; }
 
 // TEST/ADOPTER hook — clear every registered provider (restores the
 // "no catalogue wired" defaults). Lets a test assert the fallback path.
@@ -42,6 +51,7 @@ export function _clearAllProviders() {
   _surfaceCatalogueGetter = null;
   _furnitureCatalogueGetter = null;
   _rackCatalogueGetter = null;
+  _structureMaterialGetter = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,4 +109,24 @@ export function getFurnitureCatalogue() {
 // Default null matches the old devicelab getRackCatalogue().
 export function getRackCatalogue() {
   return _rackCatalogueGetter ? _rackCatalogueGetter() : null;
+}
+
+// ---------------------------------------------------------------------------
+// Building-structure materials (raw materials.json rows)
+// ---------------------------------------------------------------------------
+
+// Map<materialId, rawRow>, or an empty Map when none wired / not yet loaded.
+// Each row carries the full acoustic spec: absorption[7], scattering[7],
+// transmission_loss_db[7], surface_density_kg_m2, reference_thickness_m.
+export function getStructureMaterialCatalogue() {
+  return _structureMaterialGetter ? _structureMaterialGetter() : new Map();
+}
+
+// The raw material row for a structure, or null when no catalogue is wired
+// or the id is unknown (deleted/typo). Callers treat null as "no acoustic
+// effect" (the engine's documented visual-only fallback).
+export function getStructureMaterial(id) {
+  const cat = getStructureMaterialCatalogue();
+  if (!cat || typeof cat.get !== 'function') return null;
+  return cat.get(id) ?? null;
 }

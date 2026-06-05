@@ -177,6 +177,10 @@ applyPresetToState('auditorium');
                                             // — each entry has {id, catalogueId, position, rotation_deg, label?},
                                             // contributes A_obj into rt60 as a parallel term per
                                             // Kuttruff §5.3 / Beranek §7.3.
+    'structures', 'selectedStructureId',   // Building structures — pillars/half-walls/partitions/
+                                            // beams/platforms (2026-06-05). Structural obstructions
+                                            // affecting SPL/RT60/STI via diffraction + transmission +
+                                            // absorption (js/physics/building-structures.js).
     'outdoor',     // outdoor-field config: {enabled, field_size_m, temperature_C,
                    // humidity_pct} — 4 small scalars, scene config like physics.
                    // serializeProject (app-state.js) emits it intentionally so a

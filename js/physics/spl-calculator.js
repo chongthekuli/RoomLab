@@ -28,6 +28,7 @@ import { extractPorches, computePorchReverbPower } from './porch-enclosure.js';
 import { classifySource, listWallFacets } from './source-classification.js';
 import { furnitureDirectPathLossDb } from './furniture-direct-blocking.js';
 import { rackDirectPathLossDb } from './rack-direct-blocking.js';
+import { structureDirectPathLossDb } from './building-structures.js';
 import {
   computeCouplingForAllBands,
   COUPLING_BANDS_HZ,
@@ -186,7 +187,7 @@ function partialCoherentPower(srcs, angFreq, c, lambda) {
 //
 // `airAbsorption` defaults to `true` and must only be set false by a
 // deliberate caller (physics-toggle UI) that also disabled 4mV in RT60.
-export function computeRoomConstant(room, materials, freq_hz, zones = [], { airAbsorption = true, treatments = [], furniture = [], furnitureCatalogue = null, racks = [], rackCatalogue = null } = {}) {
+export function computeRoomConstant(room, materials, freq_hz, zones = [], { airAbsorption = true, treatments = [], furniture = [], furnitureCatalogue = null, racks = [], rackCatalogue = null, structures = [] } = {}) {
   if (!materials?.frequency_bands_hz) return 0;
   // Phase A2: was indexOf-exact-match; now snaps to nearest band. In
   // practice the UI emits exact band centres from the picker, so this is
@@ -194,7 +195,7 @@ export function computeRoomConstant(room, materials, freq_hz, zones = [], { airA
   // centres now resolve to the nearest band instead of silently
   // returning 0 (no reverb at all).
   const bandIdx = bandIndexForFreq(materials, freq_hz);
-  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, treatments, furniture, furnitureCatalogue, racks, rackCatalogue, airAbsorption });
+  const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, treatments, furniture, furnitureCatalogue, racks, rackCatalogue, structures, airAbsorption });
   const S = rt.totalArea_m2;
   if (S <= 0) return 0;
   // rt.totalAbsorption_sabins already includes 4mV when airAbsorption is
@@ -289,7 +290,7 @@ export function localAngles(speakerPos, speakerAimDeg, listenerPos) {
   };
 }
 
-export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null, airAbsorptionFn = null, furniture = null, furnitureCatalogue = null, racks = null, rackCatalogue = null }) {
+export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz = 1000, room = null, materials = null, airAbsorption = true, eqGainDb = 0, outdoorObstacles = null, airAbsorptionFn = null, furniture = null, furnitureCatalogue = null, racks = null, rackCatalogue = null, structures = null, structureMaterials = null }) {
   const { r, azimuth_deg, elevation_deg } = localAngles(
     speakerState.position, speakerState.aim, listenerPos
   );
@@ -367,6 +368,24 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
     spl_db -= rack_loss_db;
   }
 
+  // Building-structure direct-path obstruction (v=756, 2026-06-05). A pillar,
+  // half-wall, partition, beam, or platform between speaker and listener
+  // attenuates the direct field via the energy-summed diffraction + mass-law
+  // transmission model (js/physics/building-structures.js, Dr. Chen spec).
+  // No-op when no structures or no resolved materials. structureMaterials is a
+  // Map<materialId, rawMaterialRow> from the structure-material provider (the
+  // raw materials.json rows carrying TL + α, which the surface-catalogue
+  // mapping drops).
+  let structure_loss_db = 0;
+  if (Array.isArray(structures) && structures.length > 0 && structureMaterials && materials?.frequency_bands_hz) {
+    structure_loss_db = structureDirectPathLossDb(
+      speakerState.position, listenerPos,
+      structures, structureMaterials,
+      materials.frequency_bands_hz, freq_hz, room,
+    );
+    spl_db -= structure_loss_db;
+  }
+
   return {
     r, azimuth_deg, elevation_deg, attn_db: attn, spl_db,
     through_wall,
@@ -375,6 +394,7 @@ export function computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_h
     outdoor_obstacle_loss_db,
     furniture_loss_db,
     rack_loss_db,
+    structure_loss_db,
   };
 }
 
@@ -583,6 +603,8 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
   furnitureCatalogue = null,  // v=679: Map<id, row> for sub-volume lookup
   racks = null,               // v=700: state.rackSystem.racks for direct-path blocking
   rackCatalogue = null,       // v=700: rack catalogue (raw JSON or Map)
+  structures = null,          // v=756: state.structures for direct-path obstruction
+  structureMaterials = null,  // v=756: Map<materialId, rawRow> (TL + α)
 } = {}) {
   const { sourceCtx, freq_hz, reverbActive, revConst_db, eqGainDb, L_p_rev_inside_per_band } = ctx;
   // Phase A5 (2026-05-24, Martina audit §2.B): ctx fields are now
@@ -657,6 +679,7 @@ export function computeMultiSourceSPLFromContext(ctx, listenerPos, {
       outdoorObstacles: obstacles, airAbsorptionFn,
       furniture, furnitureCatalogue,
       racks, rackCatalogue,
+      structures, structureMaterials,
     });
     const spl_db = d.spl_db;
     if (!isFinite(spl_db)) continue;
@@ -919,6 +942,8 @@ export function computeMultiSourceSPL({
   furnitureCatalogue = null,
   racks = null,                  // v=700 — direct-path blocking by placed racks
   rackCatalogue = null,
+  structures = null,             // v=756 — direct-path obstruction by building structures
+  structureMaterials = null,
 }) {
   // Phase 7 — gate the interior reverberant context on the listener's
   // geometric classification. When the listener is OUTSIDE the parent
@@ -972,6 +997,7 @@ export function computeMultiSourceSPL({
     room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn,
     furniture, furnitureCatalogue,
     racks, rackCatalogue,
+    structures, structureMaterials,
   });
 }
 
@@ -981,6 +1007,7 @@ export function computeListenerBreakdown({
   roomConstantR = 0, airAbsorption = true,
   furniture = null, furnitureCatalogue = null,
   racks = null, rackCatalogue = null,
+  structures = null, structureMaterials = null,
 }) {
   // Phase 7 — same listener-classification gate as computeMultiSourceSPL.
   // The reverb leak term below adds (4/R · L_w) to every per-source
@@ -996,7 +1023,7 @@ export function computeListenerBreakdown({
     const def = getSpeakerDef(src.modelUrl);
     const outsideRoom = room ? !isInsideRoom3D(src.position, room) : false;
     if (!def) return { idx: i, spl_db: -Infinity, r: null, azimuth_deg: null, modelUrl: src.modelUrl, outsideRoom, through_wall: false, tl_db_applied: 0 };
-    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room, materials, airAbsorption, outdoorObstacles: obstacles, furniture, furnitureCatalogue, racks, rackCatalogue });
+    const d = computeDirectSPL({ speakerDef: def, speakerState: src, listenerPos, freq_hz, room, materials, airAbsorption, outdoorObstacles: obstacles, furniture, furnitureCatalogue, racks, rackCatalogue, structures, structureMaterials });
     return {
       idx: i, spl_db: d.spl_db, r: d.r, azimuth_deg: d.azimuth_deg,
       modelUrl: src.modelUrl, outsideRoom,
@@ -1194,6 +1221,8 @@ export function computeSPLGrid({
   furnitureCatalogue = null,
   racks = null,                // v=700 — placed DeviceLAB racks for direct-path blocking
   rackCatalogue = null,
+  structures = null,           // v=756 — placed building structures for direct-path obstruction
+  structureMaterials = null,
 }) {
   const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
 
@@ -1305,7 +1334,7 @@ export function computeSPLGrid({
           })
         : ctxInside);
 
-  const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn, furniture, furnitureCatalogue, racks, rackCatalogue };
+  const evalOpts = { room, materials, coherent, temperature_C, airAbsorption, airAbsorptionFn, furniture, furnitureCatalogue, racks, rackCatalogue, structures, structureMaterials };
 
   // Phase 7 (Dr. Chen audit 2026-05-23): cells inside the PARENT footprint
   // but in the WALL-THICKNESS annulus (between outer + inner polygons) are

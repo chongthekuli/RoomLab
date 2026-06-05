@@ -25,6 +25,7 @@ import { mountListenersPanel } from '../../ui/panel-listeners.js';
 import { mountZonesPanel } from '../../ui/panel-zones.js';
 import { mountTreatmentsPanel } from '../../ui/panel-treatments.js';
 import { mountFurniturePanel } from '../../ui/panel-furniture.js';
+import { mountStructurePanel } from '../../ui/panel-structure.js';
 import { mountAmbientPanel } from '../../ui/panel-ambient.js';
 import { mountOutdoorPanel } from '../../ui/panel-outdoor.js';
 import { mountResultsPanel } from '../../ui/panel-results.js';
@@ -463,6 +464,11 @@ export async function mountRoomLab() {
   // (same idempotent loader as the lab page; cache is shared).
   mountFurniturePanel().catch(err =>
     console.warn('[roomlab] furniture panel mount failed:', err));
+  // Building-structure sidebar — parametric pillars / half-walls / partitions /
+  // beams / platforms. Async because it awaits the surface catalogue (registers
+  // the structure-material provider). Renders a stub immediately.
+  mountStructurePanel().catch(err =>
+    console.warn('[roomlab] structure panel mount failed:', err));
   mountAmbientPanel();
   mountOutdoorPanel();
   mountResultsPanel({ materials });

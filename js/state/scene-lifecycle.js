@@ -62,6 +62,13 @@ export function resetSceneState({ state, defaultRoomState, deepClone, projectNam
   // never leak placed objects from the previous scene.
   state.furniture = [];
   state.selectedFurnitureId = null;
+  // Building structures (pillars/half-walls/partitions/beams/platforms)
+  // placed via panel-structure.js — structural obstructions that affect
+  // SPL/RT60/STI (diffraction + transmission + absorption, physics ON in
+  // v1). Reset on every scene swap so preset/template/blank-custom never
+  // leak structures from the previous scene.
+  state.structures = [];
+  state.selectedStructureId = null;
   state.selectedZoneId     = null;
   state.selectedListenerId = null;
   state.selectedSpeakerUrl = null;

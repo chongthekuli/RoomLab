@@ -587,6 +587,7 @@ html[data-rail-left="listeners"] #panel-listeners,
 html[data-rail-left="zones"]     #panel-zones,
 html[data-rail-left="treatments"] #panel-treatments,
 html[data-rail-left="furniture"]  #panel-furniture,
+html[data-rail-left="structure"]  #panel-structure,
 html[data-rail-left="ambient"]   #panel-ambient,
 html[data-rail-left="library"]   #panel-library,
 html[data-rail-left="outdoor"]   #panel-outdoor,
@@ -7935,6 +7936,32 @@ section h3 {
 }
 .r2d-furniture.broken .r2d-furniture-label { fill: #ff9090; }
 
+/* Building-structure footprints in the 2D plan. Cool slate fill so they read
+   as architecture (vs furniture's warm clay). Walls/partitions use a denser
+   fill than pillars/platforms; selection switches to the shared cyan ring. */
+.r2d-structure { cursor: pointer; }
+.r2d-structure .r2d-structure-footprint {
+  fill: rgba(120, 134, 156, 0.30);
+  stroke: rgba(150, 165, 188, 0.9);
+  stroke-width: 1.2;
+}
+.r2d-structure-half_wall .r2d-structure-footprint,
+.r2d-structure-partition .r2d-structure-footprint,
+.r2d-structure-beam .r2d-structure-footprint {
+  fill: rgba(120, 134, 156, 0.45);
+}
+.r2d-structure-beam .r2d-structure-footprint { stroke-dasharray: 4,3; } /* overhead */
+.r2d-structure.selected .r2d-structure-footprint {
+  stroke: #00d4ff;
+  stroke-width: 2;
+  fill: rgba(0, 212, 255, 0.22);
+}
+.r2d-structure-label {
+  fill: #cfd6df;
+  font-size: 10px;
+  pointer-events: none;
+}
+
 /* Confidence-overlay legend chip inside the 2D viewport. Text styles
    here only — geometry is laid out in SVG coords by renderFurnitureConfidenceLegend. */
 .r2d-furn-confidence-legend .r2d-furn-leg-title {
@@ -8170,3 +8197,101 @@ section h3 {
   line-height: 1;
 }
 .pf-row-remove:hover { color: var(--data-red); background: rgba(255, 107, 107, 0.10); }
+
+/* ============================================================ */
+/* Building structure panel (ps-) — parametric pillars/walls/etc */
+/* Shares the furniture-panel visual language (theme tokens).     */
+/* ============================================================ */
+.ps-body { padding: 0 6px; display: grid; gap: 12px; }
+.ps-intro { font-size: 11px; color: var(--muted); margin: 0; line-height: 1.4; }
+.ps-note {
+  font-size: 10px; color: var(--muted); line-height: 1.4;
+  border-top: 1px solid var(--border); padding-top: 8px; margin: 4px 0 0 0;
+}
+.ps-add-head, .ps-placed-head {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--muted); font-weight: 600; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 6px;
+}
+.ps-chips { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.ps-chip {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--fg); cursor: pointer;
+  padding: 7px 4px; font-size: 10px; transition: border-color 100ms, background 100ms;
+}
+.ps-chip svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.ps-chip:hover { border-color: var(--accent); background: var(--bg-panel); }
+.ps-chip.armed { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--accent); }
+.ps-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.ps-armed {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: rgba(74, 163, 255, 0.10); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 7px 10px; font-size: 11px; color: var(--fg);
+}
+.ps-armed-cancel {
+  background: none; border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--muted); cursor: pointer; font-size: 10px; padding: 3px 8px;
+}
+.ps-armed-cancel:hover { color: var(--fg); border-color: var(--accent); }
+
+.ps-placed { border-top: 1px solid var(--border); padding-top: 10px; }
+.ps-count {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0 6px; font-size: 10px; color: var(--fg); text-transform: none;
+  letter-spacing: 0; font-weight: 600;
+}
+.ps-empty { font-size: 11px; color: var(--muted); font-style: italic; padding: 6px 0; line-height: 1.4; }
+.ps-placed-list { display: grid; gap: 4px; }
+.ps-row {
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+  display: grid; grid-template-columns: 1fr auto; align-items: stretch;
+}
+.ps-row.selected { border-color: #00d4ff; box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.3); grid-template-columns: 1fr auto; }
+.ps-row-head {
+  background: none; border: none; text-align: left; cursor: pointer;
+  display: grid; grid-template-columns: 26px 1fr; grid-auto-rows: min-content;
+  align-items: center; gap: 2px 8px; padding: 6px 8px; color: var(--fg); font-size: 11px;
+}
+.ps-row-head:hover { background: var(--bg-panel); }
+.ps-row-id { font-family: var(--font-mono, monospace); color: var(--muted); font-size: 10px; font-weight: 600; grid-row: 1 / span 2; }
+.ps-row-name { color: var(--fg); font-weight: 600; }
+.ps-row-meta { grid-column: 2; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.ps-row-remove {
+  background: none; border: none; border-left: 1px solid var(--border);
+  color: var(--muted); padding: 6px 10px; font-size: 14px; cursor: pointer; line-height: 1;
+}
+.ps-row-remove:hover { color: var(--data-red); background: rgba(255, 107, 107, 0.10); }
+
+/* Inline editor (expanded card) */
+.ps-editor {
+  grid-column: 1 / -1; border-top: 1px solid var(--border);
+  padding: 8px; display: grid; gap: 7px; background: var(--bg-panel);
+}
+.ps-field { display: grid; grid-template-columns: 78px 1fr auto; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.ps-field-wide { grid-template-columns: 78px 1fr; }
+.ps-field > span:first-child { color: var(--muted); }
+.ps-field input, .ps-field select {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--fg); font-size: 11px; padding: 4px 6px; width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.ps-field input:focus, .ps-field select:focus { outline: none; border-color: var(--accent); }
+.ps-unit { color: var(--muted); font-size: 10px; min-width: 18px; }
+.ps-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ps-row2 .ps-field { grid-template-columns: 58px 1fr auto; }
+.ps-check { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg); cursor: pointer; }
+.ps-seg { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+.ps-seg-btn {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--muted); cursor: pointer; font-size: 10.5px; padding: 4px 2px;
+}
+.ps-seg-btn.on { border-color: var(--accent); color: var(--accent); background: rgba(74, 163, 255, 0.10); }
+.ps-editor-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.ps-dup {
+  background: none; border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--muted); cursor: pointer; font-size: 10px; padding: 4px 10px;
+}
+.ps-dup:hover { color: var(--accent); border-color: var(--accent); }

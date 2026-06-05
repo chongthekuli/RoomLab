@@ -22,6 +22,7 @@ import { roomEffectiveBounds } from '../physics/room-shape.js';
 import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
 import { renderRackFootprintSVG, lookupRackDef } from '../graphics/rack-2d.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
+import { structureFootprintCorners, structureFootprintCircle } from '../physics/building-structures.js';
 
 // 1.5m margin gives the North arrow + scale bar enough room to live
 // fully inside the top-right and bottom-left margin bands without ever
@@ -372,6 +373,30 @@ export function buildFloorPlanSVG(state, opts = {}) {
     return s;
   })();
 
+  // Building structures (pillars / half-walls / partitions / beams / platforms).
+  // Monochrome by the print contract: light-grey fill, black stroke. Footprints
+  // come from the SAME shared helpers the live 2D viewport + the physics prism
+  // use (structureFootprintCorners / Circle) so the print plan can't drift from
+  // screen — cross-surface convention (Sam). projectXY applies the Y-flip.
+  const structuresEl = (state.structures || []).map((st) => {
+    if (!st || !st.position) return '';
+    const circle = structureFootprintCircle(st);
+    let shape;
+    if (circle) {
+      const c = projectXY(circle.cx, circle.cy, anchorY, offsetX);
+      shape = `<circle cx="${c.sx.toFixed(3)}" cy="${c.sy.toFixed(3)}" r="${circle.r.toFixed(3)}" fill="#cfd2d6" stroke="#1c1c1c" stroke-width="0.04" />`;
+    } else {
+      const pts = structureFootprintCorners(st).map(pt => {
+        const p = projectXY(pt.x, pt.y, anchorY, offsetX);
+        return `${p.sx.toFixed(3)},${p.sy.toFixed(3)}`;
+      }).join(' ');
+      shape = `<polygon points="${pts}" fill="#cfd2d6" stroke="#1c1c1c" stroke-width="0.04" />`;
+    }
+    const lc = projectXY(st.position.x, st.position.y, anchorY, offsetX);
+    const lbl = `<text x="${lc.sx.toFixed(3)}" y="${(lc.sy + 0.5).toFixed(3)}" font-size="0.34" text-anchor="middle" fill="#1a1a1a">${escapeText(st.label || st.id)}</text>`;
+    return shape + lbl;
+  }).join('');
+
   // Surau minaret — filled mid-grey square + crescent (or dome) glyph
   // at the outdoor corner specified by surauStructure.minaret.corner.
   // Mirrors the live 2D viewport rendering so the printed plan stays
@@ -441,7 +466,7 @@ export function buildFloorPlanSVG(state, opts = {}) {
   // the print pipeline rasterises them with the rest of the document
   // (a separate <svg defs> would be lost when the report node is
   // cloned into the print iframe).
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg"><defs>${WALL_HATCH_DEFS_PRINT}</defs>${roomEl}${zonesEl}${minaretEl}${rackEl}${sourcesEl}${listenersEl}${wallLabelsEl}${scaleBarEl}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewW.toFixed(3)} ${viewH.toFixed(3)}" preserveAspectRatio="xMidYMid meet" class="pr-plan-svg"><defs>${WALL_HATCH_DEFS_PRINT}</defs>${roomEl}${zonesEl}${structuresEl}${minaretEl}${rackEl}${sourcesEl}${listenersEl}${wallLabelsEl}${scaleBarEl}</svg>`;
 }
 
 // Build a small legend block (paste-ready HTML) that names the symbol
