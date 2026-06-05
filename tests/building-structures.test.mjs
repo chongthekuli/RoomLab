@@ -15,6 +15,7 @@ import {
   _testing,
 } from '../js/physics/building-structures.js';
 import { computeAllBands } from '../js/physics/rt60.js';
+import { computeDirectSPL, computeMultiSourceSPL } from '../js/physics/spl-calculator.js';
 
 let failed = 0;
 function ok(cond, label, info = '') {
@@ -210,6 +211,41 @@ const alphaAt = (id, bi) => mats.get(id)?.absorption[bi] ?? 0;
   const hr = structureHeightRange(halfWall({ height_m: 1.1 }), room);
   ok(Math.abs(hr.top - 1.1) < 1e-9, 'half-wall top = height_m', `(${hr.top})`);
   ok(structureExposedArea(pillar({ crossSection: 'round', diameter_m: 0.4 }), room) > 0, 'round pillar exposed area > 0');
+}
+
+// =====================================================================
+// INTEGRATION — the loss must flow through computeDirectSPL AND
+// computeMultiSourceSPL, because those are the calls the heatmap, the
+// per-listener breakdown, AND the 2D dot-label path (per-listener-metrics.js)
+// all use. Guards the regression where the standalone loss worked but a
+// call site forgot to pass structures/structureMaterials (the dot label
+// silently ignored pillars — v=757 bug).
+// =====================================================================
+{
+  const splMaterials = {
+    frequency_bands_hz: BANDS,
+    byId: {
+      'concrete-painted': { absorption: mats.get('concrete-painted').absorption },
+      'gypsum-board': { absorption: mats.get('gypsum-board').absorption },
+    },
+  };
+  const speakerDef = { acoustic: { sensitivity_db_1w_1m: 97 }, directivity: { azimuth_deg: [-180, 0, 180], elevation_deg: [-90, 0, 90], attenuation_db: { '4000': [[0, 0, 0], [0, 0, 0], [0, 0, 0]] } } };
+  const speakerState = { position: { x: 1, y: 4, z: 1.5 }, aim: { yaw: 0, pitch: 0, roll: 0 }, power_watts: 50 };
+  const listenerPos = { x: 9, y: 4, z: 1.2 };
+  const blockingPillar = [pillar({ diameter_m: 0.8 })];
+
+  // computeDirectSPL — with vs without the blocking pillar at 4 kHz.
+  const clear = computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz: 4000, room, materials: splMaterials });
+  const blocked = computeDirectSPL({ speakerDef, speakerState, listenerPos, freq_hz: 4000, room, materials: splMaterials, structures: blockingPillar, structureMaterials: mats });
+  ok(blocked.spl_db < clear.spl_db - 3, 'computeDirectSPL: blocking pillar drops SPL ≥3 dB @ 4 kHz', `(clear ${clear.spl_db.toFixed(1)} → blocked ${blocked.spl_db.toFixed(1)})`);
+  ok(Number.isFinite(blocked.structure_loss_db) && blocked.structure_loss_db > 0, 'computeDirectSPL: exposes structure_loss_db > 0', `(${blocked.structure_loss_db?.toFixed(2)})`);
+
+  // computeMultiSourceSPL — the call per-listener-metrics.js uses for the dot label.
+  const getDef = () => speakerDef;
+  const srcs = [speakerState];
+  const msClear = computeMultiSourceSPL({ sources: srcs, getSpeakerDef: getDef, listenerPos, freq_hz: 4000, room, materials: splMaterials });
+  const msBlocked = computeMultiSourceSPL({ sources: srcs, getSpeakerDef: getDef, listenerPos, freq_hz: 4000, room, materials: splMaterials, structures: blockingPillar, structureMaterials: mats });
+  ok(msBlocked < msClear - 3, 'computeMultiSourceSPL (dot-label path): blocking pillar drops SPL ≥3 dB @ 4 kHz', `(clear ${msClear.toFixed(1)} → blocked ${msBlocked.toFixed(1)})`);
 }
 
 console.log(failed === 0 ? '\nAll building-structures tests PASSED' : `\n${failed} test(s) FAILED`);

@@ -21,7 +21,7 @@ import { earHeightFor, expandSources } from './source-expand.js';
 import { computeMultiSourceSPL, computeRoomConstant } from './spl-calculator.js';
 import { getCachedLoudspeaker } from './loudspeaker.js';
 import { deriveMetrics } from './precision/derive-metrics.js';
-import { getFurnitureCatalogue, getRackCatalogue } from './providers.js';
+import { getFurnitureCatalogue, getRackCatalogue, getStructureMaterialCatalogue } from './providers.js';
 
 export function computePerListenerMetrics(state, materials) {
   const listeners = state.listeners ?? [];
@@ -37,6 +37,7 @@ export function computePerListenerMetrics(state, materials) {
         furnitureCatalogue: getFurnitureCatalogue(),
         racks: state.rackSystem?.racks ?? [],
         rackCatalogue: getRackCatalogue(),
+        structures: state.structures,
       })
     : 0;
 
@@ -79,6 +80,8 @@ export function computePerListenerMetrics(state, materials) {
           furnitureCatalogue: getFurnitureCatalogue(),
           racks: state.rackSystem?.racks ?? [],
           rackCatalogue: getRackCatalogue(),
+          structures: state.structures,
+          structureMaterials: getStructureMaterialCatalogue(),
         });
         if (Number.isFinite(v)) spl_db = v;
       } catch (err) {
