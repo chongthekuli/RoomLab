@@ -38,6 +38,7 @@ import { computePerListenerMetrics } from '../physics/per-listener-metrics.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 import { getStructureMaterialCatalogue } from '../physics/providers.js';
+import { schroederFrequency } from '../physics/schroeder.js';
 import { sumFurnitureAbsorption } from '../physics/furniture-absorption.js';
 import { getAcceptanceTimestamp, getAcceptanceRecord } from './welcome-card.js';
 import { findCatalogueEntry } from '../labs/surfacelab/catalog.js';
@@ -144,9 +145,7 @@ export function buildPrintModel({ materials, nameHint } = {}) {
 
   // Schroeder cutoff f_s = 2000·√(T60/V). Below this frequency the
   // room is modal; statistical-acoustics figures lose physical meaning.
-  const schroederCutoff_hz = (t60_1k && t60_1k > 0 && volume > 0)
-    ? 2000 * Math.sqrt(t60_1k / volume)
-    : null;
+  const schroederCutoff_hz = schroederFrequency(t60_1k, volume);
 
   // SPL heatmap grid. Re-uses the cached state.results.splGrid when the
   // user has already visited the 2D viewport this session — that grid
@@ -360,6 +359,9 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
       // heatmap matches the live viewports.
       structures: state.structures,
       structureMaterials: getStructureMaterialCatalogue(),
+      // v=759 — zones + treatments for the low-frequency modal field RT60.
+      zones: state.zones,
+      treatments: state.treatments,
     });
   } catch (err) {
     console.warn('[print-report] heatmap grid compute failed:', err);
@@ -647,7 +649,7 @@ export function buildTreatmentCompareModel({ room, materials, zones, treatments 
   const bareAlpha1k    = bareBands[3]?.meanAbsorption ?? null;
   const treatedAlpha1k = treatedBands[3]?.meanAbsorption ?? null;
 
-  const schroederOf = (t60, V) => (t60 && t60 > 0 && V > 0) ? 2000 * Math.sqrt(t60 / V) : null;
+  const schroederOf = (t60, V) => schroederFrequency(t60, V);
   const bareSchroeder    = schroederOf(bareT1k, volume);
   const treatedSchroeder = schroederOf(treatedT1k, volume);
 

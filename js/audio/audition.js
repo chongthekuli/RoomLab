@@ -33,6 +33,7 @@
 // reflects the most recent precision render + listener selection.
 
 import { computeRectangularModes, buildModeFilterChain } from './room-modes.js';
+import { schroederFrequency } from '../physics/schroeder.js';
 import { LiveDirectPathChain, subtractAnalyticalDirect } from './direct-path.js';
 import { state, expandSources } from '../app-state.js';
 import { computeMultiSourceSPL } from '../physics/spl-calculator.js';
@@ -722,7 +723,7 @@ export async function startAudition({ precisionResult, receiverIdx }) {
     const listenerPos = receiverWorldPos(precisionResult, receiverIdx);
     const t60 = precisionResult?.metricsCache?.[receiverIdx]?.broadband?.t30_s ?? 0.4;
     const V = (room.width_m ?? 0) * (room.depth_m ?? 0) * (room.height_m ?? 0);
-    const schroederHz = V > 0 && t60 > 0 ? 2000 * Math.sqrt(t60 / V) : 200;
+    const schroederHz = schroederFrequency(t60, V) ?? 200;
     const modes = computeRectangularModes({
       width_m: room.width_m, depth_m: room.depth_m, height_m: room.height_m,
       sourcePos, listenerPos, t60_s: t60, schroederHz, roomVolume_m3: V,

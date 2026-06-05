@@ -5,6 +5,7 @@ import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 import { getStructureMaterialCatalogue } from '../physics/providers.js';
 import { structureFootprintCorners, structureFootprintCircle } from '../physics/building-structures.js';
+import { lowFreqCaption } from '../physics/modal-field.js';
 import { makeStructure } from '../ui/panel-structure.js';
 import { colorForReliability, reliabilityLegendRows } from '../labs/furniturelab/reliability-colors.js';
 import { computeAllBands, preferredRT60 } from '../physics/rt60.js';
@@ -1587,6 +1588,9 @@ function renderNormal(vp) {
       // so 2D + 3D heatmaps agree. structureMaterials = raw materials.json rows.
       structures: state.structures,
       structureMaterials: getStructureMaterialCatalogue(),
+      // v=759 — zones + treatments for the low-frequency modal field RT60.
+      zones: state.zones,
+      treatments: state.treatments,
     });
     if (splResult.sourceCount > 0 && isFinite(splResult.maxSPL_db)) {
       state.results.splGrid = splResult;
@@ -3888,6 +3892,9 @@ function renderLegend(splResult) {
     const dataCapHtml = dataCap
       ? `<span class="spl-legend-data-caption">${dataCap}</span>`
       : '';
+    // Low-frequency modal / statistical disclosure (Dr. Chen, 2026-06-05).
+    const lfCap = lowFreqCaption({ freq_hz: freqHz, schroeder_hz: splResult.schroeder_hz, modalApplied: splResult.modalApplied });
+    const lfCapHtml = lfCap ? `<span class="spl-legend-lf-caption">${lfCap}</span>` : '';
     return `<div class="vp-legend spl-legend spl-legend-v">
       <span class="legend-header">${legendHeader('spl', freqHz)}</span>
       <div class="spl-legend-stage">
@@ -3895,6 +3902,7 @@ function renderLegend(splResult) {
         <div class="spl-legend-ticks">${minorRows}${tickRows}</div>
       </div>
       ${dataCapHtml}
+      ${lfCapHtml}
       <span class="legend-footnote">re 20 µPa</span>
     </div>`;
   }

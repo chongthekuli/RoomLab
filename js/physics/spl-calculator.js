@@ -5,8 +5,10 @@
 // may NOT use it to provide a product that competes with AuraLAB.
 
 import { interpolateAttenuation } from './loudspeaker.js';
-import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea, roomEffectiveBounds, roomSurfaces, maxCeilingHeightAt } from './room-shape.js';
-import { computeRT60Band } from './rt60.js';
+import { isInsideRoom3D, wallPerimeter, baseArea, ceilingArea, roomEffectiveBounds, roomSurfaces, maxCeilingHeightAt, roomVolume } from './room-shape.js';
+import { computeRT60Band, preferredRT60 } from './rt60.js';
+import { computeModalField, blendModalIntoBaseline } from './modal-field.js';
+import { schroederFrequency } from './schroeder.js';
 import {
   AIR_ABSORPTION_DB_PER_M as AIR_ABS_TABLE,
   airAbsorptionDbPerM, airSabins, airAbsorptionDbPerM_param,
@@ -1223,6 +1225,11 @@ export function computeSPLGrid({
   rackCatalogue = null,
   structures = null,           // v=756 — placed building structures for direct-path obstruction
   structureMaterials = null,
+  // v=759 — zones + treatments let the grid recompute the per-band RT60 it
+  // needs for the low-frequency MODAL field (Schroeder frequency + modal Q).
+  // Default [] keeps legacy callers (and the bare-room modal estimate) valid.
+  zones = [],
+  treatments = [],
 }) {
   const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
 
@@ -1439,6 +1446,61 @@ export function computeSPLGrid({
     grid.push(row);
   }
 
+  // ---- Low-frequency MODAL field (Dr. Chen spec, 2026-06-05) -------------
+  // Below the Schroeder frequency a rectangular room is modal, not diffuse:
+  // standing waves put pressure maxima at the walls/corners and nulls between.
+  // The statistical field above cannot express that spatial structure (it's a
+  // single scalar added everywhere + a 1/r² direct term with no boundary
+  // gain), so at 125/250 Hz in a small room the heatmap is flat-wrong. Blend
+  // an analytic rigid-wall modal field in, normalised to the statistical
+  // band-mean (so it only REDISTRIBUTES energy — hot walls / cold nulls) and
+  // crossfaded out by ~1.5·f_s so the trusted mid/high bands are untouched.
+  // Gated to: SPL metric, indoor, reverberant field ON, rectangular room.
+  // Non-rectangular / outdoor / STI keep the existing path + the disclosure
+  // caption. See js/physics/modal-field.js.
+  let schroeder_hz = null;     // exposed so the legend can show the LF caption
+  let modalApplied = false;    // true when the modal field was actually blended
+  if (!useSTI && !outdoor && roomConstantR > 0 && materials?.frequency_bands_hz) {
+    const V = roomVolume(room);
+    const bandIdx = bandIndexForFreq(materials, freq_hz);
+    const rt = computeRT60Band({ room, materials, bandIndex: bandIdx, zones, treatments,
+      furniture, furnitureCatalogue, racks, rackCatalogue, structures, airAbsorption });
+    const t60_s = preferredRT60(rt);
+    const f_s = schroederFrequency(t60_s, V);
+    schroeder_hz = Number.isFinite(f_s) ? f_s : null;
+    // Modal field is only analytically available for rectangular (shoebox)
+    // rooms. Non-rectangular rooms keep the statistical field + the legend
+    // discloses that the LF prediction is statistical, not modal.
+    if (f_s > 0 && room?.shape === 'rectangular') {
+      const cells = [];
+      const baselineFlat = [];
+      for (let j = 0; j < cellsY; j++) {
+        for (let i = 0; i < cellsX; i++) {
+          cells.push({ x: originX_m + (i + 0.5) * cellW_m, y: originY_m + (j + 0.5) * cellD_m });
+          baselineFlat.push(grid[j][i]);
+        }
+      }
+      const modalSources = sources.map(s => ({
+        x: s.position?.x, y: s.position?.y, z: s.position?.z ?? earHeight_m,
+        weight: Number.isFinite(s.power_watts) ? s.power_watts : 1,
+      }));
+      const modal = computeModalField({ room, sources: modalSources, freq_hz, t60_s, f_s, cells, earZ: earHeight_m });
+      if (modal) {
+        modalApplied = true;
+        const blended = blendModalIntoBaseline(baselineFlat, modal);
+        minVal = Infinity; maxVal = -Infinity; sum = 0; count = 0;
+        let k = 0;
+        for (let j = 0; j < cellsY; j++) {
+          for (let i = 0; i < cellsX; i++) {
+            const v = blended[k++];
+            grid[j][i] = v;
+            if (isFinite(v)) { if (v < minVal) minVal = v; if (v > maxVal) maxVal = v; sum += v; count++; }
+          }
+        }
+      }
+    }
+  }
+
   const hasResults = count > 0;
   return {
     grid, cellsX, cellsY, cellW_m, cellD_m,
@@ -1454,5 +1516,10 @@ export function computeSPLGrid({
     freq_hz, earHeight_m,
     sourceCount: sources.length,
     outdoor,
+    // Low-frequency regime metadata for the legend caption. schroeder_hz is
+    // the modal/statistical boundary; modalApplied is true when the analytic
+    // modal field was blended (rectangular rooms below ~1.5·f_s).
+    schroeder_hz,
+    modalApplied,
   };
 }

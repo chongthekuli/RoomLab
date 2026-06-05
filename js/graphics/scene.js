@@ -44,6 +44,7 @@ import { buildSampleGroup } from '../labs/surfacelab/surface-3d-preview.js';
 import { getFurnitureCatalogue as getFurnitureCatalogueMap } from '../labs/furniturelab/catalog.js';
 import { getStructureMaterialCatalogue } from '../physics/providers.js';
 import { structureHeightRange, structurePlanSize } from '../physics/building-structures.js';
+import { lowFreqCaption } from '../physics/modal-field.js';
 
 let scene, camera, renderer, controls;
 let composer, ssaoPass, bloomPass;
@@ -12107,6 +12108,10 @@ function rebuildHeatmap() {
     // resolves the raw materials.json rows (TL + α) the surface catalogue drops.
     structures: state.structures,
     structureMaterials: getStructureMaterialCatalogue(),
+    // v=759 — zones + treatments so the grid can recompute per-band RT60 for
+    // the low-frequency modal field (Schroeder frequency + modal Q).
+    zones: state.zones,
+    treatments: state.treatments,
   });
   if (!splResult.sourceCount || !isFinite(splResult.maxSPL_db)) return;
   // Publish the grid for the 3D legend to read (with metric tag so the
@@ -12307,9 +12312,17 @@ function updateSPLLegend() {
   }
   if (dataCapEl) {
     const txt = formatDataBracket(minVal, maxVal, tickMode);
-    if (txt) {
+    // Low-frequency modal / statistical disclosure (Dr. Chen, 2026-06-05) —
+    // appended to the 3D legend's data caption so 2D + 3D disclose the same
+    // thing. SPL bands only; reads the regime metadata off the live grid.
+    const sg = state.results?.splGrid;
+    const lf = (tickMode !== 'stipa' && sg)
+      ? lowFreqCaption({ freq_hz: state.physics?.freq_hz ?? 1000, schroeder_hz: sg.schroeder_hz, modalApplied: sg.modalApplied })
+      : '';
+    const combined = [txt, lf].filter(Boolean).join('  ·  ');
+    if (combined) {
       dataCapEl.style.display = '';
-      dataCapEl.textContent = txt;
+      dataCapEl.textContent = combined;
     } else {
       dataCapEl.style.display = 'none';
     }

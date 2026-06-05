@@ -22,6 +22,7 @@ import { precomputeSTIPAContext, signalSPLPerBandAt } from '../physics/stipa.js'
 import { applyGlossary } from './glossary.js';
 import { startAudition, startOriginalPlayback, stopAudition, isAuditionPlaying, getAuditionMode, isAuditionInWalkMode, checkSampleAvailable, listAuditionSamplesForScene, getAuditionSampleId, setAuditionSample } from '../audio/audition.js';
 import { airAbsorptionDbPerM } from '../physics/air-absorption.js';
+import { schroederFrequency } from '../physics/schroeder.js';
 
 let materialsRef;
 let currentAbort = null;
@@ -399,7 +400,7 @@ function updateSchroederNote(result, metrics) {
     note.hidden = true;
     return;
   }
-  const fs = 2000 * Math.sqrt(t60 / V);
+  const fs = schroederFrequency(t60, V);
   if (!Number.isFinite(fs) || fs < 50) {
     note.hidden = true;
     return;
