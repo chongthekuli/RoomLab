@@ -180,6 +180,19 @@ function rackGrid() {
   return racks;
 }
 
+// The helpers above lay everything out about the ROOM CENTRE (x∈[-30,30],
+// y∈[-60,60]) because that is how the architect + cooling specs reason. But
+// RoomLab's rectangular rooms use a CORNER origin: the room spans [0,W]×[0,D]
+// and its centre is (W/2, D/2) (see room-shape.js defaultInsidePosition).
+// Shift every placement into that frame in one place. Coordinates left of the
+// west wall (chillers, exterior points) stay negative — that's outside the
+// shell, which is intentional.
+const CX = W / 2, CY = D / 2;
+const toCorner = (item) => ({
+  ...item,
+  position: { ...item.position, x: item.position.x + CX, y: item.position.y + CY },
+});
+
 const preset = {
   label: 'Google Data Center',
   authorComments:
@@ -209,21 +222,22 @@ const preset = {
   // Overhead ladder cable-trays above every rack row (derived from racks).
   cableTrays: true,
   // Halls (5 demising walls = 10 split segments) + the 16-unit chiller yard.
-  structures: [...partitionSegments(), ...chillerYard()],
+  structures: [...partitionSegments(), ...chillerYard()].map(toCorner),
   // 200 racks in DH-1, each fully loaded with 21× QD2100.
-  rackSystem: { racks: rackGrid() },
+  rackSystem: { racks: rackGrid().map(toCorner) },
   // Voice-alarm ceiling PA across the data halls — the evacuation system
   // the rack QD2100s drive (EN 54-16). Gives the preset a real SPL + STIPA
   // result on top of the RT60 of the hard box.
-  sources: vaSpeakers(),
+  sources: vaSpeakers().map(toCorner),
   zones: [],
-  // A few measurement points: the control room, a DH-1 cold aisle, and the
-  // chiller-yard boundary.
+  // A few measurement points: the control room, a DH-1 cold aisle, and a
+  // west service aisle by the chiller wall (all in centre-origin coords,
+  // shifted to the corner frame by toCorner).
   listeners: [
-    { id: 'L-noc',     label: 'NOC / control',      position: { x: 0,   y: -54 }, elevation_m: 0, posture: 'sitting_chair', custom_ear_height_m: null },
-    { id: 'L-aisle',   label: 'DH-1 cold aisle',    position: { x: 0,   y: -15 }, elevation_m: 0, posture: 'standing',     custom_ear_height_m: null },
-    { id: 'L-yard',    label: 'Chiller-yard fence', position: { x: -42, y: 0   }, elevation_m: 0, posture: 'standing',     custom_ear_height_m: null },
-  ],
+    { id: 'L-noc',   label: 'NOC / control',     position: { x: 0,   y: -54 }, elevation_m: 0, posture: 'sitting_chair', custom_ear_height_m: null },
+    { id: 'L-aisle', label: 'DH-1 cold aisle',   position: { x: 0,   y: -15 }, elevation_m: 0, posture: 'standing',     custom_ear_height_m: null },
+    { id: 'L-west',  label: 'West service aisle', position: { x: -25, y: 0   }, elevation_m: 0, posture: 'standing',     custom_ear_height_m: null },
+  ].map(toCorner),
 };
 
 export default preset;

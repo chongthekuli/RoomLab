@@ -189,6 +189,22 @@ assert(state.sources.length === 12 && state.sources.every(s => s.groupId === 'VA
   `Google DC: 12-speaker voice-alarm PA grid (got ${state.sources.length})`);
 assert(state.room.width_m === 60 && state.room.depth_m === 120 && state.room.height_m === 12,
   'Google DC: representative 60×120×12 m shell');
+// Coordinate-frame guard (v=766 regression): RoomLab rectangular rooms use a
+// CORNER origin — interior content must fall within [0,W]×[0,D], NOT centred
+// on (0,0). The first cut placed everything about the room centre, so racks /
+// halls / speakers rendered a half-building down-and-left of the shell.
+const W_ = state.room.width_m, D_ = state.room.depth_m;
+assert(state.rackSystem.racks.every(r => r.position.x >= 0 && r.position.x <= W_ && r.position.y >= 0 && r.position.y <= D_),
+  'Google DC: all 200 racks sit INSIDE the building footprint [0,W]×[0,D]');
+assert(state.sources.every(s => s.position.x >= 0 && s.position.x <= W_ && s.position.y >= 0 && s.position.y <= D_),
+  'Google DC: all VA speakers sit inside the building footprint');
+assert(state.listeners.every(l => l.position.x >= 0 && l.position.x <= W_ && l.position.y >= 0 && l.position.y <= D_),
+  'Google DC: all listeners sit inside the building footprint');
+assert(partitions.every(p => p.position.x >= 0 && p.position.x <= W_ && p.position.y >= 0 && p.position.y <= D_),
+  'Google DC: partition walls sit inside the building footprint');
+// Chillers are EXTERIOR by design — west of the west wall (x < 0).
+assert(chillerBodies.every(c => c.position.x < 0) && chillerPads.every(c => c.position.x < 0),
+  'Google DC: chiller yard sits OUTSIDE the west wall (x < 0), as intended');
 // Swap away must clear the cable-tray flag (no leak to the next scene).
 applyTemplateToState('hifi');
 assert(state.room.cableTrays === false,
