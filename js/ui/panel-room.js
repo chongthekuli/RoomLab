@@ -11,6 +11,7 @@ import { getPlacementBindings } from '../graphics/scene.js';
 import { PlaceRoomController } from '../graphics/place-room-controller.js';
 import { splitParentVsEnclosure } from '../physics/wall-overlap.js';
 import { roomPlanVertices } from '../physics/room-shape.js';
+import { placeOpeningX } from './opening-placement.js';
 
 // Identity of the saved-custom-room entry the user is currently
 // editing (or null when working on a preset / template / freshly-
@@ -1531,6 +1532,31 @@ const DEFAULT_WINDOW  = { kind: 'window', width_m: 1.5, height_m: 1.2, x_m: 0.5,
 let _opIdCounter = 1;
 function newOpeningId() { return 'op-' + (_opIdCounter++).toString(36) + Math.random().toString(36).slice(2, 5); }
 
+// Along-wall length (m) for a surface id, so a newly-added opening can be
+// placed without running off the end of the wall. Returns null when the
+// length can't be resolved (wall segments / enclosure walls) → caller skips
+// the right-edge clamp but still places the opening next to existing ones.
+function wallLengthFor(surfaceId) {
+  const room = state.room;
+  if (!room) return null;
+  if (surfaceId === 'wall_north' || surfaceId === 'wall_south') return Number(room.width_m) || null;
+  if (surfaceId === 'wall_east'  || surfaceId === 'wall_west')  return Number(room.depth_m) || null;
+  if (surfaceId === 'walls') return Math.max(Number(room.width_m) || 0, Number(room.depth_m) || 0) || null;
+  const em = /^edge_(\d+)$/.exec(surfaceId);
+  if (em) {
+    const verts = roomPlanVertices(room);
+    if (Array.isArray(verts) && verts.length >= 2) {
+      const i = parseInt(em[1], 10);
+      const a = verts[i], b = verts[(i + 1) % verts.length];
+      if (a && b) return Math.hypot(b.x - a.x, b.y - a.y) || null;
+    }
+  }
+  return null;
+}
+
+// placeOpeningX (non-overlapping left-edge x for a new opening) lives in the
+// pure, Node-testable js/ui/opening-placement.js — imported at the top.
+
 // Room Treatment preset — sets all surfaces (floor, ceiling, walls/edges)
 // to a sensible material combination representing common acoustic
 // realities. Per Dr. Chen's audit, the user expectation that "carpet =
@@ -2028,7 +2054,8 @@ function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
   addDoor.title = 'Add a door to this wall';
   addDoor.addEventListener('click', () => {
     const next = readSlotAsObject(getSlot());
-    next.openings.push({ ...DEFAULT_DOOR, id: newOpeningId() });
+    const x_m = placeOpeningX(next.openings, DEFAULT_DOOR.width_m, wallLengthFor(surfaceId));
+    next.openings.push({ ...DEFAULT_DOOR, x_m, id: newOpeningId() });
     setSlot(next);
     emit('room:changed');
     renderSurfaceMaterials();
@@ -2041,7 +2068,8 @@ function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
   addWin.title = 'Add a window to this wall';
   addWin.addEventListener('click', () => {
     const next = readSlotAsObject(getSlot());
-    next.openings.push({ ...DEFAULT_WINDOW, id: newOpeningId() });
+    const x_m = placeOpeningX(next.openings, DEFAULT_WINDOW.width_m, wallLengthFor(surfaceId));
+    next.openings.push({ ...DEFAULT_WINDOW, x_m, id: newOpeningId() });
     setSlot(next);
     emit('room:changed');
     renderSurfaceMaterials();

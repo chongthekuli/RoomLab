@@ -2845,6 +2845,39 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     // doesn't matter. No z-fight bump needed — the box faces sit well clear
     // of the punched hole's edge plane.
     opMesh.position.set(offsetX, offsetY, 0);
+    // Door handle (lever + rose) on a CLOSED door, on BOTH faces so it reads
+    // from inside and outside. Child of the door slab so it inherits the
+    // slab's orientation + the scene.scale.x = -1 mirror for free. Placed at
+    // the latch edge (opposite a notional hinge) at ~1.0 m from the floor.
+    if (op?.kind === 'door' && !isOpen && ow > 0.3 && oh > 1.0) {
+      const handle = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.85, roughness: 0.32 });
+      const latchX = ow / 2 - Math.min(0.08, ow * 0.12);   // ~8 cm in from the latch edge
+      // Door bottom sits at local y = -oh/2 (slab centred on z_m + oh/2). Put
+      // the handle 1.0 m above the floor, clamped inside the leaf.
+      const floorToBottom = Number(op.z_m) || 0;
+      let handleY = -oh / 2 + (1.0 - floorToBottom);
+      handleY = Math.max(-oh / 2 + 0.2, Math.min(oh / 2 - 0.2, handleY));
+      for (const sideZ of [depth / 2, -depth / 2]) {
+        const sign = sideZ >= 0 ? 1 : -1;
+        // Rose (round backplate) flush on the face.
+        const rose = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.008, 16), metal);
+        rose.rotation.x = Math.PI / 2;                       // axis along ±z
+        rose.position.set(latchX, handleY, sideZ + sign * 0.004);
+        handle.add(rose);
+        // Spindle + lever bar projecting from the face.
+        const spindle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.04, 12), metal);
+        spindle.rotation.x = Math.PI / 2;
+        spindle.position.set(latchX, handleY, sideZ + sign * 0.022);
+        handle.add(spindle);
+        const lever = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.022, 0.022), metal);
+        // Lever points toward the hinge side (away from the latch edge).
+        lever.position.set(latchX - 0.05, handleY, sideZ + sign * 0.042);
+        handle.add(lever);
+      }
+      handle.userData.no_acoustic = true;   // cosmetic only — not an occluder
+      opMesh.add(handle);
+    }
     opMesh.userData.tag = `opening_${op.kind || 'opening'}`;
     opMesh.userData.opening_id = op.id || `${baseSurfaceId}_op_${opIdx}`;
     opMesh.userData.acoustic_material = matId;
