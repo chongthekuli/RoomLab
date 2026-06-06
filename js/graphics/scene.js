@@ -26,6 +26,7 @@ import { wallInsetPolygon } from '../physics/wall-inset.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
 import { sceneBlocksCylinder } from '../physics/walk-collision.js';
+import { pickNearestInteractable, interactionPromptText } from './walk-interaction.js';
 import { openPanel } from '../ui/rail-system.js';
 import { loadCharacterRig } from './character-loader.js';
 import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode, setAuditionMaterials } from '../audio/audition.js';
@@ -120,6 +121,9 @@ let activeCamera = null;
 let walkMode = false;
 let walkPhase = 0;            // stride phase for leg/arm swing animation
 let _lastAuditionOrientTs = 0;  // ms — last time we pushed walk yaw/pitch to AudioListener
+let _lastInteractScanTs = 0;    // ms — last walk "Press E" proximity scan
+let _walkInteractFocus = null;  // { kind:'opening'|'rack', op?|rack?, isOpen } currently in reach
+const _tmpWorldVec = (typeof THREE !== 'undefined') ? new THREE.Vector3() : null;
 let tpController = null;
 let tpLastTs = 0;
 let _lastFrameTs = 0;             // ms — universal frame clock for tick helpers
@@ -2006,6 +2010,9 @@ function initWalkthrough() {
     }
   };
   tpController.onAnimate = applyAvatarAnimation;
+  // 'E' in walk mode → open/close the door/window/rack-door currently in focus
+  // (set each frame by updateWalkInteractionPrompt).
+  tpController.onInteract = () => toggleFocusedInteractable();
 
   // Async GLTF character upgrade — if assets/models/hitman.glb exists, swap
   // the procedural avatar for the rigged model + AnimationMixer fast path.
@@ -2106,6 +2113,87 @@ function placeAvatarAtDefault() {
   animState.prevYaw = tpController.yaw;
 }
 
+// ---------------------------------------------------------------------------
+// Walk-mode "Press E to open/close" interaction.
+//
+// Each frame (throttled) we scan the rendered interactable meshes — door /
+// window openings (userData.interact_opening, a LIVE ref to the state opening)
+// and placed device racks (userData.interact_rack) — for the nearest one within
+// reach of the avatar, and show a centered HUD prompt. Pressing E toggles that
+// one (op.state open↔closed → room:changed; rack.doorOpen → rack:changed),
+// which the existing rebuild + acoustics pipeline picks up automatically (an
+// open door becomes TL=0 + walk-through). Using the rendered meshes' world
+// positions means this works for every room shape without re-deriving wall
+// geometry. The pure nearest-pick + prompt copy live in walk-interaction.js.
+// ---------------------------------------------------------------------------
+function _walkPromptEl() { return document.getElementById('walk-interaction-prompt'); }
+function _showWalkPrompt(text) {
+  const el = _walkPromptEl();
+  if (!el) return;
+  const t = el.querySelector('.walk-prompt-text');
+  if (t) t.textContent = text;
+  el.hidden = false;
+}
+function _hideWalkPrompt() {
+  const el = _walkPromptEl();
+  if (el) el.hidden = true;
+}
+
+// Build the candidate list from the rendered scene graph, in world coords.
+function _collectWalkInteractables() {
+  const out = [];
+  if (roomGroup) {
+    roomGroup.traverse(o => {
+      const op = o.userData?.interact_opening;
+      if (op && !op.system) {
+        o.getWorldPosition(_tmpWorldVec);
+        out.push({ kind: 'opening', op, wx: _tmpWorldVec.x, wz: _tmpWorldVec.z });
+      }
+    });
+  }
+  if (racksGroup) {
+    for (const g of racksGroup.children) {
+      const rack = g.userData?.interact_rack;
+      if (!rack) continue;
+      g.getWorldPosition(_tmpWorldVec);
+      out.push({ kind: 'rack', rack, wx: _tmpWorldVec.x, wz: _tmpWorldVec.z });
+    }
+  }
+  return out;
+}
+
+function updateWalkInteractionPrompt() {
+  if (!walkMode || !tpController) { _walkInteractFocus = null; _hideWalkPrompt(); return; }
+  const tp = tpController.pos;
+  if (!tp) { _walkInteractFocus = null; _hideWalkPrompt(); return; }
+  const focus = pickNearestInteractable(tp.x, tp.z, _collectWalkInteractables());
+  if (!focus) { _walkInteractFocus = null; _hideWalkPrompt(); return; }
+  if (focus.kind === 'opening') {
+    const isOpen = focus.op.state === 'open';
+    _walkInteractFocus = { kind: 'opening', op: focus.op, isOpen };
+    _showWalkPrompt(interactionPromptText('opening', focus.op.kind, isOpen));
+  } else {
+    const isOpen = !!focus.rack.doorOpen;
+    _walkInteractFocus = { kind: 'rack', rack: focus.rack, isOpen };
+    _showWalkPrompt(interactionPromptText('rack', null, isOpen));
+  }
+}
+
+function toggleFocusedInteractable() {
+  const f = _walkInteractFocus;
+  if (!f) return;
+  if (f.kind === 'opening' && f.op) {
+    f.op.state = f.op.state === 'open' ? 'closed' : 'open';
+    emit('room:changed');
+  } else if (f.kind === 'rack' && f.rack) {
+    f.rack.doorOpen = !f.rack.doorOpen;
+    emit('rack:changed');
+  }
+  // Refresh the prompt text (open↔close) immediately; the mesh rebuild from the
+  // emit lands next frame and the next scan re-resolves the live ref.
+  updateWalkInteractionPrompt();
+}
+
 // Public toggle called by main.js when the user clicks the Walkthrough tab.
 export function setWalkthroughMode(on) {
   // Martina audit #20 — if mount3DViewport threw during init, walkCamera
@@ -2133,6 +2221,8 @@ export function setWalkthroughMode(on) {
   // tablet users have a usable walk control surface. Desktop users
   // can ignore it (CSS dims to ~55% opacity until hovered).
   if (walkMode) showWalkTouchHUD(); else hideWalkTouchHUD();
+  // Walk-mode "Press E" prompt only lives inside walk mode — clear it on exit.
+  if (!walkMode) { _walkInteractFocus = null; _hideWalkPrompt(); }
   // Toggle a body-level class so CSS can re-position siblings out of
   // the touch-control's way (e.g., the SPL legend was sitting in the
   // bottom-right where the RUN / SIT buttons are, and the legend's
@@ -2883,6 +2973,10 @@ function rebuildRoom(isFirst) { shadowsNeedRefresh = true;
     }
     opMesh.userData.tag = `opening_${op.kind || 'opening'}`;
     opMesh.userData.opening_id = op.id || `${baseSurfaceId}_op_${opIdx}`;
+    // Live reference to the state opening object (normalizeWallSlot returns
+    // openings by reference) so walk-mode "Press E" can toggle op.state
+    // directly. Surau-synthesised openings carry `system` and are skipped.
+    if (op.kind === 'door' || op.kind === 'window') opMesh.userData.interact_opening = op;
     opMesh.userData.acoustic_material = matId;
     opMesh.userData.surface_id = `${baseSurfaceId}_op_${opIdx}`;
     if (isOpen) opMesh.userData.no_walk_collide = true;   // open doors / windows are walk-through
@@ -6467,6 +6561,9 @@ function rebuildRacks() {
   const ampList = Array.isArray(_ampCatalog) ? _ampCatalog : [];
   for (const rack of racks) {
     const g = buildRackGroup(rack, ampList, _rackCatalogue);
+    // Live reference to the state rack so walk-mode "Press E" can toggle its
+    // front door (rack.doorOpen) directly.
+    g.userData.interact_rack = rack;
     // Coordinate swap from state to Three.js. State (x, y, z) where
     // z = up; Three (x, y_up, z_depth). Same convention used everywhere
     // else in scene.js.
@@ -12441,6 +12538,12 @@ function animate(ts) {
     const dt = Math.min(0.1, (now - tpLastTs) / 1000);
     tpLastTs = now;
     tpController.update(dt);
+    // Walk-mode "Press E" focus — scan for the nearest door/window/rack door
+    // and update the centered HUD prompt. Throttled to ~15 Hz (66 ms); cheap.
+    if (!_lastInteractScanTs || now - _lastInteractScanTs > 66) {
+      _lastInteractScanTs = now;
+      updateWalkInteractionPrompt();
+    }
     // Phase 11.D + W.1 — head-rotation AND position tracking for in-
     // walk audition. Throttled to ~20 Hz (every 50 ms) per Hannes's
     // spec §4 — IR rebuild budget is 80–120 ms perceived end-to-end,

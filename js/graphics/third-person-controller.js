@@ -215,6 +215,9 @@ export class ThirdPersonController {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     this.keys.add(e.code);
     if (e.code === 'Space' && this.grounded && this.onJump) this.onJump();
+    // 'E' = use/interact (open-close a focused door/window/rack door). Edge-
+    // triggered via !e.repeat so holding the key toggles once, not every frame.
+    if (e.code === 'KeyE' && !e.repeat && this.onInteract) this.onInteract();
     if (['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','Space','ShiftLeft','ShiftRight','KeyC','KeyZ','ControlLeft','ControlRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
       e.preventDefault();
     }

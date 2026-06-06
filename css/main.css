@@ -1713,6 +1713,46 @@ html[data-more-menu] .vp-more-panel {
 }
 .walk-touch[hidden] { display: none; }
 
+/* Walk-mode interaction prompt — centered toast ("Press E to open …"). */
+.walk-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 20%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 8px 8px;
+  background: rgba(15, 20, 28, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  z-index: 30;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+}
+.walk-prompt[hidden] { display: none; }
+.walk-prompt-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  background: #fff;
+  color: #15191f;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
 .walk-joystick {
   pointer-events: auto;
   position: absolute;

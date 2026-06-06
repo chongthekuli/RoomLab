@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=763" />
-  <link rel="stylesheet" href="css/theme.css?v=763" />
-  <link rel="stylesheet" href="css/print.css?v=763" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=764" />
+  <link rel="stylesheet" href="css/theme.css?v=764" />
+  <link rel="stylesheet" href="css/print.css?v=764" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -189,6 +189,13 @@
                All buttons dispatch synthetic keyboard events into
                document so the existing ThirdPersonController handles
                them with no special-case code. -->
+          <!-- Walk-mode interaction prompt — centered toast shown when the
+               avatar is near a door / window / rack door. "Press E to open …".
+               Populated + toggled by scene.js's walk proximity scan. -->
+          <div id="walk-interaction-prompt" class="walk-prompt" hidden aria-live="polite">
+            <span class="walk-prompt-key">E</span>
+            <span class="walk-prompt-text"></span>
+          </div>
           <div id="walk-touch-controls" class="walk-touch" hidden aria-hidden="true">
             <div class="walk-joystick" id="walk-joystick" role="presentation">
               <div class="walk-joystick-base"></div>
@@ -415,6 +422,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=763"></script>
+  <script type="module" src="js/main.js?v=764"></script>
 </body>
 </html>
