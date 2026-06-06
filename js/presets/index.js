@@ -4,12 +4,14 @@
 // rooms (hi-fi, studio, classroom, etc.) live as parametric TEMPLATES
 // in `js/templates/` and regenerate when the user changes dimensions.
 
-import auditorium from './auditorium.js';
-import pavilion   from './pavilion.js';
-import surau      from './surau.js';
+import auditorium    from './auditorium.js';
+import pavilion      from './pavilion.js';
+import surau         from './surau.js';
+import googleDataCenter from './google-datacenter.js';
 
 export const PRESETS = {
   auditorium,
   pavilion,
   surau,
+  googleDataCenter,
 };

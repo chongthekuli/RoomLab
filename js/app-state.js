@@ -453,6 +453,11 @@ export const state = {
     // structural columns, and escalator ramps. Built for the Pavilion 2
     // Bukit Jalil preset.
     multiLevelStructure: null,
+    // Render overhead cable-tray runs above each rack row (visual-only;
+    // set true by the Google Data Center preset). Derived from rack
+    // positions at render time — see rebuildCableTrays in scene.js. Keep
+    // in sync with DEFAULT_ROOM_STATE below.
+    cableTrays: false,
     // Sub-structures — saved custom rooms placed inside this room. Each
     // entry holds a deep snapshot of the source room geometry so deleting
     // the original library entry never breaks the placement. Phase 1:
@@ -809,6 +814,13 @@ const DEFAULT_ROOM_STATE = {
   stadiumStructure: null,
   multiLevelStructure: null,
   surauStructure: null,
+  // Render overhead cable-tray runs above each rack row (visual-only;
+  // set true by the Google Data Center preset). Derived from rack
+  // positions at render time — see rebuildCableTrays in scene.js +
+  // computeCableTrayRows in graphics/cable-tray.js. Round-trips via the
+  // whole-room deepClone in serialize/deserializeProject. Keep in sync
+  // with the active-state room block above.
+  cableTrays: false,
   // See state.room.subStructures comment above. Default-empty so a
   // preset/template/blank-custom apply starts with no sub-rooms; the
   // canonical reset path picks this up automatically.
@@ -879,6 +891,10 @@ export function applyPresetToState(key) {
   if (p.stadiumStructure)                 state.room.stadiumStructure = deepClone(p.stadiumStructure);
   if (p.multiLevelStructure)              state.room.multiLevelStructure = deepClone(p.multiLevelStructure);
   if (p.surauStructure)                   state.room.surauStructure = deepClone(p.surauStructure);
+  // Cable-tray overlay flag — preset-plumbing pattern (CLAUDE.md §3),
+  // asserted in tests/preset.test.mjs. resetSceneState seeded the room
+  // default (false); a preset that wants overhead trays sets it true.
+  if (p.cableTrays !== undefined)         state.room.cableTrays = !!p.cableTrays;
   if (p.surfaces) Object.assign(state.room.surfaces, p.surfaces);
   if (p.shape === 'polygon' || p.shape === 'round') {
     const r = p.shape === 'polygon' ? state.room.polygon_radius_m : state.room.round_radius_m;
@@ -1117,6 +1133,9 @@ export function deserializeProject(obj) {
     if (r.surauStructure && typeof r.surauStructure === 'object') {
       state.room.surauStructure = deepClone(r.surauStructure);
     }
+    // Overhead cable-tray render flag (Google Data Center preset). Round-
+    // trips so a saved data-center scene reloads with its trays.
+    if (typeof r.cableTrays === 'boolean')       state.room.cableTrays = r.cableTrays;
     // Sub-structures (Phase 1: visual only). Each entry is self-contained —
     // sourceRoom is a full snapshot captured at placement time, so the
     // placement survives even if the saved library entry was later deleted.

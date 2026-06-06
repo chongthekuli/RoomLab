@@ -13,9 +13,10 @@ function assert(cond, label) {
 // TEMPLATES = parametric shape generators. The split was introduced when
 // the eight smaller rooms (hi-fi, studio, classroom, etc.) became
 // user-scalable.
-assert(Object.keys(PRESETS).length === 3, 'PRESETS has exactly 3 entries (auditorium, pavilion, surau)');
+assert(Object.keys(PRESETS).length === 4, 'PRESETS has exactly 4 entries (auditorium, pavilion, surau, googleDataCenter)');
 assert('auditorium' in PRESETS && 'pavilion' in PRESETS, 'PRESETS contains auditorium + pavilion');
 assert('surau' in PRESETS, 'PRESETS contains surau');
+assert('googleDataCenter' in PRESETS, 'PRESETS contains googleDataCenter');
 assert(Object.keys(TEMPLATES).length === 8, 'TEMPLATES has exactly 8 entries');
 for (const k of ['hifi','studio','classroom','livevenue','recitalhall','chamber','octagon','rotunda']) {
   assert(k in TEMPLATES, `TEMPLATES contains ${k}`);
@@ -157,6 +158,43 @@ assert(state.room.authorComments === TEMPLATES.hifi.authorComments,
   `Swap surau→hifi replaces authorComments (no surau note leak)`);
 assert(state.room.authorComments !== surauNote,
   `Swap surau→hifi: authorComments actually CHANGED (sanity check)`);
+
+// --- Google Data Center preset (added 2026-06-06) --------------------------
+// rackSystem + cableTrays plumbing (CLAUDE.md §3 preset-plumbing invariant):
+// a preset that ships racks / the cable-tray flag must propagate them in
+// applyPresetToState, AND assert it here, or the renderer sees undefined and
+// silently shows nothing.
+applyPresetToState('googleDataCenter');
+const dc = PRESETS.googleDataCenter;
+assert(Array.isArray(state.rackSystem?.racks) && state.rackSystem.racks.length === 200,
+  `Google DC: 200 racks propagated to state (got ${state.rackSystem?.racks?.length})`);
+assert(state.rackSystem.racks.every(r => r.rackModelKey === 'enclosed-42u'),
+  'Google DC: every rack is the enclosed-42u (70 kg) model');
+assert(state.rackSystem.racks.every(r => r.slots.length === 21 && r.slots.every(s => s.amplifierId === 'qd2100')),
+  'Google DC: every rack stuffed with 21× QD2100 (2U each = 42U)');
+assert(state.rackSystem.racks.every(r => r.slots.every(s => s.uHeight === 2) &&
+    new Set(r.slots.map(s => s.uStart)).size === 21 &&
+    Math.max(...r.slots.map(s => s.uStart)) === 41),
+  'Google DC: QD2100 slots fill U1..U42 with no overlap');
+assert(state.room.cableTrays === true,
+  'Google DC: room.cableTrays flag propagated true (overhead trays render)');
+// Halls (5 demising walls → 10 split segments) + chiller yard (16 × 2).
+const partitions = state.structures.filter(s => s.type === 'partition');
+const chillerBodies = state.structures.filter(s => s.type === 'half_wall' && /chiller/i.test(s.materialId));
+const chillerPads = state.structures.filter(s => s.type === 'platform');
+assert(partitions.length === 10, `Google DC: 10 partition segments (got ${partitions.length})`);
+assert(chillerBodies.length === 16 && chillerPads.length === 16,
+  `Google DC: 16 chiller bodies + 16 pads (got ${chillerBodies.length}/${chillerPads.length})`);
+assert(state.sources.length === 12 && state.sources.every(s => s.groupId === 'VA'),
+  `Google DC: 12-speaker voice-alarm PA grid (got ${state.sources.length})`);
+assert(state.room.width_m === 60 && state.room.depth_m === 120 && state.room.height_m === 12,
+  'Google DC: representative 60×120×12 m shell');
+// Swap away must clear the cable-tray flag (no leak to the next scene).
+applyTemplateToState('hifi');
+assert(state.room.cableTrays === false,
+  'Swap googleDataCenter→hifi: cableTrays flag reset to false (no leak)');
+assert((state.rackSystem?.racks?.length ?? 0) === 0,
+  'Swap googleDataCenter→hifi: racks cleared');
 
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll preset/template tests passed.');

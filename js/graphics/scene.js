@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // v=719 — three-bvh-csg for true boolean drilling of the theatre-seat
 // cup-holder hole. The previous fake-recess dish (v=715-718) sat on top
 // of the armrest and never looked like a real hole. CSG subtracts a
@@ -19,6 +19,7 @@ import { on, emit } from '../ui/events.js';
 import { recordRayPaths, buildLineSegmentIndex } from './ray-viz.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { buildRackGroup } from './rack-render.js';
+import { computeCableTrayRows } from './cable-tray.js';
 import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
 import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, isInsideRoom, normalizeWallSlot, applySurauOpeningsToSlot, defaultInsidePosition } from '../physics/room-shape.js';
@@ -51,6 +52,7 @@ let composer, ssaoPass, bloomPass;
 let roomGroup, sourcesGroup, listenersGroup, zonesGroup, heatmapGroup, heatmapMesh;
 let aimLinesGroup, audienceGroup;
 let racksGroup = null;
+let cableTraysGroup = null;
 // Acoustic-treatment panels — rebuilt on treatment:changed. Each child is
 // a Group tagged userData.tag='treatment' carrying:
 //   userData.treatmentId   — state.treatments[i].id (selection / drag pick)
@@ -419,7 +421,7 @@ export async function mount3DViewport({ materials }) {
       if (f & REBUILD_ZONES) rebuildZones();
       if (f & REBUILD_HEATMAP) rebuildHeatmap();
       if (f & REBUILD_AIM) rebuildAimLines();
-      if (f & REBUILD_RACKS) rebuildRacks();
+      if (f & REBUILD_RACKS) { rebuildRacks(); rebuildCableTrays(); }
       if (f & REBUILD_TREATMENTS) rebuildTreatments();
       if (f & REBUILD_FURNITURE) rebuildFurniture();
       if (f & REBUILD_STRUCTURES) rebuildStructures();
@@ -493,6 +495,7 @@ export async function mount3DViewport({ materials }) {
     if (audienceGroup)    disposeGroup(audienceGroup);
     if (aimLinesGroup)    disposeGroup(aimLinesGroup);
     if (racksGroup)       disposeGroup(racksGroup);
+    if (cableTraysGroup)  disposeGroup(cableTraysGroup);
     if (treatmentsGroup)  disposeGroup(treatmentsGroup);
     // Drop any placement ghost left over from a cancelled-but-not-cleared
     // session — preset/template/load wipes the scene; the ghost cannot
@@ -6581,6 +6584,64 @@ function rebuildRacks() {
   }
 }
 
+// Overhead ladder cable-trays — one continuous run above each rack row.
+// Visual-only set dressing, gated by state.room.cableTrays (the Google Data
+// Center preset sets it true). Rows are DERIVED from rack positions (see
+// computeCableTrayRows in cable-tray.js), so the tray always follows the
+// racks — no parallel state array to keep in sync. Each row is built as ONE
+// merged BufferGeometry (2 rails + N rungs) → ~1 draw call per row, sharing
+// the single CABLE_TRAY_MAT. Lives in racks' world frame so the scene-level
+// X-mirror applies uniformly, exactly as for the racks themselves.
+function rebuildCableTrays() {
+  if (!cableTraysGroup) {
+    cableTraysGroup = new THREE.Group();
+    cableTraysGroup.name = 'cableTrays';
+    scene.add(cableTraysGroup);
+  } else {
+    disposeGroup(cableTraysGroup);
+  }
+  if (!state.room?.cableTrays) return;
+  const racks = state.rackSystem?.racks ?? [];
+  if (racks.length === 0 || !_rackCatalogue) return;
+
+  const rows = computeCableTrayRows(racks, _rackCatalogue);
+  if (rows.length === 0) return;
+  // One galvanized-steel material per rebuild, shared across every row in
+  // this pass. NOT module-scope: disposeGroup() disposes child materials on
+  // the next rebuild, so a single shared instance per pass is reclaimed
+  // cleanly without thrashing one global material's GPU program.
+  const trayMat = new THREE.MeshStandardMaterial({ color: 0x8b9099, metalness: 0.72, roughness: 0.5 });
+  for (const row of rows) {
+    const { length, depth, railThk, railH, rungCount } = row;
+    const parts = [];
+    // Two side rails running the length of the run (local +X = run axis).
+    for (const zs of [+1, -1]) {
+      const rail = new THREE.BoxGeometry(length, railH, railThk);
+      rail.translate(0, railH / 2, zs * (depth / 2 - railThk / 2));
+      parts.push(rail);
+    }
+    // Cross rungs spanning rail-to-rail (local Z), evenly along the run.
+    const span = rungCount > 1 ? length / (rungCount - 1) : 0;
+    for (let i = 0; i < rungCount; i++) {
+      const xi = rungCount > 1 ? -length / 2 + i * span : 0;
+      const rung = new THREE.BoxGeometry(railThk, railH * 0.6, depth);
+      rung.translate(xi, railH * 0.3, 0);
+      parts.push(rung);
+    }
+    const merged = mergeGeometries(parts, false);
+    parts.forEach(p => p.dispose());
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, trayMat);
+    mesh.castShadow = true;
+    mesh.userData.no_walk_collide = true;   // walk-through; it's overhead set dressing
+    // State→Three: (x, z_up, y_depth). Tray underside sits clearance above
+    // the rack top. Rotate 90° when the row runs along state-y.
+    mesh.position.set(row.cx, row.topY + row.clearance, row.cy);
+    mesh.rotation.y = row.axis === 'x' ? 0 : Math.PI / 2;
+    cableTraysGroup.add(mesh);
+  }
+}
+
 // 2D ray-vs-polygon-edges first hit. Each polygon vertex is { x, y } in
 // state plan coords (state-y maps to world-z). Used as the room-footprint
 // clamp for aim lines so they never project past the perimeter even when
@@ -8084,6 +8145,11 @@ let structuresGroup = null;
 // acoustics read the real material row, not this colour).
 function _structureColour(materialId) {
   const id = String(materialId || '').toLowerCase();
+  // Painted-white plant (chiller cabinets in the Google Data Center yard).
+  // Checked BEFORE metal so a 'chiller-cabinet-steel' id reads off-white,
+  // not battleship grey. Not pure white — 0xffffff blows out under the
+  // tone-mapped lighting and loses all form.
+  if (id.includes('chiller') || id.includes('hvac')) return { color: 0xe8eaec, opacity: 1, transparent: false };
   if (id.includes('glass') || id.includes('window')) return { color: 0xaaccdd, opacity: 0.35, transparent: true };
   if (id.includes('gypsum') || id.includes('plaster') || id.includes('drywall')) return { color: 0xd8d4c8, opacity: 1, transparent: false };
   if (id.includes('wood') || id.includes('timber')) return { color: 0x9a7b53, opacity: 1, transparent: false };
