@@ -25,8 +25,7 @@ import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, is
 import { wallInsetPolygon } from '../physics/wall-inset.js';
 import { getMaterialTexture, getMaterialPalette } from './textures.js';
 import { ThirdPersonController } from './third-person-controller.js';
-import { furnitureBlocksCylinder } from '../physics/furniture-walk-collision.js';
-import { rackBlocksCylinder } from '../physics/rack-walk-collision.js';
+import { sceneBlocksCylinder } from '../physics/walk-collision.js';
 import { openPanel } from '../ui/rail-system.js';
 import { loadCharacterRig } from './character-loader.js';
 import { setAuditionListenerOrientation, setAuditionListenerPose, setAuditionWalkMode, setAuditionMaterials } from '../audio/audition.js';
@@ -1981,17 +1980,21 @@ function initWalkthrough() {
     domElement: renderer.domElement,
     // Lazy getter — roomGroup is created by rebuildRoom AFTER initWalkthrough.
     getCollidables: () => roomGroup,
-    // Walk-mode furniture collision (v=682) — pure cylinder-vs-AABB
-    // test against the SAME sub-volumes that drive the visible 3D mesh
-    // and the acoustic snapshot. Catches the case where the avatar
-    // walks through a bookshelf / rack / table that the chest-ray
-    // raycast missed (table slab above ray, or furnitureGroup outside
-    // roomGroup so the raycast never even saw it).
+    // Walk-mode collision against ALL placed solids (furniture, racks,
+    // building structures) via the single js/physics/walk-collision.js
+    // aggregator — pure cylinder-vs-footprint against the SAME geometry that
+    // drives the visible 3D mesh + the acoustic snapshot. Routing every solid
+    // type through one function (enumerated by the walk-collision registry
+    // test) is what stops the recurring "avatar walks through the new object
+    // type" bug (rack → furniture → structure). Add a new solid type there,
+    // not here.
     getFurnitureBlocker: (sx, sy, yMin, yMax, radius) =>
-      furnitureBlocksCylinder(sx, sy, yMin, yMax, radius, state.furniture, getFurnitureCatalogueMap())
-      // v=699 — also block on placed racks. The avatar would otherwise
-      // walk through a placed enclosed rack as if it were vapour.
-      || rackBlocksCylinder(sx, sy, yMin, yMax, radius, state.rackSystem?.racks ?? [], _rackCatalogue),
+      sceneBlocksCylinder({
+        sx, sy, yMin, yMax, radius,
+        furniture: state.furniture, furnitureCatalogue: getFurnitureCatalogueMap(),
+        racks: state.rackSystem?.racks ?? [], rackCatalogue: _rackCatalogue,
+        structures: state.structures, room: state.room,
+      }),
     character: avatar,
   });
   tpController.onJump = () => {
