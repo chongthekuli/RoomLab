@@ -6992,6 +6992,25 @@ function rebuildListeners() { shadowsNeedRefresh = true;
     const bodyColor = isSel ? 0xffd000 : 0x4a8ff0;
     const headColor = isSel ? 0xffd000 : 0xffc59e;
 
+    // Round "cubicle" listeners (v=780): a single ball at ear height instead
+    // of the humanoid avatar (toilet cubicles are tight — a full body would
+    // clip the partitions). Still a real listener (gets SPL/STI); selection
+    // highlight reuses the same gold tint. The 2D viewport keeps its normal
+    // round dot — only the 3D avatar changes here.
+    if (lst.shape === 'round') {
+      const ball = new THREE.Mesh(
+        new THREE.SphereGeometry(0.13, 18, 18),
+        new THREE.MeshStandardMaterial({
+          color: isSel ? 0xffd000 : 0xffc59e,   // soft head-like tone
+          roughness: 0.55, metalness: 0.0,
+        })
+      );
+      ball.position.set(lst.position.x, ear, lst.position.y);
+      ball.castShadow = true;
+      listenersGroup.add(ball);
+      continue;
+    }
+
     let bodyBottom = 0;
     if (lst.posture === 'sitting_chair') bodyBottom = 0.45;
 
@@ -8273,7 +8292,7 @@ let _toiletBuildLogged = false;
 function _buildToiletMesh(s, room) {
   if (!_toiletBuildLogged) {
     _toiletBuildLogged = true;
-    console.info('[toilet] build 2026-06-07 v777 — adjustable floor gap (scuffGap 0–0.30) + pilaster feet under floating open-top boards');
+    console.info('[toilet] build 2026-06-07 v780 — WC# designator (S reserved for sources) + auto round cubicle listeners snapped to each bowl');
   }
   const localS = { ...s, position: { x: 0, y: 0 }, rotation_deg: 0 };
   const inv = expandToiletSurfaces(localS, room);

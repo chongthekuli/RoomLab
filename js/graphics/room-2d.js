@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, duplicateFurniture, duplicateRack, duplicateStructure, rotateRack, convertRoomToCustomPolygon } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, duplicateFurniture, duplicateRack, duplicateStructure, rotateRack, convertRoomToCustomPolygon, syncToiletListeners, removeToiletListeners } from '../app-state.js';
 import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
@@ -2562,6 +2562,8 @@ function placeStructureAt(type, pos) {
   const st = makeStructure(type, snapToGrid(pos.x), snapToGrid(pos.y));
   state.structures.push(st);
   state.selectedStructureId = st.id;
+  // Toilet blocks auto-spawn a round "cubicle" listener at each bowl.
+  if (st.type === 'toilet' && syncToiletListeners(st)) emit('listener:changed');
   emit('structure:changed', { id: st.id });
   emit('structure:selected', { id: st.id });
 }
@@ -2778,8 +2780,11 @@ if (typeof document !== 'undefined') {
         const id = state.selectedStructureId;
         const idx = state.structures.findIndex(x => x.id === id);
         if (idx >= 0) {
+          const wasToilet = state.structures[idx].type === 'toilet';
           state.structures.splice(idx, 1);
           state.selectedStructureId = null;
+          // Cascade-delete the toilet's round cubicle listeners.
+          if (wasToilet && removeToiletListeners(id)) emit('listener:changed');
           emit('structure:changed', { removed: id });
           e.preventDefault();
         }

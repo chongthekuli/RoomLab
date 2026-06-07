@@ -12,7 +12,7 @@
 // construction-material catalogue; the physics resolves the raw materials.json
 // row (TL + α) by id via the structure-material provider.
 
-import { state, nextStructureId, duplicateStructure } from '../app-state.js';
+import { state, nextStructureId, duplicateStructure, removeToiletListeners } from '../app-state.js';
 import { on, emit } from './events.js';
 import { loadSurfaceCatalogue } from '../labs/surfacelab/catalog.js';
 import { getStructureMaterialCatalogue } from '../physics/providers.js';
@@ -46,12 +46,21 @@ const TYPES = {
   toilet:    { label: 'Toilet',    glyph: '<rect x="3" y="4" width="5" height="16"/><rect x="9.5" y="4" width="5" height="16"/><rect x="16" y="4" width="5" height="16"/>' },
 };
 
+// Auto-number a per-type label: count existing structures of this `type` and
+// append the next ordinal, e.g. "Toilet block 1", "Toilet block 2". Keeps
+// each type's human-readable base name from TYPES (toilet → "Toilet block").
+function nextStructureLabel(type) {
+  const baseName = type === 'toilet' ? 'Toilet block' : (TYPES[type]?.label ?? 'Structure');
+  const n = (state.structures ?? []).filter(s => s.type === type).length + 1;
+  return `${baseName} ${n}`;
+}
+
 // Build a default structure of `type` at plan position {x,y}.
 export function makeStructure(type, x, y) {
   const base = {
-    id: nextStructureId(),
+    id: nextStructureId(type),
     type,
-    label: TYPES[type]?.label ?? 'Structure',
+    label: nextStructureLabel(type),
     position: { x, y },
     rotation_deg: 0,
     materialId: DEFAULT_MATERIAL[type] ?? 'concrete-painted',
@@ -76,7 +85,6 @@ export function makeStructure(type, x, y) {
       // save-files round-trip (back-to-back layout is a later phase).
       return {
         ...base,
-        label: 'Toilet block',
         cubicles: 3, pitch_m: 0.95, clearWidth_m: 0.90, clearDepth_m: 1.50, partitionThickness_m: 0.05,
         backToBack: false,
         topType: 'open',
@@ -360,8 +368,11 @@ function wire(root) {
       ev.stopPropagation();
       const idx = state.structures.findIndex(x => x.id === id);
       if (idx >= 0) {
+        const wasToilet = state.structures[idx].type === 'toilet';
         state.structures.splice(idx, 1);
         if (state.selectedStructureId === id) state.selectedStructureId = null;
+        // Cascade-delete the toilet's round cubicle listeners.
+        if (wasToilet && removeToiletListeners(id)) emit('listener:changed');
         emit('structure:changed', { removed: id });
       }
     });

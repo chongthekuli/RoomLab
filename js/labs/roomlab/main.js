@@ -12,7 +12,7 @@
 // here so they fire as soon as the user touches RoomLAB once. They
 // keep firing afterwards regardless of which Lab is active.
 
-import { state, SPEAKER_CATALOG, DEFAULT_PRESET_KEY, applyPresetToState, serializeProject, deserializeProject } from '../../app-state.js';
+import { state, SPEAKER_CATALOG, DEFAULT_PRESET_KEY, applyPresetToState, serializeProject, deserializeProject, syncToiletListeners, syncAllToiletListeners } from '../../app-state.js';
 import { readAutosave, scheduleAutosave, flushAutosave } from '../../shared/autosave.js';
 import { on, emit } from '../../shared/events.js';
 import { loadMaterials } from '../../physics/materials.js';
@@ -287,6 +287,32 @@ function setupTabs() {
   on('surface:picked', () => {
     if (document.querySelector('.lab-route.active')?.dataset.route !== 'room') return;
     openPanel('left', 'room');
+  });
+
+  // Toilet round-listener follow/resync (v=780). Any structure edit (panel
+  // field change, 2D drag/rotate/resize, cubicle-count change) emits
+  // 'structure:changed'; re-snap that toilet's round cubicle listeners so
+  // they FOLLOW the toilet and add/remove on cubicle-count change. The ADD
+  // and DELETE cascades are handled at their own call sites (placeStructureAt
+  // / delete paths); this central handler covers the MOVE/EDIT case. Guard
+  // against the listener:changed we emit re-entering (it can't trigger
+  // structure:changed, so no loop). payload.removed = a delete already
+  // cascaded — skip resync for it.
+  on('structure:changed', (p) => {
+    if (p && p.removed) return;
+    const id = p?.id;
+    const s = id
+      ? state.structures?.find(x => x.id === id)
+      : null;
+    let changed = false;
+    if (s && s.type === 'toilet') {
+      changed = syncToiletListeners(s);
+    } else if (!id) {
+      // No id in payload (e.g. drag commit emits bare 'structure:changed') —
+      // resync every toilet so a dragged toilet's listeners follow.
+      changed = syncAllToiletListeners();
+    }
+    if (changed) emit('listener:changed');
   });
 
   // Fullscreen toggle next to the Walk tab. Targets documentElement

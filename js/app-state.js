@@ -10,6 +10,11 @@ export {
   expandSources,
 } from './physics/source-expand.js';
 
+// Pure toilet-surface expander (Three.js-free) — used to read each cubicle's
+// bowl centre when auto-placing round "cubicle" listeners. app-state may import
+// from js/physics/ (physics never imports app-state), so this stays one-way.
+import { expandToiletSurfaces } from './physics/building-structures.js';
+
 export const POSTURE_LABELS = {
   standing: 'Standing',
   sitting_chair: 'Sitting in chair',
@@ -92,12 +97,33 @@ export function getSelectedStructure() {
   return state.structures?.find(s => s.id === state.selectedStructureId) || null;
 }
 
-// Next free structure id ("S1", "S2"…), unique within the scene.
-export function nextStructureId() {
+// Per-type designator prefix for building structures. 'S' is RESERVED for
+// speaker SOURCES (sources also mint "S1","S2"…) — building structures must
+// NOT collide with that namespace, so every structure type gets its own
+// non-'S' prefix. Unknown types fall back to 'BS' (building structure).
+export const STRUCTURE_ID_PREFIX = {
+  toilet: 'WC',
+  pillar: 'COL',
+  half_wall: 'HW',
+  partition: 'PRT',
+  beam: 'BM',
+  platform: 'PLT',
+};
+export function structureIdPrefix(type) {
+  return STRUCTURE_ID_PREFIX[type] ?? 'BS';
+}
+
+// Next free structure id for a given `type` — a per-type prefix ("WC1",
+// "COL2"…) followed by the next free integer that is UNIQUE across ALL
+// existing structure ids (not just same-prefix ones). Mirrors the
+// while-loop uniqueness check the other id-minters use. `type` is required;
+// callers (makeStructure / duplicateStructure) pass the structure's type.
+export function nextStructureId(type) {
+  const prefix = structureIdPrefix(type);
   const used = new Set((state.structures ?? []).map(s => s.id).filter(Boolean));
-  let n = (state.structures?.length ?? 0) + 1;
-  while (used.has(`S${n}`)) n++;
-  return `S${n}`;
+  let n = 1;
+  while (used.has(`${prefix}${n}`)) n++;
+  return `${prefix}${n}`;
 }
 
 // Duplicate the structure with id `id`. Mirrors duplicateTreatment:
@@ -111,16 +137,148 @@ export function duplicateStructure(id) {
   if (idx < 0) return null;
   const copy = JSON.parse(JSON.stringify(state.structures[idx]));
   if (copy._cachedSpec) delete copy._cachedSpec;
-  const n = nextStructureId();
+  const n = nextStructureId(copy.type);
   copy.id = n;
+  // Bump the trailing number in the visible label to the new id's number
+  // (the integer that follows the per-type prefix), e.g. "Toilet block 1"
+  // → "Toilet block 2". Labels without a trailing number get " copy".
+  const numPart = n.match(/\d+$/)?.[0] ?? '';
   if (typeof copy.label === 'string' && copy.label.length > 0) {
-    copy.label = /\d+$/.test(copy.label)
-      ? copy.label.replace(/\d+$/, n.slice(1))
+    copy.label = /\d+$/.test(copy.label) && numPart
+      ? copy.label.replace(/\d+$/, numPart)
       : `${copy.label} copy`;
   }
   if (copy.position) copy.position.x = (copy.position.x ?? 0) + 0.5;
   state.structures.push(copy);
+  if (copy.type === 'toilet') syncToiletListeners(copy);
   return copy.id;
+}
+
+// ---------------------------------------------------------------------------
+// Toilet cubicle "round" listeners (v=780)
+// ---------------------------------------------------------------------------
+// Each toilet block auto-spawns ONE round-ball listener per cubicle, snapped
+// to the bowl at seated ear height. They are REAL listeners (SPL/STI like any
+// other) tagged with `shape:'round'` (3D renders a sphere, not the humanoid
+// avatar) and `cubicleRef:{toiletId,cubicleIndex}` so they track the toilet
+// and cascade-delete with it.
+//
+// Seated ear height: posture 'sitting_chair' resolves to 1.15 m in
+// POSTURE_EAR_HEIGHTS_M, exactly the seated-on-bowl height we want — so the
+// round listeners just carry that posture (no custom height needed).
+
+// Next free "L#" listener id, unique across all existing listener ids.
+export function nextListenerId() {
+  const used = new Set((state.listeners ?? []).map(l => l.id).filter(Boolean));
+  let n = 1;
+  while (used.has(`L${n}`)) n++;
+  return `L${n}`;
+}
+
+// Make the round cubicle-listener set for `toilet` match its current cubicles:
+//   • add a listener for every cubicle that lacks one,
+//   • remove listeners whose cubicleRef.cubicleIndex no longer exists,
+//   • re-snap every kept listener to the updated bowl centre + ear height.
+// In-place mutation of state.listeners + caller emits 'listener:changed'
+// (NOT a whole-array replace) so the state-events invariant is satisfied
+// without a scene:reset. Returns true if anything changed.
+export function syncToiletListeners(toilet) {
+  if (!toilet || toilet.type !== 'toilet') return false;
+  if (!Array.isArray(state.listeners)) state.listeners = [];
+  const toiletId = toilet.id;
+
+  // Bowl centres in STATE coords (already state-frame from the pure expander).
+  let bowls = [];
+  try {
+    bowls = expandToiletSurfaces(toilet, state.room)?.bowls ?? [];
+  } catch { bowls = []; }
+  // Bowls may be suppressed (showBowls:false) but cubicles still exist — fall
+  // back to the cubicle count so every cubicle still gets a listener at the
+  // toilet centre if no bowl centre is available.
+  const cubicleCount = Math.max(0, Math.round(Number(toilet.cubicles) || bowls.length || 0));
+
+  let changed = false;
+
+  // 1. Remove listeners tied to a cubicle index that no longer exists.
+  for (let i = state.listeners.length - 1; i >= 0; i--) {
+    const ref = state.listeners[i].cubicleRef;
+    if (ref && ref.toiletId === toiletId && ref.cubicleIndex >= cubicleCount) {
+      if (state.selectedListenerId === state.listeners[i].id) state.selectedListenerId = null;
+      state.listeners.splice(i, 1);
+      changed = true;
+    }
+  }
+
+  // 2. Ensure + re-snap one listener per cubicle.
+  for (let c = 0; c < cubicleCount; c++) {
+    const center = bowls.find(b => b.cubicleIndex === c)?.center
+      ?? { x: toilet.position?.x ?? 0, y: toilet.position?.y ?? 0 };
+    let lst = state.listeners.find(
+      l => l.cubicleRef && l.cubicleRef.toiletId === toiletId && l.cubicleRef.cubicleIndex === c
+    );
+    const label = `${toilet.label ?? 'Toilet block'} · Cubicle ${c + 1}`;
+    if (!lst) {
+      lst = {
+        id: nextListenerId(),
+        label,
+        position: { x: center.x, y: center.y },
+        elevation_m: 0,
+        posture: 'sitting_chair',   // → 1.15 m seated ear height
+        custom_ear_height_m: null,
+        shape: 'round',
+        cubicleRef: { toiletId, cubicleIndex: c },
+      };
+      state.listeners.push(lst);
+      changed = true;
+    } else {
+      // Re-snap position + refresh the label (the toilet may have been
+      // renamed). Keep the user's posture/elevation if they changed it.
+      if (lst.position.x !== center.x || lst.position.y !== center.y) {
+        lst.position.x = center.x;
+        lst.position.y = center.y;
+        changed = true;
+      }
+      if (lst.label !== label) { lst.label = label; changed = true; }
+      if (lst.shape !== 'round') { lst.shape = 'round'; changed = true; }
+    }
+  }
+
+  if (state.selectedListenerId == null && state.listeners.length) {
+    state.selectedListenerId = state.listeners[0].id;
+  }
+  return changed;
+}
+
+// Remove every round listener linked to the toilet `toiletId` (cascade on
+// toilet delete). In-place splice + caller emits 'listener:changed'. Returns
+// true if any listener was removed.
+export function removeToiletListeners(toiletId) {
+  if (!Array.isArray(state.listeners)) return false;
+  let changed = false;
+  for (let i = state.listeners.length - 1; i >= 0; i--) {
+    const ref = state.listeners[i].cubicleRef;
+    if (ref && ref.toiletId === toiletId) {
+      if (state.selectedListenerId === state.listeners[i].id) state.selectedListenerId = null;
+      state.listeners.splice(i, 1);
+      changed = true;
+    }
+  }
+  if (state.selectedListenerId == null && state.listeners.length) {
+    state.selectedListenerId = state.listeners[0].id;
+  }
+  return changed;
+}
+
+// Re-sync round listeners for EVERY toilet in the scene (used after preset /
+// project load, where toilets arrive as a batch). Mirror in-place mutation;
+// caller emits one 'listener:changed'.
+export function syncAllToiletListeners() {
+  if (!Array.isArray(state.structures)) return false;
+  let changed = false;
+  for (const s of state.structures) {
+    if (s.type === 'toilet' && syncToiletListeners(s)) changed = true;
+  }
+  return changed;
 }
 
 // Source selection — used by the 2D viewport click-select + drag-to-move
@@ -922,6 +1080,10 @@ export function applyPresetToState(key) {
   if (Array.isArray(p.structures)) state.structures = p.structures.map(deepClone);
   if (Array.isArray(p.treatments)) state.treatments = p.treatments.map(deepClone);
   if (Array.isArray(p.furniture))  state.furniture  = p.furniture.map(deepClone);
+  // A preset that ships a toilet must auto-create its round cubicle listeners
+  // (preset-plumbing pattern, CLAUDE.md §3). Idempotent for presets that
+  // already declare them in their listeners array.
+  syncAllToiletListeners();
   state.selectedZoneId     = state.zones[0]?.id     ?? null;
   state.selectedListenerId = state.listeners[0]?.id ?? null;
   state.selectedSourceIdx  = null;
@@ -1302,6 +1464,11 @@ export function deserializeProject(obj) {
   } else {
     state.selectedStructureId = null;
   }
+
+  // Reconcile toilet round-listeners (v=780). Modern save files already carry
+  // them (real listeners that serialize), so this is idempotent re-snap.
+  // Pre-v780 files with a toilet but no round listeners get them created here.
+  syncAllToiletListeners();
 
   // --- Physics + ambient + EQ — overlay scalars; arrays full replace ---
   if (obj.physics && typeof obj.physics === 'object') {

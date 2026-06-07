@@ -86,16 +86,18 @@ function sampleStructures() {
   if (hadStructures === undefined) delete preset.structures; else preset.structures = hadStructures;
 }
 
-// 5. Helpers — nextStructureId uniqueness, duplicateStructure, getSelectedStructure.
+// 5. Helpers — nextStructureId per-type prefix + uniqueness, duplicateStructure,
+//    getSelectedStructure. NOTE (v=780): 'S' is RESERVED for speaker sources —
+//    structures now use per-type non-'S' prefixes (pillar → COL, toilet → WC…).
 {
-  state.structures = [{ id: 'S1', type: 'pillar', crossSection: 'round', diameter_m: 0.4, materialId: 'concrete-painted', position: { x: 1, y: 1 }, rotation_deg: 0, label: 'Pillar 1' }];
-  ok(nextStructureId() === 'S2', 'nextStructureId returns first free id', `(${nextStructureId()})`);
-  const newId = duplicateStructure('S1');
-  ok(newId === 'S2' && state.structures.length === 2, 'duplicateStructure adds a copy with fresh id', `(${newId})`);
+  state.structures = [{ id: 'COL1', type: 'pillar', crossSection: 'round', diameter_m: 0.4, materialId: 'concrete-painted', position: { x: 1, y: 1 }, rotation_deg: 0, label: 'Pillar 1' }];
+  ok(nextStructureId('pillar') === 'COL2', "nextStructureId('pillar') returns first free COL id", `(${nextStructureId('pillar')})`);
+  const newId = duplicateStructure('COL1');
+  ok(newId === 'COL2' && state.structures.length === 2, 'duplicateStructure adds a copy with fresh per-type id', `(${newId})`);
   ok(state.structures[1].position.x === 1.5, 'duplicate nudged +0.5 m on x');
   ok(state.structures[1]._cachedSpec === undefined, 'duplicate strips _cachedSpec');
-  state.selectedStructureId = 'S2';
-  ok(getSelectedStructure()?.id === 'S2', 'getSelectedStructure resolves selection');
+  state.selectedStructureId = 'COL2';
+  ok(getSelectedStructure()?.id === 'COL2', 'getSelectedStructure resolves selection');
 }
 
 console.log(failed === 0 ? '\nAll structures-state tests PASSED' : `\n${failed} test(s) FAILED`);
