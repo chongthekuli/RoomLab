@@ -47,6 +47,8 @@ ok(interactionPromptText('opening', 'window', false) === 'Press E to open the wi
 ok(interactionPromptText('opening', 'window', true) === 'Press E to close the window', 'open window → close prompt');
 ok(interactionPromptText('rack', null, false) === 'Press E to open the rack door', 'closed rack → open prompt');
 ok(interactionPromptText('rack', null, true) === 'Press E to close the rack door', 'open rack → close prompt');
+ok(interactionPromptText('toilet', null, false) === 'Press E to open the toilet door', 'closed toilet door → open prompt');
+ok(interactionPromptText('toilet', null, true) === 'Press E to close the toilet door', 'open toilet door → close prompt');
 
 console.log(failed === 0 ? '\nAll walk-interaction tests PASSED' : `\n${failed} test(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

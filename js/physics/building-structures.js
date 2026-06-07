@@ -67,7 +67,14 @@ function speedOfSound(T_C = DEFAULT_TEMPERATURE_C) {
 }
 
 // Recognised structure types (mirrors app-state deserialize filter).
-export const STRUCTURE_TYPES = ['pillar', 'half_wall', 'partition', 'beam', 'platform'];
+// 'toilet' is a COMPOSITE structure (a bank of N cubicles sharing dividing
+// partitions). It is recognised here so it round-trips, draws its bank-outline
+// footprint, and is enumerated by the walk-collision registry — but its
+// acoustic loss model (open/closed-top dB) is PHASE 2: structureExposedArea
+// returns 0 for it for now, and the direct-path loss loop skips it. The
+// renderer + (later) physics expand it into constituent surfaces via the pure
+// expandToiletSurfaces() expander below.
+export const STRUCTURE_TYPES = ['pillar', 'half_wall', 'partition', 'beam', 'platform', 'toilet'];
 
 // Nearest octave-band index for a frequency.
 function nearestBandIdx(bands_hz, freq_hz) {
@@ -113,9 +120,63 @@ export function structurePlanSize(s) {
       return { lx: Number(s.length_m) || 5, ly: Number(s.width_m) || 0.3 };
     case 'platform':
       return { lx: Number(s.width_m) || 3, ly: Number(s.depth_m) || 2 };
+    case 'toilet': {
+      const g = toiletGeom(s);
+      return { lx: g.lx, ly: g.ly };
+    }
     default:
       return { lx: 0.4, ly: 0.4 };
   }
+}
+
+// -------------------------------------------------------------------------
+// Toilet cubicle bank — composite structure geometry (Phase 1).
+// A 'toilet' is ONE placeable/rotatable object that expands into N cubicles
+// sharing dividing partitions. position = plan CENTRE of the bank; rotation_deg
+// rotates the whole bank about that centre. All metres / state coords.
+//
+//   • Cubicle pitch = clearWidth + partitionThickness (centre-to-centre).
+//   • N cubicles → N+1 shared dividing partitions (run in the DEPTH direction;
+//     the wall between two cubicles is shared — drawn ONCE) + 1 continuous rear
+//     wall + N front door openings.
+//   • OPEN-top: side+rear boards span scuffGap → openTopBoardH (floor gap under
+//     the boards, open above to the room). No ceiling slab.
+//   • CLOSED-top: boards run floor → closedTopBoardH (sealed to floor) + a
+//     ceiling slab per cubicle at base closedTopBoardH, thickness ceilingThk.
+//     Clamped to the room ceiling: if room.height_m < closedTopBoardH, the board
+//     top (and the dropped slab) clamp to the ceiling.
+//
+// Local frame (before rotation): bank centred at origin. Local +x runs along the
+// row of cubicles (the bank's long axis); local +y runs front→rear (the door
+// openings face local −y "front", the rear wall sits at local +y "rear").
+// -------------------------------------------------------------------------
+
+function toiletGeom(s) {
+  const cubicles = Math.max(1, Math.min(20, Math.round(Number(s.cubicles) || 3)));
+  const clearWidth = Number(s.clearWidth_m) > 0 ? Number(s.clearWidth_m) : 0.90;
+  const clearDepth = Number(s.clearDepth_m) > 0 ? Number(s.clearDepth_m) : 1.50;
+  const partTh = Number(s.partitionThickness_m) > 0 ? Number(s.partitionThickness_m) : 0.05;
+  const pitch = clearWidth + partTh;                 // centre-to-centre
+  const lx = cubicles * pitch + partTh;              // bank outer width
+  const ly = clearDepth + 2 * partTh;                // bank outer depth (~1.60)
+  return { cubicles, clearWidth, clearDepth, partTh, pitch, lx, ly };
+}
+
+// Vertical board extents { base, top } for the side/rear boards, given top-type
+// and the room ceiling. CLOSED-top clamps the board top to the ceiling when the
+// room is lower than the requested board height (and then the separate slab is
+// dropped to the ceiling too — see expandToiletSurfaces).
+function toiletBoardRange(s, room) {
+  const ceil = Number(room?.height_m) || 3;
+  const elev = Number(s.elev_m) || 0;
+  if (s.topType === 'closed') {
+    const want = Number(s.closedTopBoardH_m) > 0 ? Number(s.closedTopBoardH_m) : 2.40;
+    return { base: elev, top: Math.min(ceil, elev + want) };   // sealed to floor
+  }
+  // open-top: scuff gap under the boards, open above to the room.
+  const scuff = Number(s.scuffGap_m) >= 0 ? Number(s.scuffGap_m) : 0.15;
+  const want = Number(s.openTopBoardH_m) > 0 ? Number(s.openTopBoardH_m) : 2.00;
+  return { base: elev + scuff, top: Math.min(ceil, elev + want) };
 }
 
 // Vertical extent { base, top } (metres above floor). Pillars/partitions are
@@ -139,6 +200,12 @@ export function structureHeightRange(s, room) {
     }
     case 'platform':
       return { base: 0, top: Number(s.height_m) || 0.3 };
+    case 'toilet':
+      // Overall vertical envelope of the bank (board base → board top). Used by
+      // structureExposedArea (Phase 2) + as a coarse vertical gate. The per-
+      // cubicle walk-collision uses the same board range; door/bowl colliders
+      // refine within it.
+      return toiletBoardRange(s, room);
     default:
       return { base: elev, top: ceil };
   }
@@ -412,6 +479,11 @@ export function structureDirectPathLossPerBand(srcPos, listenerPos, structures, 
 
   for (const s of structures) {
     if (!s || !s.position || !STRUCTURE_TYPES.includes(s.type)) continue;
+    // PHASE 2: toilet-bank acoustic loss (open/closed-top dB, per-surface TL)
+    // is not modelled yet. Skip it here so the bank's outer rectangle is NOT
+    // treated as a solid box on the direct path. The expander inventory is
+    // ready (expandToiletSurfaces) for Phase 2 to consume.
+    if (s.type === 'toilet') continue;
     const blocking = structureBlocks(s, S, R, room);
     if (!blocking) continue;
     const row = materialMap && typeof materialMap.get === 'function' ? materialMap.get(s.materialId) : null;
@@ -483,6 +555,13 @@ export function structureExposedArea(s, room) {
       // Top deck + the riser sides.
       return w * dep + 2 * (w + dep) * h;
     }
+    case 'toilet':
+      // PHASE 2: the open/closed-top exposed-area + per-surface absorption model
+      // is not wired yet. Returning 0 keeps RT60 / the room constant NaN-free
+      // until Phase 2 consumes the expandToiletSurfaces() inventory. (The
+      // direct-path loss loop in structureDirectPathLossPerBand also skips
+      // 'toilet' for now — see the guard there.)
+      return 0;
     default:
       return 0;
   }
@@ -514,6 +593,151 @@ export function sumStructureAbsorption(structures, room, alphaAt, bandIndex) {
   return total;
 }
 
+/**
+ * PURE expander — turn one 'toilet' bank into its constituent surfaces, in
+ * WORLD (state) coordinates (rotation applied). Node-testable, no Three.js. The
+ * 3D renderer and (Phase 2) the acoustic loss model both consume this single
+ * inventory so they never disagree on "where are the boards / doors / bowls".
+ *
+ * Local frame (before rotation, bank centred on s.position):
+ *   • local +x runs along the row of cubicles (the long axis),
+ *   • local +y runs front → rear; DOOR openings face local −y (front), the
+ *     REAR wall sits at local +y.
+ *
+ * @param {object} s    a state.structures entry with type==='toilet'
+ * @param {object} room for ceiling-height clamp
+ * @returns {{
+ *   walls:   Array<{a:{x,y}, b:{x,y}, thickness_m:number, base:number, top:number, isDoorWall:boolean, kind:string, materialId:string}>,
+ *   ceilings:Array<{center:{x,y}, lx:number, ly:number, base:number, thickness_m:number, materialId:string}>,
+ *   doors:   Array<{cubicleIndex:number, hinge:{x,y}, leafW:number, leafH:number, thickness_m:number, swingDir:number, undercut_m:number, open:boolean, normal:{x,y}, axis:{x,y}}>,
+ *   bowls:   Array<{cubicleIndex:number, center:{x,y}, seatH:number, bbox:{lx,ly,h}}>,
+ *   meta:    {cubicles, pitch, clearWidth, clearDepth, partTh, lx, ly, topType}
+ * }}
+ */
+export function expandToiletSurfaces(s, room) {
+  const g = toiletGeom(s);
+  const { cubicles, clearWidth, clearDepth, partTh, pitch, lx, ly } = g;
+  const board = toiletBoardRange(s, room);
+  const cx = s.position.x, cy = s.position.y;
+  const th = deg2rad(s.rotation_deg || 0);
+  const cos = Math.cos(th), sin = Math.sin(th);
+  // local (u along +x row, v along +y front→rear) → world state coords.
+  const toWorld = (u, v) => ({ x: cx + u * cos - v * sin, y: cy + u * sin + v * cos });
+  // Local front/rear v: bank outer depth is ly; centred on origin.
+  const vFront = -ly / 2;      // door side (local −y)
+  const vRear = ly / 2;        // rear wall (local +y)
+  const materialId = s.materialId || 'gypsum-board';
+
+  // Cubicle i centre (local u); divider j centre (local u).
+  const cubicleU = (i) => -lx / 2 + partTh + clearWidth / 2 + i * pitch;
+  const dividerU = (j) => -lx / 2 + partTh / 2 + j * pitch;
+
+  const walls = [];
+  const ceilings = [];
+  const doors = [];
+  const bowls = [];
+
+  // --- N+1 shared dividing partitions (run front→rear along local +y) -------
+  for (let j = 0; j <= cubicles; j++) {
+    const u = dividerU(j);
+    walls.push({
+      a: toWorld(u, vFront), b: toWorld(u, vRear),
+      thickness_m: partTh, base: board.base, top: board.top,
+      isDoorWall: false, kind: 'divider', materialId,
+    });
+  }
+
+  // --- 1 continuous rear wall (runs along local +x at v = vRear) ------------
+  walls.push({
+    a: toWorld(-lx / 2, vRear), b: toWorld(lx / 2, vRear),
+    thickness_m: partTh, base: board.base, top: board.top,
+    isDoorWall: false, kind: 'rear', materialId,
+  });
+
+  // --- Front = N door openings (one hinged leaf per cubicle) ----------------
+  // hingeSide 'left' (viewed from outside, looking toward local +y / rear) =
+  // local −x jamb of the cubicle. Door swings OUT of the cubicle (toward the
+  // front, local −y). The outward normal of the door wall is local −y.
+  const leafW = Number(s.doorLeafW_m) > 0 ? Number(s.doorLeafW_m) : 0.60;
+  const leafH = Number(s.doorLeafH_m) > 0 ? Number(s.doorLeafH_m) : 2.00;
+  const doorThk = Number(s.doorThk_m) > 0 ? Number(s.doorThk_m) : 0.04;
+  const undercut = Number(s.undercut_m) >= 0 ? Number(s.undercut_m) : 0.30;
+  const doorsOpen = Array.isArray(s.doorsOpen) ? s.doorsOpen : [];
+  const frontNormalLocal = { x: 0, y: -1 };        // local outward (front)
+  const rowAxisLocal = { x: 1, y: 0 };             // along the row
+  // hingeSide flips which jamb the hinge sits at within the clear span.
+  const hingeLeft = (s.hingeSide ?? 'left') !== 'right';
+  for (let i = 0; i < cubicles; i++) {
+    const cu = cubicleU(i);
+    // Clear span of cubicle i: [cu - clearWidth/2, cu + clearWidth/2].
+    const jambLeftU = cu - clearWidth / 2;
+    const jambRightU = cu + clearWidth / 2;
+    const hingeU = hingeLeft ? jambLeftU : jambRightU;
+    const hinge = toWorld(hingeU, vFront);
+    // Outward normal + row axis in WORLD coords (rotate the local unit vectors).
+    const normal = {
+      x: frontNormalLocal.x * cos - frontNormalLocal.y * sin,
+      y: frontNormalLocal.x * sin + frontNormalLocal.y * cos,
+    };
+    const axis = {
+      x: rowAxisLocal.x * cos - rowAxisLocal.y * sin,
+      y: rowAxisLocal.x * sin + rowAxisLocal.y * cos,
+    };
+    // swingDir: +1 swings toward the outward (front) normal. Sign chosen for the
+    // mesh so a positive Y-rotation in Three.js carries the free edge toward the
+    // door-side normal (verified against the rack-door v=689 sign lesson).
+    doors.push({
+      cubicleIndex: i, hinge,
+      leafW, leafH, thickness_m: doorThk,
+      swingDir: hingeLeft ? -1 : +1,
+      undercut_m: undercut,
+      open: !!doorsOpen[i],
+      normal, axis,
+    });
+  }
+
+  // --- CLOSED-top: a ceiling slab per cubicle at base = board.top -----------
+  // Clamp: if the board top already reached the room ceiling, drop the slab to
+  // sit just under the ceiling (board.top - thickness) so it never pokes
+  // through. (The board.top is already min(ceil, requested) from
+  // toiletBoardRange.)
+  if (s.topType === 'closed') {
+    const ceilThk = Number(s.ceilingThk_m) > 0 ? Number(s.ceilingThk_m) : 0.05;
+    const ceilHt = Number(room?.height_m) || 3;
+    let slabBase = board.top;
+    if (slabBase + ceilThk > ceilHt) slabBase = Math.max(board.base, ceilHt - ceilThk);
+    for (let i = 0; i < cubicles; i++) {
+      ceilings.push({
+        center: toWorld(cubicleU(i), 0),
+        lx: clearWidth, ly: clearDepth,
+        base: slabBase, thickness_m: ceilThk, materialId,
+      });
+    }
+  }
+
+  // --- Toilet bowls: against the rear wall, centred per cubicle --------------
+  if (s.showBowls !== false) {
+    const seatH = Number(s.seatHeight_m) > 0 ? Number(s.seatHeight_m) : 0.42;
+    // Pedestal ~0.50 deep; sit it against the rear wall. Local v of the bowl
+    // centre = vRear - partTh/2 - 0.25 (0.50 deep pedestal, back face to wall).
+    const bowlDepth = 0.50;
+    const bowlV = vRear - partTh / 2 - bowlDepth / 2;
+    for (let i = 0; i < cubicles; i++) {
+      bowls.push({
+        cubicleIndex: i,
+        center: toWorld(cubicleU(i), bowlV),
+        seatH,
+        bbox: { lx: 0.36, ly: bowlDepth, h: seatH },
+      });
+    }
+  }
+
+  return {
+    walls, ceilings, doors, bowls,
+    meta: { cubicles, pitch, clearWidth, clearDepth, partTh, lx, ly, topType: s.topType ?? 'open' },
+  };
+}
+
 // Test/diagnostic export.
 export const _testing = {
   finiteEdgeIL,
@@ -521,4 +745,6 @@ export const _testing = {
   segPolyTRange,
   structureDeliveredRatio,
   speedOfSound,
+  toiletGeom,
+  toiletBoardRange,
 };

@@ -33,6 +33,7 @@ const DEFAULT_MATERIAL = {
   partition: 'gypsum-board',
   beam: 'concrete-painted',
   platform: 'wood-floor',
+  toilet: 'gypsum-board',
 };
 
 // Type metadata: chip label + the factory that builds a default placed entry.
@@ -42,6 +43,7 @@ const TYPES = {
   partition: { label: 'Partition', glyph: '<rect x="3" y="3" width="18" height="17"/>' },
   beam:      { label: 'Beam',      glyph: '<rect x="3" y="4" width="18" height="4"/>' },
   platform:  { label: 'Platform',  glyph: '<rect x="3" y="14" width="18" height="6"/>' },
+  toilet:    { label: 'Toilet',    glyph: '<rect x="3" y="4" width="5" height="16"/><rect x="9.5" y="4" width="5" height="16"/><rect x="16" y="4" width="5" height="16"/>' },
 };
 
 // Build a default structure of `type` at plan position {x,y}.
@@ -66,6 +68,24 @@ export function makeStructure(type, x, y) {
       return { ...base, length_m: 5, width_m: 0.3, depth_m: 0.4, soffitDrop_m: 0.4 };
     case 'platform':
       return { ...base, width_m: 3, depth_m: 2, height_m: 0.3 };
+    case 'toilet':
+      // Composite cubicle bank. ALL acoustic-relevant fields are present so
+      // Phase 2 (the open/closed-top dB loss model) just consumes them; Phase 1
+      // wires only geometry + walk-mode door + bowls. User-confirmed defaults:
+      // 3 cubicles, single row, 0.30 m door undercut. backToBack reserved so
+      // save-files round-trip (back-to-back layout is a later phase).
+      return {
+        ...base,
+        label: 'Toilet block',
+        cubicles: 3, pitch_m: 0.95, clearWidth_m: 0.90, clearDepth_m: 1.50, partitionThickness_m: 0.05,
+        backToBack: false,
+        topType: 'open',
+        openTopBoardH_m: 2.00, closedTopBoardH_m: 2.40, ceilingThk_m: 0.05, scuffGap_m: 0.15,
+        doorSide: '+y', hingeSide: 'left', doorLeafW_m: 0.60, doorLeafH_m: 2.00, doorThk_m: 0.04,
+        undercut_m: 0.30,
+        doorsOpen: [false, false, false],
+        showBowls: true, seatHeight_m: 0.42,
+      };
     default:
       return base;
   }
@@ -195,6 +215,10 @@ function rowMeta(s) {
     case 'partition': return `${(Number(s.length_m) || 0).toFixed(1)} m · full height`;
     case 'beam': return `${(Number(s.length_m) || 0).toFixed(1)} m · drop ${(Number(s.soffitDrop_m) || 0).toFixed(2)} m`;
     case 'platform': return `${(Number(s.width_m) || 0).toFixed(1)}×${(Number(s.depth_m) || 0).toFixed(1)} m · ${(Number(s.height_m) || 0).toFixed(2)} m high`;
+    case 'toilet': {
+      const n = Math.max(1, Math.round(Number(s.cubicles) || 3));
+      return `${n} cubicle${n === 1 ? '' : 's'} · ${s.topType === 'closed' ? 'closed-top' : 'open-top'}`;
+    }
     default: return '';
   }
 }
@@ -209,6 +233,16 @@ function num(key, label, val, unit, { step = unit === 'mm' ? 10 : 0.1, min = 0, 
     <input type="number" data-key="${key}" data-unit="${unit}" value="${display}" step="${step}" min="${min}" max="${max}" />
     <span class="ps-unit">${unit === 'deg' ? '°' : unit}</span>
   </label>`;
+}
+
+// Generic segmented control bound to an arbitrary string key. options is an
+// array of [value, label]. Reuses the .ps-seg styling; wired via data-segkey.
+function seg(key, label, current, options) {
+  const btns = options.map(([val, lbl]) =>
+    `<button type="button" class="ps-seg-btn ${current === val ? 'on' : ''}" role="radio" aria-checked="${current === val}" data-segkey="${escapeAttr(key)}" data-segval="${escapeAttr(val)}">${escapeHtml(lbl)}</button>`
+  ).join('');
+  return `<label class="ps-field ps-field-wide"><span>${escapeHtml(label)}</span></label>
+    <div class="ps-seg" role="radiogroup" aria-label="${escapeAttr(label)}">${btns}</div>`;
 }
 
 function materialSelect(s) {
@@ -262,6 +296,18 @@ function renderEditor(s) {
     fields += num('height_m', 'Height (riser)', s.height_m, 'm');
     fields += materialSelect(s);
     fields += num('rotation_deg', 'Rotation', s.rotation_deg, 'deg', { step: 5, min: -360, max: 360 });
+  } else if (s.type === 'toilet') {
+    fields += num('cubicles', 'Cubicles', s.cubicles, 'count', { step: 1, min: 1, max: 12 });
+    // Top type — open (boards stop short of the ceiling, room shares air) vs
+    // closed (boards floor→2.40 m + a ceiling slab per cubicle).
+    fields += seg('topType', 'Top', s.topType ?? 'open', [['open', 'Open-top'], ['closed', 'Closed-top']]);
+    // Hinge side (viewed from outside) — which front jamb the door pivots on.
+    fields += seg('hingeSide', 'Hinge', s.hingeSide ?? 'left', [['left', 'Left'], ['right', 'Right']]);
+    fields += num('undercut_m', 'Door undercut', s.undercut_m, 'm');
+    fields += `<label class="ps-check"><input type="checkbox" data-key="showBowls" ${s.showBowls !== false ? 'checked' : ''} /> Show toilet bowls</label>`;
+    fields += materialSelect(s);
+    fields += num('rotation_deg', 'Rotation', s.rotation_deg, 'deg', { step: 5, min: -360, max: 360 });
+    fields += `<p class="ps-note" style="margin:.4rem 0 0">Bank of ${Math.max(1, Math.round(Number(s.cubicles) || 3))} cubicles, single row. In walk-mode, stand at a door and press <strong>E</strong> to open/close it. Acoustic isolation is modelled in a later phase.</p>`;
   }
 
   return `<div class="ps-editor">${fields}
@@ -322,15 +368,34 @@ function wire(root) {
         const unit = inp.dataset.unit;
         if (unit === 'mm') v = v / 1000;
         if (key === 'sides') v = Math.max(3, Math.min(12, Math.round(v)));
+        if (key === 'cubicles') {
+          v = Math.max(1, Math.min(12, Math.round(v)));
+          s.cubicles = v;
+          // Keep doorsOpen length in sync with the cubicle count (pad/truncate
+          // with false) so the renderer + walk-mode never index out of range.
+          const src = Array.isArray(s.doorsOpen) ? s.doorsOpen : [];
+          s.doorsOpen = Array.from({ length: v }, (_, i) => src[i] === true);
+          if (s._cachedSpec) delete s._cachedSpec;
+          emit('structure:changed', { id, key });
+          render(root);   // note copy mentions the count
+          return;
+        }
         s[key] = v;
         if (s._cachedSpec) delete s._cachedSpec;
         emit('structure:changed', { id, key });
       });
     });
 
-    // Shape segmented control (pillar).
+    // Segmented controls. Shape (pillar) uses data-shape → crossSection; the
+    // generic ones use data-segkey/data-segval (toilet topType / hingeSide).
     rowEl.querySelectorAll('.ps-seg-btn').forEach(btn => {
       btn.addEventListener('click', () => {
+        if (btn.dataset.segkey) {
+          s[btn.dataset.segkey] = btn.dataset.segval;
+          emit('structure:changed', { id, key: btn.dataset.segkey });
+          render(root);   // open↔closed swaps note copy; re-render to reflect on-state
+          return;
+        }
         s.crossSection = btn.dataset.shape;
         emit('structure:changed', { id, key: 'crossSection' });
         render(root);   // shape change swaps which size fields show

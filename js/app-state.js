@@ -1270,7 +1270,7 @@ export function deserializeProject(obj) {
   // position + materialId are mandatory. _cachedSpec is re-resolved from
   // data/materials.json on first physics pass / render after load.
   if (Array.isArray(obj.structures)) {
-    const VALID_TYPES = new Set(['pillar', 'half_wall', 'partition', 'beam', 'platform']);
+    const VALID_TYPES = new Set(['pillar', 'half_wall', 'partition', 'beam', 'platform', 'toilet']);
     state.structures = obj.structures
       .filter(s => s && typeof s === 'object'
         && typeof s.id === 'string'
@@ -1280,7 +1280,18 @@ export function deserializeProject(obj) {
         && Number.isFinite(s.position.y))
       .map(s => {
         const { _cachedSpec, ...persistent } = s;
-        return deepClone(persistent);
+        const clone = deepClone(persistent);
+        // Toilet bank: doorsOpen must be a boolean[] of length === cubicles.
+        // Pad/truncate with `false` so a hand-edited or out-of-sync file (or a
+        // cubicles count changed since save) round-trips cleanly and the
+        // renderer never indexes past the array.
+        if (clone.type === 'toilet') {
+          const n = Math.max(1, Math.min(20, Math.round(Number(clone.cubicles) || 3)));
+          clone.cubicles = n;
+          const src = Array.isArray(clone.doorsOpen) ? clone.doorsOpen : [];
+          clone.doorsOpen = Array.from({ length: n }, (_, i) => src[i] === true);
+        }
+        return clone;
       });
   } else {
     state.structures = [];

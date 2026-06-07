@@ -30,6 +30,12 @@ function structureAt(type, x = 4, y = 4) {
     case 'partition': return { ...common, length_m: 4, height_m: 3, thickness_m: 0.2, fullHeight: true, rotation_deg: 90 };
     case 'beam':      return { ...common, length_m: 4, width_m: 0.3, depth_m: 0.4, soffitDrop_m: 0.4 };
     case 'platform':  return { ...common, width_m: 3, depth_m: 2, height_m: 0.4 };
+    case 'toilet':    return {
+      ...common, cubicles: 3, clearWidth_m: 0.90, clearDepth_m: 1.50, partitionThickness_m: 0.05,
+      topType: 'open', openTopBoardH_m: 2.00, scuffGap_m: 0.15, undercut_m: 0.30,
+      hingeSide: 'left', doorLeafW_m: 0.60, doorLeafH_m: 2.00, doorThk_m: 0.04,
+      doorsOpen: [false, false, false], showBowls: true, seatHeight_m: 0.42,
+    };
     default:          return common;
   }
 }
@@ -51,6 +57,22 @@ for (const type of STRUCTURE_TYPES) {
     ok(!atIt, `beam: floor-standing avatar walks UNDER it (no block)`, `(blocked=${atIt})`);
     const up = structureBlocksCylinder(4, 4, 2.5, 3.0, AV.radius, [s], room);
     ok(up, `beam: a probe at beam height IS blocked`, `(blocked=${up})`);
+  } else if (type === 'toilet') {
+    // The toilet bank is a COMPOSITE — NOT a solid box. Its BOARDS + closed
+    // doors + bowls block; its cubicle interiors are reachable through an OPEN
+    // door. (The default doorsOpen are all closed, so a tight cubicle centre
+    // can legitimately be blocked by the bowl — that's why the registry probes
+    // a board for "solid" and an open-door interior for "walkable".)
+    // Leftmost divider front jamb: bank centre x=4; lx = 3*0.95+0.05 = 2.90,
+    // so the left outer face is at x = 4 - 1.45 = 2.55, divider0 centre at
+    // 2.575; front of the bank at y = 4 - 0.80 = 3.20.
+    const onBoard = structureBlocksCylinder(2.575, 3.30, AV.yMin, AV.yMax, AV.radius, [s], room);
+    ok(onBoard, `toilet: a divider board IS solid to the avatar`, `(blocked=${onBoard})`);
+    // Open the middle cubicle's door → a small probe just inside its threshold
+    // is reachable (the outer rectangle is not a solid box).
+    const sOpen = { ...s, doorsOpen: [false, true, false] };
+    const insideMiddle = structureBlocksCylinder(4, 3.45, AV.yMin, AV.yMax, 0.06, [sOpen], room);
+    ok(!insideMiddle, `toilet: an open cubicle's interior is reachable (composite, not a solid box)`, `(blocked=${insideMiddle})`);
   } else {
     ok(atIt, `structure type "${type}" blocks the avatar at its location`, `(blocked=${atIt})`);
   }

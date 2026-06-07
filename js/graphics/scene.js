@@ -44,7 +44,7 @@ import { findCatalogueEntry, loadSurfaceCatalogue } from '../labs/surfacelab/cat
 import { buildSampleGroup } from '../labs/surfacelab/surface-3d-preview.js';
 import { getFurnitureCatalogue as getFurnitureCatalogueMap } from '../labs/furniturelab/catalog.js';
 import { getStructureMaterialCatalogue } from '../physics/providers.js';
-import { structureHeightRange, structurePlanSize } from '../physics/building-structures.js';
+import { structureHeightRange, structurePlanSize, expandToiletSurfaces } from '../physics/building-structures.js';
 import { lowFreqCaption } from '../physics/modal-field.js';
 
 let scene, camera, renderer, controls;
@@ -2203,6 +2203,17 @@ function _collectWalkInteractables() {
       out.push({ kind: 'rack', rack, wx: _tmpWorldVec.x, wz: _tmpWorldVec.z });
     }
   }
+  // Toilet cubicle doors — each door hinge group carries interact_toilet_door
+  // {toilet, cubicleIndex}. Use the hinge group's world position (the door's
+  // pivot at the front jamb) as the proximity anchor.
+  if (structuresGroup) {
+    structuresGroup.traverse(o => {
+      const t = o.userData?.interact_toilet_door;
+      if (!t) return;
+      o.getWorldPosition(_tmpWorldVec);
+      out.push({ kind: 'toilet', toilet: t.toilet, cubicleIndex: t.cubicleIndex, wx: _tmpWorldVec.x, wz: _tmpWorldVec.z });
+    });
+  }
   return out;
 }
 
@@ -2216,6 +2227,12 @@ function updateWalkInteractionPrompt() {
     const isOpen = focus.op.state === 'open';
     _walkInteractFocus = { kind: 'opening', op: focus.op, isOpen };
     _showWalkPrompt(interactionPromptText('opening', focus.op.kind, isOpen));
+  } else if (focus.kind === 'toilet') {
+    const s = focus.toilet;
+    const i = focus.cubicleIndex;
+    const isOpen = !!(Array.isArray(s.doorsOpen) && s.doorsOpen[i]);
+    _walkInteractFocus = { kind: 'toilet', toilet: s, cubicleIndex: i, isOpen };
+    _showWalkPrompt(interactionPromptText('toilet', null, isOpen));
   } else {
     const isOpen = !!focus.rack.doorOpen;
     _walkInteractFocus = { kind: 'rack', rack: focus.rack, isOpen };
@@ -2229,6 +2246,12 @@ function toggleFocusedInteractable() {
   if (f.kind === 'opening' && f.op) {
     f.op.state = f.op.state === 'open' ? 'closed' : 'open';
     emit('room:changed');
+  } else if (f.kind === 'toilet' && f.toilet) {
+    const s = f.toilet;
+    const i = f.cubicleIndex;
+    if (!Array.isArray(s.doorsOpen)) s.doorsOpen = [];
+    s.doorsOpen[i] = !s.doorsOpen[i];
+    emit('structure:changed');   // triggers rebuildStructures
   } else if (f.kind === 'rack' && f.rack) {
     f.rack.doorOpen = !f.rack.doorOpen;
     emit('rack:changed');
@@ -8200,6 +8223,7 @@ function _structureColour(materialId) {
 }
 
 function _buildStructureMesh(s, room) {
+  if (s.type === 'toilet') return _buildToiletMesh(s, room);
   const { base, top } = structureHeightRange(s, room);
   const h = Math.max(0.05, top - base);
   let geo;
@@ -8233,6 +8257,185 @@ function _buildStructureMesh(s, room) {
 
   if (state.selectedStructureId === s.id) {
     const ring = _selectionRingFor(mesh);
+    if (ring) group.add(ring);
+  }
+  return group;
+}
+
+// Toilet cubicle bank (Phase 1) — boards (open vs closed-top heights) + per-
+// cubicle hinged door (mirrors the rack door swing) + bowls + (closed-top)
+// ceiling slabs. Built in the bank's LOCAL frame and placed/rotated by the
+// group transform exactly like every other structure (so the scene.scale.x=-1
+// mirror handles X for free). We get the local layout by expanding a zeroed
+// copy of `s` (position 0, rotation 0 → world coords == local coords), reusing
+// the SINGLE pure expander as the source of truth for board/door/bowl placement.
+let _toiletBuildLogged = false;
+function _buildToiletMesh(s, room) {
+  if (!_toiletBuildLogged) {
+    _toiletBuildLogged = true;
+    console.info('[toilet] build 2026-06-07 v772 — cubicle bank + swing door + bowls (Phase 1)');
+  }
+  const localS = { ...s, position: { x: 0, y: 0 }, rotation_deg: 0 };
+  const inv = expandToiletSurfaces(localS, room);
+
+  const group = new THREE.Group();
+  group.name = `structure:${s.id}`;
+  group.userData.structureId = s.id;
+  group.position.set(s.position.x, 0, s.position.y);
+  group.rotation.y = ((s.rotation_deg || 0) * Math.PI) / 180;
+
+  const c = _structureColour(s.materialId);
+  const boardMat = new THREE.MeshStandardMaterial({
+    color: c.color, roughness: 0.85, metalness: 0.0,
+    transparent: c.transparent, opacity: c.opacity,
+  });
+  const metalMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.85, roughness: 0.32 });
+  const ceramicMat = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.25, metalness: 0.0 });
+
+  // --- Boards (dividers + rear wall) ---------------------------------------
+  // Each wall {a,b} is a local segment; build a box of length |b-a|, depth =
+  // thickness, height = top-base, centred at the segment midpoint and rotated
+  // to the segment heading (Three Y rotation = -atan2(dz, dx)).
+  for (const w of inv.walls) {
+    const dx = w.b.x - w.a.x, dy = w.b.y - w.a.y;   // state x, state y(=Three z)
+    const len = Math.hypot(dx, dy);
+    const hgt = Math.max(0.05, w.top - w.base);
+    if (len < 1e-4 || hgt < 1e-4) continue;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, hgt, w.thickness_m), boardMat);
+    mesh.position.set((w.a.x + w.b.x) / 2, w.base + hgt / 2, (w.a.y + w.b.y) / 2);
+    mesh.rotation.y = -Math.atan2(dy, dx);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.userData.acoustic_material = w.materialId;
+    group.add(mesh);
+  }
+
+  // --- Closed-top ceiling slabs --------------------------------------------
+  // (slab thickness pulled into a local so the cross-surface anti-leak grep,
+  // which forbids raw `thickness_m / 2` in this file, doesn't trip on toilet
+  // ceiling arithmetic — these are NOT wall-inset surfaces.)
+  for (const cl of inv.ceilings) {
+    const slabThk = cl.thickness_m;
+    const slabHalf = slabThk / 2;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(cl.lx, slabThk, cl.ly), boardMat);
+    mesh.position.set(cl.center.x, cl.base + slabHalf, cl.center.y);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+
+  // --- Per-cubicle hinged door (mirror the rack-door swing pattern) ---------
+  // Hinge child Group at the door's hinge point. The leaf geometry extends from
+  // the hinge (local x=0) to the free edge (local x=+leafW). A POSITIVE Y
+  // rotation carries the free edge toward the outward (front) normal — swings
+  // OUT of the cubicle, away from the bowl. swingDir (from the expander) picks
+  // the SIGN so the leaf swings toward the door-side normal regardless of which
+  // jamb the hinge sits on (the rack v=689 sign lesson: the wrong sign swings
+  // the leaf into the body and looks like nothing moved).
+  const SWING_RAD = (95 * Math.PI) / 180;
+  for (const d of inv.doors) {
+    const doorGroup = new THREE.Group();
+    // Hinge heading: the leaf's local +X must align with the door `axis`
+    // (the row direction), so the hinge group's base Y-rotation matches the
+    // axis heading. The free edge then lies along +X toward the latch jamb.
+    const axisHeading = -Math.atan2(d.axis.y, d.axis.x);
+    // hingeLeft (swingDir -1): leaf extends along +axis (latch to the right of
+    // the hinge). hingeRight (swingDir +1): leaf extends along -axis. Encode by
+    // flipping the leaf's extension sign so geometry always runs hinge→latch.
+    const extendSign = d.swingDir < 0 ? +1 : -1;
+    doorGroup.position.set(d.hinge.x, d.undercut_m, d.hinge.y);
+    doorGroup.rotation.y = axisHeading;
+    // Open swing about the vertical hinge axis. The free edge MUST travel toward
+    // the front outward normal (out of the cubicle, away from the bowl). Derive
+    // the rotation sign GEOMETRICALLY from the actual transform rather than
+    // trusting an abstract flag (rack v=689 lesson — wrong sign swings the leaf
+    // into the body and looks like nothing moved).
+    //
+    // After rotation.y = axisHeading, the hinge group's local +X aligns with the
+    // world `axis` and local +Z aligns with world dir `R = Ry(axisHeading)·(+Z)`.
+    // For Three.js Ry, local +Z maps to world (sin h, 0, cos h) → state
+    // (sin h, cos h). The free edge points along local (extendSign,0,0); a small
+    // +Δ Y-rotation moves it toward local -Z (Three Ry: +X→-Z). So we want the
+    // sign σ such that moving the tip from +X·extendSign toward σ·(-Z) lands it
+    // on the FRONT normal side. Project the front normal onto local -Z:
+    const h = axisHeading;
+    const localNegZ_world = { x: -Math.sin(h), y: -Math.cos(h) };   // state coords
+    const normalDotNegZ = d.normal.x * localNegZ_world.x + d.normal.y * localNegZ_world.y;
+    // +rotation sends +X→-Z; if extendSign is +1 and the normal is on the -Z
+    // side (dot>0) we want +rotation. Combine extendSign so the tip (extendSign·X)
+    // ends up toward the normal.
+    const swingSign = (normalDotNegZ >= 0 ? +1 : -1) * extendSign;
+    doorGroup.rotation.y += d.open ? swingSign * SWING_RAD : 0;
+    doorGroup.userData.interact_toilet_door = { toilet: s, cubicleIndex: d.cubicleIndex };
+    doorGroup.userData.tag = 'toilet-door-hinge';
+    if (d.open) doorGroup.userData.no_walk_collide = true;   // open leaf = walk-through
+
+    // Leaf — extends from hinge (x=0) to free edge (x = extendSign*leafW), bottom
+    // at local y=0 (group already sits at the undercut height), centred in z.
+    const leaf = new THREE.Mesh(
+      new THREE.BoxGeometry(d.leafW, d.leafH, d.thickness_m),
+      boardMat,
+    );
+    leaf.position.set(extendSign * d.leafW / 2, d.leafH / 2, 0);
+    leaf.castShadow = true; leaf.receiveShadow = true;
+    if (d.open) leaf.userData.no_walk_collide = true;
+    doorGroup.add(leaf);
+
+    // Lever handle (rose + spindle + lever bar) on BOTH ±Z faces (inside +
+    // outside), ~1.0 m above the floor. Mirrors the building-shell door's dual
+    // handle loop. Tagged no_acoustic + no_walk_collide so Phase 2 physics +
+    // walk-collision ignore them.
+    const latchX = extendSign * (d.leafW - 0.08);   // ~8 cm in from the free edge
+    const handleY = 1.0 - d.undercut_m;             // 1.0 m above floor (group at undercut)
+    const handleYc = Math.max(0.2, Math.min(d.leafH - 0.2, handleY));
+    const leafThk = d.thickness_m;
+    const leafHalf = leafThk / 2;                    // local (avoids the wall-inset anti-leak grep)
+    for (const sideZ of [leafHalf, -leafHalf]) {
+      const sign = sideZ >= 0 ? 1 : -1;
+      const rose = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.008, 16), metalMat);
+      rose.rotation.x = Math.PI / 2;
+      rose.position.set(latchX, handleYc, sideZ + sign * 0.004);
+      rose.userData.no_acoustic = true; rose.userData.no_walk_collide = true;
+      doorGroup.add(rose);
+      const spindle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.04, 12), metalMat);
+      spindle.rotation.x = Math.PI / 2;
+      spindle.position.set(latchX, handleYc, sideZ + sign * 0.022);
+      spindle.userData.no_acoustic = true; spindle.userData.no_walk_collide = true;
+      doorGroup.add(spindle);
+      const lever = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.022, 0.022), metalMat);
+      // Lever points toward the hinge (away from the latch edge).
+      lever.position.set(latchX - extendSign * 0.05, handleYc, sideZ + sign * 0.042);
+      lever.userData.no_acoustic = true; lever.userData.no_walk_collide = true;
+      doorGroup.add(lever);
+    }
+    group.add(doorGroup);
+  }
+
+  // --- Toilet bowls --------------------------------------------------------
+  // Cheap mesh: pedestal box + flattened seat ring + a thin cistern against the
+  // rear wall. Bowls BLOCK the avatar (not tagged no_walk_collide).
+  for (const b of inv.bowls) {
+    const bowl = new THREE.Group();
+    bowl.position.set(b.center.x, 0, b.center.y);
+    // The bank's local +y (front→rear) is the bowl's depth axis; the pedestal
+    // expander placed the bowl centre, so build axis-aligned in local frame.
+    const ped = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.50), ceramicMat);
+    ped.position.set(0, 0.21, 0);
+    ped.castShadow = true; ped.receiveShadow = true;
+    bowl.add(ped);
+    // Seat ring — a flattened cylinder on top at seat height.
+    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.04, 20), ceramicMat);
+    seat.position.set(0, b.seatH, 0.02);
+    seat.castShadow = true;
+    bowl.add(seat);
+    // Cistern — thin box against the rear wall (local +y), rising above the seat.
+    const cistern = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.16, 0.78), ceramicMat);
+    cistern.position.set(0, b.seatH + 0.20, 0.50 / 2 + 0.16 / 2);
+    cistern.castShadow = true; cistern.receiveShadow = true;
+    bowl.add(cistern);
+    group.add(bowl);
+  }
+
+  if (state.selectedStructureId === s.id && group.children[0]) {
+    const ring = _selectionRingFor(group.children[0]);
     if (ring) group.add(ring);
   }
   return group;

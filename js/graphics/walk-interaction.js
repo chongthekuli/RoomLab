@@ -27,14 +27,15 @@ export function pickNearestInteractable(ax, az, candidates, reachM = DEFAULT_REA
 // Friendly noun for the prompt.
 function nounFor(kind, opKind) {
   if (kind === 'rack') return 'rack door';
+  if (kind === 'toilet') return 'toilet door';
   if (opKind === 'window') return 'window';
   return 'door';
 }
 
 /**
  * Centered-HUD prompt text for a focused interactable.
- * @param {'opening'|'rack'} kind
- * @param {'door'|'window'|null} opKind  opening sub-kind (null for racks)
+ * @param {'opening'|'rack'|'toilet'} kind
+ * @param {'door'|'window'|null} opKind  opening sub-kind (null for racks/toilets)
  * @param {boolean} isOpen  current state
  * @returns {string} e.g. "Press E to open the window"
  */
