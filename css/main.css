@@ -8025,6 +8025,16 @@ section h3 {
   pointer-events: none;
 }
 
+/* Toilet architectural plan symbol (v=774) — dividers + part-open door leaf +
+   quarter-circle swing arc + WC pan/cistern. role → stroke weight. */
+.r2d-toilet-prim { fill: none; pointer-events: none; }
+.r2d-toilet-heavy { fill: rgba(120, 134, 156, 0.18); stroke: rgba(168, 182, 205, 0.95); stroke-width: 1.8; }
+.r2d-toilet-medium { stroke: rgba(186, 198, 218, 0.95); stroke-width: 1.3; }
+.r2d-toilet-swing { stroke: rgba(150, 165, 188, 0.7); stroke-width: 0.8; stroke-dasharray: 3,2.5; }
+.r2d-toilet-fixture { stroke: rgba(150, 165, 188, 0.85); stroke-width: 0.9; }
+.r2d-structure.selected .r2d-toilet-heavy { stroke: #00d4ff; stroke-width: 2.2; fill: rgba(0, 212, 255, 0.16); }
+.r2d-structure.selected .r2d-toilet-medium { stroke: #4fe1ff; }
+
 /* Confidence-overlay legend chip inside the 2D viewport. Text styles
    here only — geometry is laid out in SVG coords by renderFurnitureConfidenceLegend. */
 .r2d-furn-confidence-legend .r2d-furn-leg-title {

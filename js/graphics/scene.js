@@ -8273,7 +8273,7 @@ let _toiletBuildLogged = false;
 function _buildToiletMesh(s, room) {
   if (!_toiletBuildLogged) {
     _toiletBuildLogged = true;
-    console.info('[toilet] build 2026-06-07 v773 — closed-top→ceiling, solid front (filler+transom), 3-piece WC bowl');
+    console.info('[toilet] build 2026-06-07 v774 — leaf fills opening (~0.88 m, walkable), hinge reveal 10 mm, partition tint, plan symbol');
   }
   const localS = { ...s, position: { x: 0, y: 0 }, rotation_deg: 0 };
   const inv = expandToiletSurfaces(localS, room);
@@ -8284,11 +8284,24 @@ function _buildToiletMesh(s, room) {
   group.position.set(s.position.x, 0, s.position.y);
   group.rotation.y = ((s.rotation_deg || 0) * Math.PI) / 180;
 
+  // Dedicated toilet-board material (v=774, Viktor). The gypsum-board default
+  // (0xd8d4c8, light warm grey) read near-white and dissolved into the white
+  // room shell. A real toilet partition is a tinted laminate / HPL — give the
+  // boards + door a muted blue-grey that sits clearly DARKER than the room walls
+  // (~0xd8d4c8) but stays neutral, not garish. Roughness 0.72 reads as a wiped-
+  // down laminate (a touch glossier than raw gypsum) so it catches the key light
+  // and separates under SSAO. WC ceramic stays white (0xf2f2ee) below.
+  // If the user picks a NON-default materialId we honour that catalogue colour
+  // (so a "stainless" or "timber" partition still reads correctly); only the
+  // default gypsum-board id gets the partition tint.
+  const isDefaultBoard = !s.materialId || String(s.materialId).toLowerCase().includes('gypsum');
   const c = _structureColour(s.materialId);
-  const boardMat = new THREE.MeshStandardMaterial({
-    color: c.color, roughness: 0.85, metalness: 0.0,
-    transparent: c.transparent, opacity: c.opacity,
-  });
+  const boardMat = isDefaultBoard
+    ? new THREE.MeshStandardMaterial({ color: 0x8f9aa6, roughness: 0.72, metalness: 0.04 })
+    : new THREE.MeshStandardMaterial({
+        color: c.color, roughness: 0.85, metalness: 0.0,
+        transparent: c.transparent, opacity: c.opacity,
+      });
   const metalMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.85, roughness: 0.32 });
   const ceramicMat = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.25, metalness: 0.0 });
 

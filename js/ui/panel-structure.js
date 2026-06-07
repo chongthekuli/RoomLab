@@ -85,7 +85,12 @@ export function makeStructure(type, x, y) {
         // ceilingThk_m slab). doorLeafH_m is now COMPUTED, not stored. The closed
         // door top stops at doorClearH_m; the front latch reveal is frontLatchGap_m.
         doorClearH_m: 2.10,
-        doorSide: '+y', hingeSide: 'left', doorLeafW_m: 0.60, frontLatchGap_m: 0.010, doorThk_m: 0.04,
+        // v=774: leaf now fills the opening (≈0.88 m) so the avatar walks through.
+        // doorLeafW_m left UNSET → expandToiletSurfaces computes leafW = clearWidth
+        // − latchGap − hingeReveal = 0.88; hingeReveal_m is the 10 mm hinge-jamb gap
+        // (replaces the old 0.29 m fixed filler). A smaller custom doorLeafW_m still
+        // re-emits the filler for back-compat.
+        doorSide: '+y', hingeSide: 'left', frontLatchGap_m: 0.010, hingeReveal_m: 0.010, doorThk_m: 0.04,
         undercut_m: 0.30,
         doorsOpen: [false, false, false],
         showBowls: true, seatHeight_m: 0.42,

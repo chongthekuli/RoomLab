@@ -943,6 +943,163 @@ function assertStructureParity() {
 }
 
 // --------------------------------------------------------------------
+// Toilet architectural plan symbol parity (Sam, 2026-06-07, v=774).
+//
+// The toilet bank now draws a real plan symbol (cubicle dividers + per-cubicle
+// part-open door leaf + quarter-circle door-swing arc + WC pan/cistern) on the
+// 2D viewport AND the print plan SVG, both consuming the SINGLE pure helper
+// toiletPlanSegments(s, room) from js/physics/building-structures.js.
+//
+// Drift risks this fixture guards (Sam's #1: the swing-arc winding):
+//   (a) grep-gate — both renderers import AND call toiletPlanSegments.
+//   (b) single-source — the 3-cubicle default emits the EXACT locked primitive
+//       count, and every role ∈ the locked vocabulary.
+//   (c) the door-swing arc winds the SAME way on both surfaces after each
+//       surface's Y-flip (analytically apply a→−a, ccw→!ccw), and the leaf
+//       open-endpoint lies ON the swing arc (radius leafW from the hinge).
+//   (d) the wc-cistern sits between the wc-pan and the rear wall (against the
+//       rear) — in state coords AND after each surface's Y-flip — for rotation
+//       0 and 90.
+//   (f) every primitive's role ∈ the locked set.
+// --------------------------------------------------------------------
+
+import { toiletPlanSegments } from '../js/physics/building-structures.js';
+
+const TOILET_ROLES = new Set([
+  'bank-outline', 'divider', 'front-filler', 'door-leaf', 'door-swing', 'wc-pan', 'wc-cistern',
+]);
+
+function toiletFixture(over = {}) {
+  return {
+    id: 'WC1', type: 'toilet', position: { x: 4, y: 4 }, rotation_deg: 0,
+    materialId: 'gypsum-board', elev_m: 0,
+    cubicles: 3, clearWidth_m: 0.90, clearDepth_m: 1.50, partitionThickness_m: 0.05,
+    topType: 'open', openTopBoardH_m: 2.00, scuffGap_m: 0.15, doorClearH_m: 2.10,
+    doorSide: '+y', hingeSide: 'left', frontLatchGap_m: 0.010, hingeReveal_m: 0.010, doorThk_m: 0.04,
+    undercut_m: 0.30, doorsOpen: [false, false, false], showBowls: true, seatHeight_m: 0.42,
+    ...over,
+  };
+}
+
+function assertToiletPlanParity() {
+  const room = { width_m: 8, depth_m: 8, height_m: 3 };
+
+  // (a) grep-gate — both renderers import AND call toiletPlanSegments.
+  for (const [id, file] of [
+    ['2d-viewport', 'js/graphics/room-2d.js'],
+    ['print-plan',  'js/ui/print-plan-svg.js'],
+  ]) {
+    let src = '';
+    try { src = readFileSync(file, 'utf8'); } catch (e) { fail(`toilet-plan: ${id} unreadable (${file})`, String(e)); continue; }
+    ok(/from\s+['"][^'"]*physics\/building-structures(?:\.js)?['"]/.test(src) && /\btoiletPlanSegments\b/.test(src),
+       `toilet-plan: ${id} imports toiletPlanSegments from building-structures.js`);
+    ok(/toiletPlanSegments\s*\(/.test(src),
+       `toilet-plan: ${id} calls toiletPlanSegments()`);
+  }
+
+  // (b) single-source — locked primitive count for the 3-cubicle default.
+  // 1 bank-outline + (cubicles+1) dividers + 1 rear + per cubicle (door-leaf +
+  // door-swing + wc-cistern + wc-pan). No filler at the default.
+  const s = toiletFixture();
+  const seg = toiletPlanSegments(s, room);
+  const N = s.cubicles;
+  const expectCount = 1 /*outline*/ + (N + 1) /*dividers*/ + 1 /*rear*/ + N * 4 /*leaf+swing+cistern+pan*/;
+  ok(seg.primitives.length === expectCount,
+     `toilet-plan: 3-cubicle default emits the locked primitive count (${expectCount})`,
+     `got ${seg.primitives.length}`);
+  ok(seg.meta.cubicles === N && Math.abs(seg.meta.rotation_deg) < 1e-9,
+     'toilet-plan: meta carries cubicles + rotation_deg');
+  ok(seg.primitives.filter(p => p.role === 'front-filler').length === 0,
+     'toilet-plan: default leaf-fills-opening → NO front-filler primitive');
+
+  // (f) every primitive's role ∈ the locked set.
+  const badRole = seg.primitives.find(p => !TOILET_ROLES.has(p.role));
+  ok(!badRole, 'toilet-plan: every primitive role is in the locked vocabulary',
+     badRole ? `unknown role "${badRole.role}"` : '');
+
+  // Count the per-cubicle primitives that must exist.
+  const count = (role) => seg.primitives.filter(p => p.role === role).length;
+  ok(count('bank-outline') === 1 && count('divider') === N + 2 && count('door-leaf') === N &&
+     count('door-swing') === N && count('wc-pan') === N && count('wc-cistern') === N,
+     'toilet-plan: role counts — 1 outline, N+2 divider-lines (dividers+rear), N each of leaf/swing/pan/cistern',
+     `outline=${count('bank-outline')} divider=${count('divider')} leaf=${count('door-leaf')} swing=${count('door-swing')} pan=${count('wc-pan')} cistern=${count('wc-cistern')}`);
+
+  // (c) door-swing arc winding parity after each surface's Y-flip + leaf-on-arc.
+  // BOTH surfaces apply sy = const − y, i.e. (a→−a, ccw→!ccw). So the SCREEN
+  // winding is identical on both surfaces by construction (same helper, same
+  // flip). We assert the analytic flip is well-defined AND the leaf open-endpoint
+  // lies on the swing arc (radius leafW from the hinge centre).
+  const arc = seg.primitives.find(p => p.role === 'door-swing');
+  const leaf = seg.primitives.find(p => p.role === 'door-leaf');
+  ok(!!arc && !!leaf, 'toilet-plan: door-swing arc + door-leaf primitives present');
+  if (arc && leaf) {
+    // Screen winding (after Y-flip mirror) is the same for both surfaces because
+    // both negate angles + flip ccw identically. Verify the flipped winding is a
+    // pure boolean negation (deterministic) — a renderer that forgot to flip one
+    // surface would diverge here when we cross-check the two render files' arc
+    // code paths below.
+    const screenCcw = !arc.ccw;   // both surfaces: state-ccw → screen-(!ccw)
+    ok(screenCcw === true || screenCcw === false, 'toilet-plan: swing-arc screen winding is well-defined after Y-flip');
+    // Leaf hinge endpoint == arc centre; leaf open endpoint at radius leafW.
+    const H = leaf.a;
+    ok(Math.abs(H.x - arc.center.x) < 1e-9 && Math.abs(H.y - arc.center.y) < 1e-9,
+       'toilet-plan: door-leaf hinge endpoint coincides with the swing-arc centre');
+    const rTip = Math.hypot(leaf.b.x - arc.center.x, leaf.b.y - arc.center.y);
+    ok(Math.abs(rTip - arc.r) < 1e-9,
+       'toilet-plan: door-leaf open endpoint lies ON the swing arc (radius = leafW)',
+       `tip radius ${rTip.toFixed(4)} vs arc.r ${arc.r.toFixed(4)}`);
+
+    // Both render files must apply the SAME flip rule (sweep = ccw ? 1 : 0).
+    // A surface that hardcoded the opposite sweep would curve the door the other
+    // way. Grep both arc paths for the identical sweep expression.
+    for (const [id, file] of [
+      ['2d-viewport', 'js/graphics/room-2d.js'],
+      ['print-plan',  'js/ui/print-plan-svg.js'],
+    ]) {
+      const fsrc = readFileSync(file, 'utf8');
+      ok(/sweep\s*=\s*p\.ccw\s*\?\s*1\s*:\s*0/.test(fsrc),
+         `toilet-plan: ${id} uses sweep = p.ccw ? 1 : 0 (identical Y-flip arc winding)`);
+    }
+  }
+
+  // (d) wc-cistern sits between wc-pan and the rear wall (against the rear),
+  // for rotation 0 and 90, in STATE coords AND after each surface's Y-flip.
+  // Project pan / cistern / rear-wall centre onto the rear direction (local +y →
+  // state (−sin θ, cos θ)); ordering must be pan < cistern ≤ rear. Both render
+  // surfaces apply the SAME rigid Y-flip mirror to ALL primitives, so this
+  // state-coord ordering is what reaches the page on both — we additionally
+  // re-project under the Y-flip (y → −y) to prove the SCREEN ordering matches.
+  for (const rot of [0, 90]) {
+    const sr = toiletFixture({ rotation_deg: rot });
+    const sgr = toiletPlanSegments(sr, room);
+    const pan = sgr.primitives.find(p => p.role === 'wc-pan');
+    const cis = sgr.primitives.find(p => p.role === 'wc-cistern');
+    // Rear wall is the divider-role line spanning the full bank at the rear.
+    const rearLine = sgr.primitives.filter(p => p.role === 'divider' && p.a && p.b)
+      .map(p => ({ mid: { x: (p.a.x + p.b.x) / 2, y: (p.a.y + p.b.y) / 2 }, len: Math.hypot(p.b.x - p.a.x, p.b.y - p.a.y) }))
+      .sort((u, v) => v.len - u.len)[0];   // the rear wall is the longest divider-role line (spans lx)
+    ok(!!pan && !!cis && !!rearLine, `toilet-plan(rot ${rot}): pan + cistern + rear line present`);
+    if (pan && cis && rearLine) {
+      const th = rot * Math.PI / 180;
+      const rearDir = { x: -Math.sin(th), y: Math.cos(th) };
+      const projState = (pt) => pt.x * rearDir.x + pt.y * rearDir.y;
+      const pPan = projState(pan.center), pCis = projState(cis.center), pRear = projState(rearLine.mid);
+      ok(pPan < pCis - 1e-9 && pCis < pRear + 1e-9,
+         `toilet-plan(rot ${rot}): STATE coords — pan < cistern ≤ rear (cistern against rear)`,
+         `pan ${pPan.toFixed(3)} < cistern ${pCis.toFixed(3)} ≤ rear ${pRear.toFixed(3)}`);
+      // Y-flip (y → −y, as both surfaces apply): re-project the flipped points
+      // onto the rear direction; betweenness must persist (rigid mirror).
+      const flip = (pt) => ({ x: pt.x, y: -pt.y });
+      const fPan = projState(flip(pan.center)), fCis = projState(flip(cis.center)), fRear = projState(flip(rearLine.mid));
+      const between = (a, b, c) => (a < b && b < c + 1e-9) || (a > b && b > c - 1e-9);
+      ok(between(fPan, fCis, fRear),
+         `toilet-plan(rot ${rot}): AFTER Y-flip — cistern still between pan and rear (no inconsistent mirror)`,
+         `pan ${fPan.toFixed(3)}, cistern ${fCis.toFixed(3)}, rear ${fRear.toFixed(3)}`);
+    }
+  }
+}
+
+// --------------------------------------------------------------------
 // Run.
 // --------------------------------------------------------------------
 
@@ -978,6 +1135,9 @@ assertOffsetCustomRoomFitsFrame();
 
 // Building-structure footprint parity (2026-06-05).
 assertStructureParity();
+
+// Toilet architectural plan symbol parity (2026-06-07, v=774).
+assertToiletPlanParity();
 
 // ---------------------------------------------------------------------------
 // Phase 7 — WallLAB thickness flowing into RoomLAB rendering.

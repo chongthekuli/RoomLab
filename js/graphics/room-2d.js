@@ -4,7 +4,7 @@ import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
 import { getStructureMaterialCatalogue } from '../physics/providers.js';
-import { structureFootprintCorners, structureFootprintCircle } from '../physics/building-structures.js';
+import { structureFootprintCorners, structureFootprintCircle, toiletPlanSegments } from '../physics/building-structures.js';
 import { lowFreqCaption } from '../physics/modal-field.js';
 import { makeStructure } from '../ui/panel-structure.js';
 import { colorForReliability, reliabilityLegendRows } from '../labs/furniturelab/reliability-colors.js';
@@ -3862,12 +3862,80 @@ function renderStructuresSVG(structures, selectedId, x0, y0, pxW, pxD, room, lab
   const lblFontPx = (10 * labelScale).toFixed(1);
   const lblOffset = 11 * labelScale;
 
+  // --- Toilet architectural plan symbol (v=774) ----------------------------
+  // Shared pure helper toiletPlanSegments → dividers + part-open door leaf +
+  // quarter-circle door-swing arc + WC pan/cistern. Each primitive rides the
+  // SAME stateToSvgX/Y wrapper as every other 2D element (no parallel transform,
+  // NO X-mirror — plan surfaces use plain X). The Y-flip (sy = const − y)
+  // mirrors the plane, so the door-swing ARC has its angles negated + winding
+  // flipped (a→−a, ccw→!ccw) — the IDENTICAL transform print-plan-svg.js applies,
+  // so the door curves the same way on both surfaces.
+  const toiletPlanSVG = (st) => {
+    const seg = toiletPlanSegments(st, room);
+    // role → stroke weight: heavy bank-outline, medium divider/filler/leaf,
+    // light dashed swing, light WC.
+    const weight = (role) => {
+      if (role === 'bank-outline') return 'r2d-toilet-heavy';
+      if (role === 'divider' || role === 'front-filler' || role === 'door-leaf') return 'r2d-toilet-medium';
+      if (role === 'door-swing') return 'r2d-toilet-swing';
+      return 'r2d-toilet-fixture';   // wc-pan / wc-cistern
+    };
+    const rectPts = (p) => {
+      const hx = p.lx / 2, hy = p.ly / 2;
+      const c = Math.cos(p.rot), sn = Math.sin(p.rot);
+      return [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(([u, v]) => {
+        const x = p.center.x + u * c - v * sn;
+        const y = p.center.y + u * sn + v * c;
+        return `${stateToSvgX(x).toFixed(1)},${stateToSvgY(y).toFixed(1)}`;
+      }).join(' ');
+    };
+    let out = '';
+    for (const p of seg.primitives) {
+      const w = weight(p.role);
+      if (p.kind === 'line') {
+        out += `<line class="r2d-toilet-prim ${w}" data-role="${p.role}" x1="${stateToSvgX(p.a.x).toFixed(1)}" y1="${stateToSvgY(p.a.y).toFixed(1)}" x2="${stateToSvgX(p.b.x).toFixed(1)}" y2="${stateToSvgY(p.b.y).toFixed(1)}" />`;
+      } else if (p.kind === 'rect') {
+        out += `<polygon class="r2d-toilet-prim ${w}" data-role="${p.role}" points="${rectPts(p)}" />`;
+      } else if (p.kind === 'ellipse') {
+        // Average pixel scale (rx/ry in metres) — plan is near-isotropic.
+        const rxPx = p.rx * px_per_m_x, ryPx = p.ry * px_per_m_y;
+        const ecx = stateToSvgX(p.center.x), ecy = stateToSvgY(p.center.y);
+        // Y-flip negates the rotation (sy = const − y mirrors the plane).
+        const rotDeg = (-p.rot * 180 / Math.PI).toFixed(2);
+        out += `<ellipse class="r2d-toilet-prim ${w}" data-role="${p.role}" cx="${ecx.toFixed(1)}" cy="${ecy.toFixed(1)}" rx="${rxPx.toFixed(1)}" ry="${ryPx.toFixed(1)}" transform="rotate(${rotDeg} ${ecx.toFixed(1)} ${ecy.toFixed(1)})" />`;
+      } else if (p.kind === 'arc') {
+        // Endpoints in state coords → Y-flipped SVG coords. The Y-flip mirrors
+        // the plane → negate angles + flip winding (a→−a, ccw→!ccw).
+        const sxA = stateToSvgX(p.center.x + p.r * Math.cos(p.a0));
+        const syA = stateToSvgY(p.center.y + p.r * Math.sin(p.a0));
+        const sxB = stateToSvgX(p.center.x + p.r * Math.cos(p.a1));
+        const syB = stateToSvgY(p.center.y + p.r * Math.sin(p.a1));
+        const rPx = p.r * px_per_m_x;
+        // After Y-flip the winding inverts: a state-frame CCW arc draws CW on
+        // screen. SVG sweep-flag=1 = clockwise (screen). flippedCcw = !ccw.
+        const sweep = p.ccw ? 1 : 0;   // !ccw → CW(screen)=sweep1; ccw → sweep0
+        out += `<path class="r2d-toilet-prim ${weight(p.role)}" data-role="${p.role}" d="M ${sxA.toFixed(1)} ${syA.toFixed(1)} A ${rPx.toFixed(1)} ${rPx.toFixed(1)} 0 0 ${sweep} ${sxB.toFixed(1)} ${syB.toFixed(1)}" />`;
+      }
+    }
+    return out;
+  };
+
   let s = '';
   for (const st of structures) {
     if (!st || !st.position) continue;
     const isSel = st.id === selectedId;
     const cls = `r2d-structure r2d-structure-${st.type} ${isSel ? 'selected' : ''}`;
     let shape;
+    if (st.type === 'toilet') {
+      const cxT = stateToSvgX(st.position.x);
+      const cyT = stateToSvgY(st.position.y);
+      const lblT = st.label || st.id;
+      s += `<g class="${cls}" data-structure-id="${escapeXml(st.id)}">
+              ${toiletPlanSVG(st)}
+              <text class="r2d-structure-label" x="${cxT.toFixed(1)}" y="${(cyT + lblOffset + 6).toFixed(1)}" text-anchor="middle" style="font-size:${lblFontPx}px">${escapeXml(lblT)}</text>
+            </g>`;
+      continue;
+    }
     const circle = structureFootprintCircle(st);
     if (circle) {
       const r = Math.max(circle.r * px_per_m_x, circle.r * px_per_m_y);

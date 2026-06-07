@@ -22,7 +22,7 @@ import { roomEffectiveBounds } from '../physics/room-shape.js';
 import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
 import { renderRackFootprintSVG, lookupRackDef } from '../graphics/rack-2d.js';
 import { getRackCatalogue } from '../labs/devicelab/catalog.js';
-import { structureFootprintCorners, structureFootprintCircle } from '../physics/building-structures.js';
+import { structureFootprintCorners, structureFootprintCircle, toiletPlanSegments } from '../physics/building-structures.js';
 
 // 1.5m margin gives the North arrow + scale bar enough room to live
 // fully inside the top-right and bottom-left margin bands without ever
@@ -378,8 +378,67 @@ export function buildFloorPlanSVG(state, opts = {}) {
   // come from the SAME shared helpers the live 2D viewport + the physics prism
   // use (structureFootprintCorners / Circle) so the print plan can't drift from
   // screen — cross-surface convention (Sam). projectXY applies the Y-flip.
+  // Toilet architectural plan symbol (v=774) — dividers + part-open door leaf +
+  // quarter-circle swing arc + WC pan/cistern, from the SHARED pure helper
+  // toiletPlanSegments. Monochrome print palette; same role→weight mapping as
+  // the 2D viewport. Each primitive rides projectXY (the existing Y-flip, NO
+  // X-mirror). projectXY is sy = anchorY − y → mirrors the plane → the swing ARC
+  // gets its angles negated + winding flipped (a→−a, ccw→!ccw), IDENTICAL to
+  // room-2d.js, so the door curves the same way on screen and print.
+  const toiletPrintSVG = (st) => {
+    const seg = toiletPlanSegments(st, room);
+    const STROKE = '#1c1c1c';
+    const FILL = '#cfd2d6';
+    // role → stroke-width (metres) + fill.
+    const styleFor = (role) => {
+      if (role === 'bank-outline') return { w: 0.03, fill: FILL, dash: '' };
+      if (role === 'divider' || role === 'front-filler' || role === 'door-leaf') return { w: 0.022, fill: 'none', dash: '' };
+      if (role === 'door-swing') return { w: 0.012, fill: 'none', dash: '0.05,0.04' };
+      return { w: 0.015, fill: 'none', dash: '' };   // wc-pan / wc-cistern
+    };
+    const rectPts = (p) => {
+      const hx = p.lx / 2, hy = p.ly / 2;
+      const c = Math.cos(p.rot), sn = Math.sin(p.rot);
+      return [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(([u, v]) => {
+        const x = p.center.x + u * c - v * sn;
+        const y = p.center.y + u * sn + v * c;
+        const q = projectXY(x, y, anchorY, offsetX);
+        return `${q.sx.toFixed(3)},${q.sy.toFixed(3)}`;
+      }).join(' ');
+    };
+    let out = '';
+    for (const p of seg.primitives) {
+      const st2 = styleFor(p.role);
+      const dash = st2.dash ? ` stroke-dasharray="${st2.dash}"` : '';
+      if (p.kind === 'line') {
+        const a = projectXY(p.a.x, p.a.y, anchorY, offsetX);
+        const b = projectXY(p.b.x, p.b.y, anchorY, offsetX);
+        out += `<line x1="${a.sx.toFixed(3)}" y1="${a.sy.toFixed(3)}" x2="${b.sx.toFixed(3)}" y2="${b.sy.toFixed(3)}" stroke="${STROKE}" stroke-width="${st2.w}"${dash} />`;
+      } else if (p.kind === 'rect') {
+        out += `<polygon points="${rectPts(p)}" fill="${st2.fill}" stroke="${STROKE}" stroke-width="${st2.w}" />`;
+      } else if (p.kind === 'ellipse') {
+        const c = projectXY(p.center.x, p.center.y, anchorY, offsetX);
+        // Y-flip (sy = anchorY − y) negates the rotation.
+        const rotDeg = (-p.rot * 180 / Math.PI).toFixed(2);
+        out += `<ellipse cx="${c.sx.toFixed(3)}" cy="${c.sy.toFixed(3)}" rx="${p.rx.toFixed(3)}" ry="${p.ry.toFixed(3)}" transform="rotate(${rotDeg} ${c.sx.toFixed(3)} ${c.sy.toFixed(3)})" fill="${st2.fill}" stroke="${STROKE}" stroke-width="${st2.w}" />`;
+      } else if (p.kind === 'arc') {
+        const a = projectXY(p.center.x + p.r * Math.cos(p.a0), p.center.y + p.r * Math.sin(p.a0), anchorY, offsetX);
+        const b = projectXY(p.center.x + p.r * Math.cos(p.a1), p.center.y + p.r * Math.sin(p.a1), anchorY, offsetX);
+        // Y-flip inverts the winding: state-CCW → screen-CW → SVG sweep 1.
+        const sweep = p.ccw ? 1 : 0;
+        out += `<path d="M ${a.sx.toFixed(3)} ${a.sy.toFixed(3)} A ${p.r.toFixed(3)} ${p.r.toFixed(3)} 0 0 ${sweep} ${b.sx.toFixed(3)} ${b.sy.toFixed(3)}" fill="none" stroke="${STROKE}" stroke-width="${st2.w}"${dash} />`;
+      }
+    }
+    return out;
+  };
+
   const structuresEl = (state.structures || []).map((st) => {
     if (!st || !st.position) return '';
+    if (st.type === 'toilet') {
+      const lc = projectXY(st.position.x, st.position.y, anchorY, offsetX);
+      const lbl = `<text x="${lc.sx.toFixed(3)}" y="${(lc.sy + 0.5).toFixed(3)}" font-size="0.34" text-anchor="middle" fill="#1a1a1a">${escapeText(st.label || st.id)}</text>`;
+      return toiletPrintSVG(st) + lbl;
+    }
     const circle = structureFootprintCircle(st);
     let shape;
     if (circle) {

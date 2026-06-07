@@ -162,6 +162,50 @@ function toiletGeom(s) {
   return { cubicles, clearWidth, clearDepth, partTh, pitch, lx, ly };
 }
 
+// Shared front-face door layout (v=774). The SAME hinge/leaf/filler math feeds
+// (a) the 3D door swing in expandToiletSurfaces, (b) the 2D + print plan
+// door-leaf + swing-arc in toiletPlanSegments. Factored out so the 3D leaf and
+// the plan arc pivot from the IDENTICAL hinge point — a drift here would make
+// the swing arc miss the rendered door.
+//
+// Local frame: u runs along the row (+x), front plane at v = vFront. Composition
+// from the HINGE jamb inward: [ hingeReveal | (optional filler) | leaf | latchGap ].
+// At the default (no custom doorLeafW_m) fillerW === 0 and the leaf fills the
+// opening (≈0.88 m).
+function toiletFrontLayout(s) {
+  const g = toiletGeom(s);
+  const { clearWidth, partTh, pitch, lx } = g;
+  const latchGap = Number(s.frontLatchGap_m) >= 0 ? Number(s.frontLatchGap_m) : 0.010;
+  const hingeReveal = Number(s.hingeReveal_m) >= 0 ? Number(s.hingeReveal_m) : 0.010;
+  const fillLeafW = Math.max(0, clearWidth - latchGap - hingeReveal);
+  let leafW = Number(s.doorLeafW_m) > 0 ? Math.min(Number(s.doorLeafW_m), fillLeafW) : fillLeafW;
+  let fillerW = clearWidth - leafW - latchGap - hingeReveal;
+  if (fillerW < 1e-9) fillerW = 0;
+  const hingeLeft = (s.hingeSide ?? 'left') !== 'right';
+  const sgn = hingeLeft ? +1 : -1;
+  const cubicleU = (i) => -lx / 2 + partTh + clearWidth / 2 + i * pitch;
+  // Hinge sits a reveal in from the hinge jamb, then (if any) the filler, then
+  // the leaf runs toward the latch jamb. hingeU is the LEAF pivot — the same
+  // point the 3D door group and the plan swing-arc rotate about.
+  const hingeU = (i) => {
+    const cu = cubicleU(i);
+    const jambLeftU = cu - clearWidth / 2;
+    const jambRightU = cu + clearWidth / 2;
+    const hingeJambU = hingeLeft ? jambLeftU : jambRightU;
+    return hingeJambU + sgn * (hingeReveal + fillerW);
+  };
+  // Filler centre U (only meaningful when fillerW > 0). The filler sits between
+  // the hinge reveal and the leaf: from (hinge jamb + reveal) inward by fillerW.
+  const fillerU = (i) => {
+    const cu = cubicleU(i);
+    const jambLeftU = cu - clearWidth / 2;
+    const jambRightU = cu + clearWidth / 2;
+    const hingeJambU = hingeLeft ? jambLeftU : jambRightU;
+    return hingeJambU + sgn * (hingeReveal + fillerW / 2);
+  };
+  return { leafW, fillerW, latchGap, hingeReveal, hingeLeft, sgn, hingeU, fillerU, cubicleU, g };
+}
+
 // Vertical board extents { base, top } for the side/rear boards, given top-type
 // and the room ceiling.
 //   • OPEN-top: scuff gap under the boards (base = elev + scuffGap), top at
@@ -656,29 +700,34 @@ export function expandToiletSurfaces(s, room) {
     isDoorWall: false, kind: 'rear', materialId,
   });
 
-  // --- Front face = fixed filler + hinged door leaf (+ closed-top transom) ---
-  // Real cubicles have a fixed pilaster/filler beside a standard door — the door
-  // leaf (0.60) does NOT fill the 0.90 clear span. Compose the front of each
-  // cubicle at the front plane vFront as:
-  //   [ frontFiller (fillerW, from hinge jamb inward) | door leaf (leafW) | 10 mm
-  //     latch reveal ]   so  fillerW + leafW + latchGap === clearWidth (gap-free).
-  // hingeSide 'left' (viewed from outside, looking toward local +y / rear) =
-  // local −x jamb of the cubicle. Door swings OUT (toward the front, local −y);
-  // the outward normal of the door wall is local −y.
+  // --- Front face = hinged door leaf (+ optional filler + closed-top transom) ---
+  // v=774: the leaf now FILLS the opening so the avatar walks through. Compose
+  // the front of each cubicle at the front plane vFront as:
+  //   [ 10 mm hinge reveal | (optional filler) | door leaf (leafW) | 10 mm latch
+  //     reveal ]   so  hingeReveal + fillerW + leafW + latchGap === clearWidth.
+  // At the default fillerW === 0 and leafW ≈ 0.88 (clearWidth − the two reveals).
+  // A smaller custom doorLeafW_m re-emits the filler (back-compat). hingeSide
+  // 'left' (viewed from outside, looking toward local +y / rear) = local −x jamb
+  // of the cubicle. Door swings OUT (toward the front, local −y); the outward
+  // normal of the door wall is local −y.
   const ceil = Number(room?.height_m) || 3;
   const elev = Number(s.elev_m) || 0;
   const undercut = Number(s.undercut_m) >= 0 ? Number(s.undercut_m) : 0.30;
-  const latchGap = Number(s.frontLatchGap_m) >= 0 ? Number(s.frontLatchGap_m) : 0.010;
   const doorClearH = Number(s.doorClearH_m) > 0 ? Number(s.doorClearH_m) : 2.10;
   const doorThk = Number(s.doorThk_m) > 0 ? Number(s.doorThk_m) : 0.04;
   const doorsOpen = Array.isArray(s.doorsOpen) ? s.doorsOpen : [];
 
-  // Leaf width: clamp so filler + leaf + latchGap == clearWidth and the leaf
-  // never overhangs the clear span. If the user asks for a leaf ≥ clear span,
-  // shrink it to (clearWidth − latchGap) and drop the filler to zero.
-  let leafW = Number(s.doorLeafW_m) > 0 ? Number(s.doorLeafW_m) : 0.60;
-  let fillerW = clearWidth - leafW - latchGap;
-  if (fillerW < 0) { fillerW = 0; leafW = Math.max(0, clearWidth - latchGap); }
+  // Leaf / filler / hinge from the SHARED front layout (v=774). DEFAULT: the
+  // leaf fills the opening (leafW = clearWidth − latchGap − hingeReveal ≈ 0.88),
+  // fillerW = 0. A smaller custom doorLeafW_m re-emits the hinge-side filler so
+  // the front stays gap-free. ACOUSTIC NOTE (Phase 2 / Dr. Chen): the front area
+  // split changed — the fixed filler (was 0.29 m) is now 0 at the default and
+  // the door leaf grew 0.60 → 0.88 m. Phase 2 must weight the OPEN-door aperture
+  // as ~0.88 m (leaf) + the 0.010 m reveals, NOT the old 0.60 m.
+  const fl = toiletFrontLayout(s);
+  const leafW = fl.leafW;
+  const fillerW = fl.fillerW;
+  const latchGap = fl.latchGap;
 
   // Door vertical extent (DEFECT 3 — computed, never exceeds the stall sides).
   const doorBottom = elev + undercut;                 // always undercut off floor
@@ -705,20 +754,14 @@ export function expandToiletSurfaces(s, room) {
     x: rowAxisLocal.x * cos - rowAxisLocal.y * sin,
     y: rowAxisLocal.x * sin + rowAxisLocal.y * cos,
   };
+  const sgn = fl.sgn;
   for (let i = 0; i < cubicles; i++) {
-    const cu = cubicleU(i);
-    // Clear span of cubicle i: [cu - clearWidth/2, cu + clearWidth/2].
-    const jambLeftU = cu - clearWidth / 2;
-    const jambRightU = cu + clearWidth / 2;
-    // Hinge jamb (filler grows inward FROM the hinge jamb); the opening then runs
-    // from the inner filler edge toward the latch jamb. Signed offset `sgn` is +1
-    // when the hinge is on the −x (left) jamb so we march in +u, −1 otherwise.
-    const sgn = hingeLeft ? +1 : -1;
-    const hingeJambU = hingeLeft ? jambLeftU : jambRightU;
-
-    // Fixed front filler: from the hinge jamb inward by fillerW, full board height.
+    // Fixed front filler (back-compat: only when a smaller custom leaf is set,
+    // so fillerW > 0). At the default leaf-fills-opening case this branch is
+    // skipped (fillerW === 0). The filler sits between the hinge reveal and the
+    // leaf; fillerU(i) is its centre U.
     if (fillerW > 1e-6) {
-      const fillerCentreU = hingeJambU + sgn * (fillerW / 2);
+      const fillerCentreU = fl.fillerU(i);
       const fa = fillerCentreU - sgn * (fillerW / 2);
       const fb = fillerCentreU + sgn * (fillerW / 2);
       walls.push({
@@ -728,9 +771,10 @@ export function expandToiletSurfaces(s, room) {
       });
     }
 
-    // Hinge sits at the inner edge of the filler; the leaf runs from there toward
-    // the latch jamb, stopping latchGap short.
-    const hingeU = hingeJambU + sgn * fillerW;
+    // Hinge sits a reveal (+ any filler) in from the hinge jamb; the leaf runs
+    // from there toward the latch jamb, stopping latchGap short. hingeU is the
+    // SHARED pivot the plan swing-arc reuses (toiletPlanSegments).
+    const hingeU = fl.hingeU(i);
     const hinge = toWorld(hingeU, vFront);
     doors.push({
       cubicleIndex: i, hinge,
@@ -786,6 +830,119 @@ export function expandToiletSurfaces(s, room) {
   return {
     walls, ceilings, doors, bowls,
     meta: { cubicles, pitch, clearWidth, clearDepth, partTh, lx, ly, topType: s.topType ?? 'open' },
+  };
+}
+
+/**
+ * PURE plan-view primitives for a toilet bank — the architectural floor symbol
+ * the 2D viewport + print plan SVG both draw (cubicle dividers + per-cubicle
+ * part-open door leaf + quarter-circle door-swing arc + WC plan symbol). Node-
+ * testable, NO Three.js / DOM (nymphysics no-outbound-imports invariant).
+ *
+ * Shares toiletGeom + the toiletFrontLayout hinge/leaf math with
+ * expandToiletSurfaces, so the plan door pivots from the IDENTICAL hinge the
+ * 3D door swings about. The 2D + print renderers consume this single helper.
+ *
+ * All coords are STATE coords — already rotated by rotation_deg + translated to
+ * s.position, with Y UNFLIPPED (each renderer applies its own Y-flip). Arc
+ * angles are in the STATE frame (radians). Primitive kinds:
+ *   line    { kind, role, a:{x,y}, b:{x,y} }
+ *   arc     { kind, role, center:{x,y}, r, a0, a1, ccw }
+ *   ellipse { kind, role, center:{x,y}, rx, ry, rot }   rot = state-frame radians
+ *   rect    { kind, role, center:{x,y}, lx, ly, rot }
+ *
+ * Local frame: origin = bank centre, +x along the row, +y front→rear,
+ * vFront = −ly/2 (door side), vRear = +ly/2 (rear wall), vWall = vRear − partTh/2
+ * (rear board inner face). The door leaf swings OUT toward −y (front).
+ *
+ * @param {object} s    a state.structures entry with type==='toilet'
+ * @param {object} room (unused today; accepted for signature parity)
+ * @returns {{ primitives: Array, meta:{cubicles, lx, ly, rotation_deg} }}
+ */
+export function toiletPlanSegments(s, room) {
+  void room;
+  const fl = toiletFrontLayout(s);
+  const { leafW, fillerW, sgn, hingeLeft, g } = fl;
+  const { cubicles, clearWidth, partTh, pitch, lx, ly } = g;
+  const cx = s.position.x, cy = s.position.y;
+  const rotDeg = Number(s.rotation_deg) || 0;
+  const th = deg2rad(rotDeg);
+  const cos = Math.cos(th), sin = Math.sin(th);
+  // local (u along +x row, v along +y front→rear) → state coords (rotated +
+  // translated, Y UNFLIPPED — each renderer flips Y itself).
+  const toState = (u, v) => ({ x: cx + u * cos - v * sin, y: cy + u * sin + v * cos });
+
+  const vFront = -ly / 2;          // door side (local −y)
+  const vRear = ly / 2;            // rear wall (local +y)
+  const vWall = vRear - partTh / 2;   // rear board inner face
+
+  const dividerU = (j) => -lx / 2 + partTh / 2 + j * pitch;
+
+  const prims = [];
+
+  // bank-outline — outer rect lx × ly, rotated to rotDeg, centred on s.position.
+  prims.push({ kind: 'rect', role: 'bank-outline', center: { x: cx, y: cy }, lx, ly, rot: th });
+
+  // divider lines × (cubicles+1): each runs front→rear at dividerU(j).
+  for (let j = 0; j <= cubicles; j++) {
+    const u = dividerU(j);
+    prims.push({ kind: 'line', role: 'divider', a: toState(u, vFront), b: toState(u, vRear) });
+  }
+  // rear wall line (role 'divider'). NO continuous front line (openings there).
+  prims.push({ kind: 'line', role: 'divider', a: toState(-lx / 2, vRear), b: toState(lx / 2, vRear) });
+
+  const COS35 = Math.cos(35 * Math.PI / 180);
+  const SIN35 = Math.sin(35 * Math.PI / 180);
+
+  for (let i = 0; i < cubicles; i++) {
+    const cu = fl.cubicleU(i);
+    const hingeU = fl.hingeU(i);
+
+    // front-filler — only when a smaller custom leaf is set (fillerW > 0).
+    if (fillerW > 1e-6) {
+      const fc = fl.fillerU(i);
+      prims.push({
+        kind: 'line', role: 'front-filler',
+        a: toState(fc - sgn * (fillerW / 2), vFront),
+        b: toState(fc + sgn * (fillerW / 2), vFront),
+      });
+    }
+
+    // door-leaf — drawn part-open ~35°, hinge H at (hingeU, vFront), tip swings
+    // OUT toward −y. Open tip (local): u = hingeU + sgn*leafW*cos35,
+    // v = vFront − leafW*sin35.
+    const H = toState(hingeU, vFront);
+    const tip = toState(hingeU + sgn * leafW * COS35, vFront - leafW * SIN35);
+    prims.push({ kind: 'line', role: 'door-leaf', a: H, b: tip });
+
+    // door-swing arc — centre H, r = leafW, quarter circle from CLOSED (along
+    // the front, toward the latch) to fully-open OUT (toward −y). In the LOCAL
+    // frame the closed leaf points along +sgn·u (a0 = hingeLeft?0:π) and the open
+    // leaf points along −v (−π/2). Rotate the angles into the STATE frame by th.
+    const a0Local = hingeLeft ? 0 : Math.PI;
+    const a1Local = -Math.PI / 2;
+    prims.push({
+      kind: 'arc', role: 'door-swing',
+      center: H, r: leafW,
+      a0: a0Local + th, a1: a1Local + th,
+      ccw: !hingeLeft,
+    });
+
+    // wc-cistern — rect against the rear wall, between the pan and the rear.
+    prims.push({
+      kind: 'rect', role: 'wc-cistern',
+      center: toState(cu, vWall - 0.08), lx: 0.36, ly: 0.16, rot: th,
+    });
+    // wc-pan — ellipse in front of the cistern.
+    prims.push({
+      kind: 'ellipse', role: 'wc-pan',
+      center: toState(cu, vWall - 0.435), rx: 0.18, ry: 0.275, rot: th,
+    });
+  }
+
+  return {
+    primitives: prims,
+    meta: { cubicles, lx, ly, rotation_deg: rotDeg },
   };
 }
 

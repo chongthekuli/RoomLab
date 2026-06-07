@@ -30,7 +30,9 @@ function toiletAt(over = {}) {
     backToBack: false,
     topType: 'open',
     openTopBoardH_m: 2.00, scuffGap_m: 0.15, doorClearH_m: 2.10,
-    doorSide: '+y', hingeSide: 'left', doorLeafW_m: 0.60, frontLatchGap_m: 0.010, doorThk_m: 0.04,
+    // v=774: doorLeafW_m UNSET → leaf fills the opening (0.88 m). hingeReveal_m
+    // is the 10 mm hinge-jamb gap that replaces the old 0.29 m fixed filler.
+    doorSide: '+y', hingeSide: 'left', frontLatchGap_m: 0.010, hingeReveal_m: 0.010, doorThk_m: 0.04,
     undercut_m: 0.30,
     doorsOpen: [false, false, false],
     showBowls: true, seatHeight_m: 0.42,
@@ -122,7 +124,8 @@ ok(STRUCTURE_TYPES.includes('toilet'), "'toilet' is a recognised STRUCTURE_TYPE"
   const s = toiletAt({ doorsOpen: [false, true, false] });
   const inv = expandToiletSurfaces(s, room);
   ok(inv.doors.every(d => approx(d.undercut_m, 0.30)), 'every door undercut = 0.30 m (user-confirmed)');
-  ok(inv.doors.every(d => approx(d.leafW, 0.60)), 'leaf width = 0.60 m');
+  // v=774: leaf fills the opening = clearWidth − latchGap − hingeReveal = 0.88.
+  ok(inv.doors.every(d => approx(d.leafW, 0.90 - 0.010 - 0.010)), 'leaf width = 0.88 m (fills opening, walkable)', `(${inv.doors[0].leafW})`);
   // DEFECT 3: leafH is COMPUTED (doorTop − doorBottom). Open-top: 2.00 − 0.30 = 1.70.
   ok(inv.doors.every(d => approx(d.doorBottom, 0.30)), 'doorBottom = elev + undercut = 0.30');
   ok(inv.doors.every(d => approx(d.leafH, 1.70)), 'open-top computed leaf height = 1.70 m', `(${inv.doors[0].leafH})`);
@@ -132,34 +135,50 @@ ok(STRUCTURE_TYPES.includes('toilet'), "'toilet' is a recognised STRUCTURE_TYPE"
 }
 
 // =====================================================================
-// 7b. DEFECT 2 — gap-free solid front: fillerW + leafW + latchGap === clearWidth.
+// 7b. v=774 — DEFAULT leaf fills the opening: NO filler, and
+//     hingeReveal + leafW + latchGap === clearWidth (gap-free front).
 // =====================================================================
 {
-  const s = toiletAt();   // clearWidth 0.90, leaf 0.60, latchGap 0.010
+  const s = toiletAt();   // clearWidth 0.90, leaf UNSET → fills, latchGap 0.010, hingeReveal 0.010
   const inv = expandToiletSurfaces(s, room);
   const fillers = inv.walls.filter(w => w.kind === 'frontFiller');
-  ok(fillers.length === s.cubicles, 'one fixed front filler per cubicle', `(${fillers.length})`);
-  // Filler width = |b - a| of the planar segment.
-  const fW = Math.hypot(fillers[0].b.x - fillers[0].a.x, fillers[0].b.y - fillers[0].a.y);
+  ok(fillers.length === 0, 'default leaf fills the opening → NO front filler emitted', `(${fillers.length})`);
   const leafW = inv.doors[0].leafW;
   const latchGap = Number(s.frontLatchGap_m);
-  ok(approx(fW, 0.90 - 0.60 - 0.010), 'fillerW = clearWidth − leafW − latchGap = 0.29', `(${fW})`);
-  ok(approx(fW + leafW + latchGap, s.clearWidth_m),
-     'fillerW + leafW + latchGap === clearWidth (gap-free front)', `(${fW + leafW + latchGap})`);
-  // Filler spans full board height (sealed front, no see-through side gap).
+  const hingeReveal = Number(s.hingeReveal_m);
+  ok(approx(hingeReveal + leafW + latchGap, s.clearWidth_m),
+     'hingeReveal + leafW + latchGap === clearWidth (gap-free front, 0.90)', `(${hingeReveal + leafW + latchGap})`);
+}
+
+// =====================================================================
+// 7b-2. CUSTOM smaller leaf → filler re-emitted (back-compat), gap-free.
+// =====================================================================
+{
+  const s = toiletAt({ doorLeafW_m: 0.60 });   // smaller than the 0.88 fill width
+  const inv = expandToiletSurfaces(s, room);
+  const fillers = inv.walls.filter(w => w.kind === 'frontFiller');
+  ok(fillers.length === s.cubicles, 'custom smaller leaf → one filler per cubicle (back-compat)', `(${fillers.length})`);
+  const fW = Math.hypot(fillers[0].b.x - fillers[0].a.x, fillers[0].b.y - fillers[0].a.y);
+  const leafW = inv.doors[0].leafW;
+  const latchGap = Number(s.frontLatchGap_m), hingeReveal = Number(s.hingeReveal_m);
+  ok(approx(leafW, 0.60), 'custom leaf honored at 0.60', `(${leafW})`);
+  ok(approx(fW, 0.90 - 0.60 - 0.010 - 0.010), 'fillerW = clearWidth − leaf − latchGap − hingeReveal = 0.28', `(${fW})`);
+  ok(approx(hingeReveal + fW + leafW + latchGap, s.clearWidth_m),
+     'hingeReveal + fillerW + leafW + latchGap === clearWidth (gap-free)', `(${hingeReveal + fW + leafW + latchGap})`);
   ok(approx(fillers[0].base, inv.walls.find(w => w.kind === 'divider').base) &&
      approx(fillers[0].top, inv.walls.find(w => w.kind === 'divider').top),
      'front filler spans full board height');
 }
 
 // =====================================================================
-// 7c. DEFECT 2 clamp — leaf ≥ clear span → filler 0, leaf shrinks to fit.
+// 7c. Clamp — custom leaf ≥ fill width → filler 0, leaf clamped to fill width.
 // =====================================================================
 {
-  const s = toiletAt({ doorLeafW_m: 1.20 });   // wider than the 0.90 clear span
+  const s = toiletAt({ doorLeafW_m: 1.20 });   // wider than the clear span
   const inv = expandToiletSurfaces(s, room);
   ok(inv.walls.filter(w => w.kind === 'frontFiller').length === 0, 'over-wide leaf → no filler emitted');
-  ok(approx(inv.doors[0].leafW, 0.90 - 0.010), 'over-wide leaf shrunk to clearWidth − latchGap (never overhangs)', `(${inv.doors[0].leafW})`);
+  ok(approx(inv.doors[0].leafW, 0.90 - 0.010 - 0.010),
+     'over-wide leaf clamped to clearWidth − latchGap − hingeReveal (never overhangs)', `(${inv.doors[0].leafW})`);
 }
 
 // =====================================================================
