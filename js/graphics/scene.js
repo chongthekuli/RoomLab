@@ -129,6 +129,23 @@ const _tmpWorldVec = (typeof THREE !== 'undefined') ? new THREE.Vector3() : null
 let tpController = null;
 let tpLastTs = 0;
 let _lastFrameTs = 0;             // ms — universal frame clock for tick helpers
+// --- 3D render-loop gating (perf fix, 2026-06-07) -------------------
+// The WebGL render loop (animate → composer.render: SSAO+Bloom+SMAA+
+// OutputPass) is the heaviest thing in the app. On weak integrated GPUs
+// that post-FX chain can run 30–80 ms/frame, starving the main thread
+// and the 2D SVG draw canvas / coord-entry text input. When the user is
+// in the 2D view the 3D canvas is hidden, so we PAUSE the loop entirely
+// and hand the whole frame budget back to 2D. Walk-mode shares the 3D
+// canvas (view = 'walk' maps to #view-3d), so it counts as "3D active".
+//
+// _rafId   — handle of the in-flight requestAnimationFrame, or null when
+//            the chain is stopped. Guards against two concurrent chains
+//            (the double-start bug) — startAnimation() is a no-op while a
+//            chain is already armed.
+// _loopPaused — true while the 2D view is active. When true, animate()
+//            does NOT re-arm rAF, so the chain unwinds to zero cost.
+let _rafId = null;
+let _loopPaused = false;
 // Rigged GLTF character (loaded async). When present, the avatar swaps to
 // this rig and procedural animation layers are bypassed in favor of the
 // AnimationMixer's idle/walk/run crossfade.
@@ -587,11 +604,35 @@ export async function mount3DViewport({ materials }) {
   rebuildHeatmap();
   rebuildTreatments();
   rebuildFurniture();
-  animate();
+  // Boot the render loop ONLY if the 3D canvas is actually visible on
+  // load. The default tab is 3D (index.html: #view-3d is not hidden,
+  // the 3D vp-tab carries .active), so normally we start running. But
+  // gate on the live DOM so a future change of default tab — or a
+  // deep-link that opens straight into 2D — doesn't burn the SSAO+Bloom
+  // +SMAA chain at 60 fps behind a hidden canvas before the user ever
+  // opens 3D. startAnimation() is idempotent; pauseAnimation() leaves
+  // the loop stopped until the user switches to 3D / Walk.
+  {
+    const v3 = document.getElementById('view-3d');
+    const view3dVisible = !v3 || !v3.hidden;   // missing element → assume visible (legacy)
+    if (view3dVisible) startAnimation();
+    else _loopPaused = true;                    // armed-on-demand by the listener below
+  }
 
   window.addEventListener('resize', onResize);
   document.addEventListener('viewport:tab-changed', e => {
-    if (e.detail.view === '3d') requestAnimationFrame(onResize);
+    // Render-loop gating (perf): the 3D canvas is shown for BOTH '3d'
+    // and 'walk' (walk maps to #view-3d). It is hidden for '2d'. Pause
+    // the WebGL loop in 2D so the full GPU + main-thread budget goes to
+    // the 2D SVG editor + coord-entry input; resume + repaint on return.
+    const view = e.detail && e.detail.view;
+    if (view === '2d') {
+      pauseAnimation();
+    } else {
+      // '3d' or 'walk' (or anything else that shows the 3D canvas)
+      startAnimation();
+      requestAnimationFrame(onResize);
+    }
   });
   // Side-panel open / close (and any other layout change) shifts the
   // container's clientWidth without firing window resize. Without a
@@ -12588,7 +12629,12 @@ function applyShadowFlags() {
 }
 
 function animate(ts) {
-  requestAnimationFrame(animate);
+  // Re-arm the chain UNLESS the loop has been paused (2D view active).
+  // When paused we let the chain unwind: _rafId goes null and no frame
+  // is scheduled, so the GPU + main thread are freed for the 2D editor.
+  // startAnimation() is the only path that can re-arm a stopped chain.
+  if (_loopPaused) { _rafId = null; return; }
+  _rafId = requestAnimationFrame(animate);
   if (!renderer || !scene || !activeCamera) return;
   if (shadowsNeedRefresh) { applyShadowFlags(); shadowsNeedRefresh = false; }
   _tickSurfaceSelectionPulse(ts);
@@ -12643,9 +12689,16 @@ function animate(ts) {
   } else if (controls) {
     controls.update();
   }
-  // Route through the EffectComposer chain (SSAO + Bloom + SMAA + OutputPass).
-  // The RenderPass needs the active camera each frame because walkthrough
-  // swaps to walkCamera — we reseat it before render.
+  _renderOnce();
+}
+
+// Single render pass — no time-based ticks. Shared by the per-frame
+// animate() and by the resume path (so the scene isn't stale/black for
+// one frame when the user switches 2D → 3D). The RenderPass needs the
+// active camera each frame because walkthrough swaps to walkCamera —
+// we reseat it before render.
+function _renderOnce() {
+  if (!renderer || !scene || !activeCamera) return;
   if (composer) {
     const renderPass = composer.passes[0];
     if (renderPass && renderPass.camera !== activeCamera) renderPass.camera = activeCamera;
@@ -12654,4 +12707,33 @@ function animate(ts) {
   } else {
     renderer.render(scene, activeCamera);
   }
+}
+
+// --- Render-loop pause / resume (perf fix, 2026-06-07) --------------
+// Resume the 3D render loop (3D or Walk view became active). Idempotent:
+// if a chain is already armed (_rafId != null) this is a no-op, so we
+// never end up with two concurrent rAF chains. Resets the frame clocks
+// so the first post-resume frame doesn't see a multi-second dt (which
+// would teleport the walk avatar / fling a wall-opacity lerp), then
+// kicks one immediate render so the canvas isn't stale for a frame.
+function startAnimation() {
+  _loopPaused = false;
+  if (_rafId != null) return;        // already running — don't double-start
+  const now = performance.now();
+  _lastFrameTs = now;
+  tpLastTs = now;
+  _renderOnce();                     // paint immediately, no stale/black frame
+  _rafId = requestAnimationFrame(animate);
+}
+
+// Pause the 3D render loop (2D view active — 3D canvas hidden). Sets the
+// flag; the in-flight animate() frame sees _loopPaused and lets the chain
+// unwind to _rafId = null on its next tick. We also cancel any pending
+// frame so the pause takes effect within one frame even if animate()
+// already re-armed this turn. One-shot animations (camera focus, wall
+// opacity) triggered while paused are NOT lost — they resume ticking from
+// their stored t0 when startAnimation() re-arms the loop.
+function pauseAnimation() {
+  _loopPaused = true;
+  if (_rafId != null) { cancelAnimationFrame(_rafId); _rafId = null; }
 }
