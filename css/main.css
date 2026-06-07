@@ -8346,3 +8346,71 @@ section h3 {
   color: var(--muted); cursor: pointer; font-size: 10px; padding: 4px 10px;
 }
 .ps-dup:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ───────────────────────────────────────────────────────────────────────
+   Mobile auto-zoom guard (Maya, 2026-06-07 · v=768)
+
+   BUG (Android/tablet Chrome only): focusing any form control whose
+   font-size < 16px makes the browser auto-zoom the visual viewport. The
+   app shell is position:fixed; height:100vh; overflow:hidden, so the
+   auto-zoom scrolls the top header + left rail off-screen and does NOT
+   reset on blur — "the upper parts is hidden" persists into draw mode.
+
+   FIX: force every focusable control to ≥16px on coarse-pointer (touch /
+   stylus) devices — 16px is the exact threshold below which iOS/Android
+   Chrome auto-zoom on focus. We deliberately do NOT add
+   maximum-scale=1 / user-scalable=no to the viewport meta (WCAG 1.4.4 —
+   low-vision users must keep pinch-zoom).
+
+   Scoping: `pointer: coarse` only. Mouse users (pointer: fine) never
+   match this block, so the compact 12px desktop styling above is
+   untouched — these are additive selectors at the end of the cascade
+   matching a disjoint device class. Guarded by
+   tests/mobile-input-zoom.test.mjs.
+   ─────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  /* Global safety net — any present-or-future focusable text control
+     renders at the no-auto-zoom threshold. 16px is a floor, not a
+     restyle; larger inputs keep their size. */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* The project / room name modal dialog (was 12px). */
+  .rl-modal-input {
+    font-size: 16px;
+  }
+
+  /* In-draw CAD coord entry (was 0.78rem ≈ 12.5px, width:5ch). At 16px a
+     5ch box is too cramped to show "−12.5" comfortably and the panel can
+     creep toward the canvas edge on a narrow phone. Widen to fit ~6 mono
+     chars, cap the whole panel's width, and pin it inside the viewport so
+     it can never overflow the canvas on a small screen. */
+  .draw-float-coord-input {
+    font-size: 16px;
+    width: 7ch;
+    padding: 6px 7px;
+  }
+  .draw-float-coord {
+    max-width: calc(100vw - 24px);
+    padding: 8px 10px 7px;
+    gap: 6px;
+  }
+  .draw-float-coord-label { font-size: 0.9rem; }
+  .draw-float-coord-unit  { font-size: 0.85rem; }
+  .draw-float-coord-hint  { font-size: 0.8rem; }
+
+  /* Post-close room-height prompt (was 0.95rem ≈ 15px — just under the
+     threshold, so it also triggered the zoom). Bump to 16px and give the
+     box a touch more room. */
+  .draw-height-prompt-row input {
+    font-size: 16px;
+    width: 7ch;
+    padding: 6px 8px;
+  }
+  .draw-height-prompt-unit { font-size: 0.92rem; }
+  .draw-height-prompt-hint { font-size: 0.8rem; }
+}
+
