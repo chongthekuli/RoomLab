@@ -168,6 +168,39 @@ let panActive = false;
 let panStart = null;
 let spaceHeld = false;
 
+// --- Pointer-based vertex placement (replaces the fragile native `click`) ---
+// Why: draw mode rebuilds the entire <svg> via innerHTML on every mousemove
+// (handleDrawMove → render → renderCustomDraw). A physical mouse emits a tiny
+// `mousemove` between mousedown and mouseup; that move fires render(), which
+// swaps out the <svg>. The native `click` event only fires when mousedown and
+// mouseup land on the SAME element, so the swap suppresses the click and the
+// vertex is never placed. Touch taps emit no intervening hover-move, so the
+// synthesized click always lands — which is exactly why phone tap is reliable
+// and fast desktop mouse is flaky. We therefore place on pointerdown→pointerup
+// (with a drag threshold to distinguish a click from a pan-drag) and compute
+// coords from the pointerUP event, so it does not matter that the <svg> was
+// rebuilt mid-interaction.
+const DRAW_DRAG_THRESHOLD_PX = 5;     // pointer travel under this = a click, not a drag
+const DRAW_DBLCLICK_WINDOW_MS = 400;  // placements within this of a dblclick are undone
+let drawPointerDown = null;           // { x, y, id } captured on pointerdown, or null
+// Timestamps (performance.now) of vertices placed by pointerup, oldest→newest.
+// On dblclick we pop any vertex whose placement falls inside the dblclick
+// window so a double-click-to-finish does not leave 1–2 stray vertices behind.
+let drawPlaceStamps = [];
+
+// Pure decision helper (exported for tests): given the pointerdown client
+// position, the pointerup client position, and whether a pan is/was active,
+// decide whether this pointer interaction should place a vertex. A vertex is
+// placed only when no pan was involved AND the pointer travelled less than the
+// drag threshold (i.e. it was a click, not a drag). Distance is Euclidean.
+export function shouldPlaceVertexOnPointerUp(down, up, panWasActive, threshold = DRAW_DRAG_THRESHOLD_PX) {
+  if (panWasActive) return false;
+  if (!down || !up) return false;
+  const dx = up.clientX - down.x;
+  const dy = up.clientY - down.y;
+  return Math.sqrt(dx * dx + dy * dy) < threshold;
+}
+
 // Edge auto-pan — when the cursor lingers within EDGE_PAN_BAND_PX of
 // any canvas border during a draw, the canvas auto-shifts in that
 // direction so the user can chase a large building outside the
@@ -289,8 +322,9 @@ export function startDrawCustomShape() {
   // see this, your browser is serving a cached copy; do "Empty cache
   // and hard reload" (Chrome: right-click the reload button) or
   // toggle DevTools Network → "Disable cache".
-  console.info('[room-2d] draw started — snap-to-grid + edge auto-pan + shortcuts (R/Backspace/Esc/Enter) ENABLED');
+  console.info('[room-2d] build 2026-06-07 v770 — pointerup vertex placement (fixes lost-click on fast desktop mouse)');
   drawActive = true;
+  resetDrawPointerState();
   installWindowKeyHandler();
   drawConfig = {
     mode: 'room-shape',
@@ -313,6 +347,7 @@ export function startDrawCustomShape() {
 
 export function startDrawZone(opts = {}) {
   drawActive = true;
+  resetDrawPointerState();
   installWindowKeyHandler();
   drawConfig = {
     mode: 'zone',
@@ -358,6 +393,7 @@ function finishDraw() {
   drawCursor = null;
   drawCursorNearStart = false;
   drawPan.dx = 0; drawPan.dy = 0;
+  resetDrawPointerState();
   stopEdgePan();
   destroyFloatCoordEl();
   removeWindowKeyHandler();
@@ -436,11 +472,20 @@ function showHeightPrompt() {
   setTimeout(() => { input.focus(); input.select(); }, 0);
 }
 
+// Clear the pointer-placement bookkeeping (the in-flight pointerdown snapshot
+// and the dblclick-undo placement stamps). Called whenever the vertex list is
+// wholesale reset so stale stamps can never mis-trigger a dblclick undo.
+function resetDrawPointerState() {
+  drawPointerDown = null;
+  drawPlaceStamps = [];
+}
+
 function cancelDraw() {
   drawActive = false;
   drawConfig = null;
   drawVertices = [];
   drawCursor = null;
+  resetDrawPointerState();
   stopEdgePan();
   destroyFloatCoordEl();
   removeWindowKeyHandler();
@@ -449,10 +494,17 @@ function cancelDraw() {
 
 function undoDrawVertex() {
   drawVertices.pop();
+  // Keep the placement-stamp stack from outgrowing the vertex list so a later
+  // dblclick can't undo a vertex the user already removed. Stamps are a pure
+  // time-window heuristic, so dropping the newest one on any undo is safe.
+  drawPlaceStamps.pop();
   render();
 }
 
-function handleDrawClick(event) {
+// Place (or close-loop) from an event whose currentTarget is the LIVE svg.
+// Shared by the pointerup placement path. Records a placement timestamp so a
+// trailing dblclick can undo stray vertices. Returns nothing.
+function placeVertexFromEvent(event) {
   if (!drawActive) return;
   if (panActive) return;       // mid-pan release should not place a vertex
   const c = drawCoordsFromEvent(event);
@@ -476,12 +528,50 @@ function handleDrawClick(event) {
     }
   }
   drawVertices.push({ x: c.rx, y: c.ry });
+  drawPlaceStamps.push(performance.now());
   // A mouse-placed vertex is the most recent intent — clear any half-
   // typed values in the floating panel so the next field shows blank
   // (ready to accept the next coord). The render() below re-uses the
   // existing panel; this just zeroes its inputs first.
   clearFloatCoordFields();
   render();
+}
+
+// Pointerdown on the canvas — record the start position so pointerup can tell
+// a click (place) from a drag (pan). Pan-start (middle / Space+left) is
+// handled separately by handleDrawPanStart, also bound to pointerdown; this
+// handler only snapshots the position and ignores the pan buttons so a
+// pan-drag never leaves a stale "down" that a later stray pointerup could
+// misread as a click.
+function handleDrawPlacePointerDown(event) {
+  if (!drawActive) return;
+  // Middle-button or Space+left is a pan, not a placement intent.
+  if (event.button === 1 || (event.button === 0 && spaceHeld)) {
+    drawPointerDown = null;
+    return;
+  }
+  // Only the primary (left) button places.
+  if (event.button !== 0) { drawPointerDown = null; return; }
+  drawPointerDown = { x: event.clientX, y: event.clientY, id: event.pointerId };
+}
+
+// Pointerup on the canvas — place a vertex iff this was a click (not a pan,
+// not a drag past the threshold). Coords come from THIS event, whose
+// currentTarget is the live (possibly just-rebuilt) svg, so the mid-tap
+// innerHTML swap that breaks the native `click` no longer matters.
+function handleDrawPlacePointerUp(event) {
+  if (!drawActive) return;
+  const down = drawPointerDown;
+  drawPointerDown = null;
+  // panActive captures both manual pan (handleDrawPanStart set it) and the
+  // mid-pan-release case the old click guard protected against.
+  if (!shouldPlaceVertexOnPointerUp(
+        down,
+        { clientX: event.clientX, clientY: event.clientY },
+        panActive)) {
+    return;
+  }
+  placeVertexFromEvent(event);
 }
 
 function clearFloatCoordFields() {
@@ -639,10 +729,29 @@ function stopEdgePan() {
 function handleDrawDblClick(event) {
   event.preventDefault();
   if (!drawActive) return;
+  // Pointer-based placement means each click of a double-click already pushed
+  // a vertex via pointerup (sequence: down,up,place, down,up,place, dblclick).
+  // Undo any vertex placed inside the dblclick window so a double-click-to-
+  // finish does not leave 1–2 stray points behind. We only pop placement-
+  // stamped vertices (typed/floating-panel vertices don't stamp), and never
+  // below zero.
+  const now = performance.now();
+  while (drawPlaceStamps.length
+         && (now - drawPlaceStamps[drawPlaceStamps.length - 1]) <= DRAW_DBLCLICK_WINDOW_MS
+         && drawVertices.length > 0) {
+    drawPlaceStamps.pop();
+    drawVertices.pop();
+  }
   // Maya §4: double-click on empty canvas resets pan (when no vertices
   // placed yet). Otherwise double-click finishes the draw.
   if (drawVertices.length === 0) {
     drawPan.dx = 0; drawPan.dy = 0;
+    render();
+    return;
+  }
+  if (drawVertices.length < 3) {
+    // Too few points to close after stripping the dblclick's own placements —
+    // just re-render so the stripped vertices disappear; don't finish.
     render();
     return;
   }
@@ -1196,7 +1305,15 @@ function buildDrawHtml(svg) {
 
 function wireDrawEvents(vp) {
   const svgEl = vp.querySelector('svg');
-  svgEl.addEventListener('click', handleDrawClick);
+  // Vertex placement is on pointerdown→pointerup, NOT the native `click`.
+  // The native click only fires when mousedown and mouseup land on the same
+  // element; draw mode rebuilds the <svg> on every mousemove, so a fast
+  // physical mouse (which emits a stray move between button-down and -up)
+  // swaps the element out and the click is lost. Touch taps emit no hover
+  // move, so click survives there — which is why phone was reliable and fast
+  // desktop mouse flaky. pointerup computes coords from its OWN event (live
+  // svg), so the mid-tap rebuild no longer matters. See
+  // shouldPlaceVertexOnPointerUp + handleDrawPlacePointerUp.
   svgEl.addEventListener('mousemove', handleDrawMove);
   svgEl.addEventListener('dblclick', handleDrawDblClick);
   // mouseleave halts edge auto-pan when the cursor exits the canvas
@@ -1206,9 +1323,17 @@ function wireDrawEvents(vp) {
   svgEl.addEventListener('mouseleave', stopEdgePan);
   // Pan: middle-button or Space + left-button. Middle-button still
   // gets clicked through, so guard in handleDrawPanStart.
+  // ORDER MATTERS: on pointerdown, pan-start must set panActive BEFORE the
+  // placement handler snapshots the down-position (placement bails on
+  // pan buttons). On pointerup, placement must read panActive BEFORE pan-end
+  // clears it — otherwise a pan-release would slip past the guard and drop a
+  // vertex. So: panStart, placeDown on pointerdown; placeUp, panEnd on pointerup.
   svgEl.addEventListener('pointerdown', handleDrawPanStart);
+  svgEl.addEventListener('pointerdown', handleDrawPlacePointerDown);
+  svgEl.addEventListener('pointerup', handleDrawPlacePointerUp);
   svgEl.addEventListener('pointerup', handleDrawPanEnd);
   svgEl.addEventListener('pointercancel', handleDrawPanEnd);
+  svgEl.addEventListener('pointercancel', () => { drawPointerDown = null; });
   // Keyboard: focus the SVG so Esc / Backspace / Enter / Space reach us.
   svgEl.addEventListener('keydown', handleDrawKey);
   svgEl.addEventListener('keyup', handleDrawKeyUp);
