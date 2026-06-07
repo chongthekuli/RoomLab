@@ -219,8 +219,11 @@ function toiletBoardRange(s, room) {
   if (s.topType === 'closed') {
     return { base: elev, top: ceil };   // floor → real ceiling, no slab
   }
-  // open-top: scuff gap under the boards, open above to the room.
-  const scuff = Number(s.scuffGap_m) >= 0 ? Number(s.scuffGap_m) : 0.15;
+  // open-top: scuff gap under the boards, open above to the room. The gap is
+  // user-editable (v=777, panel-structure) and clamped 0–0.30 m. 0 = boards meet
+  // the floor (no gap, no feet); >0 = boards float on pilaster feet (see feet[]
+  // in expandToiletSurfaces).
+  const scuff = Math.max(0, Math.min(0.30, Number(s.scuffGap_m) >= 0 ? Number(s.scuffGap_m) : 0.15));
   const want = Number(s.openTopBoardH_m) > 0 ? Number(s.openTopBoardH_m) : 2.00;
   return { base: elev + scuff, top: Math.min(ceil, elev + want) };
 }
@@ -657,8 +660,16 @@ export function sumStructureAbsorption(structures, room, alphaAt, bandIndex) {
  *   ceilings:Array<...>,   // ALWAYS EMPTY for toilets now (v=773) — kept for API stability
  *   doors:   Array<{cubicleIndex:number, hinge:{x,y}, leafW:number, leafH:number, doorBottom:number, doorTop:number, thickness_m:number, swingDir:number, undercut_m:number, open:boolean, normal:{x,y}, axis:{x,y}}>,
  *   bowls:   Array<{cubicleIndex:number, center:{x,y}, seatH:number, bbox:{lx,ly,h}}>,
- *   meta:    {cubicles, pitch, clearWidth, clearDepth, partTh, lx, ly, topType}
+ *   feet:    Array<{center:{x,y}, base:number, top:number, size:number, kind:string}>,
+ *   meta:    {cubicles, pitch, clearWidth, clearDepth, partTh, lx, ly, topType, scuffGap}
  * }}
+ *
+ * `feet` are the pilaster support posts (v=777) under the FLOATING open-top
+ * boards: when topType==='open' AND scuffGap>0 the side/divider/rear boards sit
+ * a scuff gap above the floor, so each must be carried by a leg. Empty array
+ * when closed-top (boards run floor→ceiling) OR scuffGap===0 (boards meet the
+ * floor — no gap, no feet). One front foot per divider (cubicles+1) under the
+ * front pilaster, plus a rear foot at each of the two outer dividers.
  */
 export function expandToiletSurfaces(s, room) {
   const g = toiletGeom(s);
@@ -682,6 +693,7 @@ export function expandToiletSurfaces(s, room) {
   const ceilings = [];
   const doors = [];
   const bowls = [];
+  const feet = [];
 
   // --- N+1 shared dividing partitions (run front→rear along local +y) -------
   for (let j = 0; j <= cubicles; j++) {
@@ -699,6 +711,39 @@ export function expandToiletSurfaces(s, room) {
     thickness_m: partTh, base: board.base, top: board.top,
     isDoorWall: false, kind: 'rear', materialId,
   });
+
+  // --- Pilaster feet ("bone structure", v=777) ------------------------------
+  // A real commercial cubicle partition that floats a scuff gap off the floor is
+  // carried by leveling feet at the bottom of each vertical pilaster post.
+  // Render them ONLY for the floating case: open-top AND a non-zero scuff gap.
+  //   • topType==='closed' → boards run floor→ceiling (board.base = elev), no gap.
+  //   • scuffGap===0        → open-top boards meet the floor, no gap, no feet.
+  // Each foot is a slim post from the floor (z = elevF) up to the board base
+  // (z = board.base = elevF + scuffGap), centred under a support point. Support
+  // points: the FRONT end of every divider (the front pilaster carrying the door
+  // hinge/latch) → cubicles+1 front feet, plus a rear foot at each of the two
+  // OUTER dividers for stability. Feet are tiny (~partTh across) and acoustically
+  // negligible (skipped in the precision snapshot + analytical path).
+  const elevF = Number(s.elev_m) || 0;
+  const scuffGap = (s.topType !== 'closed') ? Math.max(0, board.base - elevF) : 0;
+  if (scuffGap > 1e-6) {
+    const footSize = Math.max(0.04, Math.min(0.06, partTh));   // ~board thickness, 40–60 mm
+    for (let j = 0; j <= cubicles; j++) {
+      const u = dividerU(j);
+      // Front pilaster foot — at the front end of each divider.
+      feet.push({
+        center: toWorld(u, vFront + footSize / 2),
+        base: elevF, top: board.base, size: footSize, kind: 'frontFoot',
+      });
+      // Rear stability foot — only under the two OUTER dividers (cheap, 2 feet).
+      if (j === 0 || j === cubicles) {
+        feet.push({
+          center: toWorld(u, vRear - footSize / 2),
+          base: elevF, top: board.base, size: footSize, kind: 'rearFoot',
+        });
+      }
+    }
+  }
 
   // --- Front face = hinged door leaf (+ optional filler + closed-top transom) ---
   // v=774: the leaf now FILLS the opening so the avatar walks through. Compose
@@ -828,8 +873,8 @@ export function expandToiletSurfaces(s, room) {
   }
 
   return {
-    walls, ceilings, doors, bowls,
-    meta: { cubicles, pitch, clearWidth, clearDepth, partTh, lx, ly, topType: s.topType ?? 'open' },
+    walls, ceilings, doors, bowls, feet,
+    meta: { cubicles, pitch, clearWidth, clearDepth, partTh, lx, ly, topType: s.topType ?? 'open', scuffGap },
   };
 }
 

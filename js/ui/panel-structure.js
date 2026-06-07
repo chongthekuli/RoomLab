@@ -313,6 +313,15 @@ function renderEditor(s) {
     // Top type — open (boards stop short of the ceiling, room shares air) vs
     // closed (boards floor→real ceiling + a transom above each door; no slab).
     fields += seg('topType', 'Top', s.topType ?? 'open', [['open', 'Open-top'], ['closed', 'Closed-top']]);
+    // Floor gap (scuff gap) — only meaningful for OPEN-top boards. Open-top
+    // boards float this far above the floor on pilaster feet (the realistic
+    // commercial "scuff gap"). 0 = boards meet the floor (no gap, no feet). The
+    // expander renders chrome feet under the floating boards when this is > 0.
+    // Closed-top boards run floor→ceiling, so the gap is N/A and hidden.
+    if ((s.topType ?? 'open') !== 'closed') {
+      fields += num('scuffGap_m', 'Floor gap', s.scuffGap_m ?? 0.15, 'm', { step: 0.01, min: 0, max: 0.30 });
+      fields += `<p class="ps-note" style="margin:.2rem 0 .3rem">Open-top partition clearance above the floor; 0 = meets floor. Floating boards stand on pilaster feet.</p>`;
+    }
     // Hinge side (viewed from outside) — which front jamb the door pivots on.
     fields += seg('hingeSide', 'Hinge', s.hingeSide ?? 'left', [['left', 'Left'], ['right', 'Right']]);
     fields += num('undercut_m', 'Door undercut', s.undercut_m, 'm');
@@ -387,6 +396,9 @@ function wire(root) {
         // longer cubicle re-fans the doors + redraws 2D/3D on the emit below.
         if (key === 'clearWidth_m') v = Math.max(0.6, Math.min(2.0, v));
         if (key === 'clearDepth_m') v = Math.max(1.0, Math.min(2.5, v));
+        // Floor gap (scuff gap) for open-top toilet partitions: 0–0.30 m. 0 =
+        // boards meet the floor (no feet); >0 = boards float on pilaster feet.
+        if (key === 'scuffGap_m') v = Math.max(0, Math.min(0.30, v));
         if (key === 'cubicles') {
           v = Math.max(1, Math.min(12, Math.round(v)));
           s.cubicles = v;

@@ -416,5 +416,57 @@ ok(interactionPromptText('toilet', null, true) === 'Press E to close the toilet 
      'door leaf fills the WIDER opening (leafW = clearWidth − reveals = 1.18)', `(${inv.doors[0].leafW})`);
 }
 
+// =====================================================================
+// 16. v=777 — adjustable floor gap (scuffGap_m) + pilaster feet under
+//     floating open-top boards.
+// =====================================================================
+{
+  // (a) scuffGap_m = 0 → open-top boards MEET the floor (base = elev) AND no feet.
+  const s0 = toiletAt({ topType: 'open', scuffGap_m: 0, elev_m: 0 });
+  const inv0 = expandToiletSurfaces(s0, room);
+  const w0 = inv0.walls.find(x => x.kind === 'divider');
+  ok(approx(w0.base, 0), 'scuffGap 0 → open-top board base = elev (meets floor)', `(${w0.base})`);
+  ok(Array.isArray(inv0.feet) && inv0.feet.length === 0, 'scuffGap 0 → feet array EMPTY (no floating boards to support)', `(${inv0.feet.length})`);
+  ok(approx(inv0.meta.scuffGap, 0), 'meta.scuffGap = 0 when gap closed', `(${inv0.meta.scuffGap})`);
+
+  // (b) scuffGap_m > 0 → board base = elev + scuffGap AND feet rendered.
+  const gap = 0.12;
+  const sg = toiletAt({ topType: 'open', scuffGap_m: gap, elev_m: 0, cubicles: 3 });
+  const invg = expandToiletSurfaces(sg, room);
+  const wg = invg.walls.find(x => x.kind === 'divider');
+  ok(approx(wg.base, gap), 'scuffGap 0.12 → open-top board base = elev + scuffGap', `(${wg.base})`);
+  ok(Array.isArray(invg.feet) && invg.feet.length > 0, 'scuffGap > 0 → feet array NON-empty', `(${invg.feet.length})`);
+  // At least cubicles+1 front feet (one per divider front pilaster).
+  const front = invg.feet.filter(f => f.kind === 'frontFoot');
+  ok(front.length === sg.cubicles + 1, 'cubicles+1 front pilaster feet (one per divider)', `(${front.length})`);
+  // Every foot connects the floor (base = elev = 0) to the board base (top = scuffGap).
+  ok(invg.feet.every(f => approx(f.base, 0)), 'every foot base = 0 (floor)', `(${invg.feet[0].base})`);
+  ok(invg.feet.every(f => approx(f.top, gap)), 'every foot top = scuffGap (board base)', `(${invg.feet[0].top})`);
+  ok(invg.feet.every(f => f.size > 0 && f.size <= 0.06), 'feet are slim (~board thickness, ≤ 60 mm)', `(${invg.feet[0].size})`);
+  ok(approx(invg.meta.scuffGap, gap), 'meta.scuffGap echoes the gap', `(${invg.meta.scuffGap})`);
+
+  // (b2) feet stand UNDER the divider front ends — x/y match a divider front pilaster
+  // (default rotation 0: front plane at v = -ly/2, foot centred footSize/2 inside).
+  // Sanity: the front feet share the bank's divider-U coordinates.
+  const dG = _testing.toiletGeom(sg);
+  const expectFrontU = (j) => -dG.lx / 2 + dG.partTh / 2 + j * dG.pitch;   // dividerU
+  const frontUs = front.map(f => f.center.x - sg.position.x).sort((a, b) => a - b);
+  const wantUs = Array.from({ length: sg.cubicles + 1 }, (_, j) => expectFrontU(j)).sort((a, b) => a - b);
+  ok(frontUs.every((u, k) => approx(u, wantUs[k], 1e-6)), 'front feet sit under each divider pilaster (U coords match dividerU)');
+
+  // (c) closed-top is UNAFFECTED — boards floor→ceiling (base 0), NO feet.
+  const sc = toiletAt({ topType: 'closed', scuffGap_m: 0.15 });
+  const invc = expandToiletSurfaces(sc, room);
+  const wc = invc.walls.find(x => x.kind === 'divider');
+  ok(approx(wc.base, 0), 'closed-top board base = 0 regardless of scuffGap_m (unaffected)', `(${wc.base})`);
+  ok(Array.isArray(invc.feet) && invc.feet.length === 0, 'closed-top → NO feet (boards already reach the floor)', `(${invc.feet.length})`);
+  ok(approx(invc.meta.scuffGap, 0), 'closed-top meta.scuffGap = 0 (no gap)', `(${invc.meta.scuffGap})`);
+
+  // (d) gap clamp — values above 0.30 are clamped by the expander's board range.
+  const sClamp = toiletAt({ topType: 'open', scuffGap_m: 0.9 });
+  const invClamp = expandToiletSurfaces(sClamp, room);
+  ok(approx(invClamp.meta.scuffGap, 0.30), 'scuffGap clamped to 0.30 m max', `(${invClamp.meta.scuffGap})`);
+}
+
 console.log(failed === 0 ? '\nAll toilet-structure tests PASSED' : `\n${failed} test(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

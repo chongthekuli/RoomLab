@@ -8273,7 +8273,7 @@ let _toiletBuildLogged = false;
 function _buildToiletMesh(s, room) {
   if (!_toiletBuildLogged) {
     _toiletBuildLogged = true;
-    console.info('[toilet] build 2026-06-07 v776 — 2D right-click per-cubicle door toggle, door-state-aware plan, per-wall precision prisms, editable cubicle W/L');
+    console.info('[toilet] build 2026-06-07 v777 — adjustable floor gap (scuffGap 0–0.30) + pilaster feet under floating open-top boards');
   }
   const localS = { ...s, position: { x: 0, y: 0 }, rotation_deg: 0 };
   const inv = expandToiletSurfaces(localS, room);
@@ -8304,6 +8304,10 @@ function _buildToiletMesh(s, room) {
       });
   const metalMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.85, roughness: 0.32 });
   const ceramicMat = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.25, metalness: 0.0 });
+  // Chrome pilaster-foot material (v=777). Brushed stainless leveling foot — the
+  // recognizable commercial-cubicle detail. metalness 0.7 + low roughness reads
+  // as chrome under the key light and separates from the laminate board above.
+  const chromeMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.7, roughness: 0.28 });
 
   // --- Boards (dividers + rear wall) ---------------------------------------
   // Each wall {a,b} is a local segment; build a box of length |b-a|, depth =
@@ -8447,6 +8451,24 @@ function _buildToiletMesh(s, room) {
     seat.castShadow = true; seat.receiveShadow = true;
     bowl.add(seat);
     group.add(bowl);
+  }
+
+  // --- Pilaster feet ("bone structure", v=777) ------------------------------
+  // Chrome leveling posts from the floor up to each floating open-top board's
+  // base, so the partition reads as SUPPORTED, not floating in mid-air. The
+  // expander emits feet[] ONLY when topType==='open' AND scuffGap>0; otherwise
+  // the array is empty and this loop is a no-op (closed-top + meets-floor cases).
+  // Feet are slim, below knee height, and tagged no_walk_collide (the board
+  // above is the collider) + no_acoustic (acoustically negligible).
+  for (const f of (inv.feet || [])) {
+    const fh = Math.max(0.01, f.top - f.base);
+    const r = (f.size || 0.05) / 2;
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(r, r, fh, 12), chromeMat);
+    foot.position.set(f.center.x, f.base + fh / 2, f.center.y);
+    foot.castShadow = true; foot.receiveShadow = true;
+    foot.userData.no_walk_collide = true;
+    foot.userData.no_acoustic = true;
+    group.add(foot);
   }
 
   if (state.selectedStructureId === s.id && group.children[0]) {
