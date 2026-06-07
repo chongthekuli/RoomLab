@@ -226,5 +226,28 @@ function toiletAt(over = {}) {
   ok(state.listeners.filter(l => l.cubicleRef).length === 3, 'deserialize auto-creates listeners for a legacy toilet', `(${state.listeners.filter(l => l.cubicleRef).length})`);
 }
 
+// =====================================================================
+// Cubicle-bound listeners are LOCKED in the 2D viewport — a click selects
+// them but never starts a drag (they follow their toilet block). room-2d.js
+// pulls in DOM/Three deps so it isn't Node-loadable; grep the drag guard.
+// (regression: v=783)
+// =====================================================================
+{
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const here = fileURLToPath(new URL('.', import.meta.url));
+  const r2d = readFileSync(here + '../js/graphics/room-2d.js', 'utf8');
+  // The listener pointer-down branch must bail (no pickableDrag) when the
+  // listener has a cubicleRef, AFTER selecting it.
+  const m = r2d.match(/pick\.kind === 'listener'\)[\s\S]{0,800}?pickableDrag = \{/);
+  ok(!!m, "room-2d.js has a listener pointer-down branch");
+  const branch = m ? m[0] : '';
+  ok(/if \(lst\.cubicleRef\) return;/.test(branch),
+     'cubicle-bound listener bails before pickableDrag (locked, not draggable)');
+  // The guard must come BEFORE the pickableDrag assignment (select-but-lock).
+  ok(branch.indexOf('lst.cubicleRef') < branch.indexOf('pickableDrag = {'),
+     'cubicleRef lock guard precedes the drag setup');
+}
+
 console.log(failed === 0 ? '\nAll toilet-listener tests PASSED' : `\n${failed} test(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

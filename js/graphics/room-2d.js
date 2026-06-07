@@ -3005,6 +3005,10 @@ function onPickablePointerDown(e) {
       state.selectedListenerId = pick.listenerId;
       emit('listener:selected', { id: pick.listenerId });
     }
+    // Cubicle-bound listeners (auto-placed on a toilet bowl) are LOCKED — they
+    // follow their toilet block, so a click selects them (to read SPL/STI) but
+    // never starts a drag. Move the toilet to reposition them.
+    if (lst.cubicleRef) return;
     startWorldX = lst.position.x;
     startWorldY = lst.position.y;
     pickableDrag = {
