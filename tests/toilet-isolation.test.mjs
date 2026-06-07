@@ -17,6 +17,29 @@
 // not a bug. (b) therefore demonstrates the over-top channel on the favourable
 // geometry where it is NOT swamped; (a)/(c) use the user's literal geometry.
 //
+// v=782 OVER-DOOR CHANNEL (Dr. Chen — the channel the v=781 stopgap flagged).
+// The transom above the door was removed (v=781): a CLOSED door leaf is now a
+// finite-height barrier (top = doorClearH ≈ 2.10) with an OPEN gap above it
+// (doorTop → ceil). So a CLOSED door leaks over its TOP edge (channel 4) AS WELL
+// AS under its 0.30 m undercut. The net closed-top isolation is governed by
+// whichever leaks most: undercut OR over-door. For a TALL front source the
+// over-door path lights the leaf top edge and DOMINATES — capping closed-door
+// isolation at ~4 dB no matter how small the undercut; for a LOW/seated source
+// the leaf top is in deep shadow (over-door IL ~24 dB) and the undercut governs,
+// so sealing it still recovers the leaf-TL regime (~17 dB). Both correct physics.
+// Honest figures re-derived below (NOT hand-tuned) replace the v=781 stopgaps:
+//   (a) door open 0 dB vs closed 7.7 dB @2k — margin 7.7 dB (LOAD-BEARING).
+//   (b1) user low-source: closed-top 7.98 vs open-top 7.74 @2k — margin 0.24 dB
+//        (over-door barely lit; the side-board top sealing is the only delta).
+//   (b2) favourable high-source: closed-top 4.32 vs open-top 2.23 @2k — margin
+//        2.09 dB. The old ≥8 dB was the TRANSOM artifact (dominantSeparatingBoard
+//        picked the solid gypsum transom). With the transom gone + over-door live
+//        the honest margin is ~2 dB: open-top leaks over BOTH the side board AND
+//        the door, closed-top leaks over the door ONLY.
+//   (c2) user low-source, 0.01 undercut: 16.50 dB (leaf-TL regime — over-door in
+//        deep shadow). HIGH-source 0.001 undercut: caps at ~4.4 dB (over-door
+//        plateau — sealing the undercut no longer helps once the leaf top is lit).
+//
 // Run: node tests/toilet-isolation.test.mjs
 
 import { readFileSync } from 'node:fs';
@@ -81,83 +104,114 @@ const loss = (over, src = S_FRONT, lst = L_WC) =>
 }
 
 // =====================================================================
-// (b) Over-top channel is LIVE and directionally correct.
-//   (b1) user geometry, door CLOSED, 0.30 undercut: closed-top ≥ open-top + ~0.3
-//        (the over-top channel exists but is undercut-swamped at low source).
+// (b) Over-top + over-door channels LIVE and directionally correct.
+//   (b1) user geometry, door CLOSED, 0.30 undercut: closed-top ≥ open-top + 0.2
+//        (sealing the SIDE-board top adds isolation; the over-door leak is in
+//        deep shadow for the low source so the delta is small — honest 0.24 dB).
 //   (b2) FAVOURABLE geometry (high PA z=2.9, standing ear z=1.6) + undercut 0.02:
-//        closed-top beats open-top by ≥ 8 dB — proves the over-top channel is
-//        NOT swamped when the diffraction path is favourable.
+//        closed-top beats open-top by ≥ 1.5 dB — the HONEST margin once the
+//        over-door channel (v=782) is live. Open-top leaks over BOTH the side
+//        board AND the door; closed-top leaks over the DOOR ONLY. The old ≥8 dB
+//        threshold was the v=781 TRANSOM artifact (dominantSeparatingBoard picked
+//        the solid gypsum transom as the front board). Re-derived to ~2.1 dB.
 // =====================================================================
 {
-  // (b1) user geometry: directional sign only (over-top is genuinely small here).
+  // (b1) user geometry: small but signed delta (over-door in deep shadow here).
   const openTop = loss({ topType: 'open', doorsOpen: [false, false, false] });
   const closedTop = loss({ topType: 'closed', doorsOpen: [false, false, false] });
   ok(closedTop[I2K] >= openTop[I2K] + 0.2,
-     '(b1) closed-top ≥ open-top @2k (sealing the top adds isolation — directionally correct)',
-     `(open=${openTop[I2K].toFixed(2)} closed=${closedTop[I2K].toFixed(2)})`);
+     '(b1) closed-top ≥ open-top + 0.2 @2k (sealing the side-board top adds isolation; over-door in shadow for low src)',
+     `(open=${openTop[I2K].toFixed(2)} closed=${closedTop[I2K].toFixed(2)} Δ=${(closedTop[I2K] - openTop[I2K]).toFixed(2)})`);
 
-  // (b2) favourable over-top geometry: HIGH PA + standing ear + tiny undercut.
+  // (b2) favourable over-top + over-door geometry: HIGH PA + standing ear + tiny
+  // undercut. With the v=782 over-door channel LIVE, closed-top no longer over-
+  // reads (the transom artifact is gone) and the honest closed-vs-open margin is
+  // ~2.1 dB — open-top has the extra side-board over-top leak that closed-top
+  // lacks, on top of the shared over-door leak. Assert a defensible floor (≥1.5).
   const S_HIGH = { x: 4, y: 1, z: 2.9 };
   const L_STAND = { x: 4, y: 4, z: 1.6 };
   const ot_open = loss({ topType: 'open', undercut_m: 0.02 }, S_HIGH, L_STAND);
   const ot_closed = loss({ topType: 'closed', undercut_m: 0.02 }, S_HIGH, L_STAND);
-  // v=781 RE-BASELINE (Dr. Chen follow-up queued): the transom above the door was
-  // REMOVED (real cubicles are open over the door). The old ≥8 dB margin was an
-  // ARTIFACT — dominantSeparatingBoard was picking the SOLID transom panel
-  // (coplanar with the door, high gypsum TL) as the front board for a high-source
-  // / standing-ear ray, so closed-top read ~17 dB at the front. With the transom
-  // gone the front board is correctly the DOOR LEAF (~7 dB at 2 mm undercut), so
-  // closed-top no longer over-reads. Directional sign is still correct (closed ≥
-  // open). KNOWN GAP: the over-DOOR leak channel for closed-top is not yet
-  // modelled (Dr. Chen to add structureDirectPathLossPerBand over-door branch);
-  // until then this asserts only the directional sign, NOT the old ≥8 dB margin.
-  ok(ot_closed[I2K] >= ot_open[I2K],
-     '(b2) v=781: closed-top ≥ open-top @2k (over-door leak channel pending — Dr. Chen follow-up; transom artifact removed)',
+  ok(ot_closed[I2K] >= ot_open[I2K] + 1.5,
+     '(b2) v=782: closed-top ≥ open-top + 1.5 dB @2k (honest post-transom + over-door margin; was the ≥8 dB transom artifact)',
      `(closed=${ot_closed[I2K].toFixed(2)} open=${ot_open[I2K].toFixed(2)} Δ=${(ot_closed[I2K] - ot_open[I2K]).toFixed(2)} dB)`);
 }
 
 // =====================================================================
-// (c) Undercut governs the closed-door plateau (the HONEST number).
-//   (c1) closed-door + closed-top, 0.30 undercut: loss @2k ∈ [5,10] dB —
-//        the undercut-governed plateau, NOT a hand-tuned 20 dB.
-//   (c2) tiny undercut (0.01): closed-door loss @2k ≥ 18 dB — the leaf-TL
-//        regime exists once the slot is sealed. (0.02 caps at ~17 because a
-//        20 mm slot on a 0.88 m door still leaks ~1.2% open area — correct.)
+// (c) Undercut governs the closed-door plateau (the HONEST number), UNLESS the
+//     over-door leak (v=782) caps it first for a tall source.
+//   (c1) closed-door + closed-top, 0.30 undercut, LOW source: loss @2k ∈ [5,10]
+//        dB — the undercut-governed plateau, NOT a hand-tuned 20 dB.
+//   (c2) LOW source, tiny undercut (0.01): closed-door loss @2k ≥ 16 dB — the
+//        leaf-TL regime exists once the slot is sealed AND the over-door path is
+//        in deep shadow (low source). Monotone in slot size.
+//   (c3) HIGH source, the over-door CAP: sealing the undercut to 0.001 m no
+//        longer climbs to the leaf-TL regime — it plateaus at ~4.4 dB because the
+//        over-door diffraction leak now governs (the leaf top edge is lit). This
+//        is the v=782 behaviour the stopgap was hiding: closed-door isolation is
+//        bounded by whichever leaks most, undercut OR over-door.
 // =====================================================================
 {
   const c030 = loss({ topType: 'closed', undercut_m: 0.30, doorsOpen: [false, false, false] });
   ok(c030[I2K] >= 5 && c030[I2K] <= 10,
-     '(c1) closed-door+closed-top, 0.30 undercut → loss @2k ∈ [5,10] dB (undercut plateau, honest)',
+     '(c1) closed-door+closed-top, 0.30 undercut, low src → loss @2k ∈ [5,10] dB (undercut plateau, honest)',
      `(${c030[I2K].toFixed(2)})`);
 
   const c001 = loss({ topType: 'closed', undercut_m: 0.01, doorsOpen: [false, false, false] });
-  // v=781 RE-BASELINE (Dr. Chen follow-up queued): the old ≥18 dB threshold was
-  // set when the SOLID transom sat at the front plane (so a near-front ray hit the
-  // transom, not the door leaf). With the transom removed the closed-door front is
-  // the DOOR LEAF; at a 1 cm undercut the leaf-TL regime still dominates (~17 dB).
-  // Loosen the threshold to ≥16 dB (the honest door-leaf figure) — the leaf-TL
-  // regime still EXISTS once the slot is sealed, which is what (c2) guards.
+  // v=782: the over-door channel is in DEEP SHADOW for the user's LOW source
+  // (over-door IL ~24 dB), so sealing the undercut still recovers the leaf-TL
+  // regime (~16.5 dB). The honest door-leaf figure — not the old ≥18 dB transom
+  // artifact, not a hand-tuned 20 dB. The leaf-TL regime EXISTS once sealed.
   ok(c001[I2K] >= 16,
-     '(c2) closed-door, 0.01 undercut → loss @2k ≥ 16 dB (leaf-TL regime exists once sealed; v=781 re-baseline post-transom-removal)',
+     '(c2) closed-door, 0.01 undercut, LOW src → loss @2k ≥ 16 dB (leaf-TL regime; over-door in shadow → undercut governs)',
      `(${c001[I2K].toFixed(2)})`);
   ok(c001[I2K] > c030[I2K],
-     '(c2) tighter undercut → MORE isolation (monotone in slot size)',
+     '(c2) tighter undercut → MORE isolation (monotone in slot size, low src)',
      `(0.01:${c001[I2K].toFixed(2)} > 0.30:${c030[I2K].toFixed(2)})`);
+
+  // (c3) HIGH source over-door CAP — the v=782 dominant-leak logic. A standing PA
+  // (z=2.9) clears the 2.10 m door top, so the over-door diffraction leak governs:
+  // sealing the undercut to 0.001 m plateaus at ~4.4 dB instead of climbing to the
+  // ~17 dB leaf-TL regime the LOW source reaches. closed-door isolation = min over
+  // the two leaks (undercut vs over-door), exactly as the spec requires.
+  const S_HIGH = { x: 4, y: 1, z: 2.9 };
+  const L_STAND = { x: 4, y: 4, z: 1.6 };
+  const hi001 = loss({ topType: 'closed', undercut_m: 0.001 }, S_HIGH, L_STAND);
+  ok(hi001[I2K] >= 3 && hi001[I2K] <= 7,
+     '(c3) HIGH src, 0.001 undercut → loss @2k CAPPED at ~4.4 dB by the over-door leak (NOT the ~17 dB leaf-TL regime)',
+     `(${hi001[I2K].toFixed(2)})`);
+  ok(hi001[I2K] < c001[I2K] - 8,
+     '(c3) over-door cap (high src) ≪ leaf-TL regime (low src) at the same 0.01-class undercut (dominant-leak logic live)',
+     `(high=${hi001[I2K].toFixed(2)} low=${c001[I2K].toFixed(2)})`);
 }
 
 // =====================================================================
 // (d) LF internal consistency + bounds. The door-open-vs-closed delta must
-//     not swing wildly across frequency (|Δ125 − Δ2k| ≤ 3 dB); every band's
-//     loss is finite, ≥0, ≤ MAEKAWA_IL_MAX_DB.
+//     not swing wildly across frequency; every band's loss is finite, ≥0,
+//     ≤ MAEKAWA_IL_MAX_DB.
+//     v=782 RE-BASELINE: the over-door diffraction leak (channel 4) is
+//     WAVELENGTH-DEPENDENT — a longer LF wavelength bends over the 2.10 m leaf
+//     top more readily, so closed-door isolation is honestly LOWER at 125 Hz
+//     (4.3 dB) than at 2 kHz (7.7 dB), a 3.4 dB spread. This is correct
+//     diffraction physics, not a wild swing: the leak rises smoothly toward LF
+//     (monotone) and stays bounded. Threshold widened 3 → 4 dB to admit the
+//     honest two-channel (undercut + over-door) spectral slope.
 // =====================================================================
 {
   const open = loss({ doorsOpen: [false, true, false] });
   const closed = loss({ doorsOpen: [false, false, false] });
   const d125 = closed[I125] - open[I125];
   const d2k = closed[I2K] - open[I2K];
-  ok(Math.abs(d125 - d2k) <= 3,
-     '(d) |Δ(125Hz) − Δ(2kHz)| ≤ 3 dB (no wild spectral swing)',
+  ok(Math.abs(d125 - d2k) <= 4,
+     '(d) |Δ(125Hz) − Δ(2kHz)| ≤ 4 dB (honest over-door LF slope, monotone — no wild swing)',
      `(|${d125.toFixed(2)} − ${d2k.toFixed(2)}| = ${Math.abs(d125 - d2k).toFixed(2)})`);
+  // Monotone guard: closed-door loss must rise smoothly LF→HF (over-door + door
+  // composite both favour leak at LF), never oscillate — that would signal a bug.
+  let monotone = true;
+  for (let k = 1; k < closed.length; k++) if (closed[k] < closed[k - 1] - 1e-6) monotone = false;
+  ok(monotone,
+     '(d) closed-door loss is monotone non-decreasing LF→HF (smooth diffraction slope, not an oscillation)',
+     `(${Array.from(closed).map(v => v.toFixed(1)).join(' ')})`);
   for (const arr of [open, closed]) {
     ok(Array.from(arr).every(v => Number.isFinite(v) && v >= 0 && v <= MAX_IL),
        '(d) all bands finite, ≥0, ≤ MAEKAWA_IL_MAX_DB (24)',
@@ -222,6 +276,65 @@ const loss = (over, src = S_FRONT, lst = L_WC) =>
   ok(Math.abs(tauSealed - expected) < 1e-9,
      '(h) leaf TL→∞ → τ_door = undercut open-area fraction (geometric floor)',
      `(${tauSealed.toFixed(4)} vs ${expected.toFixed(4)})`);
+}
+
+// =====================================================================
+// (i) OVER-DOOR CHANNEL (v=782) — the channel the v=781 stopgap flagged.
+//   (i1) dominantSeparatingBoard picks the DOOR LEAF (isFront, top = doorClearH
+//        2.10 m) for a near-front ray — NOT the removed transom, NOT a side board.
+//   (i2) the over-door diffraction leak is NON-ZERO and finite for a HIGH source
+//        clearing the 2.10 m leaf top (over-door IL ~7.6 dB → ratio ~0.18), and
+//        is in deep shadow (IL ~24 dB) for a LOW source — both correct physics.
+//   (i3) closed-top is NOT fully sealed: a HIGH front source closed-top reads
+//        STRICTLY LESS isolation than it would if the over-door path were absent
+//        (i.e. less than the LOW-source closed-top at the same undercut). This
+//        proves the over-door leak is wired into structureDirectPathLossPerBand,
+//        not just the helper.
+// =====================================================================
+{
+  const c = _testing.speedOfSound(20);
+  // (i1) dominant board pick = door leaf for the near-front user ray.
+  const { expandToiletSurfaces } = await import('../js/physics/building-structures.js');
+  const inv = expandToiletSurfaces(toilet({ topType: 'closed' }), room);
+  inv.meta.boardMaterialId = 'gypsum-board';
+  inv.meta.doorMaterialId = 'door-hollow-core';
+  const polys = _testing.toiletCubiclePolys(toilet({ topType: 'closed' }));
+  const rIdx = _testing.cubicleIndexOf(L_WC, polys);
+  const dom = _testing.dominantSeparatingBoard(inv, rIdx, L_WC, S_FRONT);
+  ok(dom && dom.isFront === true && !!dom.door,
+     '(i1) dominantSeparatingBoard picks the DOOR LEAF as the front separating element (transom artifact gone)',
+     `(isFront=${dom?.isFront} top=${dom?.board?.top})`);
+  ok(dom && Math.abs(dom.board.top - 2.10) < 1e-6,
+     '(i1) door-leaf top edge = doorClearH (2.10 m), below the 3.0 m ceiling → over-door gap exists',
+     `(top=${dom?.board?.top})`);
+
+  // (i2) over-door diffraction ratio: non-zero & finite for a HIGH source; deep
+  // shadow for a LOW source. Reuses the SAME overTopChannel primitive the model
+  // calls, fed the door-leaf board (doorToBoard).
+  const door = inv.doors[1];
+  const board = _testing.doorToBoard(door);
+  const lam2k = c / 2000;
+  const S_HIGH = { x: 4, y: 1, z: 2.9 };
+  const L_STAND = { x: 4, y: 4, z: 1.6 };
+  const dHi = Math.hypot(S_HIGH.x - L_STAND.x, S_HIGH.y - L_STAND.y, S_HIGH.z - L_STAND.z);
+  const dLo = Math.hypot(S_FRONT.x - L_WC.x, S_FRONT.y - L_WC.y, S_FRONT.z - L_WC.z);
+  const rHi = _testing.overTopChannel(board, L_STAND, S_HIGH, lam2k, dHi);
+  const rLo = _testing.overTopChannel(board, L_WC, S_FRONT, lam2k, dLo);
+  ok(rHi > 0.05 && rHi < 1 && Number.isFinite(rHi),
+     '(i2) over-door leak NON-ZERO & finite for a HIGH source clearing the 2.10 m leaf top',
+     `(ratio=${rHi.toFixed(4)} → ${(-10 * Math.log10(rHi)).toFixed(2)} dB IL)`);
+  ok(rLo < rHi && rLo > 0,
+     '(i2) over-door leak in DEEP SHADOW for a LOW/seated source (ratio ≪ high-source ratio)',
+     `(low=${rLo.toFixed(4)} → ${(-10 * Math.log10(rLo)).toFixed(2)} dB IL; high=${rHi.toFixed(4)})`);
+
+  // (i3) END-TO-END proof the over-door channel is wired into the public model:
+  // HIGH-source closed-top isolation is strictly LOWER than LOW-source closed-top
+  // at the SAME 0.001 undercut (the over-door leak only the high source sees).
+  const hi = loss({ topType: 'closed', undercut_m: 0.001 }, S_HIGH, L_STAND)[I2K];
+  const lo = loss({ topType: 'closed', undercut_m: 0.001 }, S_FRONT, L_WC)[I2K];
+  ok(hi < lo - 5,
+     '(i3) HIGH-src closed-top < LOW-src closed-top by ≥5 dB at 0.001 undercut → over-door leak is wired into the model',
+     `(high=${hi.toFixed(2)} low=${lo.toFixed(2)} Δ=${(lo - hi).toFixed(2)} dB)`);
 }
 
 console.log(failed === 0 ? '\nAll toilet-isolation tests PASSED' : `\n${failed} test(s) FAILED`);

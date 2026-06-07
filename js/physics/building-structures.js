@@ -50,8 +50,14 @@
 //     (dB losses added) — a conservative simplification, not a coupled solve.
 //   • Any TL shown is a lab value; field isolation is lower (no flanking).
 //   • Toilet cubicles (Phase 2, 2026-06-07) leak on parallel channels (through-
-//     board TL + door composite + open-top diffraction), energy-summed. Three
-//     simplifications, tracked with Theo:
+//     board TL + door composite + over-top diffraction + OVER-DOOR diffraction),
+//     energy-summed. v=782: a CLOSED door is NOT sealed except for its undercut —
+//     the transom above it was removed (v=781), so the leaf is a finite-height
+//     barrier (top = doorClearH ≈ 2.10 m) that ALSO leaks over its top edge into
+//     the cubicle. Net closed-top isolation is set by whichever leaks most, the
+//     undercut OR the over-door diffraction (a tall front source clearing the leaf
+//     top makes the over-door path dominate; a low/seated source leaves it in deep
+//     shadow and the undercut governs). Three simplifications, tracked with Theo:
 //       P23 — aperture τ=1 (open door / undercut slot / open top) OVER-counts
 //             leak below ~250 Hz (sub-wavelength radiation impedance ignored).
 //       P24 — NO per-cubicle RT60. Analytical toilet loss is a DIRECT-field
@@ -535,14 +541,25 @@ function structureDeliveredRatio(s, S, R, blocking, lambda_m, tl_db) {
 //             τ_door = (A_leaf·10^(−TL_leaf/10) + A_undercut)/(A_leaf+A_undercut)
 //           A 0.30 m undercut caps closed-door isolation at ~8 dB — the HONEST
 //           number; we do NOT hand-tune toward 20 dB.
-//       (3) OVER-TOP (open-top ONLY, gated board.top < ceil): diffract over the
-//           dominant board's top edge (diffractionPointOnEdge + thickBarrierIL +
-//           bypassPowerRatio — the same primitives the existing over-top branch
-//           uses). Sealed (closed-top) cubicles have NO over-top channel.
+//       (3) OVER-TOP — SIDE/REAR board (open-top ONLY, gated board.top < ceil):
+//           diffract over the dominant board's top edge (diffractionPointOnEdge +
+//           thickBarrierIL + bypassPowerRatio). Closed-top side/rear boards run to
+//           the ceiling → NO side-board over-top channel.
+//       (4) OVER-DOOR — the CLOSED door leaf (v=782, gated doorTop < ceil). The
+//           transom above the door was removed (v=781), so the closed leaf is a
+//           finite-height barrier (top = doorClearH ≈ 2.10 m for closed-top, the
+//           side-board top for open-top) with an OPEN gap above it. Sound diffracts
+//           over the LEAF top into the cubicle via the SAME primitives as (3),
+//           fed the door-leaf board (doorToBoard). Live for closed-top AND open-
+//           top (for open-top the leaf top = side-board top so it coincides with
+//           (3); the energy-sum + min(1,·) cap prevents any double-count). For a
+//           tall front source this path dominates the undercut.
 //     delivered = min(1, Σ channels); loss = −10·log10(delivered), capped at
 //     MAEKAWA_IL_MAX_DB. Only the geometry-driven DOMINANT face is summed (door
 //     if the source is in front of the cubicle, the side/rear board if to the
-//     side) plus the door + over-top — NOT all six faces (P25 below).
+//     side) plus the door composite + over-top + over-door — NOT all six faces
+//     (P25 below). Net closed-top isolation = whichever of {undercut, over-door}
+//     leaks most (dominant-leak logic, v=782).
 //
 //   • RECIPROCITY — every per-channel quantity is S↔L symmetric (TL, aperture
 //     area, diffraction detour). Topology B is implemented ONCE and called with
@@ -557,7 +574,11 @@ function structureDeliveredRatio(s, S, R, blocking, lambda_m, tl_db) {
 //   • P24 — NO per-cubicle RT60. The analytical path is a DIRECT-field screening
 //     estimate; for a listener fully enclosed in a cubicle the PRECISION ray
 //     tracer is the authority (it builds the local reverberant tail). The
-//     analytical heatmap shows the direct-path delta only.
+//     analytical heatmap shows the direct-path delta only. v=782: the over-door
+//     channel is a DIRECT-FIELD diffraction leak too — it sharpens the screening
+//     estimate (closed-top is no longer over-sealed at the front) but does NOT
+//     model the reverberant build-up inside the cubicle; the precision tracer
+//     remains authoritative for the enclosed-listener tail.
 //   • P25 — SINGLE dominant separating face. A corner cubicle leaking through two
 //     boards at once is under-counted; we take the geometry-dominant board only.
 // -------------------------------------------------------------------------
@@ -661,12 +682,22 @@ function closedDoorTau(door, tlLeaf_band) {
   return (aLeaf * tau + aGap * 1) / (aLeaf + aGap);
 }
 
-// Over-top diffraction delivered-power ratio into a cubicle over the dominant
-// board's TOP edge (open-top only). Reuses diffractionPointOnEdge + thickBarrierIL
-// + bypassPowerRatio — the IDENTICAL primitives the planar-barrier over-top branch
-// in structureDeliveredRatio uses, so the two paths can't drift.
+// Over-top diffraction delivered-power ratio into a cubicle over a board's TOP
+// edge. Reuses diffractionPointOnEdge + thickBarrierIL + bypassPowerRatio — the
+// IDENTICAL primitives the planar-barrier over-top branch in
+// structureDeliveredRatio uses, so the two paths can't drift.
+//
+// Two callers (v=782):
+//   • SIDE/REAR board over-top (open-top only, board.top < ceil) — the classic
+//     "see over the partition" leak.
+//   • DOOR-LEAF over-top (v=782, NEW) — the CLOSED door leaf is a finite-height
+//     barrier whose top sits at doorTop (= doorClearH ≈ 2.10 for closed-top, or
+//     the side-board top for open-top). Above the leaf, doorTop → ceiling is an
+//     OPEN gap (no transom — v=781 removed it), so sound diffracts over the door
+//     into the cubicle. For a TALL front source this over-door path can dominate
+//     the 0.30 m undercut. Pass the door-leaf board (doorToBoard) as `board`.
 function overTopChannel(board, S, R, lambda_m, directLen_m) {
-  // Dominant board top edge endpoints (world a/b at z = board.top).
+  // Board top edge endpoints (world a/b at z = board.top).
   const E1 = { x: board.a.x, y: board.a.y, z: board.top };
   const E2 = { x: board.b.x, y: board.b.y, z: board.top };
   const opt = diffractionPointOnEdge(S, R, E1, E2);
@@ -764,16 +795,26 @@ function toiletTopologyBLoss(inv, inIdx, PIn, POut, materialMap, bands_hz, room,
   const doorTl = tlArrayFor(materialMap, inv.meta.doorMaterialId || 'door-hollow-core')
     || tlArrayFor(materialMap, inv.meta.boardMaterialId || 'gypsum-board');
 
-  // Over-top gate: open-top board (top below the ceiling). Closed-top boards run
-  // to the ceiling → NO over-top channel over the SIDE/REAR boards. Use the
-  // dominant board's own top.
-  // ACOUSTIC FLAG (v=781, queued for Dr. Chen): the transom above the door was
-  // removed, so a CLOSED-top cubicle now has an OPEN gap above the door at the
-  // FRONT (doorTop → ceil). This over-door leak path is NOT yet modelled — the
-  // gate below only opens for boards whose own top is below the ceiling, which is
-  // never true for closed-top boards. The analytical model therefore slightly
-  // OVER-estimates closed-top isolation until the over-door channel is added.
+  // Over-top gate (SIDE/REAR board): open-top board (top below the ceiling).
+  // Closed-top boards run to the ceiling → NO over-top channel over the
+  // SIDE/REAR boards. Use the dominant board's own top.
   const openTop = board.top < ceil - TOILET_TOP_EPS_M;
+
+  // Over-DOOR gate (v=782, Dr. Chen — the channel the v=781 flag asked for). The
+  // transom above the door was removed (v=781), so a CLOSED door leaf is really a
+  // finite-height barrier (top = doorTop = doorClearH ≈ 2.10 for closed-top) with
+  // an OPEN gap above (doorTop → ceil). Whenever doorTop < ceil there is an
+  // over-the-door diffraction leak into the cubicle, IN ADDITION to the undercut
+  // aperture below the leaf. This channel governs closed-top isolation whenever
+  // the front source is high enough to light the leaf top edge (a standing PA
+  // clearing a 2.10 m door); for a low/seated source it sits in deep shadow and
+  // the 0.30 m undercut governs — both correct physics. Applied for open-top too
+  // (doorTop = side-board top there, so this and the side-board over-top coincide
+  // — the energy-sum + min(1,·) cap prevents any double-count beyond unity). The
+  // over-door edge is the DOOR LEAF top (doorToBoard → top = doorTop), NOT the
+  // side board: that is the geometry the v=781 flag identified as missing.
+  const overDoorBoard = door ? doorToBoard(door) : null;
+  const overDoorLive = !!(overDoorBoard && overDoorBoard.top < ceil - TOILET_TOP_EPS_M);
 
   for (let k = 0; k < B; k++) {
     const lambda = c / bands_hz[k];
@@ -803,7 +844,17 @@ function toiletTopologyBLoss(inv, inIdx, PIn, POut, materialMap, bands_hz, room,
       overTop = overTopChannel(board, PIn, POut, lambda, directLen);
     }
 
-    const delivered = Math.min(1, through + doorChan + overTop);
+    // Channel 4 (v=782) — over-the-DOOR diffraction over the closed leaf top.
+    // Skipped when the door is OPEN (that front is already a τ=1 aperture; the
+    // leaf-top edge does not exist as a barrier). Live whenever doorTop < ceil
+    // (the open gap above the leaf). For a tall front source this can exceed the
+    // 0.30 m undercut and become the dominant closed-top leak.
+    let overDoor = 0;
+    if (overDoorLive && door && !door.open) {
+      overDoor = overTopChannel(overDoorBoard, PIn, POut, lambda, directLen);
+    }
+
+    const delivered = Math.min(1, through + doorChan + overTop + overDoor);
     const loss = delivered > 0 ? -10 * Math.log10(delivered) : MAEKAWA_IL_MAX_DB;
     out[k] = Math.min(MAEKAWA_IL_MAX_DB, Math.max(0, loss));
   }
@@ -1397,4 +1448,7 @@ export const _testing = {
   cubicleIndexOf,
   closedDoorTau,
   pointInPoly2D,
+  dominantSeparatingBoard,   // v=782 — confirm door-leaf pick post-transom-removal
+  doorToBoard,               // v=782 — door→board promotion for the over-door edge
+  overTopChannel,            // v=782 — shared over-top / over-door diffraction ratio
 };
