@@ -1067,16 +1067,19 @@ function assertToiletPlanParity() {
        'toilet-plan: door-leaf open endpoint lies ON the swing arc (radius = leafW)',
        `tip radius ${rTip.toFixed(4)} vs arc.r ${arc.r.toFixed(4)}`);
 
-    // Both render files must apply the SAME flip rule (sweep = ccw ? 1 : 0).
-    // A surface that hardcoded the opposite sweep would curve the door the other
-    // way. Grep both arc paths for the identical sweep expression.
+    // Both render files must apply the SAME sweep rule. stateToSvgY/projectXY
+    // PRESERVE visual orientation (state-up = screen-up), so a state-CW arc
+    // (ccw=false) reads clockwise on screen = SVG sweep 1 → sweep = p.ccw ? 0 : 1.
+    // (v=779: corrected from the inverted `ccw ? 1 : 0`, which bulged the
+    // door-swing arc INTO the cubicle instead of along the swing.) A surface that
+    // hardcoded the opposite sweep would curve the door the other way.
     for (const [id, file] of [
       ['2d-viewport', 'js/graphics/room-2d.js'],
       ['print-plan',  'js/ui/print-plan-svg.js'],
     ]) {
       const fsrc = readFileSync(file, 'utf8');
-      ok(/sweep\s*=\s*p\.ccw\s*\?\s*1\s*:\s*0/.test(fsrc),
-         `toilet-plan: ${id} uses sweep = p.ccw ? 1 : 0 (identical Y-flip arc winding)`);
+      ok(/sweep\s*=\s*p\.ccw\s*\?\s*0\s*:\s*1/.test(fsrc),
+         `toilet-plan: ${id} uses sweep = p.ccw ? 0 : 1 (identical, orientation-preserving arc winding)`);
     }
   }
 

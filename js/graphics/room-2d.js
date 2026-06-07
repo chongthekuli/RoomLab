@@ -3971,9 +3971,13 @@ function renderStructuresSVG(structures, selectedId, x0, y0, pxW, pxD, room, lab
         const sxB = stateToSvgX(p.center.x + p.r * Math.cos(p.a1));
         const syB = stateToSvgY(p.center.y + p.r * Math.sin(p.a1));
         const rPx = p.r * px_per_m_x;
-        // After Y-flip the winding inverts: a state-frame CCW arc draws CW on
-        // screen. SVG sweep-flag=1 = clockwise (screen). flippedCcw = !ccw.
-        const sweep = p.ccw ? 1 : 0;   // !ccw → CW(screen)=sweep1; ccw → sweep0
+        // stateToSvgX increases with x, stateToSvgY DECREASES with y, so in
+        // (right, up) visual terms the map PRESERVES orientation (state-up =
+        // screen-up). A state-frame CW arc therefore reads clockwise on screen.
+        // SVG sweep-flag=1 = clockwise (screen, y-down). So state-CW (ccw=false)
+        // → sweep 1; state-CCW (ccw=true) → sweep 0. (v=779: was inverted, which
+        // bulged the door-swing arc INTO the cubicle instead of along the swing.)
+        const sweep = p.ccw ? 0 : 1;
         out += `<path class="r2d-toilet-prim ${weight(p.role)}" data-role="${p.role}" d="M ${sxA.toFixed(1)} ${syA.toFixed(1)} A ${rPx.toFixed(1)} ${rPx.toFixed(1)} 0 0 ${sweep} ${sxB.toFixed(1)} ${syB.toFixed(1)}" />`;
       }
     }

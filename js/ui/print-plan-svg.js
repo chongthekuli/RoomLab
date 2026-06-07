@@ -424,8 +424,12 @@ export function buildFloorPlanSVG(state, opts = {}) {
       } else if (p.kind === 'arc') {
         const a = projectXY(p.center.x + p.r * Math.cos(p.a0), p.center.y + p.r * Math.sin(p.a0), anchorY, offsetX);
         const b = projectXY(p.center.x + p.r * Math.cos(p.a1), p.center.y + p.r * Math.sin(p.a1), anchorY, offsetX);
-        // Y-flip inverts the winding: state-CCW → screen-CW → SVG sweep 1.
-        const sweep = p.ccw ? 1 : 0;
+        // projectXY is sx=x+offset (increasing), sy=anchorY−y (decreasing) →
+        // PRESERVES visual orientation (state-up = screen-up), same as the 2D
+        // viewport. So state-CW (ccw=false) reads clockwise on screen = SVG
+        // sweep 1; state-CCW → sweep 0. Must match room-2d.js exactly (parity).
+        // (v=779: was inverted — door-swing arc bulged into the cubicle.)
+        const sweep = p.ccw ? 0 : 1;
         out += `<path d="M ${a.sx.toFixed(3)} ${a.sy.toFixed(3)} A ${p.r.toFixed(3)} ${p.r.toFixed(3)} 0 0 ${sweep} ${b.sx.toFixed(3)} ${b.sy.toFixed(3)}" fill="none" stroke="${STROKE}" stroke-width="${st2.w}"${dash} />`;
       }
     }
