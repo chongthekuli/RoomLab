@@ -8273,7 +8273,7 @@ let _toiletBuildLogged = false;
 function _buildToiletMesh(s, room) {
   if (!_toiletBuildLogged) {
     _toiletBuildLogged = true;
-    console.info('[toilet] build 2026-06-07 v772 — cubicle bank + swing door + bowls (Phase 1)');
+    console.info('[toilet] build 2026-06-07 v773 — closed-top→ceiling, solid front (filler+transom), 3-piece WC bowl');
   }
   const localS = { ...s, position: { x: 0, y: 0 }, rotation_deg: 0 };
   const inv = expandToiletSurfaces(localS, room);
@@ -8309,18 +8309,10 @@ function _buildToiletMesh(s, room) {
     group.add(mesh);
   }
 
-  // --- Closed-top ceiling slabs --------------------------------------------
-  // (slab thickness pulled into a local so the cross-surface anti-leak grep,
-  // which forbids raw `thickness_m / 2` in this file, doesn't trip on toilet
-  // ceiling arithmetic — these are NOT wall-inset surfaces.)
-  for (const cl of inv.ceilings) {
-    const slabThk = cl.thickness_m;
-    const slabHalf = slabThk / 2;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(cl.lx, slabThk, cl.ly), boardMat);
-    mesh.position.set(cl.center.x, cl.base + slabHalf, cl.center.y);
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    group.add(mesh);
-  }
+  // (No closed-top ceiling slab loop — DEFECT 1, v=773. Closed-top side boards
+  // run floor → real ceiling and the per-door transom seals the front, so
+  // inv.ceilings is always empty for toilets. The `walls[]` loop above already
+  // renders the new 'frontFiller' + 'transom' planar boards automatically.)
 
   // --- Per-cubicle hinged door (mirror the rack-door swing pattern) ---------
   // Hinge child Group at the door's hinge point. The leaf geometry extends from
@@ -8341,7 +8333,10 @@ function _buildToiletMesh(s, room) {
     // the hinge). hingeRight (swingDir +1): leaf extends along -axis. Encode by
     // flipping the leaf's extension sign so geometry always runs hinge→latch.
     const extendSign = d.swingDir < 0 ? +1 : -1;
-    doorGroup.position.set(d.hinge.x, d.undercut_m, d.hinge.y);
+    // Hinge group sits at the door's bottom edge (elev + undercut). leafH is the
+    // COMPUTED height (doorTop − doorBottom), top-type-aware so the leaf never
+    // exceeds the side boards (DEFECT 3, v=773).
+    doorGroup.position.set(d.hinge.x, d.doorBottom, d.hinge.y);
     doorGroup.rotation.y = axisHeading;
     // Open swing about the vertical hinge axis. The free edge MUST travel toward
     // the front outward normal (out of the cubicle, away from the bowl). Derive
@@ -8384,7 +8379,7 @@ function _buildToiletMesh(s, room) {
     // handle loop. Tagged no_acoustic + no_walk_collide so Phase 2 physics +
     // walk-collision ignore them.
     const latchX = extendSign * (d.leafW - 0.08);   // ~8 cm in from the free edge
-    const handleY = 1.0 - d.undercut_m;             // 1.0 m above floor (group at undercut)
+    const handleY = 1.0 - d.doorBottom;             // 1.0 m above floor (group at doorBottom)
     const handleYc = Math.max(0.2, Math.min(d.leafH - 0.2, handleY));
     const leafThk = d.thickness_m;
     const leafHalf = leafThk / 2;                    // local (avoids the wall-inset anti-leak grep)
@@ -8409,28 +8404,35 @@ function _buildToiletMesh(s, room) {
     group.add(doorGroup);
   }
 
-  // --- Toilet bowls --------------------------------------------------------
-  // Cheap mesh: pedestal box + flattened seat ring + a thin cistern against the
-  // rear wall. Bowls BLOCK the avatar (not tagged no_walk_collide).
+  // --- Toilet bowls — recognizable 3-piece WC (DEFECT 4, v=773) -------------
+  // Cistern (tank) + pan/pedestal + seat ring, built relative to the bbox CENTRE
+  // (b.center). The bank's local +y (front→rear, toward the rear wall) maps to
+  // Three +Z; the bbox depth is 0.62 (z: −0.31 front … +0.31 wall side, with the
+  // tank's BACK face exactly on the rear board inner face vWall). The 3 primitive
+  // z-offsets below are relative to that centre so renderer + walk-collider agree.
+  // Bowls BLOCK the avatar (not tagged no_walk_collide).
+  //   z = +0.31 → wall face (vWall);  z = −0.31 → front of bbox.
   for (const b of inv.bowls) {
     const bowl = new THREE.Group();
     bowl.position.set(b.center.x, 0, b.center.y);
-    // The bank's local +y (front→rear) is the bowl's depth axis; the pedestal
-    // expander placed the bowl centre, so build axis-aligned in local frame.
-    const ped = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.50), ceramicMat);
-    ped.position.set(0, 0.21, 0);
-    ped.castShadow = true; ped.receiveShadow = true;
-    bowl.add(ped);
-    // Seat ring — a flattened cylinder on top at seat height.
-    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.04, 20), ceramicMat);
-    seat.position.set(0, b.seatH, 0.02);
-    seat.castShadow = true;
+    // 1. Cistern (tank): W0.36 H0.36 D0.16, BACK face on vWall (z=+0.31) →
+    //    centre z = +0.31 − 0.08 = +0.23; vertical 0.42→0.78 → centre y 0.60.
+    const tank = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.16), ceramicMat);
+    tank.position.set(0, 0.60, 0.23);
+    tank.castShadow = true; tank.receiveShadow = true;
+    bowl.add(tank);
+    // 2. Pan/pedestal: W0.36 H0.40 D0.46, back face at vWall−0.16 (front of tank,
+    //    z=+0.15) → centre z = +0.15 − 0.23 = −0.08; vertical 0→0.40 → centre y 0.20.
+    const pan = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.40, 0.46), ceramicMat);
+    pan.position.set(0, 0.20, -0.08);
+    pan.castShadow = true; pan.receiveShadow = true;
+    bowl.add(pan);
+    // 3. Seat ring: flattened cylinder r0.18 h0.05, at pan centre (z=−0.08), top
+    //    at seatHeight (0.42) → centre y = seatH − 0.025.
+    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.05, 24), ceramicMat);
+    seat.position.set(0, b.seatH - 0.025, -0.08);
+    seat.castShadow = true; seat.receiveShadow = true;
     bowl.add(seat);
-    // Cistern — thin box against the rear wall (local +y), rising above the seat.
-    const cistern = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.16, 0.78), ceramicMat);
-    cistern.position.set(0, b.seatH + 0.20, 0.50 / 2 + 0.16 / 2);
-    cistern.castShadow = true; cistern.receiveShadow = true;
-    bowl.add(cistern);
     group.add(bowl);
   }
 

@@ -141,10 +141,10 @@ export function structurePlanSize(s) {
 //     wall + N front door openings.
 //   • OPEN-top: side+rear boards span scuffGap → openTopBoardH (floor gap under
 //     the boards, open above to the room). No ceiling slab.
-//   • CLOSED-top: boards run floor → closedTopBoardH (sealed to floor) + a
-//     ceiling slab per cubicle at base closedTopBoardH, thickness ceilingThk.
-//     Clamped to the room ceiling: if room.height_m < closedTopBoardH, the board
-//     top (and the dropped slab) clamp to the ceiling.
+//   • CLOSED-top: boards run floor → the REAL room ceiling (base elev, top
+//     room.height_m). The side boards themselves seal the cubicle to the
+//     structural ceiling — there is NO floating ceiling slab (DEFECT 1, v=773).
+//     The front is sealed top-to-ceiling by a transom panel above each door.
 //
 // Local frame (before rotation): bank centred at origin. Local +x runs along the
 // row of cubicles (the bank's long axis); local +y runs front→rear (the door
@@ -163,15 +163,17 @@ function toiletGeom(s) {
 }
 
 // Vertical board extents { base, top } for the side/rear boards, given top-type
-// and the room ceiling. CLOSED-top clamps the board top to the ceiling when the
-// room is lower than the requested board height (and then the separate slab is
-// dropped to the ceiling too — see expandToiletSurfaces).
+// and the room ceiling.
+//   • OPEN-top: scuff gap under the boards (base = elev + scuffGap), top at
+//     openTopBoardH (clamped to ceiling). Open above to the room.
+//   • CLOSED-top: boards run floor → REAL room ceiling (base = elev, top = ceil).
+//     No floating ceiling slab — the side boards themselves seal the cubicle to
+//     the structural ceiling (DEFECT 1 fix, v=773).
 function toiletBoardRange(s, room) {
   const ceil = Number(room?.height_m) || 3;
   const elev = Number(s.elev_m) || 0;
   if (s.topType === 'closed') {
-    const want = Number(s.closedTopBoardH_m) > 0 ? Number(s.closedTopBoardH_m) : 2.40;
-    return { base: elev, top: Math.min(ceil, elev + want) };   // sealed to floor
+    return { base: elev, top: ceil };   // floor → real ceiling, no slab
   }
   // open-top: scuff gap under the boards, open above to the room.
   const scuff = Number(s.scuffGap_m) >= 0 ? Number(s.scuffGap_m) : 0.15;
@@ -608,8 +610,8 @@ export function sumStructureAbsorption(structures, room, alphaAt, bandIndex) {
  * @param {object} room for ceiling-height clamp
  * @returns {{
  *   walls:   Array<{a:{x,y}, b:{x,y}, thickness_m:number, base:number, top:number, isDoorWall:boolean, kind:string, materialId:string}>,
- *   ceilings:Array<{center:{x,y}, lx:number, ly:number, base:number, thickness_m:number, materialId:string}>,
- *   doors:   Array<{cubicleIndex:number, hinge:{x,y}, leafW:number, leafH:number, thickness_m:number, swingDir:number, undercut_m:number, open:boolean, normal:{x,y}, axis:{x,y}}>,
+ *   ceilings:Array<...>,   // ALWAYS EMPTY for toilets now (v=773) — kept for API stability
+ *   doors:   Array<{cubicleIndex:number, hinge:{x,y}, leafW:number, leafH:number, doorBottom:number, doorTop:number, thickness_m:number, swingDir:number, undercut_m:number, open:boolean, normal:{x,y}, axis:{x,y}}>,
  *   bowls:   Array<{cubicleIndex:number, center:{x,y}, seatH:number, bbox:{lx,ly,h}}>,
  *   meta:    {cubicles, pitch, clearWidth, clearDepth, partTh, lx, ly, topType}
  * }}
@@ -654,80 +656,129 @@ export function expandToiletSurfaces(s, room) {
     isDoorWall: false, kind: 'rear', materialId,
   });
 
-  // --- Front = N door openings (one hinged leaf per cubicle) ----------------
+  // --- Front face = fixed filler + hinged door leaf (+ closed-top transom) ---
+  // Real cubicles have a fixed pilaster/filler beside a standard door — the door
+  // leaf (0.60) does NOT fill the 0.90 clear span. Compose the front of each
+  // cubicle at the front plane vFront as:
+  //   [ frontFiller (fillerW, from hinge jamb inward) | door leaf (leafW) | 10 mm
+  //     latch reveal ]   so  fillerW + leafW + latchGap === clearWidth (gap-free).
   // hingeSide 'left' (viewed from outside, looking toward local +y / rear) =
-  // local −x jamb of the cubicle. Door swings OUT of the cubicle (toward the
-  // front, local −y). The outward normal of the door wall is local −y.
-  const leafW = Number(s.doorLeafW_m) > 0 ? Number(s.doorLeafW_m) : 0.60;
-  const leafH = Number(s.doorLeafH_m) > 0 ? Number(s.doorLeafH_m) : 2.00;
-  const doorThk = Number(s.doorThk_m) > 0 ? Number(s.doorThk_m) : 0.04;
+  // local −x jamb of the cubicle. Door swings OUT (toward the front, local −y);
+  // the outward normal of the door wall is local −y.
+  const ceil = Number(room?.height_m) || 3;
+  const elev = Number(s.elev_m) || 0;
   const undercut = Number(s.undercut_m) >= 0 ? Number(s.undercut_m) : 0.30;
+  const latchGap = Number(s.frontLatchGap_m) >= 0 ? Number(s.frontLatchGap_m) : 0.010;
+  const doorClearH = Number(s.doorClearH_m) > 0 ? Number(s.doorClearH_m) : 2.10;
+  const doorThk = Number(s.doorThk_m) > 0 ? Number(s.doorThk_m) : 0.04;
   const doorsOpen = Array.isArray(s.doorsOpen) ? s.doorsOpen : [];
+
+  // Leaf width: clamp so filler + leaf + latchGap == clearWidth and the leaf
+  // never overhangs the clear span. If the user asks for a leaf ≥ clear span,
+  // shrink it to (clearWidth − latchGap) and drop the filler to zero.
+  let leafW = Number(s.doorLeafW_m) > 0 ? Number(s.doorLeafW_m) : 0.60;
+  let fillerW = clearWidth - leafW - latchGap;
+  if (fillerW < 0) { fillerW = 0; leafW = Math.max(0, clearWidth - latchGap); }
+
+  // Door vertical extent (DEFECT 3 — computed, never exceeds the stall sides).
+  const doorBottom = elev + undercut;                 // always undercut off floor
+  let doorTop;
+  if (s.topType === 'closed') {
+    doorTop = Math.min(elev + doorClearH, board.top); // ≤ side-board top (= ceil)
+  } else {
+    doorTop = board.top;                              // open-top: align to sides
+  }
+  const leafH = Math.max(0, doorTop - doorBottom);
+  // Opening width (leaf + latch reveal) — the transom above spans this.
+  const openingW = leafW + latchGap;
+
   const frontNormalLocal = { x: 0, y: -1 };        // local outward (front)
   const rowAxisLocal = { x: 1, y: 0 };             // along the row
   // hingeSide flips which jamb the hinge sits at within the clear span.
   const hingeLeft = (s.hingeSide ?? 'left') !== 'right';
+  // Outward normal + row axis in WORLD coords (rotate the local unit vectors).
+  const normal = {
+    x: frontNormalLocal.x * cos - frontNormalLocal.y * sin,
+    y: frontNormalLocal.x * sin + frontNormalLocal.y * cos,
+  };
+  const axis = {
+    x: rowAxisLocal.x * cos - rowAxisLocal.y * sin,
+    y: rowAxisLocal.x * sin + rowAxisLocal.y * cos,
+  };
   for (let i = 0; i < cubicles; i++) {
     const cu = cubicleU(i);
     // Clear span of cubicle i: [cu - clearWidth/2, cu + clearWidth/2].
     const jambLeftU = cu - clearWidth / 2;
     const jambRightU = cu + clearWidth / 2;
-    const hingeU = hingeLeft ? jambLeftU : jambRightU;
+    // Hinge jamb (filler grows inward FROM the hinge jamb); the opening then runs
+    // from the inner filler edge toward the latch jamb. Signed offset `sgn` is +1
+    // when the hinge is on the −x (left) jamb so we march in +u, −1 otherwise.
+    const sgn = hingeLeft ? +1 : -1;
+    const hingeJambU = hingeLeft ? jambLeftU : jambRightU;
+
+    // Fixed front filler: from the hinge jamb inward by fillerW, full board height.
+    if (fillerW > 1e-6) {
+      const fillerCentreU = hingeJambU + sgn * (fillerW / 2);
+      const fa = fillerCentreU - sgn * (fillerW / 2);
+      const fb = fillerCentreU + sgn * (fillerW / 2);
+      walls.push({
+        a: toWorld(fa, vFront), b: toWorld(fb, vFront),
+        thickness_m: partTh, base: board.base, top: board.top,
+        isDoorWall: false, kind: 'frontFiller', materialId,
+      });
+    }
+
+    // Hinge sits at the inner edge of the filler; the leaf runs from there toward
+    // the latch jamb, stopping latchGap short.
+    const hingeU = hingeJambU + sgn * fillerW;
     const hinge = toWorld(hingeU, vFront);
-    // Outward normal + row axis in WORLD coords (rotate the local unit vectors).
-    const normal = {
-      x: frontNormalLocal.x * cos - frontNormalLocal.y * sin,
-      y: frontNormalLocal.x * sin + frontNormalLocal.y * cos,
-    };
-    const axis = {
-      x: rowAxisLocal.x * cos - rowAxisLocal.y * sin,
-      y: rowAxisLocal.x * sin + rowAxisLocal.y * cos,
-    };
-    // swingDir: +1 swings toward the outward (front) normal. Sign chosen for the
-    // mesh so a positive Y-rotation in Three.js carries the free edge toward the
-    // door-side normal (verified against the rack-door v=689 sign lesson).
     doors.push({
       cubicleIndex: i, hinge,
-      leafW, leafH, thickness_m: doorThk,
+      leafW, leafH, doorBottom, doorTop, thickness_m: doorThk,
       swingDir: hingeLeft ? -1 : +1,
       undercut_m: undercut,
       open: !!doorsOpen[i],
       normal, axis,
     });
-  }
 
-  // --- CLOSED-top: a ceiling slab per cubicle at base = board.top -----------
-  // Clamp: if the board top already reached the room ceiling, drop the slab to
-  // sit just under the ceiling (board.top - thickness) so it never pokes
-  // through. (The board.top is already min(ceil, requested) from
-  // toiletBoardRange.)
-  if (s.topType === 'closed') {
-    const ceilThk = Number(s.ceilingThk_m) > 0 ? Number(s.ceilingThk_m) : 0.05;
-    const ceilHt = Number(room?.height_m) || 3;
-    let slabBase = board.top;
-    if (slabBase + ceilThk > ceilHt) slabBase = Math.max(board.base, ceilHt - ceilThk);
-    for (let i = 0; i < cubicles; i++) {
-      ceilings.push({
-        center: toWorld(cubicleU(i), 0),
-        lx: clearWidth, ly: clearDepth,
-        base: slabBase, thickness_m: ceilThk, materialId,
+    // CLOSED-top transom: a fixed solid panel above the door opening, spanning the
+    // opening width (leaf + latch reveal) from doorTop → ceil, so the closed front
+    // is sealed top-to-ceiling. Coplanar with the leaf/filler (same front plane),
+    // above the leaf — does not clip the OUT swing.
+    if (s.topType === 'closed' && ceil - doorTop > 1e-4 && openingW > 1e-6) {
+      // Opening spans from the inner filler edge (hingeU) to latchGap short of the
+      // latch jamb; the transom covers leaf+latchGap = openingW from hingeU.
+      const ta = hingeU;
+      const tb = hingeU + sgn * openingW;
+      walls.push({
+        a: toWorld(ta, vFront), b: toWorld(tb, vFront),
+        thickness_m: partTh, base: doorTop, top: ceil,
+        isDoorWall: false, kind: 'transom', materialId,
       });
     }
   }
+  // NOTE (DEFECT 1, v=773): no closed-top ceiling slab is emitted. `ceilings`
+  // stays EMPTY for toilets — the side boards run to the real ceiling and the
+  // transom seals the front. The array is returned for API stability only.
 
-  // --- Toilet bowls: against the rear wall, centred per cubicle --------------
+  // --- Toilet bowls: a recognizable WC flush to the rear wall ---------------
+  // (DEFECT 4, v=773). The bowl is a 3-primitive WC (tank + pan + seat ring)
+  // built by the renderer relative to `center`. Here we expose only the overall
+  // bbox + centre so the renderer and the walk-collider agree. The bbox depth
+  // (ly 0.62) is fully inside clearDepth (1.50); width 0.36 ≤ clearWidth (0.90).
+  // vWall = inner face of the rear board; the tank's back face sits exactly on it
+  // (centre y = vWall − 0.08 for a 0.16-deep tank); the bbox centre bowlV is the
+  // shared origin the 3 renderer primitives offset from.
   if (s.showBowls !== false) {
     const seatH = Number(s.seatHeight_m) > 0 ? Number(s.seatHeight_m) : 0.42;
-    // Pedestal ~0.50 deep; sit it against the rear wall. Local v of the bowl
-    // centre = vRear - partTh/2 - 0.25 (0.50 deep pedestal, back face to wall).
-    const bowlDepth = 0.50;
-    const bowlV = vRear - partTh / 2 - bowlDepth / 2;
+    const vWall = vRear - partTh / 2;          // rear board inner face
+    const bowlV = vWall - 0.31;                // bbox centre (depth 0.62 → span vWall−0.62 .. vWall)
     for (let i = 0; i < cubicles; i++) {
       bowls.push({
         cubicleIndex: i,
         center: toWorld(cubicleU(i), bowlV),
         seatH,
-        bbox: { lx: 0.36, ly: bowlDepth, h: seatH },
+        bbox: { lx: 0.36, ly: 0.62, h: 0.78 },
       });
     }
   }

@@ -80,8 +80,12 @@ export function makeStructure(type, x, y) {
         cubicles: 3, pitch_m: 0.95, clearWidth_m: 0.90, clearDepth_m: 1.50, partitionThickness_m: 0.05,
         backToBack: false,
         topType: 'open',
-        openTopBoardH_m: 2.00, closedTopBoardH_m: 2.40, ceilingThk_m: 0.05, scuffGap_m: 0.15,
-        doorSide: '+y', hingeSide: 'left', doorLeafW_m: 0.60, doorLeafH_m: 2.00, doorThk_m: 0.04,
+        openTopBoardH_m: 2.00, scuffGap_m: 0.15,
+        // v=773: closed-top boards run floor→real ceiling (no closedTopBoardH_m /
+        // ceilingThk_m slab). doorLeafH_m is now COMPUTED, not stored. The closed
+        // door top stops at doorClearH_m; the front latch reveal is frontLatchGap_m.
+        doorClearH_m: 2.10,
+        doorSide: '+y', hingeSide: 'left', doorLeafW_m: 0.60, frontLatchGap_m: 0.010, doorThk_m: 0.04,
         undercut_m: 0.30,
         doorsOpen: [false, false, false],
         showBowls: true, seatHeight_m: 0.42,
@@ -299,7 +303,7 @@ function renderEditor(s) {
   } else if (s.type === 'toilet') {
     fields += num('cubicles', 'Cubicles', s.cubicles, 'count', { step: 1, min: 1, max: 12 });
     // Top type — open (boards stop short of the ceiling, room shares air) vs
-    // closed (boards floor→2.40 m + a ceiling slab per cubicle).
+    // closed (boards floor→real ceiling + a transom above each door; no slab).
     fields += seg('topType', 'Top', s.topType ?? 'open', [['open', 'Open-top'], ['closed', 'Closed-top']]);
     // Hinge side (viewed from outside) — which front jamb the door pivots on.
     fields += seg('hingeSide', 'Hinge', s.hingeSide ?? 'left', [['left', 'Left'], ['right', 'Right']]);

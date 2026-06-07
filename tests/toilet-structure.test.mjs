@@ -29,8 +29,8 @@ function toiletAt(over = {}) {
     cubicles: 3, pitch_m: 0.95, clearWidth_m: 0.90, clearDepth_m: 1.50, partitionThickness_m: 0.05,
     backToBack: false,
     topType: 'open',
-    openTopBoardH_m: 2.00, closedTopBoardH_m: 2.40, ceilingThk_m: 0.05, scuffGap_m: 0.15,
-    doorSide: '+y', hingeSide: 'left', doorLeafW_m: 0.60, doorLeafH_m: 2.00, doorThk_m: 0.04,
+    openTopBoardH_m: 2.00, scuffGap_m: 0.15, doorClearH_m: 2.10,
+    doorSide: '+y', hingeSide: 'left', doorLeafW_m: 0.60, frontLatchGap_m: 0.010, doorThk_m: 0.04,
     undercut_m: 0.30,
     doorsOpen: [false, false, false],
     showBowls: true, seatHeight_m: 0.42,
@@ -85,44 +85,118 @@ ok(STRUCTURE_TYPES.includes('toilet'), "'toilet' is a recognised STRUCTURE_TYPE"
 }
 
 // =====================================================================
-// 5. Closed-top: sealed to floor (base 0), ceiling slab per cubicle.
+// 5. Closed-top (DEFECT 1): boards run floor → REAL room ceiling, NO slab.
 // =====================================================================
 {
   const s = toiletAt({ topType: 'closed' });
   const tall = { ...room, height_m: 3.0 };
   const inv = expandToiletSurfaces(s, tall);
-  const w = inv.walls[0];
-  ok(approx(w.base, 0), 'closed-top board base = 0 (sealed to floor, no scuff gap)', `(${w.base})`);
-  ok(approx(w.top, 2.40), 'closed-top board top = 2.40 m', `(${w.top})`);
-  ok(inv.ceilings.length === s.cubicles, 'closed-top has 1 ceiling slab per cubicle', `(${inv.ceilings.length})`);
-  ok(approx(inv.ceilings[0].base, 2.40), 'ceiling slab base = 2.40 m', `(${inv.ceilings[0].base})`);
-  ok(approx(inv.ceilings[0].thickness_m, 0.05), 'ceiling slab thickness = 0.05 m', `(${inv.ceilings[0].thickness_m})`);
+  const w = inv.walls.find(x => x.kind === 'divider');
+  ok(approx(w.base, 0), 'closed-top board base = 0 (sealed to floor)', `(${w.base})`);
+  // Priya assert (1a): closed-top board.top === room.height_m (reaches ceiling).
+  ok(approx(w.top, tall.height_m), 'closed-top board.top === room.height_m (3.0)', `(${w.top})`);
+  // Priya assert (1b): inv.ceilings is EMPTY (no floating slab).
+  ok(inv.ceilings.length === 0, 'closed-top emits NO ceiling slab (ceilings empty)', `(${inv.ceilings.length})`);
 }
 
 // =====================================================================
-// 6. Closed-top clamp: low room → board top clamps to ceiling, slab drops.
+// 6. Closed-top, different ceiling height → boards still reach it; transom seals.
 // =====================================================================
 {
   const s = toiletAt({ topType: 'closed' });
-  const low = { ...room, height_m: 2.20 };   // below the 2.40 board height
+  const low = { ...room, height_m: 2.20 };
   const inv = expandToiletSurfaces(s, low);
-  ok(approx(inv.walls[0].top, 2.20), 'low room: board top clamps to ceiling (2.20)', `(${inv.walls[0].top})`);
-  ok(inv.ceilings[0].base + inv.ceilings[0].thickness_m <= 2.20 + 1e-6,
-     'low room: ceiling slab never pokes through the room ceiling',
-     `(${inv.ceilings[0].base + inv.ceilings[0].thickness_m})`);
+  const w = inv.walls.find(x => x.kind === 'divider');
+  ok(approx(w.top, 2.20), 'closed-top board.top tracks the ceiling (2.20)', `(${w.top})`);
+  ok(inv.ceilings.length === 0, 'low room: still no ceiling slab', `(${inv.ceilings.length})`);
+  // A transom panel seals the front above each door (doorTop → ceil).
+  const transoms = inv.walls.filter(x => x.kind === 'transom');
+  ok(transoms.length === s.cubicles, 'closed-top: 1 transom per door opening', `(${transoms.length})`);
+  ok(transoms.every(t => approx(t.top, 2.20)), 'transom top === ceiling (sealed top-to-ceiling)');
 }
 
 // =====================================================================
-// 7. Doors — undercut 0.30, open flag passthrough, doorsOpen sync.
+// 7. Doors — undercut 0.30, computed leaf, open flag, doorsOpen sync.
 // =====================================================================
 {
   const s = toiletAt({ doorsOpen: [false, true, false] });
   const inv = expandToiletSurfaces(s, room);
   ok(inv.doors.every(d => approx(d.undercut_m, 0.30)), 'every door undercut = 0.30 m (user-confirmed)');
-  ok(inv.doors.every(d => approx(d.leafW, 0.60) && approx(d.leafH, 2.00)), 'leaf 0.60 × 2.00 m');
+  ok(inv.doors.every(d => approx(d.leafW, 0.60)), 'leaf width = 0.60 m');
+  // DEFECT 3: leafH is COMPUTED (doorTop − doorBottom). Open-top: 2.00 − 0.30 = 1.70.
+  ok(inv.doors.every(d => approx(d.doorBottom, 0.30)), 'doorBottom = elev + undercut = 0.30');
+  ok(inv.doors.every(d => approx(d.leafH, 1.70)), 'open-top computed leaf height = 1.70 m', `(${inv.doors[0].leafH})`);
   ok(inv.doors[0].open === false && inv.doors[1].open === true && inv.doors[2].open === false,
      'doors[i].open reads doorsOpen[i]');
   ok(s.doorsOpen.length === s.cubicles, 'doorsOpen length === cubicles');
+}
+
+// =====================================================================
+// 7b. DEFECT 2 — gap-free solid front: fillerW + leafW + latchGap === clearWidth.
+// =====================================================================
+{
+  const s = toiletAt();   // clearWidth 0.90, leaf 0.60, latchGap 0.010
+  const inv = expandToiletSurfaces(s, room);
+  const fillers = inv.walls.filter(w => w.kind === 'frontFiller');
+  ok(fillers.length === s.cubicles, 'one fixed front filler per cubicle', `(${fillers.length})`);
+  // Filler width = |b - a| of the planar segment.
+  const fW = Math.hypot(fillers[0].b.x - fillers[0].a.x, fillers[0].b.y - fillers[0].a.y);
+  const leafW = inv.doors[0].leafW;
+  const latchGap = Number(s.frontLatchGap_m);
+  ok(approx(fW, 0.90 - 0.60 - 0.010), 'fillerW = clearWidth − leafW − latchGap = 0.29', `(${fW})`);
+  ok(approx(fW + leafW + latchGap, s.clearWidth_m),
+     'fillerW + leafW + latchGap === clearWidth (gap-free front)', `(${fW + leafW + latchGap})`);
+  // Filler spans full board height (sealed front, no see-through side gap).
+  ok(approx(fillers[0].base, inv.walls.find(w => w.kind === 'divider').base) &&
+     approx(fillers[0].top, inv.walls.find(w => w.kind === 'divider').top),
+     'front filler spans full board height');
+}
+
+// =====================================================================
+// 7c. DEFECT 2 clamp — leaf ≥ clear span → filler 0, leaf shrinks to fit.
+// =====================================================================
+{
+  const s = toiletAt({ doorLeafW_m: 1.20 });   // wider than the 0.90 clear span
+  const inv = expandToiletSurfaces(s, room);
+  ok(inv.walls.filter(w => w.kind === 'frontFiller').length === 0, 'over-wide leaf → no filler emitted');
+  ok(approx(inv.doors[0].leafW, 0.90 - 0.010), 'over-wide leaf shrunk to clearWidth − latchGap (never overhangs)', `(${inv.doors[0].leafW})`);
+}
+
+// =====================================================================
+// 7d. DEFECT 3 — door never exceeds the stall side height (top-type-aware).
+// =====================================================================
+{
+  // Open-top: doorTop === board.top (door top aligns to side boards exactly).
+  const so = toiletAt({ topType: 'open' });
+  const io = expandToiletSurfaces(so, room);
+  const boardTopO = io.walls.find(w => w.kind === 'divider').top;
+  ok(io.doors.every(d => approx(d.doorTop, boardTopO)), 'open-top doorTop === board.top', `(${io.doors[0].doorTop} vs ${boardTopO})`);
+  // Closed-top: doorTop === min(elev + doorClearH, board.top) = 2.10 (room 3.0).
+  const sc = toiletAt({ topType: 'closed' });
+  const ic = expandToiletSurfaces(sc, room);
+  ok(ic.doors.every(d => approx(d.doorTop, 2.10)), 'closed-top doorTop = doorClearH (2.10)', `(${ic.doors[0].doorTop})`);
+  ok(ic.doors.every(d => d.doorTop <= ic.walls.find(w => w.kind === 'divider').top + 1e-9),
+     'closed-top doorTop never exceeds the side-board top');
+}
+
+// =====================================================================
+// 7e. DEFECT 4 — bowl is flush to the rear wall inner face; bbox inside cubicle.
+// =====================================================================
+{
+  const s = toiletAt({ rotation_deg: 0, position: { x: 4, y: 4 } });
+  const inv = expandToiletSurfaces(s, room);
+  const g = _testing.toiletGeom(s);
+  const vWallWorld = s.position.y + (g.ly / 2 - g.partTh / 2);   // rear board inner face, world y
+  const b0 = inv.bowls[0];
+  // bbox: lx 0.36, ly 0.62, h 0.78; centre at bowlV = vWall − 0.31.
+  ok(approx(b0.bbox.lx, 0.36) && approx(b0.bbox.ly, 0.62) && approx(b0.bbox.h, 0.78),
+     'bowl bbox = 0.36 × 0.62 × 0.78');
+  // Back face (toward wall, local +y) = centre.y + ly/2 must land on vWall.
+  const backFace = b0.center.y + b0.bbox.ly / 2;
+  ok(approx(backFace, vWallWorld), 'bowl back face sits exactly on rear-wall inner face (vWall)', `(${backFace} vs ${vWallWorld})`);
+  // Footprint fully inside: depth 0.62 ≤ clearDepth 1.50, width 0.36 ≤ clearWidth 0.90.
+  ok(b0.bbox.ly <= s.clearDepth_m + 1e-9, 'bowl depth 0.62 ≤ clearDepth (inside cubicle)');
+  ok(b0.bbox.lx <= s.clearWidth_m + 1e-9, 'bowl width 0.36 ≤ clearWidth (inside cubicle)');
 }
 
 // =====================================================================
