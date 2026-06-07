@@ -221,18 +221,24 @@ ok(STRUCTURE_TYPES.includes('toilet'), "'toilet' is a recognised STRUCTURE_TYPE"
 }
 
 // =====================================================================
-// 8. Phase-2 acoustics are NOT wired (no NaN, no spurious loss).
+// 8. Phase-2 DIRECT-PATH loss is WIRED (flipped 2026-06-07 — was a stale
+//    Phase-1 zero assertion). The reverberant absorption SINK is still 0.
 // =====================================================================
 {
   const s = toiletAt();
-  ok(structureExposedArea(s, room) === 0, 'structureExposedArea(toilet) === 0 (Phase 2 pending, NaN-free)');
-  // A source/listener line straight through the bank must NOT pick up a loss
-  // from the toilet in Phase 1 (the bank outer rect is not a solid box).
+  // Reverb sink still Phase-2-pending → 0 (NaN-free).
+  ok(structureExposedArea(s, room) === 0, 'structureExposedArea(toilet) === 0 (reverb sink Phase-2 pending, NaN-free)');
+  // A source/listener line straight through the bank (S in front, L behind the
+  // rear wall) now PICKS UP a non-zero through-board loss — the bank is modelled
+  // as per-surface boards, not skipped (Topology A).
   const bands = [125, 250, 500, 1000, 2000, 4000, 8000];
+  // Build a real material map so the boards have a finite TL.
+  const md = JSON.parse(readFileSync('data/materials.json', 'utf8'));
+  const matMap = new Map(md.materials.map(m => [m.id, m]));
   const loss = structureDirectPathLossPerBand(
-    { x: 4, y: 1, z: 1.2 }, { x: 4, y: 7, z: 1.2 }, [s], new Map(), bands, room,
+    { x: 4, y: 1, z: 1.2 }, { x: 4, y: 7, z: 1.2 }, [s], matMap, bands, room,
   );
-  ok(Array.from(loss).every(v => v === 0), 'direct-path loss skips toilet in Phase 1 (all-zero)');
+  ok(Array.from(loss).some(v => v > 0), 'direct-path loss is WIRED for toilet (non-zero through the bank, Topology A)', `(${Array.from(loss).map(v => v.toFixed(1))})`);
 }
 
 // =====================================================================

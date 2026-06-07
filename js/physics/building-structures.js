@@ -49,6 +49,16 @@
 //   • Multiple structures on one path are treated as independent series barriers
 //     (dB losses added) — a conservative simplification, not a coupled solve.
 //   • Any TL shown is a lab value; field isolation is lower (no flanking).
+//   • Toilet cubicles (Phase 2, 2026-06-07) leak on parallel channels (through-
+//     board TL + door composite + open-top diffraction), energy-summed. Three
+//     simplifications, tracked with Theo:
+//       P23 — aperture τ=1 (open door / undercut slot / open top) OVER-counts
+//             leak below ~250 Hz (sub-wavelength radiation impedance ignored).
+//       P24 — NO per-cubicle RT60. Analytical toilet loss is a DIRECT-field
+//             screening estimate; for a listener fully inside a cubicle the
+//             PRECISION ray tracer is the authority for the reverberant tail.
+//       P25 — SINGLE dominant separating face (a corner cubicle leaking through
+//             two boards at once is under-counted).
 //
 // Pure / Node-testable. No DOM, no Three.js, no outbound imports beyond the
 // pure diffraction primitives (nymphysics no-outbound-imports invariant).
@@ -69,11 +79,12 @@ function speedOfSound(T_C = DEFAULT_TEMPERATURE_C) {
 // Recognised structure types (mirrors app-state deserialize filter).
 // 'toilet' is a COMPOSITE structure (a bank of N cubicles sharing dividing
 // partitions). It is recognised here so it round-trips, draws its bank-outline
-// footprint, and is enumerated by the walk-collision registry — but its
-// acoustic loss model (open/closed-top dB) is PHASE 2: structureExposedArea
-// returns 0 for it for now, and the direct-path loss loop skips it. The
-// renderer + (later) physics expand it into constituent surfaces via the pure
-// expandToiletSurfaces() expander below.
+// footprint, and is enumerated by the walk-collision registry. Its DIRECT-PATH
+// loss model (open/closed-top dB, per-surface TL, door-state-aware) is LIVE
+// (Phase 2, 2026-06-07 — see toiletDirectPathLossPerBand). Its reverberant-field
+// absorption sink (structureExposedArea / RT60) is still Phase-2-pending and
+// returns 0 for now. The renderer + physics both expand it into constituent
+// surfaces via the pure expandToiletSurfaces() expander below.
 export const STRUCTURE_TYPES = ['pillar', 'half_wall', 'partition', 'beam', 'platform', 'toilet'];
 
 // Nearest octave-band index for a frequency.
@@ -498,6 +509,376 @@ function structureDeliveredRatio(s, S, R, blocking, lambda_m, tl_db) {
 }
 
 // -------------------------------------------------------------------------
+// Toilet-bank direct-path blocking (Phase 2, Dr. Lena Chen, 2026-06-07).
+//
+// A cubicle bank is NOT a solid box — it is a set of thin boards + hinged door
+// leaves + (open-top) an OPEN gap above. We read the SAME walls[]/doors[]
+// inventory the precision tracer + walk-collision consume (expandToiletSurfaces)
+// so the analytical heatmap and the ray tracer never disagree on "where are the
+// boards". Two topologies on the source→listener segment:
+//
+//   • TOPOLOGY A — S and L both OUTSIDE the bank, the bank between them. Each
+//     crossed board is a thin-prism pseudo-wall reusing structureBlocks +
+//     structureDeliveredRatio (the same diffraction-over-top + through-mass model
+//     pillars/half-walls use). A CLOSED door leaf is a crossed wall at the door
+//     material's TL; an OPEN door's front opening is an APERTURE (τ=1, no loss).
+//     Series-add the per-board dB losses.
+//
+//   • TOPOLOGY B — one endpoint INSIDE a cubicle (the user's case: PA outside,
+//     a listener on the WC). The cubicle leaks on PARALLEL channels, energy-
+//     summed (NOT series — they are simultaneous independent leak paths into the
+//     enclosure, Kuttruff §5 / ISO 12354 composite-element logic):
+//       (1) THROUGH-WALL transmission of the dominant separating board: T=10^(−TL/10).
+//       (2) DOOR — OPEN → aperture (T=1). CLOSED → area-weighted composite of the
+//           leaf (TL_leaf) + the undercut aperture (τ=1):
+//             τ_door = (A_leaf·10^(−TL_leaf/10) + A_undercut)/(A_leaf+A_undercut)
+//           A 0.30 m undercut caps closed-door isolation at ~8 dB — the HONEST
+//           number; we do NOT hand-tune toward 20 dB.
+//       (3) OVER-TOP (open-top ONLY, gated board.top < ceil): diffract over the
+//           dominant board's top edge (diffractionPointOnEdge + thickBarrierIL +
+//           bypassPowerRatio — the same primitives the existing over-top branch
+//           uses). Sealed (closed-top) cubicles have NO over-top channel.
+//     delivered = min(1, Σ channels); loss = −10·log10(delivered), capped at
+//     MAEKAWA_IL_MAX_DB. Only the geometry-driven DOMINANT face is summed (door
+//     if the source is in front of the cubicle, the side/rear board if to the
+//     side) plus the door + over-top — NOT all six faces (P25 below).
+//
+//   • RECIPROCITY — every per-channel quantity is S↔L symmetric (TL, aperture
+//     area, diffraction detour). Topology B is implemented ONCE and called with
+//     roles swapped for the source-inside case; both-inside-different-cubicles
+//     leaks through the shared dividers; both-inside-SAME-cubicle = 0 loss.
+//
+// Honesty boundaries (Theo P-level backlog — keep consistent with the candor
+// block at the top of this file):
+//   • P23 — the aperture τ=1 (open door / undercut / open top) OVER-counts leak
+//     below ~250 Hz: a sub-wavelength slot has a radiation impedance the τ=1
+//     plane-wave model ignores. Screening estimate only at LF.
+//   • P24 — NO per-cubicle RT60. The analytical path is a DIRECT-field screening
+//     estimate; for a listener fully enclosed in a cubicle the PRECISION ray
+//     tracer is the authority (it builds the local reverberant tail). The
+//     analytical heatmap shows the direct-path delta only.
+//   • P25 — SINGLE dominant separating face. A corner cubicle leaking through two
+//     boards at once is under-counted; we take the geometry-dominant board only.
+// -------------------------------------------------------------------------
+
+const TOILET_TOP_EPS_M = 1e-3;
+
+// Pure 2D point-in-polygon (ray cast). Inlined to keep cubicle membership self-
+// contained — no outbound import (nymphysics no-outbound-imports invariant).
+function pointInPoly2D(x, y, verts) {
+  let inside = false;
+  const n = verts.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const yi = verts[i].y, yj = verts[j].y, xi = verts[i].x, xj = verts[j].x;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// Resolve a TL[] array for a material id from the materialMap, or null if the
+// row / its TL array is missing. Boards fall back to OPAQUE (never transparent);
+// the door falls back to the board TL — both handled by the callers.
+function tlArrayFor(materialMap, materialId) {
+  const row = materialMap && typeof materialMap.get === 'function' ? materialMap.get(materialId) : null;
+  return row && Array.isArray(row.transmission_loss_db) ? row.transmission_loss_db : null;
+}
+
+// The clear-interior polygon (in world coords) of cubicle i: the rectangle
+// bounded by dividers i and i+1, the rear board, and the front door plane,
+// inset by half a partition thickness so the test is the INTERIOR air volume.
+// Built in the bank LOCAL frame then rotated to world (same toWorld as the
+// expander) so membership is rotation-correct.
+function toiletCubiclePolys(s) {
+  const g = toiletGeom(s);
+  const { cubicles, clearWidth, partTh, pitch, lx, ly } = g;
+  const cx = s.position.x, cy = s.position.y;
+  const th = deg2rad(s.rotation_deg || 0);
+  const cos = Math.cos(th), sin = Math.sin(th);
+  const toWorld = (u, v) => ({ x: cx + u * cos - v * sin, y: cy + u * sin + v * cos });
+  const vFront = -ly / 2 + partTh / 2;   // inner face of the (notional) front plane
+  const vRear = ly / 2 - partTh / 2;     // rear board inner face
+  const cubicleU = (i) => -lx / 2 + partTh + clearWidth / 2 + i * pitch;
+  const polys = [];
+  for (let i = 0; i < cubicles; i++) {
+    const cu = cubicleU(i);
+    const uL = cu - clearWidth / 2, uR = cu + clearWidth / 2;
+    polys.push([
+      toWorld(uL, vFront), toWorld(uR, vFront),
+      toWorld(uR, vRear), toWorld(uL, vRear),
+    ]);
+  }
+  return polys;
+}
+
+// Which cubicle (index) contains point P in plan, or -1 if outside every
+// cubicle interior. Pure plan test — vertical containment is irrelevant for
+// membership (a listener on a 0.42 m WC is "in" the cubicle).
+function cubicleIndexOf(P, polys) {
+  for (let i = 0; i < polys.length; i++) {
+    if (pointInPoly2D(P.x, P.y, polys[i])) return i;
+  }
+  return -1;
+}
+
+// Build a thin-prism pseudo-structure from one expander wall[] segment so it can
+// be fed to structureBlocks + structureDeliveredRatio (which expect a state-style
+// structure with position / rotation_deg / length_m / thickness_m). The pseudo
+// structure is a 'partition' when it reaches the ceiling (no over-top path) and a
+// 'half_wall' when its top is below the ceiling (over-top path live).
+function wallToPseudoStructure(w, room) {
+  const ax = w.a.x, ay = w.a.y, bx = w.b.x, by = w.b.y;
+  const cx = (ax + bx) / 2, cy = (ay + by) / 2;
+  const len = Math.hypot(bx - ax, by - ay);
+  const rotDeg = (Math.atan2(by - ay, bx - ax) * 180) / Math.PI;
+  const ceil = Number(room?.height_m) || 3;
+  const reachesCeiling = w.top >= ceil - TOILET_TOP_EPS_M;
+  return {
+    type: reachesCeiling ? 'partition' : 'half_wall',
+    position: { x: cx, y: cy },
+    rotation_deg: rotDeg,
+    length_m: Math.max(0.01, len),
+    thickness_m: Math.max(0.01, w.thickness_m || 0.05),
+    elev_m: w.base,
+    height_m: Math.max(0.01, w.top - w.base),
+    fullHeight: reachesCeiling,
+  };
+}
+
+// Closed-door composite aperture transmission coefficient at one band:
+//   τ_door = (A_leaf·10^(−TL_leaf/10) + A_undercut·1) / (A_leaf + A_undercut)
+// A_leaf = leafW·leafH (the closed solid leaf); A_undercut = leafW·undercut. The
+// undercut slot (τ=1) sets the FLOOR on closed-door isolation — a 0.30 m undercut
+// on a ~1.7 m leaf is ~15 % open area → ~8 dB, the honest number. An OPEN door is
+// a pure aperture (τ=1) handled by the caller.
+function closedDoorTau(door, tlLeaf_band) {
+  const leafW = Math.max(0.01, door.leafW || 0.88);
+  const leafH = Math.max(0.01, door.leafH || 1.70);
+  const undercut = Math.max(0, door.undercut_m ?? 0.30);
+  const aLeaf = leafW * leafH;
+  const aGap = leafW * undercut;
+  const tau = Number.isFinite(tlLeaf_band) ? Math.pow(10, -tlLeaf_band / 10) : 0;
+  return (aLeaf * tau + aGap * 1) / (aLeaf + aGap);
+}
+
+// Over-top diffraction delivered-power ratio into a cubicle over the dominant
+// board's TOP edge (open-top only). Reuses diffractionPointOnEdge + thickBarrierIL
+// + bypassPowerRatio — the IDENTICAL primitives the planar-barrier over-top branch
+// in structureDeliveredRatio uses, so the two paths can't drift.
+function overTopChannel(board, S, R, lambda_m, directLen_m) {
+  // Dominant board top edge endpoints (world a/b at z = board.top).
+  const E1 = { x: board.a.x, y: board.a.y, z: board.top };
+  const E2 = { x: board.b.x, y: board.b.y, z: board.top };
+  const opt = diffractionPointOnEdge(S, R, E1, E2);
+  if (!opt) return 0;
+  const il = thickBarrierIL(opt.delta, lambda_m, Math.max(0.01, board.thickness_m || 0.05));
+  if (!(il > 0)) return 1;   // lit over the top → no attenuation on this path
+  return bypassPowerRatio(il, opt.detour, directLen_m);
+}
+
+// Pick the DOMINANT separating board between an inside point (PIn) and an outside
+// point (POut) for a cubicle: the expander wall whose plane the PIn→POut segment
+// crosses (door front if the outside point is in front, a side divider / rear
+// board otherwise). Falls back to the nearest board by midpoint distance when no
+// crossing is found (grazing geometry). Returns { board, isFront } where isFront
+// marks the front (door) plane.
+function dominantSeparatingBoard(inv, cubicleIdx, PIn, POut) {
+  // Candidate boards bounding this cubicle: dividers j=idx and j=idx+1, the rear
+  // wall, and the door front. We test segment-vs-board-plane crossing.
+  const segCrosses = (w) => {
+    const r = segPolyTRangeLine(PIn.x, PIn.y, POut.x, POut.y, w.a, w.b);
+    return r;
+  };
+  let best = null, bestT = Infinity;
+  for (const w of inv.walls) {
+    const t = segCrosses(w);
+    if (t !== null && t < bestT) { bestT = t; best = { board: w, isFront: false }; }
+  }
+  // Door front plane (use the closed-leaf line for the front geometry regardless
+  // of open/closed — the channel logic decides aperture vs leaf).
+  for (const d of inv.doors) {
+    const free = { x: d.hinge.x + d.axis.x * d.leafW, y: d.hinge.y + d.axis.y * d.leafW };
+    const t = segPolyTRangeLine(PIn.x, PIn.y, POut.x, POut.y, d.hinge, free);
+    if (t !== null && t < bestT && d.cubicleIndex === cubicleIdx) {
+      bestT = t; best = { board: doorToBoard(d), isFront: true, door: d };
+    }
+  }
+  if (best) return best;
+  // Fallback: nearest board midpoint.
+  let nb = null, nd = Infinity;
+  for (const w of inv.walls) {
+    const mx = (w.a.x + w.b.x) / 2, my = (w.a.y + w.b.y) / 2;
+    const dd = Math.hypot(mx - PIn.x, my - PIn.y);
+    if (dd < nd) { nd = dd; nb = w; }
+  }
+  return nb ? { board: nb, isFront: false } : null;
+}
+
+// Segment vs an infinite-thin board LINE crossing parameter t∈[0,1] along
+// P0→P1, or null if the segment does not cross the board's line within the
+// board's extent. (A board is a thin wall; we test the segment against the
+// finite line a→b.)
+function segPolyTRangeLine(p0x, p0y, p1x, p1y, a, b) {
+  const r = p1x - p0x, ry = p1y - p0y;
+  const sx = b.x - a.x, sy = b.y - a.y;
+  const denom = r * sy - ry * sx;
+  if (Math.abs(denom) < 1e-12) return null;   // parallel
+  const t = ((a.x - p0x) * sy - (a.y - p0y) * sx) / denom;   // along P0→P1
+  const u = ((a.x - p0x) * ry - (a.y - p0y) * r) / denom;    // along a→b
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return t;
+}
+
+// Promote a door to a thin "board" descriptor (a/b along the closed leaf line,
+// base/top, thickness) so it can flow through the over-top + dominant-board code
+// uniformly. The door's TL is resolved separately (door material).
+function doorToBoard(d) {
+  const free = { x: d.hinge.x + d.axis.x * d.leafW, y: d.hinge.y + d.axis.y * d.leafW };
+  return {
+    a: { x: d.hinge.x, y: d.hinge.y }, b: free,
+    base: d.doorBottom, top: d.doorTop,
+    thickness_m: d.thickness_m || 0.04,
+    _door: d,
+  };
+}
+
+// Topology B core (Dr. Chen): one endpoint INSIDE cubicle `inIdx`, the other
+// OUTSIDE (or in a different cubicle, reached through the shared divider). Returns
+// a Float32Array(B) of per-band loss (dB). Implemented ONCE; the caller swaps the
+// inside/outside roles for the reciprocal case (every channel quantity is S↔L
+// symmetric, so the result is identical — validated by hook (e)).
+function toiletTopologyBLoss(inv, inIdx, PIn, POut, materialMap, bands_hz, room, c, B) {
+  const out = new Float32Array(B);
+  const dom = dominantSeparatingBoard(inv, inIdx, PIn, POut);
+  if (!dom) return out;
+  const board = dom.board;
+  const ceil = Number(room?.height_m) || 3;
+  const directLen = Math.max(0.1, Math.hypot(POut.x - PIn.x, POut.y - PIn.y, (POut.z ?? 0) - (PIn.z ?? 0)));
+
+  // Board TL (through-wall channel) — boards fall back to OPAQUE.
+  const boardMatId = board._door ? (inv.meta.doorMaterialId || 'door-hollow-core') : (inv.meta.boardMaterialId || 'gypsum-board');
+  const boardTl = tlArrayFor(materialMap, boardMatId);
+
+  // Door (channel 2) — the front door of this cubicle.
+  const door = dom.door || inv.doors.find(d => d.cubicleIndex === inIdx) || null;
+  const doorTl = tlArrayFor(materialMap, inv.meta.doorMaterialId || 'door-hollow-core')
+    || tlArrayFor(materialMap, inv.meta.boardMaterialId || 'gypsum-board');
+
+  // Over-top gate: open-top board (top below the ceiling). Closed-top boards run
+  // to the ceiling → NO over-top channel. Use the dominant board's own top; a
+  // door front also has an over-top if its top is below the ceiling AND the bank
+  // is open-top (the transom seals closed-top fronts).
+  const openTop = board.top < ceil - TOILET_TOP_EPS_M;
+
+  for (let k = 0; k < B; k++) {
+    const lambda = c / bands_hz[k];
+
+    // Channel 1 — through the dominant solid board (or the door leaf if the
+    // dominant face IS the door; that case is folded into channel 2 below).
+    let through = 0;
+    if (!dom.isFront) {
+      const tl = boardTl ? boardTl[k] : null;
+      through = Number.isFinite(tl) ? Math.pow(10, -tl / 10) : 0;   // missing row → opaque
+    }
+
+    // Channel 2 — the door. OPEN → aperture (τ=1). CLOSED → leaf+undercut composite.
+    let doorChan = 0;
+    if (door) {
+      if (door.open) {
+        doorChan = 1;   // open door = front aperture, fully transparent
+      } else {
+        const tlLeaf = doorTl ? doorTl[k] : null;
+        doorChan = closedDoorTau(door, Number.isFinite(tlLeaf) ? tlLeaf : Infinity);
+      }
+    }
+
+    // Channel 3 — over-top diffraction (open-top only) over the dominant board.
+    let overTop = 0;
+    if (openTop) {
+      overTop = overTopChannel(board, PIn, POut, lambda, directLen);
+    }
+
+    const delivered = Math.min(1, through + doorChan + overTop);
+    const loss = delivered > 0 ? -10 * Math.log10(delivered) : MAEKAWA_IL_MAX_DB;
+    out[k] = Math.min(MAEKAWA_IL_MAX_DB, Math.max(0, loss));
+  }
+  return out;
+}
+
+// Topology A (Dr. Chen): S and L both OUTSIDE, the bank between them. Each crossed
+// board is a thin-prism pseudo-wall; series-add the dB losses. CLOSED doors are
+// crossed walls at the door TL; OPEN doors are apertures (skipped — τ=1, no loss).
+function toiletTopologyALoss(inv, S, R, materialMap, bands_hz, room, c, B) {
+  const out = new Float32Array(B);
+  const boardTl = tlArrayFor(materialMap, inv.meta.boardMaterialId || 'gypsum-board');
+  const doorTl = tlArrayFor(materialMap, inv.meta.doorMaterialId || 'door-hollow-core') || boardTl;
+
+  // Solid boards (dividers + rear + fillers + transoms).
+  for (const w of inv.walls) {
+    const pseudo = wallToPseudoStructure(w, room);
+    const blocking = structureBlocks(pseudo, S, R, room);
+    if (!blocking) continue;
+    for (let k = 0; k < B; k++) {
+      const lambda = c / bands_hz[k];
+      const tl = boardTl ? boardTl[k] : null;
+      const ratio = structureDeliveredRatio(pseudo, S, R, blocking, lambda, Number.isFinite(tl) ? tl : Infinity);
+      const lossDb = ratio > 0 ? -10 * Math.log10(ratio) : MAEKAWA_IL_MAX_DB;
+      out[k] += Math.max(0, lossDb);
+    }
+  }
+
+  // Door leaves — CLOSED → crossed wall at door TL; OPEN → aperture (no loss).
+  for (const d of inv.doors) {
+    if (d.open) continue;   // open door front = aperture, contributes 0 loss
+    const board = doorToBoard(d);
+    const pseudo = wallToPseudoStructure({
+      a: board.a, b: board.b, top: board.top, base: board.base, thickness_m: board.thickness_m,
+    }, room);
+    const blocking = structureBlocks(pseudo, S, R, room);
+    if (!blocking) continue;
+    for (let k = 0; k < B; k++) {
+      const lambda = c / bands_hz[k];
+      const tl = doorTl ? doorTl[k] : null;
+      const ratio = structureDeliveredRatio(pseudo, S, R, blocking, lambda, Number.isFinite(tl) ? tl : Infinity);
+      const lossDb = ratio > 0 ? -10 * Math.log10(ratio) : MAEKAWA_IL_MAX_DB;
+      out[k] += Math.max(0, lossDb);
+    }
+  }
+  return out;
+}
+
+// Public-ish (module): per-band direct-path loss contributed by ONE toilet bank.
+// Dispatches A vs B by cubicle membership of S and L. Returns Float32Array(B).
+function toiletDirectPathLossPerBand(s, S, R, materialMap, bands_hz, room, c, B) {
+  const inv = expandToiletSurfaces(s, room);
+  // Stamp material ids onto the inventory meta so the channel code resolves them
+  // without re-reading `s` (keeps the channel helpers structure-shape-agnostic).
+  inv.meta.boardMaterialId = s.materialId || 'gypsum-board';
+  inv.meta.doorMaterialId = s.doorMaterialId || 'door-hollow-core';
+
+  const polys = toiletCubiclePolys(s);
+  const sIdx = cubicleIndexOf(S, polys);
+  const rIdx = cubicleIndexOf(R, polys);
+
+  if (sIdx >= 0 && rIdx >= 0) {
+    if (sIdx === rIdx) return new Float32Array(B);   // both in SAME cubicle → 0 loss
+    // Both inside DIFFERENT cubicles — leak through the shared dividers. Treat as
+    // Topology B from the listener's cubicle toward the source point (the shared
+    // divider is the dominant separating board picked by the segment crossing).
+    return toiletTopologyBLoss(inv, rIdx, R, S, materialMap, bands_hz, room, c, B);
+  }
+  if (rIdx >= 0) {
+    // Listener INSIDE, source outside — the user's case.
+    return toiletTopologyBLoss(inv, rIdx, R, S, materialMap, bands_hz, room, c, B);
+  }
+  if (sIdx >= 0) {
+    // Source INSIDE, listener outside — reciprocal (roles swapped; identical result).
+    return toiletTopologyBLoss(inv, sIdx, S, R, materialMap, bands_hz, room, c, B);
+  }
+  // Both OUTSIDE — Topology A.
+  return toiletTopologyALoss(inv, S, R, materialMap, bands_hz, room, c, B);
+}
+
+// -------------------------------------------------------------------------
 // Public: per-band direct-path loss from all blocking structures
 // -------------------------------------------------------------------------
 
@@ -528,11 +909,15 @@ export function structureDirectPathLossPerBand(srcPos, listenerPos, structures, 
 
   for (const s of structures) {
     if (!s || !s.position || !STRUCTURE_TYPES.includes(s.type)) continue;
-    // PHASE 2: toilet-bank acoustic loss (open/closed-top dB, per-surface TL)
-    // is not modelled yet. Skip it here so the bank's outer rectangle is NOT
-    // treated as a solid box on the direct path. The expander inventory is
-    // ready (expandToiletSurfaces) for Phase 2 to consume.
-    if (s.type === 'toilet') continue;
+    // Toilet bank (Phase 2, Dr. Chen 2026-06-07): NOT a solid box — dispatch to
+    // the per-surface topology model (A = bank between S & L; B = an endpoint
+    // inside a cubicle). Reads the SAME expandToiletSurfaces inventory the
+    // precision tracer + walk-collision consume. Series-adds its dB into out[].
+    if (s.type === 'toilet') {
+      const tLoss = toiletDirectPathLossPerBand(s, S, R, materialMap, bands_hz, room, c, B);
+      for (let k = 0; k < B; k++) out[k] += Math.max(0, tLoss[k]);
+      continue;
+    }
     const blocking = structureBlocks(s, S, R, room);
     if (!blocking) continue;
     const row = materialMap && typeof materialMap.get === 'function' ? materialMap.get(s.materialId) : null;
@@ -605,11 +990,10 @@ export function structureExposedArea(s, room) {
       return w * dep + 2 * (w + dep) * h;
     }
     case 'toilet':
-      // PHASE 2: the open/closed-top exposed-area + per-surface absorption model
-      // is not wired yet. Returning 0 keeps RT60 / the room constant NaN-free
-      // until Phase 2 consumes the expandToiletSurfaces() inventory. (The
-      // direct-path loss loop in structureDirectPathLossPerBand also skips
-      // 'toilet' for now — see the guard there.)
+      // The reverberant-field absorption sink (exposed-area × α) is still Phase-2-
+      // pending: returning 0 keeps RT60 / the room constant NaN-free until that
+      // model consumes the expandToiletSurfaces() inventory. NOTE: the DIRECT-PATH
+      // loss IS wired (toiletDirectPathLossPerBand) — only the reverb sink is 0.
       return 0;
     default:
       return 0;
@@ -1010,4 +1394,8 @@ export const _testing = {
   speedOfSound,
   toiletGeom,
   toiletBoardRange,
+  toiletCubiclePolys,
+  cubicleIndexOf,
+  closedDoorTau,
+  pointInPoly2D,
 };
