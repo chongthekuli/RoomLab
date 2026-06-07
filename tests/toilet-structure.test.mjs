@@ -104,7 +104,8 @@ ok(STRUCTURE_TYPES.includes('toilet'), "'toilet' is a recognised STRUCTURE_TYPE"
 }
 
 // =====================================================================
-// 6. Closed-top, different ceiling height → boards still reach it; transom seals.
+// 6. Closed-top: boards reach the ceiling, but the FRONT above the door is
+//    OPEN (v=781 — NO transom, like a real cubicle you can see over).
 // =====================================================================
 {
   const s = toiletAt({ topType: 'closed' });
@@ -113,10 +114,58 @@ ok(STRUCTURE_TYPES.includes('toilet'), "'toilet' is a recognised STRUCTURE_TYPE"
   const w = inv.walls.find(x => x.kind === 'divider');
   ok(approx(w.top, 2.20), 'closed-top board.top tracks the ceiling (2.20)', `(${w.top})`);
   ok(inv.ceilings.length === 0, 'low room: still no ceiling slab', `(${inv.ceilings.length})`);
-  // A transom panel seals the front above each door (doorTop → ceil).
+  // v=781: ZERO transom walls — the front above the door is open to the ceiling.
   const transoms = inv.walls.filter(x => x.kind === 'transom');
-  ok(transoms.length === s.cubicles, 'closed-top: 1 transom per door opening', `(${transoms.length})`);
-  ok(transoms.every(t => approx(t.top, 2.20)), 'transom top === ceiling (sealed top-to-ceiling)');
+  ok(transoms.length === 0, 'closed-top: ZERO transom walls (front above door is OPEN)', `(${transoms.length})`);
+  // The door leaf top is below board.top (the ceiling); the gap above is open.
+  const ceil = low.height_m;
+  ok(inv.doors.every(d => d.doorTop < ceil - 1e-6),
+     'closed-top door top < ceiling (open gap above the door)', `(top ${inv.doors[0].doorTop}, ceil ${ceil})`);
+  // No solid wall covers doorTop → ceil at any door opening. Each door spans
+  // [hingeU .. hingeU+leafW+latchGap] on the FRONT plane (local vFront). Confirm
+  // no emitted wall sits in that vertical band on the front plane (transom-free).
+  const doorTopMax = Math.max(...inv.doors.map(d => d.doorTop));
+  const wallsAboveDoor = inv.walls.filter(x => x.top > doorTopMax + 1e-6 && x.base >= doorTopMax - 1e-6);
+  ok(wallsAboveDoor.length === 0, 'no wall covers doorTop → ceiling at the front (over-door is open)', `(${wallsAboveDoor.length})`);
+}
+
+// =====================================================================
+// 6b. v=781 — adjustable door height (closed-top): doorClearH_m sets the
+//     leaf top, clamped to [1.8, 2.4] AND to ≤ board.top (the ceiling).
+// =====================================================================
+{
+  // (i) custom door height tracks through to doorTop = elev + doorClearH.
+  const s = toiletAt({ topType: 'closed', doorClearH_m: 2.00, elev_m: 0 });
+  const inv = expandToiletSurfaces(s, room);   // room ceiling 3.0
+  ok(inv.doors.every(d => approx(d.doorTop, 2.00)),
+     'closed-top door top tracks doorClearH_m (2.00)', `(${inv.doors[0].doorTop})`);
+  // leaf bottom = undercut (0.30), leaf fills the opening width (0.88).
+  ok(inv.doors.every(d => approx(d.doorBottom, 0.30)), 'door bottom = undercut (0.30)');
+  ok(inv.doors.every(d => approx(d.leafW, 0.88)), 'leaf still fills the opening (0.88 m)', `(${inv.doors[0].leafW})`);
+  ok(inv.doors.every(d => approx(d.leafH, 2.00 - 0.30)), 'computed leaf height = doorClearH − undercut', `(${inv.doors[0].leafH})`);
+
+  // (ii) ceiling clamp: a door height TALLER than the ceiling is capped to
+  //      board.top by the expander (doorTop = min(elev+doorClearH, board.top)).
+  const low = { ...room, height_m: 2.10 };
+  const sTall = toiletAt({ topType: 'closed', doorClearH_m: 2.40, elev_m: 0 });
+  const invLow = expandToiletSurfaces(sTall, low);
+  ok(invLow.doors.every(d => d.doorTop <= low.height_m + 1e-9),
+     'door top clamped to ≤ board.top (ceiling) when doorClearH exceeds it', `(${invLow.doors[0].doorTop})`);
+  ok(invLow.walls.filter(x => x.kind === 'transom').length === 0,
+     'still no transom even when door reaches the ceiling', '');
+}
+
+// =====================================================================
+// 6c. v=781 — panel-structure.js clamps doorClearH_m to [1.8, 2.4] AND ≤ ceiling.
+//     Text-grep guard over the editor wiring (matches the scene-x-mirror style).
+// =====================================================================
+{
+  const src = readFileSync(new URL('../js/ui/panel-structure.js', import.meta.url), 'utf8');
+  ok(/key === 'doorClearH_m'/.test(src), 'panel clamps the doorClearH_m key');
+  ok(/Math\.max\(\s*1\.8/.test(src), "panel floor-clamps doorClearH_m to 1.8 m");
+  ok(/Math\.min\(\s*2\.4/.test(src), "panel ceiling-clamps doorClearH_m to 2.4 m");
+  ok(/ceilH\s*-\s*elevH/.test(src), 'panel also clamps doorClearH_m to ≤ (ceiling − elev)');
+  ok(/'Door height'/.test(src), "panel exposes a 'Door height' editable field");
 }
 
 // =====================================================================

@@ -155,7 +155,8 @@ export function structurePlanSize(s) {
 //   • CLOSED-top: boards run floor → the REAL room ceiling (base elev, top
 //     room.height_m). The side boards themselves seal the cubicle to the
 //     structural ceiling — there is NO floating ceiling slab (DEFECT 1, v=773).
-//     The front is sealed top-to-ceiling by a transom panel above each door.
+//     The FRONT above the door is OPEN (v=781): no transom — like a real
+//     cubicle you can see over the door even when otherwise full-height.
 //
 // Local frame (before rotation): bank centred at origin. Local +x runs along the
 // row of cubicles (the bank's long axis); local +y runs front→rear (the door
@@ -764,9 +765,14 @@ function toiletTopologyBLoss(inv, inIdx, PIn, POut, materialMap, bands_hz, room,
     || tlArrayFor(materialMap, inv.meta.boardMaterialId || 'gypsum-board');
 
   // Over-top gate: open-top board (top below the ceiling). Closed-top boards run
-  // to the ceiling → NO over-top channel. Use the dominant board's own top; a
-  // door front also has an over-top if its top is below the ceiling AND the bank
-  // is open-top (the transom seals closed-top fronts).
+  // to the ceiling → NO over-top channel over the SIDE/REAR boards. Use the
+  // dominant board's own top.
+  // ACOUSTIC FLAG (v=781, queued for Dr. Chen): the transom above the door was
+  // removed, so a CLOSED-top cubicle now has an OPEN gap above the door at the
+  // FRONT (doorTop → ceil). This over-door leak path is NOT yet modelled — the
+  // gate below only opens for boards whose own top is below the ceiling, which is
+  // never true for closed-top boards. The analytical model therefore slightly
+  // OVER-estimates closed-top isolation until the over-door channel is added.
   const openTop = board.top < ceil - TOILET_TOP_EPS_M;
 
   for (let k = 0; k < B; k++) {
@@ -812,7 +818,7 @@ function toiletTopologyALoss(inv, S, R, materialMap, bands_hz, room, c, B) {
   const boardTl = tlArrayFor(materialMap, inv.meta.boardMaterialId || 'gypsum-board');
   const doorTl = tlArrayFor(materialMap, inv.meta.doorMaterialId || 'door-hollow-core') || boardTl;
 
-  // Solid boards (dividers + rear + fillers + transoms).
+  // Solid boards (dividers + rear + front fillers). v=781: no transoms.
   for (const w of inv.walls) {
     const pseudo = wallToPseudoStructure(w, room);
     const blocking = structureBlocks(pseudo, S, R, room);
@@ -1214,25 +1220,18 @@ export function expandToiletSurfaces(s, room) {
       normal, axis,
     });
 
-    // CLOSED-top transom: a fixed solid panel above the door opening, spanning the
-    // opening width (leaf + latch reveal) from doorTop → ceil, so the closed front
-    // is sealed top-to-ceiling. Coplanar with the leaf/filler (same front plane),
-    // above the leaf — does not clip the OUT swing.
-    if (s.topType === 'closed' && ceil - doorTop > 1e-4 && openingW > 1e-6) {
-      // Opening spans from the inner filler edge (hingeU) to latchGap short of the
-      // latch jamb; the transom covers leaf+latchGap = openingW from hingeU.
-      const ta = hingeU;
-      const tb = hingeU + sgn * openingW;
-      walls.push({
-        a: toWorld(ta, vFront), b: toWorld(tb, vFront),
-        thickness_m: partTh, base: doorTop, top: ceil,
-        isDoorWall: false, kind: 'transom', materialId,
-      });
-    }
+    // v=781: NO transom above the door. Real cubicles leave the space ABOVE the
+    // door OPEN (you can see over the door) even when otherwise full-height. For
+    // closed-top, the side/divider/rear boards still run floor→room ceiling and the
+    // room ceiling seals the top; only the FRONT above the door (doorTop → ceil) is
+    // now an open gap. The hinge-side `frontFiller` beside the door (privacy fix)
+    // stays — only the transom is removed. Open-top is unchanged.
+    void openingW; // retained for API parity; no longer spanned by a transom
   }
   // NOTE (DEFECT 1, v=773): no closed-top ceiling slab is emitted. `ceilings`
   // stays EMPTY for toilets — the side boards run to the real ceiling and the
-  // transom seals the front. The array is returned for API stability only.
+  // room ceiling seals the top. v=781: the front above the door is OPEN (no
+  // transom), like a real cubicle. The array is returned for API stability only.
 
   // --- Toilet bowls: a recognizable WC flush to the rear wall ---------------
   // (DEFECT 4, v=773). The bowl is a 3-primitive WC (tank + pan + seat ring)

@@ -319,7 +319,8 @@ function renderEditor(s) {
     // clearWidth + partitionThickness, so widening one widens the whole bank).
     fields += `<div class="ps-row2">${num('clearWidth_m', 'Cubicle width', s.clearWidth_m ?? 0.90, 'm', { step: 0.05, min: 0.6, max: 2.0 })}${num('clearDepth_m', 'Cubicle depth/length', s.clearDepth_m ?? 1.50, 'm', { step: 0.05, min: 1.0, max: 2.5 })}</div>`;
     // Top type — open (boards stop short of the ceiling, room shares air) vs
-    // closed (boards floor→real ceiling + a transom above each door; no slab).
+    // closed (boards floor→real ceiling; no slab; the front above the door is
+    // OPEN — v=781, no transom, like a real cubicle you can see over).
     fields += seg('topType', 'Top', s.topType ?? 'open', [['open', 'Open-top'], ['closed', 'Closed-top']]);
     // Floor gap (scuff gap) — only meaningful for OPEN-top boards. Open-top
     // boards float this far above the floor on pilaster feet (the realistic
@@ -333,6 +334,17 @@ function renderEditor(s) {
     // Hinge side (viewed from outside) — which front jamb the door pivots on.
     fields += seg('hingeSide', 'Hinge', s.hingeSide ?? 'left', [['left', 'Left'], ['right', 'Right']]);
     fields += num('undercut_m', 'Door undercut', s.undercut_m, 'm');
+    // Door height (closed-top only): sets the door-leaf TOP; the space above the
+    // door (door top → ceiling) stays OPEN like a real cubicle (v=781 — no
+    // transom). Clamped 1.8–2.4 m AND to ≤ ceiling. For OPEN-top the leaf top
+    // tracks the partition height instead, so this field is hidden there.
+    if ((s.topType ?? 'open') === 'closed') {
+      const ceilH = Number(state.room?.height_m) || 3;
+      const elevH = Number(s.elev_m) || 0;
+      const maxDoorH = Math.min(2.4, ceilH - elevH);
+      fields += num('doorClearH_m', 'Door height', s.doorClearH_m ?? 2.10, 'm', { step: 0.05, min: 1.8, max: maxDoorH });
+      fields += `<p class="ps-note" style="margin:.2rem 0 .3rem">Closed-top door-leaf top; the space above the door stays open to the ceiling (see over the door, like a real cubicle).</p>`;
+    }
     fields += `<label class="ps-check"><input type="checkbox" data-key="showBowls" ${s.showBowls !== false ? 'checked' : ''} /> Show toilet bowls</label>`;
     fields += materialSelect(s);
     fields += num('rotation_deg', 'Rotation', s.rotation_deg, 'deg', { step: 5, min: -360, max: 360 });
@@ -410,6 +422,16 @@ function wire(root) {
         // Floor gap (scuff gap) for open-top toilet partitions: 0–0.30 m. 0 =
         // boards meet the floor (no feet); >0 = boards float on pilaster feet.
         if (key === 'scuffGap_m') v = Math.max(0, Math.min(0.30, v));
+        // Door height (closed-top): clamp to [1.8, 2.4] m AND to ≤ the ceiling
+        // (room.height_m − elev) so the door top never exceeds board.top. The
+        // expander also re-clamps doorTop = min(elev+doorClearH, board.top), so
+        // this is belt-and-braces; it sets the closed-top door-leaf top, with the
+        // space above it open to the ceiling (v=781 — no transom).
+        if (key === 'doorClearH_m') {
+          const ceilH = Number(state.room?.height_m) || 3;
+          const elevH = Number(s.elev_m) || 0;
+          v = Math.max(1.8, Math.min(2.4, Math.min(ceilH - elevH, v)));
+        }
         if (key === 'cubicles') {
           v = Math.max(1, Math.min(12, Math.round(v)));
           s.cubicles = v;

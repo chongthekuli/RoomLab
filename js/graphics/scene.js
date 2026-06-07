@@ -8292,7 +8292,7 @@ let _toiletBuildLogged = false;
 function _buildToiletMesh(s, room) {
   if (!_toiletBuildLogged) {
     _toiletBuildLogged = true;
-    console.info('[toilet] build 2026-06-07 v780 — WC# designator (S reserved for sources) + auto round cubicle listeners snapped to each bowl');
+    console.info('[toilet] build 2026-06-07 v781 — closed-top open above door (no transom) + adjustable door height (1.8–2.4 m, clamped to ceiling)');
   }
   const localS = { ...s, position: { x: 0, y: 0 }, rotation_deg: 0 };
   const inv = expandToiletSurfaces(localS, room);
@@ -8346,9 +8346,10 @@ function _buildToiletMesh(s, room) {
   }
 
   // (No closed-top ceiling slab loop — DEFECT 1, v=773. Closed-top side boards
-  // run floor → real ceiling and the per-door transom seals the front, so
-  // inv.ceilings is always empty for toilets. The `walls[]` loop above already
-  // renders the new 'frontFiller' + 'transom' planar boards automatically.)
+  // run floor → real ceiling and the room ceiling seals the top; the FRONT above
+  // the door is OPEN (v=781 — no transom, like a real cubicle), so inv.ceilings is
+  // always empty for toilets. The `walls[]` loop above renders the 'frontFiller'
+  // planar boards automatically; with no transom emitted, no transom mesh exists.)
 
   // --- Per-cubicle hinged door (mirror the rack-door swing pattern) ---------
   // Hinge child Group at the door's hinge point. The leaf geometry extends from
