@@ -3956,6 +3956,18 @@ section h3 {
   background: rgba(116, 208, 255, 0.16);
   outline: none;
 }
+/* Disabled context-menu item (e.g. "Delete node" at the 3-vertex floor) —
+   greyed and non-clickable, matching the app's disabled-control affordance. */
+.r2d-ctx-item.is-disabled,
+.r2d-ctx-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.r2d-ctx-item.is-disabled:hover,
+.r2d-ctx-item:disabled:hover {
+  background: transparent;
+}
 .r2d-ctx-glyph {
   font-size: 14px;
   color: #74d0ff;

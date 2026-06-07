@@ -22,6 +22,7 @@ import { computePerListenerMetrics, formatListenerMetricsLabel } from '../physic
 import { wallInsetPolygon, wallLabelAnchor, WALL_LABEL_MAX_CHARS } from '../physics/wall-inset.js';
 import { getMaterialHatchKind } from '../labs/walllab/material-family-hatch.js';
 import { renderRackFootprintSVG, lookupRackDef } from './rack-2d.js';
+import { insertMidpointNode, deleteNode, fixSelectionAfterDelete } from './polygon-node-edit.js';
 
 let materialsRef;
 
@@ -3383,7 +3384,75 @@ function onPickableContextMenu(e) {
       emit('listener:selected', { id: pick.listenerId });
     }
     openListenerContextMenu(e.clientX, e.clientY, pick.listenerId);
+  } else if (pick.kind === 'vertex') {
+    // Only custom rooms have an editable vertex array. If a non-custom
+    // room somehow exposed a vertex pick, bail gracefully (no menu).
+    const verts = state.room?.custom_vertices;
+    if (state.room?.shape !== 'custom'
+        || !Array.isArray(verts)
+        || pick.vertexIdx < 0
+        || pick.vertexIdx >= verts.length) {
+      closeSourceContextMenu();
+      return;
+    }
+    if (state.selectedVertexIdx !== pick.vertexIdx) {
+      state.selectedVertexIdx = pick.vertexIdx;
+      emit('room:changed');
+    }
+    openVertexContextMenu(e.clientX, e.clientY, pick.vertexIdx);
   }
+}
+
+// Node (polygon-vertex) context menu for custom rooms — "Add node" inserts
+// a vertex at the next-edge midpoint; "Delete node" removes this vertex
+// (disabled at the 3-vertex floor). Both follow the same write path as the
+// vertex DRAG handler — mutate custom_vertices → recomputeRoomDimsFromPolygon
+// → emit('room:changed') — so the 3D wall builder + heatmap grid rebuild
+// identically for a vertex-COUNT change as for a position change.
+function openVertexContextMenu(clientX, clientY, vertexIdx) {
+  closeSourceContextMenu();
+  const verts = state.room?.custom_vertices;
+  if (!Array.isArray(verts) || vertexIdx < 0 || vertexIdx >= verts.length) return;
+  const canDelete = verts.length > 3;
+  openItemsMenu(clientX, clientY, `Node ${vertexIdx + 1}`, [
+    {
+      action: 'add-node',
+      glyph: '＋',
+      label: 'Add node',
+      hint: 'midpoint of next edge',
+      onClick: () => {
+        const cur = state.room?.custom_vertices;
+        if (!Array.isArray(cur) || vertexIdx >= cur.length) {
+          closeSourceContextMenu();
+          return;
+        }
+        state.room.custom_vertices = insertMidpointNode(cur, vertexIdx, snapToGrid);
+        // Select the freshly-inserted node so the user can drag it now.
+        state.selectedVertexIdx = vertexIdx + 1;
+        recomputeRoomDimsFromPolygon(state.room);
+        closeSourceContextMenu();
+        emit('room:changed');
+      },
+    },
+    {
+      action: 'delete-node',
+      glyph: '✕',
+      label: 'Delete node',
+      hint: canDelete ? '' : 'min 3 nodes',
+      disabled: !canDelete,
+      onClick: () => {
+        const cur = state.room?.custom_vertices;
+        const next = deleteNode(cur, vertexIdx);
+        if (!next) { closeSourceContextMenu(); return; }   // refused (≤3)
+        state.room.custom_vertices = next;
+        state.selectedVertexIdx = fixSelectionAfterDelete(
+          state.selectedVertexIdx, vertexIdx, next.length);
+        recomputeRoomDimsFromPolygon(state.room);
+        closeSourceContextMenu();
+        emit('room:changed');
+      },
+    },
+  ]);
 }
 
 function openSourceContextMenu(clientX, clientY, sourceIdx) {
@@ -3472,23 +3541,46 @@ function openRackContextMenu(clientX, clientY, rackId) {
 // Shared menu builder — same chrome for sources / listeners / furniture /
 // racks. `onDuplicate` always shown; `onRotate` (optional) adds a "Rotate
 // 45°" item for racks + anything else that grows rotation support later.
+// This is a thin compatibility shim over openItemsMenu so the four
+// existing callers stay byte-for-byte unchanged.
 function openPickableMenu(clientX, clientY, label, onDuplicate, onRotate = null) {
+  const items = [
+    { action: 'duplicate', glyph: '⎘', label: 'Duplicate',
+      hint: 'all settings, +0.5 m', onClick: onDuplicate },
+  ];
+  if (typeof onRotate === 'function') {
+    items.push({ action: 'rotate', glyph: '↻', label: 'Rotate 45°',
+      hint: 'clockwise around centre', onClick: onRotate });
+  }
+  openItemsMenu(clientX, clientY, label, items);
+}
+
+// Generic context-menu builder. `items` is an array of
+// `{ action, glyph, label, hint?, disabled?, onClick }`. A disabled item
+// renders greyed and non-clickable (`.is-disabled` + the native disabled
+// attribute). Reuses the same `.r2d-ctx-*` chrome + outside-click/Esc
+// dismissal as before. closeSourceContextMenu() tears it down (the var
+// name is historical — it owns whichever r2d context menu is open).
+function openItemsMenu(clientX, clientY, label, items) {
+  closeSourceContextMenu();
   const menu = document.createElement('div');
   menu.className = 'r2d-ctx-menu';
   menu.setAttribute('role', 'menu');
-  const rotateRow = typeof onRotate === 'function'
-    ? `<button type="button" class="r2d-ctx-item" data-action="rotate" role="menuitem">
-         <span class="r2d-ctx-glyph">↻</span> Rotate 45°
-         <span class="r2d-ctx-hint">clockwise around centre</span>
-       </button>`
-    : '';
+  const rows = (items || []).map((it) => {
+    const disabled = !!it.disabled;
+    const hint = it.hint
+      ? `<span class="r2d-ctx-hint">${escapeMenuHtml(it.hint)}</span>` : '';
+    return `<button type="button"
+              class="r2d-ctx-item${disabled ? ' is-disabled' : ''}"
+              data-action="${escapeMenuHtml(it.action)}"
+              role="menuitem"${disabled ? ' disabled aria-disabled="true"' : ''}>
+              <span class="r2d-ctx-glyph">${escapeMenuHtml(it.glyph ?? '')}</span> ${escapeMenuHtml(it.label ?? '')}
+              ${hint}
+            </button>`;
+  }).join('');
   menu.innerHTML = `
     <div class="r2d-ctx-header">${escapeMenuHtml(label)}</div>
-    <button type="button" class="r2d-ctx-item" data-action="duplicate" role="menuitem">
-      <span class="r2d-ctx-glyph">⎘</span> Duplicate
-      <span class="r2d-ctx-hint">all settings, +0.5 m</span>
-    </button>
-    ${rotateRow}
+    ${rows}
   `;
   // Position. Clamp into the viewport so menus near the right/bottom
   // edge don't open off-screen.
@@ -3499,9 +3591,10 @@ function openPickableMenu(clientX, clientY, label, onDuplicate, onRotate = null)
   menu.style.left = `${Math.max(8, left)}px`;
   menu.style.top  = `${Math.max(8, top)}px`;
 
-  menu.querySelector('[data-action="duplicate"]').addEventListener('click', onDuplicate);
-  if (typeof onRotate === 'function') {
-    menu.querySelector('[data-action="rotate"]')?.addEventListener('click', onRotate);
+  for (const it of (items || [])) {
+    if (it.disabled || typeof it.onClick !== 'function') continue;
+    menu.querySelector(`[data-action="${CSS.escape(it.action)}"]`)
+      ?.addEventListener('click', it.onClick);
   }
 
   // Dismiss on outside click / Escape.
