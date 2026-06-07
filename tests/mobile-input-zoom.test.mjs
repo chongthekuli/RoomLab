@@ -30,6 +30,7 @@ const assertTrue = (c, l, e = '') => c ? pass(l) : fail(l, e);
 
 const css = readFileSync('./css/main.css', 'utf8');
 const html = readFileSync('./index.html', 'utf8');
+const panelRoom = readFileSync('./js/ui/panel-room.js', 'utf8');
 
 // ── Extract the @media (pointer: coarse) block body ──────────────────────
 // Match `@media (pointer: coarse) {` then balance braces to the close.
@@ -142,8 +143,59 @@ assertTrue(
   );
 }
 
+// ── Mobile keyboard-shift fix (Maya, 2026-06-07 · v=769) ──────────────────
+// Second-order bug after the auto-zoom cure: focusing the custom-room name
+// inputs raises the Android soft keyboard, which pans the page up. In a
+// position:fixed / overflow:hidden shell that scroll offset STICKS after
+// the modal closes, leaving the top tab-bar + left rail above the visible
+// edge. Two-layer fix, both asserted here.
+
+// (7) Viewport meta must request `interactive-widget=resizes-content` so
+//     Chrome resizes the layout viewport (fixed elements re-anchor) instead
+//     of panning the visual viewport when the keyboard opens.
+{
+  const meta = /<meta\s+name=["']viewport["'][^>]*>/i.exec(html);
+  const content = meta ? meta[0] : '';
+  assertTrue(
+    /interactive-widget\s*=\s*resizes-content/i.test(content),
+    '(7) viewport meta requests interactive-widget=resizes-content',
+    'Without it Android Chrome pans the visual viewport on keyboard-open; the fixed header/rail get scrolled off-screen and the offset sticks.'
+  );
+  // (7b) Re-assert the accessibility floor on the AMENDED meta — adding the
+  //      keyboard directive must not have reintroduced a zoom lock.
+  assertTrue(
+    !/maximum-scale/i.test(content) && !/user-scalable\s*=\s*no/i.test(content),
+    '(7b) amended viewport meta still keeps pinch-zoom (no maximum-scale / user-scalable=no)',
+    'WCAG 1.4.4 — the keyboard directive must be additive, not a zoom lock.'
+  );
+}
+
+// (8) Defense-in-depth: the custom-room draw-entry flow in panel-room.js
+//     must force the document scroll back to the top, for engines that
+//     still leave residual scroll after the keyboard dismisses.
+{
+  // A scroll-reset must exist (window.scrollTo(0,... or *.scrollTop = 0).
+  const hasReset =
+    /window\.scrollTo\(\s*0\s*,/.test(panelRoom) &&
+    /scrollTop\s*=\s*0/.test(panelRoom);
+  assertTrue(
+    hasReset,
+    '(8) panel-room.js resets document scroll (scrollTo(0,...) + scrollTop = 0)',
+    'Belt-and-braces for the keyboard-shift bug — primary cure is the viewport meta, this catches residual stick.'
+  );
+  // (8b) The reset must actually be wired into the draw-custom-room flow,
+  //      not just defined and orphaned. Assert it's called near the
+  //      showCustomRoomDialog / startDrawCustomShape draw-entry block.
+  const drawBlock = /showCustomRoomDialog\(\)[\s\S]*?startDrawCustomShape\(\)[\s\S]{0,200}/.exec(panelRoom);
+  assertTrue(
+    drawBlock !== null && /resetShellScroll\s*\(|scrollTo\(\s*0\s*,/.test(drawBlock[0]),
+    '(8b) the scroll-reset is invoked inside the draw-custom-room entry flow',
+    'A reset defined but never called in the draw path would let the keyboard-shift bug persist.'
+  );
+}
+
 if (failed > 0) {
   console.log(`\n${failed} mobile-input-zoom tripwire(s) FAILED`);
   process.exit(1);
 }
-console.log('\nAll mobile input auto-zoom tripwires passed.');
+console.log('\nAll mobile input auto-zoom + keyboard-shift tripwires passed.');

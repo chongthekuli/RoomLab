@@ -41,6 +41,20 @@ function runSceneSwap(swapFn) {
     _suppressSync = false;
   }
 }
+
+// Force the document back to the top after the soft keyboard dismisses.
+// On Android Chrome the keyboard raised for the custom-room name inputs
+// pans the page up; with the fixed / overflow:hidden app shell that
+// offset sticks, hiding the top tab-bar + left rail. Which element holds
+// the residual scroll is browser-dependent, so reset every candidate.
+// Each line is a harmless no-op when there's nothing scrolled (desktop).
+function resetShellScroll() {
+  try {
+    window.scrollTo(0, 0);
+    if (document.documentElement) document.documentElement.scrollTop = 0;
+    if (document.body) document.body.scrollTop = 0;
+  } catch { /* defensive — never let a scroll reset break the draw flow */ }
+}
 // Names captured from the two-prompt flow, held until the polygon
 // closes (roomshape:closed) so the new entry gets the right labels.
 let pendingProjectName = null;
@@ -265,6 +279,17 @@ export function mountRoomPanel({ materials }) {
       const { projectName, roomName } = result;
       pendingProjectName = projectName;
       pendingRoomName = roomName;
+      // Mobile keyboard-shift fix (v=769): on Android Chrome the soft
+      // keyboard raised for the name inputs pans the page up; in a
+      // position:fixed / overflow:hidden shell that scroll offset STICKS
+      // after the modal closes, leaving the top tab-bar + left rail above
+      // the visible edge. The viewport meta `interactive-widget=
+      // resizes-content` is the primary cure; this is defense-in-depth for
+      // engines that still leave residual scroll. Reset every candidate
+      // scroller (which one moved is browser-dependent) immediately and
+      // once more after the keyboard-dismiss settles (async). No-op on
+      // desktop where there's nothing scrolled.
+      resetShellScroll();
       runSceneSwap(() => {
         activeCustomRoomId = null;     // a fresh draw starts a new entry
         applyBlankCustomRoom({ projectName });
@@ -275,6 +300,9 @@ export function mountRoomPanel({ materials }) {
       });
       document.querySelector('.vp-tab[data-view="2d"]')?.click();
       setTimeout(() => startDrawCustomShape(), 50);
+      // Second pass — the keyboard dismiss + scroll settle is async, so a
+      // single synchronous reset can be undone by the late pan.
+      setTimeout(resetShellScroll, 250);
     });
   });
 
