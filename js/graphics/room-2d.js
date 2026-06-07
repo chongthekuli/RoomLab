@@ -3930,7 +3930,17 @@ function renderStructuresSVG(structures, selectedId, x0, y0, pxW, pxD, room, lab
       const cxT = stateToSvgX(st.position.x);
       const cyT = stateToSvgY(st.position.y);
       const lblT = st.label || st.id;
+      // Invisible hit-area over the whole bank footprint so a click
+      // anywhere on the toilet selects it (and opens the structure
+      // panel). The plan symbol itself is mostly unfilled strokes
+      // (dividers / door-swing arcs / WC glyphs) with no clickable
+      // interior — without this, only the thin lines were pickable.
+      // fill="transparent" (not "none") still receives pointer events.
+      const hitPts = structureFootprintCorners(st)
+        .map(c => `${stateToSvgX(c.x).toFixed(1)},${stateToSvgY(c.y).toFixed(1)}`)
+        .join(' ');
       s += `<g class="${cls}" data-structure-id="${escapeXml(st.id)}">
+              <polygon class="r2d-structure-hit" points="${hitPts}" fill="transparent" stroke="none" />
               ${toiletPlanSVG(st)}
               <text class="r2d-structure-label" x="${cxT.toFixed(1)}" y="${(cyT + lblOffset + 6).toFixed(1)}" text-anchor="middle" style="font-size:${lblFontPx}px">${escapeXml(lblT)}</text>
             </g>`;

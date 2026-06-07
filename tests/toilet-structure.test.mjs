@@ -298,5 +298,28 @@ ok(interactionPromptText('toilet', null, false) === 'Press E to open the toilet 
 ok(interactionPromptText('toilet', null, true) === 'Press E to close the toilet door',
    "open toilet door → 'Press E to close the toilet door'");
 
+// =====================================================================
+// 12. 2D pick hit-area — the toilet plan is mostly unfilled strokes, so
+// the rendered <g> MUST carry a transparent filled hit polygon over the
+// bank footprint or a click in the cubicle interior selects nothing and
+// the structure panel never opens (regression: v=775).
+// =====================================================================
+{
+  const fs = await import('node:fs');
+  const url = await import('node:url');
+  const here = url.fileURLToPath(new URL('.', import.meta.url));
+  const room2d = fs.readFileSync(here + '../js/graphics/room-2d.js', 'utf8');
+  // Isolate the toilet branch of renderStructuresSVG.
+  const m = room2d.match(/if \(st\.type === 'toilet'\)[\s\S]{0,2000}?continue;/);
+  ok(!!m, "room-2d.js has a renderStructuresSVG 'toilet' branch");
+  const branch = m ? m[0] : '';
+  ok(/r2d-structure-hit/.test(branch),
+     "toilet branch renders a 'r2d-structure-hit' hit polygon (clickable interior)");
+  ok(/fill="transparent"/.test(branch),
+     'toilet hit polygon uses fill="transparent" (receives pointer events; fill:none would not)');
+  ok(/structureFootprintCorners\(st\)/.test(branch),
+     'toilet hit polygon spans the bank footprint (structureFootprintCorners)');
+}
+
 console.log(failed === 0 ? '\nAll toilet-structure tests PASSED' : `\n${failed} test(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);
