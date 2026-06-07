@@ -307,6 +307,9 @@ function renderEditor(s) {
     fields += num('rotation_deg', 'Rotation', s.rotation_deg, 'deg', { step: 5, min: -360, max: 360 });
   } else if (s.type === 'toilet') {
     fields += num('cubicles', 'Cubicles', s.cubicles, 'count', { step: 1, min: 1, max: 12 });
+    // Per-cubicle clear dimensions — ALL cubicles share these (the bank pitch =
+    // clearWidth + partitionThickness, so widening one widens the whole bank).
+    fields += `<div class="ps-row2">${num('clearWidth_m', 'Cubicle width', s.clearWidth_m ?? 0.90, 'm', { step: 0.05, min: 0.6, max: 2.0 })}${num('clearDepth_m', 'Cubicle depth/length', s.clearDepth_m ?? 1.50, 'm', { step: 0.05, min: 1.0, max: 2.5 })}</div>`;
     // Top type — open (boards stop short of the ceiling, room shares air) vs
     // closed (boards floor→real ceiling + a transom above each door; no slab).
     fields += seg('topType', 'Top', s.topType ?? 'open', [['open', 'Open-top'], ['closed', 'Closed-top']]);
@@ -377,6 +380,13 @@ function wire(root) {
         const unit = inp.dataset.unit;
         if (unit === 'mm') v = v / 1000;
         if (key === 'sides') v = Math.max(3, Math.min(12, Math.round(v)));
+        // Toilet per-cubicle clear dimensions — clamp to sane ranges. All
+        // cubicles share these; the bank pitch (clearWidth + partitionThickness)
+        // + lx/ly + the door leaf width (clearWidth − latchGap − hingeReveal) all
+        // recompute downstream in toiletGeom / toiletFrontLayout, so a wider/
+        // longer cubicle re-fans the doors + redraws 2D/3D on the emit below.
+        if (key === 'clearWidth_m') v = Math.max(0.6, Math.min(2.0, v));
+        if (key === 'clearDepth_m') v = Math.max(1.0, Math.min(2.5, v));
         if (key === 'cubicles') {
           v = Math.max(1, Math.min(12, Math.round(v)));
           s.cubicles = v;

@@ -8273,7 +8273,7 @@ let _toiletBuildLogged = false;
 function _buildToiletMesh(s, room) {
   if (!_toiletBuildLogged) {
     _toiletBuildLogged = true;
-    console.info('[toilet] build 2026-06-07 v774 — leaf fills opening (~0.88 m, walkable), hinge reveal 10 mm, partition tint, plan symbol');
+    console.info('[toilet] build 2026-06-07 v776 — 2D right-click per-cubicle door toggle, door-state-aware plan, per-wall precision prisms, editable cubicle W/L');
   }
   const localS = { ...s, position: { x: 0, y: 0 }, rotation_deg: 0 };
   const inv = expandToiletSurfaces(localS, room);

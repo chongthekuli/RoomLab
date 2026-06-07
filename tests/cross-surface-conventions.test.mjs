@@ -998,14 +998,17 @@ function assertToiletPlanParity() {
   }
 
   // (b) single-source — locked primitive count for the 3-cubicle default.
+  // v=776: the plan now reflects door state. A CLOSED door draws a flush leaf
+  // but NO swing arc; an OPEN door draws the swung leaf + the quarter arc. The
+  // count is deterministic for a given doorsOpen. With ALL doors OPEN:
   // 1 bank-outline + (cubicles+1) dividers + 1 rear + per cubicle (door-leaf +
   // door-swing + wc-cistern + wc-pan). No filler at the default.
-  const s = toiletFixture();
+  const s = toiletFixture({ doorsOpen: [true, true, true] });
   const seg = toiletPlanSegments(s, room);
   const N = s.cubicles;
   const expectCount = 1 /*outline*/ + (N + 1) /*dividers*/ + 1 /*rear*/ + N * 4 /*leaf+swing+cistern+pan*/;
   ok(seg.primitives.length === expectCount,
-     `toilet-plan: 3-cubicle default emits the locked primitive count (${expectCount})`,
+     `toilet-plan: 3-cubicle ALL-OPEN emits the locked primitive count (${expectCount})`,
      `got ${seg.primitives.length}`);
   ok(seg.meta.cubicles === N && Math.abs(seg.meta.rotation_deg) < 1e-9,
      'toilet-plan: meta carries cubicles + rotation_deg');
@@ -1017,12 +1020,27 @@ function assertToiletPlanParity() {
   ok(!badRole, 'toilet-plan: every primitive role is in the locked vocabulary',
      badRole ? `unknown role "${badRole.role}"` : '');
 
-  // Count the per-cubicle primitives that must exist.
+  // Count the per-cubicle primitives that must exist (all-open case).
   const count = (role) => seg.primitives.filter(p => p.role === role).length;
   ok(count('bank-outline') === 1 && count('divider') === N + 2 && count('door-leaf') === N &&
      count('door-swing') === N && count('wc-pan') === N && count('wc-cistern') === N,
-     'toilet-plan: role counts — 1 outline, N+2 divider-lines (dividers+rear), N each of leaf/swing/pan/cistern',
+     'toilet-plan: ALL-OPEN role counts — 1 outline, N+2 divider-lines, N each of leaf/swing/pan/cistern',
      `outline=${count('bank-outline')} divider=${count('divider')} leaf=${count('door-leaf')} swing=${count('door-swing')} pan=${count('wc-pan')} cistern=${count('wc-cistern')}`);
+
+  // (b2) v=776 door-state-dependent plan: a CLOSED door draws a flush leaf and
+  // NO swing arc; ONE open door adds exactly ONE swing arc. Deterministic.
+  {
+    const allClosed = toiletPlanSegments(toiletFixture({ doorsOpen: [false, false, false] }), room);
+    const cc = (role) => allClosed.primitives.filter(p => p.role === role).length;
+    ok(cc('door-leaf') === N && cc('door-swing') === 0,
+       'toilet-plan: ALL-CLOSED → N flush leaves, ZERO swing arcs',
+       `leaf=${cc('door-leaf')} swing=${cc('door-swing')}`);
+    const oneOpen = toiletPlanSegments(toiletFixture({ doorsOpen: [false, true, false] }), room);
+    const oc = (role) => oneOpen.primitives.filter(p => p.role === role).length;
+    ok(oc('door-leaf') === N && oc('door-swing') === 1,
+       'toilet-plan: exactly one open door → N leaves, exactly 1 swing arc',
+       `leaf=${oc('door-leaf')} swing=${oc('door-swing')}`);
+  }
 
   // (c) door-swing arc winding parity after each surface's Y-flip + leaf-on-arc.
   // BOTH surfaces apply sy = const − y, i.e. (a→−a, ccw→!ccw). So the SCREEN

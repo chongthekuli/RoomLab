@@ -893,10 +893,12 @@ export function toiletPlanSegments(s, room) {
 
   const COS35 = Math.cos(35 * Math.PI / 180);
   const SIN35 = Math.sin(35 * Math.PI / 180);
+  const doorsOpen = Array.isArray(s.doorsOpen) ? s.doorsOpen : [];
 
   for (let i = 0; i < cubicles; i++) {
     const cu = fl.cubicleU(i);
     const hingeU = fl.hingeU(i);
+    const isOpen = !!doorsOpen[i];
 
     // front-filler — only when a smaller custom leaf is set (fillerW > 0).
     if (fillerW > 1e-6) {
@@ -908,25 +910,33 @@ export function toiletPlanSegments(s, room) {
       });
     }
 
-    // door-leaf — drawn part-open ~35°, hinge H at (hingeU, vFront), tip swings
-    // OUT toward −y. Open tip (local): u = hingeU + sgn*leafW*cos35,
-    // v = vFront − leafW*sin35.
+    // door-leaf — v=776: drawn per door state. CLOSED → leaf flush across the
+    // opening along the front face (the leaf lies on vFront from hinge toward
+    // the latch jamb), and NO swing arc. OPEN → leaf swung OUT ~35° toward −y
+    // (front) PLUS the quarter-circle swing arc. Hinge H = (hingeU, vFront).
     const H = toState(hingeU, vFront);
-    const tip = toState(hingeU + sgn * leafW * COS35, vFront - leafW * SIN35);
-    prims.push({ kind: 'line', role: 'door-leaf', a: H, b: tip });
-
-    // door-swing arc — centre H, r = leafW, quarter circle from CLOSED (along
-    // the front, toward the latch) to fully-open OUT (toward −y). In the LOCAL
-    // frame the closed leaf points along +sgn·u (a0 = hingeLeft?0:π) and the open
-    // leaf points along −v (−π/2). Rotate the angles into the STATE frame by th.
-    const a0Local = hingeLeft ? 0 : Math.PI;
-    const a1Local = -Math.PI / 2;
-    prims.push({
-      kind: 'arc', role: 'door-swing',
-      center: H, r: leafW,
-      a0: a0Local + th, a1: a1Local + th,
-      ccw: !hingeLeft,
-    });
+    if (isOpen) {
+      // Open tip (local): u = hingeU + sgn*leafW*cos35, v = vFront − leafW*sin35.
+      const tip = toState(hingeU + sgn * leafW * COS35, vFront - leafW * SIN35);
+      prims.push({ kind: 'line', role: 'door-leaf', a: H, b: tip });
+      // door-swing arc — centre H, r = leafW, quarter circle from CLOSED (along
+      // the front, toward the latch) to fully-open OUT (toward −y). In the LOCAL
+      // frame the closed leaf points along +sgn·u (a0 = hingeLeft?0:π) and the
+      // open leaf points along −v (−π/2). Rotate the angles into the STATE frame.
+      const a0Local = hingeLeft ? 0 : Math.PI;
+      const a1Local = -Math.PI / 2;
+      prims.push({
+        kind: 'arc', role: 'door-swing',
+        center: H, r: leafW,
+        a0: a0Local + th, a1: a1Local + th,
+        ccw: !hingeLeft,
+      });
+    } else {
+      // CLOSED — leaf lies flush along the front face from the hinge toward the
+      // latch jamb (local v = vFront, u from hingeU by +sgn*leafW). No arc.
+      const closedTip = toState(hingeU + sgn * leafW, vFront);
+      prims.push({ kind: 'line', role: 'door-leaf', a: H, b: closedTip });
+    }
 
     // wc-cistern — rect against the rear wall, between the pan and the rear.
     prims.push({

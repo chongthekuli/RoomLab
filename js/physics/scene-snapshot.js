@@ -27,7 +27,7 @@
 import { expandSources } from './source-expand.js';
 import { getCachedCatalogue, getFurnitureCatalogue, getRackCatalogue, getStructureMaterial } from './providers.js';
 import { getSubVolumes } from './furniture-sub-volumes.js';
-import { STRUCTURE_TYPES, structureFootprintCorners, structureHeightRange } from './building-structures.js';
+import { STRUCTURE_TYPES, structureFootprintCorners, structureHeightRange, expandToiletSurfaces } from './building-structures.js';
 
 export const PHYSICS_SCENE_VERSION = 1;
 
@@ -644,8 +644,94 @@ export function buildPhysicsScene({ state, materials, getLoudspeakerDef }) {
     _structureMatByMaterialId.set(materialId, idx);
     return idx;
   }
+  // Push one structureItem from a 4-corner plan footprint + [base,top] + matIdx.
+  function pushStructureItem(idSuffix, type, corners4, base, top, matIdx) {
+    if (!(top > base)) return;
+    const fp = new Float32Array(corners4.length * 2);
+    for (let k = 0; k < corners4.length; k++) { fp[k * 2] = corners4[k].x; fp[k * 2 + 1] = corners4[k].y; }
+    structureItems.push(Object.freeze({
+      id: idSuffix, type, footprint: fp, base, top, materialIdx: matIdx,
+    }));
+  }
+
   for (const s of stateStructures) {
     if (!s || !s.position || !STRUCTURE_TYPES.includes(s.type)) continue;
+
+    // --- Toilet: per-WALL thin prisms (NOT the solid outer rect) ----------
+    // v=776 — a toilet bank must NOT enter the soup as one solid box, or the
+    // precision tracer can never put a ray INTO a cubicle (the door + open top
+    // are lost). Expand into its constituent boards: each board is a thin
+    // rectangular prism from the wall segment a→b offset by ±thickness/2 along
+    // the segment normal, with the wall's own [base,top] + material. A door
+    // wall is emitted as solid ONLY when that cubicle's door is CLOSED — an
+    // OPEN door is skipped, leaving the doorway as a gap rays enter through.
+    // Open-top boards already stop at ~2.0 m (their `top`) so rays pass over
+    // into the open top; closed-top boards run floor→room ceiling and the ROOM
+    // ceiling seals the top — no bank-wide top cap is emitted either way. Bowls
+    // are emitted as short solid boxes so an inside listener is shadowed by the
+    // pan. This consumes the SAME expandToiletSurfaces() inventory the 3D
+    // renderer + Dr. Chen's analytical blocking use — keep the wall/door shape
+    // in sync (see building-structures.js header).
+    if (s.type === 'toilet') {
+      const matIdx = registerStructureMaterial(s.materialId);
+      let inv;
+      try { inv = expandToiletSurfaces(s, state.room ?? {}); } catch (_) { inv = null; }
+      if (inv) {
+        const baseId = s.id ?? `S${structureItems.length + 1}`;
+        let wIdx = 0;
+        for (const w of inv.walls) {
+          // Thin prism: offset the segment a→b by ±thickness/2 along its normal.
+          const dx = w.b.x - w.a.x, dy = w.b.y - w.a.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const half = (Number(w.thickness_m) || 0.05) / 2;
+          const nx = (-dy / len) * half, ny = (dx / len) * half;
+          const corners4 = [
+            { x: w.a.x + nx, y: w.a.y + ny },
+            { x: w.b.x + nx, y: w.b.y + ny },
+            { x: w.b.x - nx, y: w.b.y - ny },
+            { x: w.a.x - nx, y: w.a.y - ny },
+          ];
+          pushStructureItem(`${baseId}:wall${wIdx++}`, 'toilet', corners4, w.base, w.top, matIdx);
+        }
+        // Door leaves — only the CLOSED cubicles seal their doorway. An OPEN
+        // door is skipped so the doorway is a gap rays enter through. The leaf
+        // is a thin board from the hinge along `axis` for leafW, ±thickness/2.
+        let dIdx = 0;
+        for (const d of inv.doors) {
+          if (d.open) { dIdx++; continue; }   // open → gap, no solid leaf
+          const fx = d.hinge.x + d.axis.x * d.leafW;
+          const fy = d.hinge.y + d.axis.y * d.leafW;
+          const dx = fx - d.hinge.x, dy = fy - d.hinge.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const half = (Number(d.thickness_m) || 0.04) / 2;
+          const nx = (-dy / len) * half, ny = (dx / len) * half;
+          const corners4 = [
+            { x: d.hinge.x + nx, y: d.hinge.y + ny },
+            { x: fx + nx, y: fy + ny },
+            { x: fx - nx, y: fy - ny },
+            { x: d.hinge.x - nx, y: d.hinge.y - ny },
+          ];
+          pushStructureItem(`${baseId}:door${dIdx++}`, 'toilet', corners4, d.doorBottom, d.doorTop, matIdx);
+        }
+        // Bowls — short solid boxes (axis-aligned bbox in plan; the precision
+        // tracer is fine with a coarse occluder here). Centre + bbox from the
+        // expander; height seatH at the seat top.
+        let bIdx = 0;
+        for (const b of inv.bowls) {
+          const hx = (b.bbox?.lx || 0.36) / 2, hy = (b.bbox?.ly || 0.62) / 2;
+          const corners4 = [
+            { x: b.center.x - hx, y: b.center.y - hy },
+            { x: b.center.x + hx, y: b.center.y - hy },
+            { x: b.center.x + hx, y: b.center.y + hy },
+            { x: b.center.x - hx, y: b.center.y + hy },
+          ];
+          const top = Number(b.bbox?.h) > 0 ? b.bbox.h : (Number(b.seatH) || 0.42);
+          pushStructureItem(`${baseId}:bowl${bIdx++}`, 'toilet', corners4, 0, top, matIdx);
+        }
+      }
+      continue;   // toilet handled per-surface; skip the single-prism path
+    }
+
     const corners = structureFootprintCorners(s);
     if (!Array.isArray(corners) || corners.length < 3) continue;
     const { base, top } = structureHeightRange(s, state.room ?? {});

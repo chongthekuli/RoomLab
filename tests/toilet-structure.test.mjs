@@ -11,10 +11,12 @@
 
 import {
   STRUCTURE_TYPES, expandToiletSurfaces, structurePlanSize, structureFootprintCorners,
-  structureExposedArea, structureDirectPathLossPerBand, _testing,
+  structureExposedArea, structureDirectPathLossPerBand, toiletPlanSegments, _testing,
 } from '../js/physics/building-structures.js';
 import { interactionPromptText } from '../js/graphics/walk-interaction.js';
 import { structureBlocksCylinder, toiletBlocksCylinder } from '../js/physics/structure-walk-collision.js';
+import { readFileSync } from 'node:fs';
+import { buildPhysicsScene } from '../js/physics/scene-snapshot.js';
 
 let failed = 0;
 const ok = (c, l, e = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${l}  ${e}`); if (!c) failed++; };
@@ -319,6 +321,99 @@ ok(interactionPromptText('toilet', null, true) === 'Press E to close the toilet 
      'toilet hit polygon uses fill="transparent" (receives pointer events; fill:none would not)');
   ok(/structureFootprintCorners\(st\)/.test(branch),
      'toilet hit polygon spans the bank footprint (structureFootprintCorners)');
+}
+
+// =====================================================================
+// 13. v=776 PART A — plan door-state dependence. A CLOSED door draws a
+//     FLUSH leaf along the front face (no swing arc); an OPEN door draws
+//     the swung leaf + the quarter-circle swing arc.
+// =====================================================================
+{
+  const allClosed = toiletPlanSegments(toiletAt({ doorsOpen: [false, false, false] }), room);
+  const cc = (role) => allClosed.primitives.filter(p => p.role === role).length;
+  ok(cc('door-leaf') === 3 && cc('door-swing') === 0,
+     'CLOSED doors → N flush leaves, ZERO swing arcs', `leaf=${cc('door-leaf')} swing=${cc('door-swing')}`);
+  // The closed leaf lies on the front face — its two endpoints share the same
+  // perpendicular offset from the bank centre line (both on vFront). Easiest
+  // check: the closed leaf endpoints are NOT swung out (tip not at radius leafW
+  // from hinge in the −y direction). Both endpoints lie on the front plane, so
+  // the leaf length === leafW and it is collinear with the row (front face).
+  const cl = allClosed.primitives.find(p => p.role === 'door-leaf');
+  const clLen = Math.hypot(cl.b.x - cl.a.x, cl.b.y - cl.a.y);
+  ok(approx(clLen, 0.90 - 0.010 - 0.010), 'closed leaf length === leafW (0.88), flush along front', `(${clLen})`);
+
+  const oneOpen = toiletPlanSegments(toiletAt({ doorsOpen: [false, true, false] }), room);
+  const oc = (role) => oneOpen.primitives.filter(p => p.role === role).length;
+  ok(oc('door-leaf') === 3 && oc('door-swing') === 1,
+     'exactly one OPEN door → N leaves, exactly 1 swing arc', `leaf=${oc('door-leaf')} swing=${oc('door-swing')}`);
+  // Toggling a door visibly changes the plan: all-closed has 0 arcs, all-open 3.
+  const allOpen = toiletPlanSegments(toiletAt({ doorsOpen: [true, true, true] }), room);
+  ok(allOpen.primitives.filter(p => p.role === 'door-swing').length === 3,
+     'ALL-OPEN → 3 swing arcs (plan reflects state — toggling changes the drawing)');
+}
+
+// =====================================================================
+// 14. v=776 PART B — the precision SNAPSHOT emits per-WALL thin prisms for a
+//     toilet (NOT one solid outer-rect box). An OPEN door omits its door wall
+//     (gap for rays); a CLOSED door emits a solid leaf occluder.
+// =====================================================================
+{
+  const md = JSON.parse(readFileSync('data/materials.json', 'utf8'));
+  const materials = {
+    frequency_bands_hz: md.frequency_bands_hz,
+    list: md.materials,
+    byId: Object.fromEntries(md.materials.map(m => [m.id, m])),
+  };
+  const getDef = () => ({ acoustic: { sensitivity_db_1w_1m: 100, directivity_index_db: 0 } });
+  const baseState = (toilet) => ({
+    room: { shape: 'rectangular', width_m: 8, depth_m: 8, height_m: 3, ceiling_type: 'flat',
+      surfaces: { floor: 'concrete-painted', ceiling: 'gypsum-board',
+        wall_north: 'concrete-painted', wall_south: 'concrete-painted',
+        wall_east: 'concrete-painted', wall_west: 'concrete-painted' } },
+    sources: [], listeners: [], zones: [], treatments: [], furniture: [],
+    rackSystem: { racks: [] }, structures: [toilet], physics: {},
+  });
+
+  // All doors CLOSED → the bank emits MANY items (N+1 dividers + 1 rear + N
+  // closed doors + N bowls), NOT a single outer-rect box.
+  const sceneClosed = buildPhysicsScene({ state: baseState(toiletAt({ doorsOpen: [false, false, false] })), materials, getLoudspeakerDef: getDef });
+  const itemsClosed = sceneClosed.structures.items;
+  ok(sceneClosed.structures.count > 1,
+     'snapshot emits per-wall prisms (count > 1, NOT a single solid box)', `count=${sceneClosed.structures.count}`);
+  ok(itemsClosed.every(it => it.footprint.length === 8),
+     'every toilet structureItem is a 4-corner thin prism (footprint = 8 floats)');
+  const closedDoors = itemsClosed.filter(it => /:door\d+$/.test(it.id));
+  ok(closedDoors.length === 3, 'all-closed → 3 solid door-leaf occluders emitted', `(${closedDoors.length})`);
+
+  // Open cubicle 1's door → its door wall is SKIPPED (gap for rays). Now only
+  // 2 door occluders remain.
+  const sceneOpen = buildPhysicsScene({ state: baseState(toiletAt({ doorsOpen: [false, true, false] })), materials, getLoudspeakerDef: getDef });
+  const openDoors = sceneOpen.structures.items.filter(it => /:door\d+$/.test(it.id));
+  ok(openDoors.length === 2, 'one open door → that door wall omitted (2 solid leaves remain → rays enter)', `(${openDoors.length})`);
+
+  // Wall prisms carry the wall's own [base,top] (open-top boards stop at 2.0 m;
+  // no bank-wide top cap). A divider wall item's top ≤ 2.0 for an open-top bank.
+  const wallItems = itemsClosed.filter(it => /:wall\d+$/.test(it.id));
+  ok(wallItems.length === 3 + 1 + 1, 'open-top: N+1 dividers + 1 rear = 5 wall prisms', `(${wallItems.length})`);
+  ok(wallItems.every(it => it.top <= 2.0 + 1e-6),
+     'open-top wall prisms stop at the board top (≤2.0 m) — rays pass over into the open top');
+}
+
+// =====================================================================
+// 15. v=776 PART C — editable cubicle width/length; cubicles follow + the
+//     door leaf still fills the (now wider) opening.
+// =====================================================================
+{
+  const wide = toiletAt({ clearWidth_m: 1.20, clearDepth_m: 2.00 });
+  const g = _testing.toiletGeom(wide);
+  ok(approx(g.clearWidth, 1.20) && approx(g.clearDepth, 2.00), 'toiletGeom reads the edited clear dims');
+  ok(approx(g.pitch, 1.20 + 0.05), 'pitch follows the wider cubicle (clearWidth + partition)', `(${g.pitch})`);
+  ok(approx(g.lx, 3 * (1.20 + 0.05) + 0.05), 'bank width lx follows the wider cubicle', `(${g.lx})`);
+  ok(approx(g.ly, 2.00 + 2 * 0.05), 'bank depth ly follows the longer cubicle', `(${g.ly})`);
+  const inv = expandToiletSurfaces(wide, room);
+  // Door leaf still fills the opening: leafW === clearWidth − latchGap − hingeReveal.
+  ok(inv.doors.every(d => approx(d.leafW, 1.20 - 0.010 - 0.010)),
+     'door leaf fills the WIDER opening (leafW = clearWidth − reveals = 1.18)', `(${inv.doors[0].leafW})`);
 }
 
 console.log(failed === 0 ? '\nAll toilet-structure tests PASSED' : `\n${failed} test(s) FAILED`);

@@ -1,4 +1,4 @@
-import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, duplicateFurniture, duplicateRack, rotateRack, convertRoomToCustomPolygon } from '../app-state.js';
+import { state, earHeightFor, getSelectedListener, colorForZone, colorForGroup, expandSources, expandLineArrayToElements, duplicateSource, duplicateListener, duplicateFurniture, duplicateRack, duplicateStructure, rotateRack, convertRoomToCustomPolygon } from '../app-state.js';
 import { openPanel } from '../ui/rail-system.js';
 import { projectOntoWall } from '../ui/panel-treatments.js';
 import { getFurnitureCatalogue } from '../labs/furniturelab/catalog.js';
@@ -3384,6 +3384,13 @@ function onPickableContextMenu(e) {
       emit('listener:selected', { id: pick.listenerId });
     }
     openListenerContextMenu(e.clientX, e.clientY, pick.listenerId);
+  } else if (pick.kind === 'structure') {
+    try { openPanel('left', 'structure'); } catch (_) {}
+    if (state.selectedStructureId !== pick.structureId) {
+      state.selectedStructureId = pick.structureId;
+      emit('structure:selected', { id: pick.structureId });
+    }
+    openStructureContextMenu(e.clientX, e.clientY, pick.structureId);
   } else if (pick.kind === 'vertex') {
     // Only custom rooms have an editable vertex array. If a non-custom
     // room somehow exposed a vertex pick, bail gracefully (no menu).
@@ -3453,6 +3460,59 @@ function openVertexContextMenu(clientX, clientY, vertexIdx) {
       },
     },
   ]);
+}
+
+// Structure context menu. For a TOILET bank it lists each cubicle with an
+// open/close-door toggle (the same `doorsOpen[i]` boolean the 3D door swing +
+// walk-mode 'Press E' mutate — one source of truth, so all three surfaces stay
+// consistent). Each toggle flips doorsOpen[i] and emits 'structure:changed',
+// which rebuilds the 3D mesh AND re-renders this 2D plan (the door-state-aware
+// toiletPlanSegments now draws the flush/swung leaf accordingly). For non-
+// toilet structures, a simple label-only menu (Duplicate) preserves prior
+// behaviour. (v=776)
+function openStructureContextMenu(clientX, clientY, structureId) {
+  closeSourceContextMenu();
+  const st = state.structures?.find(x => x.id === structureId);
+  if (!st) return;
+
+  if (st.type === 'toilet') {
+    const n = Math.max(1, Math.min(20, Math.round(Number(st.cubicles) || 3)));
+    if (!Array.isArray(st.doorsOpen)) st.doorsOpen = [];
+    const header = st.label || `Toilet — ${n} cubicle${n === 1 ? '' : 's'}`;
+    const items = [];
+    for (let i = 0; i < n; i++) {
+      const isOpen = st.doorsOpen[i] === true;
+      items.push({
+        action: `door-${i}`,
+        glyph: isOpen ? '▢' : '▣',
+        label: `Cubicle ${i + 1} — ${isOpen ? 'Close door' : 'Open door'}`,
+        hint: isOpen ? 'open' : 'closed',
+        onClick: () => {
+          const cur = state.structures?.find(x => x.id === structureId);
+          if (!cur) { closeSourceContextMenu(); return; }
+          if (!Array.isArray(cur.doorsOpen)) cur.doorsOpen = [];
+          cur.doorsOpen[i] = !cur.doorsOpen[i];
+          closeSourceContextMenu();
+          emit('structure:changed', { id: structureId, key: 'doorsOpen' });
+        },
+      });
+    }
+    openItemsMenu(clientX, clientY, header, items);
+    return;
+  }
+
+  // Non-toilet structures: label-only menu with Duplicate (matches the click-
+  // select behaviour; keeps prior right-click expectation simple).
+  const label = st.label || st.type || 'Structure';
+  openPickableMenu(clientX, clientY, label, () => {
+    const newId = duplicateStructure(structureId);
+    closeSourceContextMenu();
+    if (newId) {
+      state.selectedStructureId = newId;
+      emit('structure:changed', { id: newId });
+      emit('structure:selected', { id: newId });
+    }
+  });
 }
 
 function openSourceContextMenu(clientX, clientY, sourceIdx) {
