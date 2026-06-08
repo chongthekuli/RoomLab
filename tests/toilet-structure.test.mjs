@@ -156,16 +156,43 @@ ok(STRUCTURE_TYPES.includes('toilet'), "'toilet' is a recognised STRUCTURE_TYPE"
 }
 
 // =====================================================================
-// 6c. v=781 — panel-structure.js clamps doorClearH_m to [1.8, 2.4] AND ≤ ceiling.
-//     Text-grep guard over the editor wiring (matches the scene-x-mirror style).
+// 6c. v=786 — panel-structure.js clamps doorClearH_m to [1.8 m, CEILING].
+//     The old hard 2.4 m cap was removed (a closed-top door must be able to
+//     run up to the ceiling, i.e. a full-height door). Text-grep guard over
+//     the editor wiring (matches the scene-x-mirror style).
 // =====================================================================
 {
   const src = readFileSync(new URL('../js/ui/panel-structure.js', import.meta.url), 'utf8');
   ok(/key === 'doorClearH_m'/.test(src), 'panel clamps the doorClearH_m key');
   ok(/Math\.max\(\s*1\.8/.test(src), "panel floor-clamps doorClearH_m to 1.8 m");
-  ok(/Math\.min\(\s*2\.4/.test(src), "panel ceiling-clamps doorClearH_m to 2.4 m");
-  ok(/ceilH\s*-\s*elevH/.test(src), 'panel also clamps doorClearH_m to ≤ (ceiling − elev)');
+  ok(/ceilH\s*-\s*elevH/.test(src), 'panel ceiling-clamps doorClearH_m to (ceiling − elev)');
+  // Regression: the doorClearH_m clamp must NOT hard-cap at 2.4 m any more.
+  const clampLine = (src.match(/key === 'doorClearH_m'[\s\S]{0,260}?\n\s*\}/) || [''])[0];
+  ok(!/2\.4/.test(clampLine), "doorClearH_m clamp no longer hard-caps at 2.4 m", `(${clampLine.replace(/\s+/g, ' ').slice(0, 120)}…)`);
   ok(/'Door height'/.test(src), "panel exposes a 'Door height' editable field");
+}
+
+// =====================================================================
+// 6d. v=786 — a closed-top door TALLER than the old 2.4 m cap is honored when
+//     the ceiling allows it (the bug: door height was stuck at ≤ 2.4 m).
+// =====================================================================
+{
+  const tall = { ...room, height_m: 3.0 };
+  const s = toiletAt({ topType: 'closed', doorClearH_m: 2.90, elev_m: 0 });
+  const inv = expandToiletSurfaces(s, tall);
+  ok(inv.doors.every(d => approx(d.doorTop, 2.90)),
+     'door height above 2.4 m is honored (doorTop = 2.90 in a 3.0 m room)', `(${inv.doors[0].doorTop})`);
+  ok(inv.doors.every(d => d.doorTop < tall.height_m - 1e-6),
+     'a 2.90 m door in a 3.0 m room still leaves an open gap above', `(top ${inv.doors[0].doorTop})`);
+
+  // Full-height door: doorClearH_m === ceiling → doorTop clamps to the ceiling,
+  // no gap above (a fully sealed closed-top front).
+  const sFull = toiletAt({ topType: 'closed', doorClearH_m: 3.0, elev_m: 0 });
+  const invFull = expandToiletSurfaces(sFull, tall);
+  ok(invFull.doors.every(d => approx(d.doorTop, 3.0)),
+     'full-height door: doorTop reaches the ceiling', `(${invFull.doors[0].doorTop})`);
+  ok(invFull.walls.filter(x => x.kind === 'transom').length === 0,
+     'still no transom on a full-height closed-top door', '');
 }
 
 // =====================================================================

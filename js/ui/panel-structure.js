@@ -26,6 +26,20 @@ let _mounted = false;
 // physics still accepts ANY materialId; this just curates the dropdown.
 const CONSTRUCTION_RE = /concrete|gypsum|glass|plaster|brick|cmu|wall_|wood|stone|metal|steel|block|masonry|tile|drywall/i;
 
+// Toilet cubicle partitions are a narrow, realistic material set — drywall
+// partitions, plastered / ceramic-tiled hard walls, painted blockwork, and
+// glass vision panels. The full bulk-construction list (double-stud isolation
+// assemblies, stone, perforated metal deck, LED panels…) is unrealistic for a
+// WC cubicle, so the toilet picker is curated down to these. Order = sensible
+// default first. Each id MUST exist in materials.json.
+export const TOILET_MATERIAL_IDS = [
+  'gypsum-board',     // drywall / plasterboard partition (default)
+  'plaster-smooth',   // plastered or ceramic-tiled hard wall (also HPL-board proxy)
+  'concrete-painted', // painted concrete / tiled blockwork
+  'cmu_200_hollow',   // concrete-block partition wall
+  'glass-window',     // glass partition / above-door vision panel
+];
+
 // Default material per type — must exist in materials.json.
 const DEFAULT_MATERIAL = {
   pillar: 'concrete-painted',
@@ -163,6 +177,19 @@ function constructionMaterials() {
   return out;
 }
 
+// Candidate materials for a structure type's picker. Toilet cubicles get the
+// curated realistic subset; every other structure type uses the full
+// bulk-construction list. Returns [{id, name}] preserving curated order for
+// the toilet (default first), alphabetical for the rest.
+function materialsForType(type) {
+  if (type !== 'toilet') return constructionMaterials();
+  const cat = getStructureMaterialCatalogue();
+  return TOILET_MATERIAL_IDS.map(id => {
+    const row = cat && typeof cat.get === 'function' ? cat.get(id) : null;
+    return { id, name: row?.name ?? id };
+  });
+}
+
 function render(root) {
   const placed = Array.isArray(state.structures) ? state.structures : [];
   const armed = state.structureArmed;
@@ -263,7 +290,7 @@ function seg(key, label, current, options) {
 }
 
 function materialSelect(s) {
-  const opts = constructionMaterials();
+  const opts = materialsForType(s.type);
   const list = opts.length ? opts : [{ id: s.materialId, name: s.materialId }];
   const options = list.map(o => `<option value="${escapeAttr(o.id)}" ${o.id === s.materialId ? 'selected' : ''}>${escapeHtml(o.name)}</option>`).join('');
   // If the current material isn't in the construction list, surface it anyway.
@@ -336,14 +363,15 @@ function renderEditor(s) {
     fields += num('undercut_m', 'Door undercut', s.undercut_m, 'm');
     // Door height (closed-top only): sets the door-leaf TOP; the space above the
     // door (door top → ceiling) stays OPEN like a real cubicle (v=781 — no
-    // transom). Clamped 1.8–2.4 m AND to ≤ ceiling. For OPEN-top the leaf top
-    // tracks the partition height instead, so this field is hidden there.
+    // transom). Clamped 1.8 m up to the CEILING (room height − elevation) — set
+    // it to the ceiling for a full-height door with no gap above. For OPEN-top
+    // the leaf top tracks the partition height instead, so this field is hidden.
     if ((s.topType ?? 'open') === 'closed') {
       const ceilH = Number(state.room?.height_m) || 3;
       const elevH = Number(s.elev_m) || 0;
-      const maxDoorH = Math.min(2.4, ceilH - elevH);
+      const maxDoorH = Math.max(1.8, ceilH - elevH);
       fields += num('doorClearH_m', 'Door height', s.doorClearH_m ?? 2.10, 'm', { step: 0.05, min: 1.8, max: maxDoorH });
-      fields += `<p class="ps-note" style="margin:.2rem 0 .3rem">Closed-top door-leaf top; the space above the door stays open to the ceiling (see over the door, like a real cubicle).</p>`;
+      fields += `<p class="ps-note" style="margin:.2rem 0 .3rem">Closed-top door-leaf top, up to the ceiling. Below the ceiling, the space above the door stays open (see over the door, like a real cubicle); at the ceiling it becomes a full-height door.</p>`;
     }
     fields += `<label class="ps-check"><input type="checkbox" data-key="showBowls" ${s.showBowls !== false ? 'checked' : ''} /> Show toilet bowls</label>`;
     fields += materialSelect(s);
@@ -422,15 +450,15 @@ function wire(root) {
         // Floor gap (scuff gap) for open-top toilet partitions: 0–0.30 m. 0 =
         // boards meet the floor (no feet); >0 = boards float on pilaster feet.
         if (key === 'scuffGap_m') v = Math.max(0, Math.min(0.30, v));
-        // Door height (closed-top): clamp to [1.8, 2.4] m AND to ≤ the ceiling
-        // (room.height_m − elev) so the door top never exceeds board.top. The
-        // expander also re-clamps doorTop = min(elev+doorClearH, board.top), so
-        // this is belt-and-braces; it sets the closed-top door-leaf top, with the
-        // space above it open to the ceiling (v=781 — no transom).
+        // Door height (closed-top): clamp to [1.8 m, ceiling] (room.height_m −
+        // elev) so the door top never exceeds board.top (= ceiling). At the
+        // ceiling it's a full-height door; below it the front stays open above
+        // the leaf (v=781 — no transom). The expander also re-clamps
+        // doorTop = min(elev+doorClearH, board.top), so this is belt-and-braces.
         if (key === 'doorClearH_m') {
           const ceilH = Number(state.room?.height_m) || 3;
           const elevH = Number(s.elev_m) || 0;
-          v = Math.max(1.8, Math.min(2.4, Math.min(ceilH - elevH, v)));
+          v = Math.max(1.8, Math.min(ceilH - elevH, v));
         }
         if (key === 'cubicles') {
           v = Math.max(1, Math.min(12, Math.round(v)));
