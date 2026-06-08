@@ -79,6 +79,9 @@ export async function loadSurfaceCatalogue() {
       name: m.name,
       manufacturer: m.manufacturer || 'Generic',
       category,
+      // Surface applicability (floor / wall / ceiling) from materials.json.
+      // [] = not a room-boundary finish (rack panel, seat zone-coverage).
+      applicableTo: Array.isArray(m.applicableTo) ? m.applicableTo : null,
       description: m._source || '',
       absorption: m.absorption,
       scattering_coefficient: m.scattering,

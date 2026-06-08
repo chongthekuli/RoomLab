@@ -2248,11 +2248,49 @@ function attachSurfaceHover(rowEl, surfaceId) {
   });
 }
 
+// Map a surface slot id to the boundary kind it represents, so the picker
+// can offer only materials classified for that kind (materials.json
+// `applicableTo`). Floor / ceiling are matched explicitly (incl. broken-out
+// enclosure_N_* and the surau podium / roof undersides); everything else
+// that hosts a material — rectangular walls, custom edges, enclosure walls,
+// surau columns / partition / minaret, shared segments — is a vertical
+// wall-like surface.
+function surfaceKindFor(surfaceId) {
+  if (!surfaceId) return null;
+  if (surfaceId === 'floor' || /_floor$/.test(surfaceId) || surfaceId === 'surau_podium_top') return 'floor';
+  if (surfaceId === 'ceiling' || /_ceiling$/.test(surfaceId)
+      || surfaceId === 'surau_arcade_roof' || surfaceId === 'surau_portico_roof') return 'ceiling';
+  return 'wall';
+}
+
+// A material is offered on a surface when its `applicableTo` list includes
+// the surface kind. An empty array means "not a room-boundary finish" (rack
+// panels, seat zone-coverage) → never offered. A MISSING list (legacy data /
+// adopter catalogue without the field) falls back to "show everywhere" so we
+// never hide a material we failed to classify.
+function materialAllowedOn(mat, kind) {
+  if (!kind) return true;
+  const allow = mat.applicableTo;
+  if (!Array.isArray(allow)) return true;
+  return allow.includes(kind);
+}
+
 function buildMatSelect(dataKey, currentValue) {
   const sel = document.createElement('select');
   sel.dataset.key = dataKey;
-  sel.innerHTML = materialsRef.list.filter(m => m.id !== 'audience-seated').map(m => `<option value="${m.id}">${m.name}</option>`).join('');
-  sel.value = currentValue ?? materialsRef.list[0].id;
+  const kind = surfaceKindFor(dataKey);
+  const curId = (currentValue && typeof currentValue === 'object')
+    ? currentValue.materialId : currentValue;
+  let opts = materialsRef.list.filter(m => m.id !== 'audience-seated' && materialAllowedOn(m, kind));
+  // Back-compat safety net: if the saved material isn't classified for this
+  // surface (old scene, preset edge case), keep it selectable so loading a
+  // project never silently swaps the material out from under the user.
+  if (curId && !opts.some(m => m.id === curId)) {
+    const cur = materialsRef.list.find(m => m.id === curId);
+    if (cur) opts = [cur, ...opts];
+  }
+  sel.innerHTML = opts.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  sel.value = curId ?? opts[0]?.id ?? materialsRef.list[0].id;
   return sel;
 }
 

@@ -211,9 +211,13 @@ function renderCatalogueRow(entry) {
     ? `<span class="surface-cat-flag${hasHighFlag ? ' surface-cat-flag-high' : ''}" title="${flagCount} caution flag${flagCount === 1 ? '' : 's'}">⚠</span>`
     : '';
   const isActive = state.selectedId === entry.id;
+  const useShort = formatApplicabilityShort(entry.applicableTo);
+  const useChip = useShort
+    ? `<span class="surface-cat-use" title="Usable on: ${escapeAttr(formatApplicability(entry.applicableTo) || '—')}">${useShort}</span>`
+    : '';
   return `
     <button type="button" class="surface-cat-row${isActive ? ' active' : ''}" data-id="${entry.id}">
-      <span class="surface-cat-mfr">${escapeHtml(entry.manufacturer)}</span>
+      <span class="surface-cat-mfr"><span>${escapeHtml(entry.manufacturer)}</span>${useChip}</span>
       <span class="surface-cat-name">${escapeHtml(entry.name)}</span>
       <span class="surface-cat-headline">${headline}</span>
       ${flagChip}
@@ -255,10 +259,12 @@ function renderTitleBar() {
     return;
   }
   const headline = formatHeadlineNumber(entry, true);
+  const useChips = renderApplicabilityChips(entry.applicableTo);
   titleEl.innerHTML = `
     <div class="sv-brand">${escapeHtml(entry.manufacturer || 'GENERIC').toUpperCase()}</div>
     <div class="sv-model">${escapeHtml(entry.name)}</div>
     <div class="sv-note">${escapeHtml(entry.description || '')}</div>
+    ${useChips}
     <div class="surface-headline">${headline}</div>
   `;
   if (chipsEl) {
@@ -301,6 +307,9 @@ function renderSpecsPanel(entry) {
   `).join('');
 
   const geomRows = [
+    entry.applicableTo !== undefined
+      ? rowKv('Usable on', formatApplicability(entry.applicableTo) || '<span class="surface-use-none">Not a room surface (treatment / fitting)</span>')
+      : '',
     rowKv('Dimensions',
       entry.geometry?.width_mm ? `${entry.geometry.width_mm} × ${entry.geometry.height_mm} × ${entry.geometry.depth_mm} mm` : '—'),
     rowKv('Weight', entry.geometry?.weight_kg_m2 ? `${entry.geometry.weight_kg_m2} kg/m²` : '—'),
@@ -648,6 +657,34 @@ function layersFor(entry) {
     ];
   }
   return [{ name: entry.name, role: 'Surface finish', color: c }];
+}
+
+// Surface applicability (floor / wall / ceiling) presentation. `arr` is the
+// material's materials.json `applicableTo` list, or null (legacy / not a
+// material). An empty array means "not a room-boundary finish" (rack panel,
+// seat zone-coverage) and renders as null so callers can show a note.
+const APPLY_ORDER = ['floor', 'wall', 'ceiling'];
+const APPLY_LABEL = { floor: 'Floor', wall: 'Wall', ceiling: 'Ceiling' };
+const APPLY_SHORT = { floor: 'F', wall: 'W', ceiling: 'C' };
+
+function formatApplicability(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return APPLY_ORDER.filter(k => arr.includes(k)).map(k => APPLY_LABEL[k]).join(' · ');
+}
+
+function formatApplicabilityShort(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return '';
+  return APPLY_ORDER.filter(k => arr.includes(k)).map(k => APPLY_SHORT[k]).join('·');
+}
+
+function renderApplicabilityChips(arr) {
+  if (!Array.isArray(arr)) return '';
+  if (arr.length === 0) {
+    return `<div class="surface-use-chips"><span class="surface-use-chip surface-use-chip-none">Not a room surface</span></div>`;
+  }
+  const chips = APPLY_ORDER.filter(k => arr.includes(k))
+    .map(k => `<span class="surface-use-chip">${APPLY_LABEL[k]}</span>`).join('');
+  return `<div class="surface-use-chips">${chips}</div>`;
 }
 
 function escapeHtml(s) {

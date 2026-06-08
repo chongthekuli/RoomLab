@@ -5853,6 +5853,18 @@ section h3 {
   text-transform: uppercase;
   grid-column: 1 / 4;
   margin-bottom: -2px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+/* Compact floor/wall/ceiling applicability badge in a catalogue row. */
+.surface-cat-use {
+  font-size: 0.6rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  opacity: 0.8;
+  flex: 0 0 auto;
 }
 .surface-cat-name {
   font-size: 0.78rem;
@@ -5872,6 +5884,33 @@ section h3 {
 }
 .surface-cat-flag-high {
   color: #ff7070;
+}
+
+/* Floor/wall/ceiling applicability chips under the title-bar description. */
+.surface-use-chips {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.surface-use-chip {
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(116, 208, 255, 0.12);
+  border: 1px solid rgba(116, 208, 255, 0.30);
+  color: #aee0ff;
+}
+.surface-use-chip-none {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.10);
+  color: var(--muted);
+}
+.surface-use-none {
+  color: var(--muted);
+  font-style: italic;
 }
 
 /* Title bar headline figure — appended to the right of the title block
