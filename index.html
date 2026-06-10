@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="no-transitions-yet">
+<html lang="en" class="no-transitions-yet pre-auth">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content" />
@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=786" />
-  <link rel="stylesheet" href="css/theme.css?v=786" />
-  <link rel="stylesheet" href="css/print.css?v=786" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=787" />
+  <link rel="stylesheet" href="css/theme.css?v=787" />
+  <link rel="stylesheet" href="css/print.css?v=787" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -67,8 +67,93 @@
   <link rel="prefetch" href="data/loudspeakers/amperes-cs620.json" as="fetch">
   <link rel="prefetch" href="data/loudspeakers/amperes-cs630.json" as="fetch">
   <link rel="prefetch" href="data/loudspeakers/amperes-cs840.json" as="fetch">
+  <!-- Login-wall styles. Inlined so the gate paints instantly, before any
+       app CSS, and the app shell stays hidden until authenticated. -->
+  <style>
+    html.pre-auth body > *:not(#auth-gate) { display: none !important; }
+    #auth-gate {
+      position: fixed; inset: 0; z-index: 100000;
+      display: flex; align-items: center; justify-content: center;
+      background: #0e1116; color: #e8eaed;
+      font-family: "Inter Tight", system-ui, sans-serif;
+    }
+    #auth-gate .auth-card {
+      width: min(92vw, 360px); padding: 32px 28px;
+      background: #161b22; border: 1px solid #2a3038; border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5); text-align: center;
+    }
+    #auth-gate .auth-logo { width: 72px; height: 72px; margin: 0 auto 14px; display: block; }
+    #auth-gate h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; letter-spacing: .2px; }
+    #auth-gate .auth-sub { font-size: 13px; color: #9aa4b2; margin: 0 0 22px; }
+    #auth-gate button, #auth-gate input {
+      width: 100%; box-sizing: border-box; font-size: 14px; border-radius: 9px;
+    }
+    #auth-gate .auth-google {
+      padding: 11px; margin-bottom: 16px; cursor: pointer; font-weight: 600;
+      background: #fff; color: #1f2328; border: 0;
+      display: flex; align-items: center; justify-content: center; gap: 9px;
+    }
+    #auth-gate .auth-google:hover { background: #f1f3f5; }
+    #auth-gate .auth-sep {
+      display: flex; align-items: center; gap: 10px;
+      color: #6b7280; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; margin: 6px 0 16px;
+    }
+    #auth-gate .auth-sep::before, #auth-gate .auth-sep::after {
+      content: ""; flex: 1; height: 1px; background: #2a3038;
+    }
+    #auth-gate input {
+      padding: 10px 12px; margin-bottom: 10px;
+      background: #0e1116; border: 1px solid #2a3038; color: #e8eaed;
+    }
+    #auth-gate input:focus { outline: none; border-color: #4b8bf4; }
+    #auth-gate .auth-submit {
+      padding: 11px; cursor: pointer; font-weight: 600;
+      background: #2f6fed; color: #fff; border: 0;
+    }
+    #auth-gate .auth-submit:hover { background: #2a63d6; }
+    #auth-gate .auth-error {
+      margin-top: 16px; font-size: 13px; color: #ff8585;
+      background: rgba(255,80,80,.08); border: 1px solid rgba(255,80,80,.25);
+      border-radius: 8px; padding: 9px 11px; text-align: left;
+    }
+    #auth-gate .auth-note { margin-top: 18px; font-size: 11px; color: #6b7280; }
+    #auth-gate.auth-busy { opacity: .6; pointer-events: none; }
+    #auth-signout {
+      position: fixed; bottom: 12px; right: 12px; z-index: 90000;
+      font: 500 12px "Inter Tight", system-ui, sans-serif;
+      padding: 6px 12px; border-radius: 7px; cursor: pointer;
+      background: rgba(22,27,34,.9); color: #c9d1d9; border: 1px solid #2a3038;
+    }
+    #auth-signout:hover { background: #21262d; color: #fff; }
+  </style>
 </head>
 <body class="lab-body">
+
+  <!-- ===== Login wall (removed from the DOM after successful sign-in) ===== -->
+  <div id="auth-gate" role="dialog" aria-modal="true" aria-label="Sign in to AuraLAB">
+    <div class="auth-card">
+      <img class="auth-logo" src="assets/logo/AuraLAB-logo-1024.png" alt="AuraLAB" />
+      <h1>AuraLAB</h1>
+      <p class="auth-sub">Authorized access only. Please sign in.</p>
+
+      <button type="button" id="auth-google" class="auth-google">
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.71-1.57 2.68-3.89 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.42 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+        Continue with Google
+      </button>
+
+      <div class="auth-sep">or</div>
+
+      <form id="auth-email-form">
+        <input type="email" id="auth-email" placeholder="Email" autocomplete="username" required />
+        <input type="password" id="auth-pass" placeholder="Password" autocomplete="current-password" required />
+        <button type="submit" class="auth-submit">Sign in</button>
+      </form>
+
+      <p id="auth-error" class="auth-error" hidden></p>
+      <p class="auth-note">Accounts are provisioned by the administrator.</p>
+    </div>
+  </div>
+
   <header id="app-header"></header>
 
   <!-- SPA: all 3 Labs live in this single page. The router toggles
@@ -422,6 +507,8 @@
       </div>
     </div>
   </div>
-  <script type="module" src="js/main.js?v=786"></script>
+  <!-- Boot goes through the login wall; auth-gate.js dynamically imports
+       js/main.js only after a user is authenticated. -->
+  <script type="module" src="js/auth/auth-gate.js?v=787"></script>
 </body>
 </html>

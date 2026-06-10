@@ -1,0 +1,52 @@
+{
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      ".firebaserc",
+      "**/.*",
+      "**/node_modules/**",
+      "tests/**",
+      "docs/**",
+      "scripts/**",
+      "tools/**",
+      ".codex/**",
+      "*.md"
+    ],
+    "headers": [
+      {
+        "//": "HTML is the cache-bust anchor (it carries the ?v=NNN refs). Never cache it, so a new deploy is seen immediately.",
+        "source": "**/*.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "//": "Code + data: short cache, ETag revalidation keeps versions from skewing across a deploy.",
+        "source": "**/*.@(js|css|json)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=300" }
+        ]
+      },
+      {
+        "//": "Static media rarely changes; cache hard for a week.",
+        "source": "**/*.@(png|jpg|jpeg|gif|svg|webp|ico|mp3|wav|glb|gltf|wasm|woff|woff2|ttf)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=604800, immutable" }
+        ]
+      },
+      {
+        "//": "Security headers on every response. frame-ancestors controls WHO may iframe-embed the app. EDIT the list to match the exact Google Site / domain you embed from, or drop the google entries and keep 'self' if you only serve it standalone.",
+        "source": "**",
+        "headers": [
+          {
+            "key": "Content-Security-Policy",
+            "value": "frame-ancestors 'self' https://sites.google.com https://*.googleusercontent.com https://*.google.com"
+          },
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        ]
+      }
+    ]
+  }
+}
