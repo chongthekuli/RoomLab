@@ -5,6 +5,11 @@ node_modules/
 .env
 .vscode/
 
+# Firebase CLI deploy cache + debug logs (per-machine, not team-shared)
+.firebase/
+firebase-debug.log
+.firebase-debug.log
+
 # Claude Code runtime artefacts (per-machine, not team-shared)
 .claude/scheduled_tasks.lock
 .claude/worktrees/
