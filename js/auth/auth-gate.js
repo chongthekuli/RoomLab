@@ -22,6 +22,7 @@ import {
   signInWithEmailAndPassword, signOut,
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { firebaseConfig, isConfigured } from './firebase-config.js';
+import { isBusinessEmail } from './free-email-domains.js';
 
 const gate = document.getElementById('auth-gate');
 const errEl = document.getElementById('auth-error');
@@ -130,6 +131,13 @@ getRedirectResult(auth).catch((e) => { if (e?.code) showError(humanize(e.code));
 // Single source of truth: whenever auth state resolves to a user, boot.
 onAuthStateChanged(auth, (user) => {
   if (user) {
+    // Corporate-only: reject public / disposable email providers. The account
+    // exists at this point, but we sign it straight back out and never boot.
+    if (!isBusinessEmail(user.email)) {
+      showError('Please sign in with your company email address. Public providers (Gmail, Outlook, Yahoo, QQ, etc.) are not permitted.');
+      signOut(auth);
+      return;
+    }
     clearError();
     bootApp();
   } else if (booted) {

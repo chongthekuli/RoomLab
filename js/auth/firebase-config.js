@@ -12,12 +12,12 @@
 // ---------------------------------------------------------------------------
 
 export const firebaseConfig = {
-  apiKey: 'YOUR_API_KEY',
-  authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-  projectId: 'YOUR_PROJECT_ID',
-  storageBucket: 'YOUR_PROJECT_ID.appspot.com',
-  messagingSenderId: 'YOUR_SENDER_ID',
-  appId: 'YOUR_APP_ID',
+  apiKey: 'AIzaSyCAxPuxNi_ndX-UQeXrWQQ2HGR9KyFrD58',
+  authDomain: 'auralabsuite.firebaseapp.com',
+  projectId: 'auralabsuite',
+  storageBucket: 'auralabsuite.firebasestorage.app',
+  messagingSenderId: '306335156615',
+  appId: '1:306335156615:web:68532de75fcf2e5951eb22',
 };
 
 // Loud console warning if the placeholders were never replaced, so a broken
