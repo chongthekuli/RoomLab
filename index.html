@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=790" />
-  <link rel="stylesheet" href="css/theme.css?v=790" />
-  <link rel="stylesheet" href="css/print.css?v=790" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=791" />
+  <link rel="stylesheet" href="css/theme.css?v=791" />
+  <link rel="stylesheet" href="css/print.css?v=791" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -155,6 +155,27 @@
     }
     #auth-gate .auth-switch { margin: 20px 0 0; font-size: 13px; color: #8b95a3; }
     #auth-gate [data-views][hidden], #auth-gate .auth-view[hidden] { display: none; }
+
+    /* --- Terms of Use on the auth page --- */
+    #auth-gate .auth-account { font-size: 13px; color: #9aa4b2; margin: 0 0 16px; }
+    #auth-gate .auth-account strong { color: #e8eaed; font-weight: 600; }
+    #auth-gate .auth-terms { text-align: left; margin: 0 0 12px; }
+    #auth-gate .auth-terms-title { font-size: 12.5px; font-weight: 600; color: #c9d1d9; margin: 0 0 7px; }
+    #auth-gate .auth-terms-scroll {
+      max-height: 148px; overflow-y: auto; padding: 12px 13px;
+      background: #0e1116; border: 1px solid #2a3038; border-radius: 9px;
+      font-size: 11.5px; line-height: 1.5; color: #98a2b0;
+    }
+    #auth-gate .auth-terms-scroll p { margin: 0 0 9px; }
+    #auth-gate .auth-terms-scroll p:last-child { margin-bottom: 0; }
+    #auth-gate .auth-terms-scroll strong { color: #cbd3dd; font-weight: 600; }
+    #auth-gate .auth-terms-scroll:focus { outline: none; border-color: #4b8bf4; box-shadow: 0 0 0 3px rgba(75,139,244,.15); }
+    #auth-gate .auth-terms-check {
+      display: flex; align-items: flex-start; gap: 9px; text-align: left;
+      font-size: 12.5px; color: #c9d1d9; line-height: 1.4; margin: 0 0 16px; cursor: pointer;
+    }
+    #auth-gate .auth-terms-check input { width: auto; flex: none; margin: 2px 0 0; cursor: pointer; accent-color: #2f6fed; }
+    #auth-gate button:disabled { opacity: .5; cursor: not-allowed; }
   </style>
 </head>
 <body class="lab-body">
@@ -164,7 +185,30 @@
     <div class="auth-card">
       <img class="auth-logo" src="assets/logo/AuraLAB-logo-1024.png" alt="AuraLAB" />
       <h1 id="auth-title">Sign in to AuraLAB</h1>
-      <p class="auth-sub" id="auth-subtitle">Welcome back — sign in to continue.</p>
+      <p class="auth-sub" id="auth-subtitle">Review the terms, then sign in to continue.</p>
+
+      <!-- Account chip — shown in the terms-acceptance step (already signed in) -->
+      <p class="auth-account" data-views="terms" hidden>Signed in as <strong id="auth-account-email"></strong></p>
+
+      <!-- Terms of Use — shown on sign-in, create-account and the accept step -->
+      <section class="auth-terms" data-views="signin signup terms" aria-label="Terms of Use">
+        <h2 class="auth-terms-title">Terms of Use — AuraLAB Suite</h2>
+        <div class="auth-terms-scroll" tabindex="0">
+          <p><strong>Predictions are simulations, not measurements.</strong> RT60, STIPA, SPL and coverage are computed by a browser-side physics engine. Safety-of-life or compliance work — voice-alarm and emergency PA under BS&nbsp;5839-8, EN&nbsp;54-16, IEC&nbsp;60849 and MS&nbsp;IEC&nbsp;60849 — requires independent on-site verification with calibrated instruments before sign-off.</p>
+          <p><strong>Standards are referenced, not certified.</strong> The engine implements published methods (ISO&nbsp;3382-1, ISO&nbsp;9613-1, IEC&nbsp;60268-16:2020, ISO&nbsp;17497-2, Sabine, Eyring, Schroeder, Beranek) with documented simplifications. AuraLAB is not certified against any standard it cites; full methodology is printed in every report.</p>
+          <p><strong>No warranty; engineering judgement remains yours.</strong> AuraLAB is provided as-is, without warranty of fitness for any purpose, and its operator accepts no liability for design decisions made from its output. By continuing you affirm that you are a competent acoustics, AV, architectural or engineering professional — or are supervised by one — and will not present these predictions as commissioning-grade measurements.</p>
+          <p><strong>Your acceptance is recorded.</strong> It is timestamped in UTC together with your signed-in account, public IP address, browser and platform, and is referenced on the methodology page of every PDF report generated in this session.</p>
+        </div>
+      </section>
+
+      <!-- Acceptance checkbox — gates the sign-in / create-account actions -->
+      <label class="auth-terms-check" data-views="signin signup">
+        <input type="checkbox" id="terms-accept-check" />
+        <span>I have read and accept the Terms of Use above.</span>
+      </label>
+
+      <!-- Accept button — terms-acceptance step only -->
+      <button type="button" id="terms-accept-btn" class="auth-submit" data-views="terms" hidden>I accept &amp; continue</button>
 
       <button type="button" id="auth-google" class="auth-google" data-views="signin signup">
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.71-1.57 2.68-3.89 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.42 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
@@ -578,6 +622,6 @@
   </div>
   <!-- Boot goes through the login wall; auth-gate.js dynamically imports
        js/main.js only after a user is authenticated. -->
-  <script type="module" src="js/auth/auth-gate.js?v=790"></script>
+  <script type="module" src="js/auth/auth-gate.js?v=791"></script>
 </body>
 </html>

@@ -8,7 +8,6 @@
 import { state } from './app-state.js';
 import { mountHeaderNav } from './shared/header-nav.js';
 import { startRouter } from './shared/router.js';
-import { mountTermsModal } from './ui/welcome-card.js';
 import { loadFurnitureCatalogue } from './labs/furniturelab/catalog.js';
 import { loadRackCatalogue } from './labs/devicelab/catalog.js';
 
@@ -26,12 +25,10 @@ loadFurnitureCatalogue().catch(err => console.warn('[main] FurnitureLAB pre-warm
 // acoustics if a preset / saved scene ships with placed racks.
 loadRackCatalogue().catch(err => console.warn('[main] DeviceLAB rack pre-warm failed', err));
 
-// Mandatory terms-of-use acceptance — shown on EVERY page load.
-// Lin (docs-writer) drafted the copy, Sofia (designer) spec'd the
-// glass card + 1.8 s acceptance animation. The router still starts
-// concurrently so the active route mounts behind the scrim; user
-// can't interact until the modal dismisses.
-mountTermsModal();
+// Terms-of-use acceptance is now handled on the combined sign-in page
+// (js/auth/auth-gate.js) BEFORE the app boots — the acceptance record is
+// captured there and read by print-report.js via welcome-card.js's readers.
+// No post-boot modal: by the time main.js runs, the user has already accepted.
 
 // Cache-bust dynamic imports with the same ?v= that index.html uses on
 // the top-level <script>. Without this, a deploy that ships new HTML
