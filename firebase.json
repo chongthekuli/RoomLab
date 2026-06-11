@@ -4,14 +4,19 @@
     "ignore": [
       "firebase.json",
       ".firebaserc",
+      ".git/**",
+      "**/.git/**",
+      ".github/**",
+      ".claude/**",
+      ".codex/**",
+      ".vscode/**",
       "**/.*",
       "**/node_modules/**",
       "tests/**",
       "docs/**",
       "scripts/**",
       "tools/**",
-      ".codex/**",
-      "*.md"
+      "**/*.md"
     ],
     "headers": [
       {
