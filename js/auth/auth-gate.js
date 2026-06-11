@@ -32,6 +32,7 @@ import {
   RESTRICT_TO_BUSINESS_EMAIL, REQUIRE_EMAIL_VERIFICATION,
 } from './firebase-config.js';
 import { isBusinessEmail } from './free-email-domains.js';
+import { isAdminEmail, markAdmin } from './admin.js';
 import { recordAcceptance, hasAcceptedThisSession } from '../shared/terms-record.js';
 
 // ---- element refs ----------------------------------------------------------
@@ -347,6 +348,9 @@ onAuthStateChanged(auth, async (user) => {
       signOut(auth);
       return;
     }
+    // Super-admin flag (lightweight email check) — tags <html> so admin-only
+    // UI shows for this account.
+    markAdmin(isAdminEmail(user.email));
     // Terms gate: already accepted this session → boot; just ticked + signed
     // in → record then boot; otherwise (persisted login) → ask on this page.
     if (hasAcceptedThisSession()) { clearMessages(); bootApp(); return; }
@@ -354,6 +358,7 @@ onAuthStateChanged(auth, async (user) => {
     showAccountTermsGate(user);
   } else {
     pendingUser = null;
+    markAdmin(false);
     if (booted) {
       // Signed out after using the app — reload to a clean locked state.
       window.location.reload();

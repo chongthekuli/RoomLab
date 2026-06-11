@@ -36,3 +36,11 @@ export const RESTRICT_TO_BUSINESS_EMAIL = false;
 // OFF for now so new accounts can use the app immediately. Flip to true to
 // require inbox confirmation before first use.
 export const REQUIRE_EMAIL_VERIFICATION = false;
+
+// Super-admin accounts (lightweight client-side role check — see js/auth/admin.js).
+// A signed-in user whose email is listed here gets the `is-admin` page flag, so
+// admin-only UI (any element marked data-admin-only) is shown only to them.
+// Add the addresses that should have admin access, e.g. 'you@yourcompany.com'.
+export const ADMIN_EMAILS = [
+  // 'admin@auralabsuite.com',
+];

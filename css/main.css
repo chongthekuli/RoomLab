@@ -1,4 +1,9 @@
 * { box-sizing: border-box; }
+
+/* Super-admin gating (see js/auth/admin.js). auth-gate.js adds `is-admin` to
+   <html> when the signed-in email is on ADMIN_EMAILS. Any element marked
+   data-admin-only is then hidden from non-admins. */
+html:not(.is-admin) [data-admin-only] { display: none !important; }
 /* P5 — typography pass. Specialist tools use a NAMED display sans, not
    the OS default (system-ui resolves to Segoe UI on Windows / SF on
    Mac, both of which read as "AI-generated landing page" against a
