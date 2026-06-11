@@ -335,8 +335,8 @@ function showAccountTermsGate(user) {
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
-    // Corporate-only gate (flag-controlled).
-    if (RESTRICT_TO_BUSINESS_EMAIL && !isBusinessEmail(user.email)) {
+    // Corporate-only gate (flag-controlled). Admins are always exempt.
+    if (RESTRICT_TO_BUSINESS_EMAIL && !isBusinessEmail(user.email) && !isAdminEmail(user.email)) {
       showError('Please use your company email address. Public providers (Gmail, Outlook, Yahoo, QQ, etc.) are not permitted.');
       signOut(auth);
       return;

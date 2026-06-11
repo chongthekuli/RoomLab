@@ -42,5 +42,5 @@ export const REQUIRE_EMAIL_VERIFICATION = false;
 // admin-only UI (any element marked data-admin-only) is shown only to them.
 // Add the addresses that should have admin access, e.g. 'you@yourcompany.com'.
 export const ADMIN_EMAILS = [
-  // 'admin@auralabsuite.com',
+  'admin@admin.com',
 ];
