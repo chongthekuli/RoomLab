@@ -91,7 +91,7 @@ function buildRoomSummary(room) {
   if (!room) return '';
   const dims = `${fmt(room.width_m, 1)} × ${fmt(room.depth_m, 1)} × ${fmt(room.height_m, 1)} m`;
   const shape = describeShape(room);
-  const vol = fmt(room.volume_m3, 0);
+  const vol = fmtTrim(room.volume_m3, 1);
   const meanA = (Number.isFinite(room.meanAbsorption_1k) && room.meanAbsorption_1k > 0)
     ? room.meanAbsorption_1k
     : null;
@@ -866,6 +866,15 @@ function fmt(v, decimals = 1) {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—';
   return v.toFixed(decimals);
 }
+// Like fmt but trims trailing zeros so genuine precision shows without forcing
+// a round-to-integer: 1.5 → "1.5", 600 → "600", 2.25 → "2.25". Use for physical
+// quantities (power, dimensions, areas, volumes, aim angles) where rounding
+// 1.5 W to "2 W" or 1.5 m to "2 m" misrepresents the figure. `maxDecimals`
+// caps precision; trailing zeros below the actual value are dropped.
+function fmtTrim(v, maxDecimals = 2) {
+  if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+  return String(Number(v.toFixed(maxDecimals)));
+}
 function fmtBand(hz) {
   return hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`;
 }
@@ -981,8 +990,8 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     <tr><th>Shape</th><td>${escapeHtml(describeShape(room))}</td></tr>
     <tr><th>W × D × H</th><td>${fmt(room.width_m, 2)} × ${fmt(room.depth_m, 2)} × ${fmt(room.height_m, 2)} m</td></tr>
     <tr><th>Floor area</th><td>${fmt(room.baseArea_m2, 1)} m²</td></tr>
-    <tr><th>Volume</th><td>${fmt(room.volume_m3, 0)} m³</td></tr>
-    <tr><th>Surface area</th><td>${fmt(room.totalArea_m2, 0)} m²</td></tr>`;
+    <tr><th>Volume</th><td>${fmtTrim(room.volume_m3, 1)} m³</td></tr>
+    <tr><th>Surface area</th><td>${fmtTrim(room.totalArea_m2, 1)} m²</td></tr>`;
 
   // Proposal description copy — engineer-tone, no marketing fluff.
   // References project + room without repeating them as labels (the
@@ -994,7 +1003,7 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
   const nZones     = model.zones.length;
   const hasPrecision = !!model.precision;
   const shapeLabel = describeShape(room);
-  const dims = `${fmt(room.width_m, 0)} × ${fmt(room.depth_m, 0)} × ${fmt(room.height_m, 0)} m`;
+  const dims = `${fmt(room.width_m, 1)} × ${fmt(room.depth_m, 1)} × ${fmt(room.height_m, 1)} m`;
   const sourcePhrase = nSources === 0
     ? 'a proposed loudspeaker layout'
     : `the proposed ${nSources}-source loudspeaker layout`;
@@ -1326,9 +1335,9 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
       <td>${fmt(s.x, 2)} m</td>
       <td>${fmt(s.y, 2)} m</td>
       <td>${fmt(s.z, 2)} m</td>
-      <td>${fmt(s.yaw_deg, 0)}°</td>
-      <td>${fmt(s.pitch_deg, 0)}°</td>
-      <td>${fmt(s.power_w, 0)} W</td>
+      <td>${fmtTrim(s.yaw_deg, 1)}°</td>
+      <td>${fmtTrim(s.pitch_deg, 1)}°</td>
+      <td>${fmtTrim(s.power_w, 2)} W</td>
       <td>${escapeHtml(s.groupId ?? '—')}</td>
     </tr>`).join('');
 
@@ -1336,8 +1345,8 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
     <tr>
       <td class="pr-bom-model">${escapeHtml(r.modelLabel)}</td>
       <td>${r.qty}</td>
-      <td>${fmt(r.power_each_w, 0)} W</td>
-      <td>${fmt(r.total_power_w, 0)} W</td>
+      <td>${fmtTrim(r.power_each_w, 2)} W</td>
+      <td>${fmtTrim(r.total_power_w, 2)} W</td>
       <td>${escapeHtml(r.groups)}</td>
     </tr>`).join('');
 
@@ -1727,9 +1736,9 @@ function renderPrintReport(model, { splGrid = null, coverImage = null } = {}) {
           ${escapeHtml(valueRange)}, ${escapeHtml(meanTxt)}.${escapeHtml(scaleNote)} Grey is outside the room footprint.
         </p>
         <div class="pr-tilegrid">
-          ${tile('Volume',                  `${fmt(room.volume_m3, 0)} m³`)}
+          ${tile('Volume',                  `${fmtTrim(room.volume_m3, 1)} m³`)}
           ${tile('Floor area',              `${fmt(room.baseArea_m2, 1)} m²`)}
-          ${tile('Surface area',            `${fmt(room.totalArea_m2, 0)} m²`)}
+          ${tile('Surface area',            `${fmtTrim(room.totalArea_m2, 1)} m²`)}
           ${tile('Mean α @ 1 kHz',          fmt(room.meanAbsorption_1k, 3))}
           ${tile('RT60 @ 1 kHz · Sabine',   rt60_1k ? `${fmt(rt60_1k.sabine_s, 2)} s` : '—')}
           ${tile('RT60 @ 1 kHz · Eyring',   rt60_1k ? `${fmt(rt60_1k.eyring_s, 2)} s` : '—')}
