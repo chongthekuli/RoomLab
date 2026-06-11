@@ -847,6 +847,15 @@ export const state = {
     // legend; 'stipa' paints the IEC 60268-16 speech-intelligibility index
     // (0–1) + a different legend scale. Toggled from the toolbar.
     heatmapMode: 'spl',
+    // Report 3D-cover camera lock (Viktor, 2026-06-11). When LOCKED
+    // (default), the print-report cover hero is captured from the fixed
+    // 'iso' preset — identical behaviour to before this flag existed.
+    // When UNLOCKED, the cover is captured from the user's CURRENT live
+    // orbit-camera angle, re-fitted to the cover's fixed 4:3 frame (no
+    // clipping, room centred). Toggled by the lock glyph inside the Iso
+    // preset button. Session-only — like every other display.* toggle it
+    // is excluded from project serialization (resets to true on load).
+    reportCamLocked: true,
   },
   // Physics model toggles (see spl-calculator.js). Reverberant field is OFF
   // by default — the Hopkins-Stryker statistical reverb is spatially uniform,

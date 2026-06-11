@@ -782,6 +782,31 @@ html[data-rail-right="method"]          #panel-method {
   font-size: 0.66rem;
   line-height: 1;
 }
+/* Report-cam lock toggle nested inside the Iso button. Small, low-key —
+   it's a power-user affordance, not a primary control. Clicking it
+   toggles whether the print report's 3D cover uses the fixed Iso view
+   (locked) or the user's current orbit angle (unlocked). stopPropagation
+   in JS keeps the click from also firing the iso preset snap. */
+.vp-iso-lock {
+  font-size: 0.62rem;
+  line-height: 1;
+  margin-left: 1px;
+  opacity: 0.55;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 3px;
+  padding: 0 1px;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+.vp-iso-lock:hover,
+.vp-iso-lock:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
+}
+/* Unlocked reads as the "live" / active state — brighten it so the user
+   notices the report will use a non-default angle. */
+.vp-iso-lock.is-unlocked { opacity: 0.95; }
 /* On narrow viewports collapse to glyph-only so the cluster doesn't
    eat horizontal space from the central column. */
 @media (max-width: 900px) {

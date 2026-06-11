@@ -100,6 +100,37 @@ function setupTabs() {
         setTimeout(updateViewCubeActive, 560);
       });
     });
+    // --- Report-cam lock toggle (nested inside the Iso button) --------
+    // Locked (default) → print report's 3D cover uses the fixed Iso view.
+    // Unlocked → cover uses the user's CURRENT orbit angle, re-fit to the
+    // cover frame. The glyph lives INSIDE the Iso .vp-view-btn, so its
+    // click must stopPropagation() or it would also snap the camera to
+    // iso. Reflects state.display.reportCamLocked on mount and on toggle.
+    const isoLock = document.getElementById('vp-iso-lock');
+    if (isoLock) {
+      const syncIsoLock = () => {
+        const locked = state.display.reportCamLocked !== false;
+        isoLock.textContent = locked ? '🔒' : '🔓';
+        isoLock.setAttribute('aria-pressed', locked ? 'true' : 'false');
+        isoLock.classList.toggle('is-unlocked', !locked);
+        isoLock.title = locked
+          ? 'Locked: report 3D uses the fixed Iso view. Unlock to use your current camera angle.'
+          : 'Unlocked: report 3D will use your CURRENT camera angle (re-fit to the cover frame). Lock to use the fixed Iso view.';
+      };
+      const toggleIsoLock = (ev) => {
+        // Critical: don't let the click/keydown bubble to the Iso button
+        // and trigger applyCameraPreset('iso').
+        ev.stopPropagation();
+        ev.preventDefault();
+        state.display.reportCamLocked = (state.display.reportCamLocked === false);
+        syncIsoLock();
+      };
+      isoLock.addEventListener('click', toggleIsoLock);
+      isoLock.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') toggleIsoLock(e);
+      });
+      syncIsoLock();   // reflect initial (locked) state on mount
+    }
     // Initial state: 3D is the default tab so the cube is visible. The
     // tab-changed listener below keeps it in sync on every switch.
     document.addEventListener('viewport:tab-changed', e => {

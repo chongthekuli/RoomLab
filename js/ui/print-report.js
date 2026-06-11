@@ -2632,7 +2632,15 @@ export async function triggerPrint() {
     // with margin (no edge cropped). Aspect changed from 1:1 to 4:3 per
     // user request (2026-05-19, v=538) so the hero reads as a landscape
     // proposal cover rather than a square thumbnail.
-    if (captureFn) coverImage = captureFn({ width: 1500, height: 1125, preset: 'iso', fixedAspect: true });
+    // Report-cam lock (Viktor, 2026-06-11). LOCKED (default) → fixed iso
+    // preset, identical to prior behaviour. UNLOCKED → 'current' mode
+    // captures the user's live orbit angle, re-fit to the same fixed 4:3
+    // cover slot (no clipping, room centred). Flag lives on state.display
+    // and is toggled by the lock glyph inside the Iso preset button.
+    const reportPreset = (state.display && state.display.reportCamLocked === false)
+      ? 'current'
+      : 'iso';
+    if (captureFn) coverImage = captureFn({ width: 1500, height: 1125, preset: reportPreset, fixedAspect: true });
   } catch (err) { console.warn('[print-report] capture failed:', err); }
   const model = buildPrintModel({ materials: _printMaterialsRef });
   renderPrintReport(model, { splGrid, coverImage });

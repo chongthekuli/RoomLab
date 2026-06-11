@@ -4820,6 +4820,183 @@ function _cameraPresetTransform(name) {
   }
 }
 
+// Build (targetPos, targetCam, up) for the "use my current angle" report
+// capture (report cam UNLOCKED). Reuses the iterative-fit ALGORITHM from
+// the iso preset above, but takes the view DIRECTION from the LIVE
+// orbit-camera instead of the hardcoded iso dirToCam. The room is re-fit
+// to FILL the fixed cover frame (aspect = frameAspect) with the same
+// margin guarantee as the iso capture — so locked vs unlocked produce a
+// comparably-sized, centred, never-clipped room.
+//
+// Frame note: the live camera + controls are already in the
+// scene.scale.x = -1 mirrored world. We build the basis straight off the
+// live camera vectors — NO extra mirror is applied (the rendered scene is
+// the same one the live camera sees, just reframed).
+function _currentAngleTransform(frameAspect) {
+  if (!camera) return null;
+
+  // 1. View direction from the live camera → controls target. This is
+  //    exactly what the user is looking along right now.
+  const liveTarget = (controls && controls.target)
+    ? controls.target.clone()
+    : new THREE.Vector3(0, 0, 0);
+  // dirToCam points FROM the subject TOWARD the camera (camera = target +
+  // dirToCam*dist), matching the iso preset's convention.
+  const dirToCam = new THREE.Vector3()
+    .subVectors(camera.position, liveTarget);
+  if (dirToCam.lengthSq() < 1e-9) {
+    // Degenerate: camera sitting on the target. Fall back to the iso
+    // direction so we never NaN.
+    dirToCam.set(-0.85, 0.6, -0.45);
+  }
+  dirToCam.normalize();
+  const viewDir = dirToCam.clone().negate();   // camera → target
+
+  // 2. Build a right/up view basis. worldUp = +Y, EXCEPT when the view is
+  //    near-vertical (top-down / bottom-up) where cross(worldUp, viewDir)
+  //    collapses → NaN basis. Detect the gimbal case and fall back to the
+  //    live camera.up (stable) or world -Z as a last resort.
+  let worldUp = new THREE.Vector3(0, 1, 0);
+  if (Math.abs(viewDir.dot(worldUp)) > 0.999) {
+    // Near-parallel to world-up. Prefer the live camera.up if it isn't
+    // itself parallel to viewDir; else world -Z.
+    const camUp = camera.up.clone().normalize();
+    worldUp = (Math.abs(viewDir.dot(camUp)) < 0.999)
+      ? camUp
+      : new THREE.Vector3(0, 0, -1);
+  }
+  const right = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();
+  const up    = new THREE.Vector3().crossVectors(right, viewDir).normalize();
+
+  // 3. Gather the visible-content Box3 + room silhouette — IDENTICAL point
+  //    set to the iso fit so the room size matches between locked and
+  //    unlocked covers.
+  const aabb = _roomWorldAABB();
+  const { minX, maxX, minZ, maxZ, h } = aabb;
+  const groups = [];
+  if (roomGroup        && roomGroup.visible)        groups.push(roomGroup);
+  if (sourcesGroup     && sourcesGroup.visible)     groups.push(sourcesGroup);
+  if (listenersGroup   && listenersGroup.visible)   groups.push(listenersGroup);
+  if (treatmentsGroup  && treatmentsGroup.visible)  groups.push(treatmentsGroup);
+  if (zonesGroup       && zonesGroup.visible)       groups.push(zonesGroup);
+  if (typeof racksGroup    !== 'undefined' && racksGroup    && racksGroup.visible)    groups.push(racksGroup);
+  if (typeof aimLinesGroup !== 'undefined' && aimLinesGroup && aimLinesGroup.visible) groups.push(aimLinesGroup);
+
+  const box = new THREE.Box3();
+  let havePoints = false;
+  for (const g of groups) {
+    box.expandByObject(g);
+    if (!box.isEmpty()) havePoints = true;
+  }
+  if (!havePoints || box.isEmpty()) {
+    box.min.set(minX, 0, minZ);
+    box.max.set(maxX, h, maxZ);
+  }
+
+  const targetPos = box.getCenter(new THREE.Vector3());
+
+  // Silhouette corners — room polygon footprint × {floor, ceil}, plus
+  // Box3 corners for rectangular rooms (matches iso-fit reasoning at
+  // ~4657-4704: polygon-only for non-rect rooms avoids fitting empty
+  // inscribed-square corners).
+  const corners = [];
+  try {
+    const planVerts = roomPlanVertices(state.room);
+    const floorY = box.min.y;
+    const ceilY  = box.max.y;
+    for (const v of planVerts) {
+      // X negated — roomPlanVertices returns STATE coords; the box is in
+      // WORLD coords with scene.scale.x = -1 applied. Same frame-match fix
+      // as the iso silhouette (~4671).
+      corners.push(new THREE.Vector3(-v.x, floorY, v.y));
+      corners.push(new THREE.Vector3(-v.x, ceilY,  v.y));
+    }
+  } catch (_) { /* fall through to bbox corners */ }
+  const isRect = state.room?.shape === 'rectangular' || corners.length === 0;
+  if (isRect) {
+    corners.push(
+      new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+      new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+      new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+      new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+      new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+      new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+      new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+      new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+    );
+  }
+
+  // 4. Projection / fit math — same FOV + TARGET_NDC margin as the iso
+  //    fit. Frame aspect comes from the caller (cover frame), NOT the live
+  //    canvas, so the room fills the PNG slot regardless of window shape.
+  const fovV = THREE.MathUtils.degToRad(camera.fov || 38);
+  const aspect = Math.max(frameAspect || (camera.aspect || 1), 0.1);
+  const tanHalfV = Math.tan(fovV / 2);
+  const tanHalfH = tanHalfV * aspect;
+  const TARGET_NDC = 0.99;
+
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const sphereR = Math.max(sphere.radius, 0.5);
+  const minHalfFov = Math.min(fovV / 2, Math.atan(tanHalfH));
+  let dist = sphereR / Math.sin(minHalfFov);
+
+  // Centre the silhouette in the frustum (one pass, before the iterative
+  // distance fit) — same off-centre correction as the iso fit at ~4749.
+  {
+    const probePos = targetPos.clone().addScaledVector(dirToCam, dist);
+    let minVX = Infinity, maxVX = -Infinity, minVY = Infinity, maxVY = -Infinity;
+    const tp = new THREE.Vector3();
+    for (const c of corners) {
+      tp.copy(c).sub(probePos);
+      const vz = tp.dot(viewDir);
+      if (vz <= 1e-3) continue;
+      const ndcX = tp.dot(right) / (vz * tanHalfH);
+      const ndcY = tp.dot(up)    / (vz * tanHalfV);
+      if (ndcX < minVX) minVX = ndcX;
+      if (ndcX > maxVX) maxVX = ndcX;
+      if (ndcY < minVY) minVY = ndcY;
+      if (ndcY > maxVY) maxVY = ndcY;
+    }
+    if (Number.isFinite(minVX) && Number.isFinite(minVY)) {
+      const centerNdcX = (minVX + maxVX) / 2;
+      const centerNdcY = (minVY + maxVY) / 2;
+      targetPos.addScaledVector(right, centerNdcX * dist * tanHalfH);
+      targetPos.addScaledVector(up,    centerNdcY * dist * tanHalfV);
+    }
+  }
+
+  const tmp = new THREE.Vector3();
+  for (let iter = 0; iter < 6; iter++) {
+    const camPos = targetPos.clone().addScaledVector(dirToCam, dist);
+    let maxFracH = 0, maxFracV = 0;
+    for (const c of corners) {
+      tmp.copy(c).sub(camPos);
+      const vx = tmp.dot(right);
+      const vy = tmp.dot(up);
+      const vz = tmp.dot(viewDir);
+      if (vz <= 1e-3) continue;
+      const fracH = Math.abs(vx) / (vz * tanHalfH);
+      const fracV = Math.abs(vy) / (vz * tanHalfV);
+      if (fracH > maxFracH) maxFracH = fracH;
+      if (fracV > maxFracV) maxFracV = fracV;
+    }
+    const maxFrac = Math.max(maxFracH, maxFracV);
+    if (maxFrac <= 1e-4) break;
+    const newDist = dist * (maxFrac / TARGET_NDC);
+    if (Math.abs(newDist - dist) / dist < 0.005) { dist = newDist; break; }
+    dist = newDist;
+  }
+
+  // Guard against any NaN slipping through (degenerate basis / empty
+  // corners) — fall back to the iso preset so capture never renders garbage.
+  const targetCam = targetPos.clone().addScaledVector(dirToCam, dist);
+  if (![targetPos.x, targetPos.y, targetPos.z, targetCam.x, targetCam.y, targetCam.z]
+        .every(Number.isFinite)) {
+    return _cameraPresetTransform('iso');
+  }
+  return { targetPos, targetCam, up };
+}
+
 // Build tag so a user can confirm the live module matches the fix in
 // case of stale-cache reports. Logged once at module load.
 try {
@@ -4831,7 +5008,7 @@ try {
 // capture/fit path changes shape.
 try {
   if (typeof console !== 'undefined' && !window.__roomlab_scene_build_logged) {
-    console.info('[scene] build 2026-05-13 v362 — captureViewportImage shape-aware fit + wall-opacity boost');
+    console.info('[scene] build 2026-06-11 v363 — captureViewportImage \'current\'-angle mode (report cam unlock)');
     window.__roomlab_scene_build_logged = true;
   }
 } catch (_) { /* noop */ }
@@ -5097,6 +5274,25 @@ export function captureViewportImage(opts = {}) {
     // frames the room for the PNG's aspect, not the screen's.
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    if (presetName === 'current') {
+      // ---- "Use my current angle" capture (report cam UNLOCKED) -------
+      // Instead of snapping to the fixed iso preset, we KEEP the live
+      // orbit-camera's viewing DIRECTION but RE-FIT the distance so the
+      // room fills the fixed cover frame (no clipping, room centred,
+      // consistent margin) — same framing guarantee as the iso capture.
+      //
+      // Frame coords: the live camera + controls already live in the
+      // scene.scale.x = -1 mirrored world. We render the SAME scene with
+      // the SAME camera object, so we reuse the live basis directly and
+      // do NOT re-apply the mirror (doing so would double-flip).
+      const t = _currentAngleTransform(width / height);
+      if (t) {
+        camera.up.copy(t.up);
+        camera.position.copy(t.targetCam);
+        if (controls) controls.target.copy(t.targetPos);
+        camera.lookAt(t.targetPos);
+      }
+    } else {
     const t = _cameraPresetTransform(presetName);
     if (t) {
       // Apply camera.up BEFORE lookAt so the basis is correct for this
@@ -5112,6 +5308,7 @@ export function captureViewportImage(opts = {}) {
       const dir = new THREE.Vector3().subVectors(camera.position, t.targetPos);
       camera.position.copy(t.targetPos).addScaledVector(dir, CAPTURE_PULL_BACK);
       camera.lookAt(t.targetPos);
+    }
     }
     // Kill any in-flight tween so _tickCameraFocus on the next
     // animate() frame doesn't drag the camera away from the preset
