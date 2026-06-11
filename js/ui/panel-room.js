@@ -2351,6 +2351,15 @@ on('room:changed', () => {
     shapeSel.value = state.room.shape;
     render();
   } else if (state.room.shape === 'custom') {
+    // Don't rebuild the custom-shape panel while the user is typing in a
+    // vertex X/Y field. renderShapeParams() replaces #vertex-list via
+    // innerHTML, which would destroy the focused input and drop the caret
+    // after the first digit (the vertex manual-entry focus bug). The 2D/3D
+    // viewports still update live — they listen to room:changed separately.
+    // The list re-renders on the next room:changed once focus has left the
+    // field. Guarded by tests/vertex-edit-focus.test.mjs.
+    const ae = document.activeElement;
+    if (ae && typeof ae.closest === 'function' && ae.closest('#vertex-list')) return;
     renderShapeParams();
     renderSurfaceMaterials();
   }
