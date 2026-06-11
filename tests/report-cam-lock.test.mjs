@@ -59,6 +59,13 @@ if (cat) {
   // Re-fits against the caller frame aspect, not the live canvas aspect.
   ok(/frameAspect/.test(body),
      '_currentAngleTransform fits against the passed frame aspect');
+  // gluLookAt handedness — right = cross(viewDir, worldUp). The reversed
+  // cross(worldUp, viewDir) negates the up vector and rolls the captured
+  // cover 180°. Pin the corrected order so the roll bug can't regress.
+  ok(/crossVectors\(\s*viewDir,\s*worldUp\s*\)/.test(body),
+     '_currentAngleTransform builds right = cross(viewDir, worldUp) (correct up, no 180° roll)');
+  ok(!/crossVectors\(\s*worldUp,\s*viewDir\s*\)/.test(body),
+     '_currentAngleTransform does NOT use the reversed cross(worldUp, viewDir)');
 }
 
 // ---- 3. print-report selects preset from the flag ------------------

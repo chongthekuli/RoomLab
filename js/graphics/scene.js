@@ -4865,7 +4865,13 @@ function _currentAngleTransform(frameAspect) {
       ? camUp
       : new THREE.Vector3(0, 0, -1);
   }
-  const right = new THREE.Vector3().crossVectors(worldUp, viewDir).normalize();
+  // gluLookAt handedness: right = cross(forward, worldUp), up = cross(right,
+  // forward). Using cross(worldUp, viewDir) here instead negates BOTH right
+  // and up, which left camera.up pointing DOWN → the captured cover rendered
+  // rolled 180° (near/far + left/right swapped) relative to the live view.
+  // The fit math below is sign-invariant (|vx|,|vy| for distance; the
+  // centering term cancels the sign), so only the returned `up` was wrong.
+  const right = new THREE.Vector3().crossVectors(viewDir, worldUp).normalize();
   const up    = new THREE.Vector3().crossVectors(right, viewDir).normalize();
 
   // 3. Gather the visible-content Box3 + room silhouette — IDENTICAL point
