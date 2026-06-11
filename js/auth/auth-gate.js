@@ -21,7 +21,7 @@ import {
   GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
   signInWithEmailAndPassword, signOut,
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { firebaseConfig, isConfigured } from './firebase-config.js';
+import { firebaseConfig, isConfigured, RESTRICT_TO_BUSINESS_EMAIL } from './firebase-config.js';
 import { isBusinessEmail } from './free-email-domains.js';
 
 const gate = document.getElementById('auth-gate');
@@ -133,7 +133,8 @@ onAuthStateChanged(auth, (user) => {
   if (user) {
     // Corporate-only: reject public / disposable email providers. The account
     // exists at this point, but we sign it straight back out and never boot.
-    if (!isBusinessEmail(user.email)) {
+    // Gated by RESTRICT_TO_BUSINESS_EMAIL (off for now — Gmail allowed).
+    if (RESTRICT_TO_BUSINESS_EMAIL && !isBusinessEmail(user.email)) {
       showError('Please sign in with your company email address. Public providers (Gmail, Outlook, Yahoo, QQ, etc.) are not permitted.');
       signOut(auth);
       return;

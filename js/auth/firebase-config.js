@@ -23,3 +23,9 @@ export const firebaseConfig = {
 // Loud console warning if the placeholders were never replaced, so a broken
 // deploy is obvious instead of failing with a cryptic Firebase error.
 export const isConfigured = !firebaseConfig.apiKey.startsWith('YOUR_');
+
+// Corporate-email-only login. When true, sign-ins from public/disposable
+// providers (Gmail, Outlook, Yahoo, QQ, etc.) are rejected at the gate.
+// Currently OFF — Gmail and personal logins are allowed for this stage.
+// Flip to true (and bump ?v=) to enforce business-domain-only access.
+export const RESTRICT_TO_BUSINESS_EMAIL = false;
