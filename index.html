@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=792" />
-  <link rel="stylesheet" href="css/theme.css?v=792" />
-  <link rel="stylesheet" href="css/print.css?v=792" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=793" />
+  <link rel="stylesheet" href="css/theme.css?v=793" />
+  <link rel="stylesheet" href="css/print.css?v=793" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -87,8 +87,10 @@
     /* Single column when the Terms column is hidden (reset-password view). */
     #auth-gate .auth-card:not(:has(.auth-terms-col:not([hidden]))) { width: min(94vw, 400px); }
     #auth-gate .auth-terms-col {
-      flex: 1 1 50%; padding: 30px; text-align: left;
-      background: #12161d; border-right: 1px solid #262c35;
+      flex: 1 1 50%; padding: 28px 30px; text-align: left;
+      background: linear-gradient(180deg, #2c1517 0%, #231214 100%);
+      border-right: 1px solid #4a2226;
+      box-shadow: inset 4px 0 0 #e0453a;   /* red caution stripe */
     }
     #auth-gate .auth-main-col {
       flex: 1 1 50%; padding: 32px 30px; text-align: center;
@@ -172,12 +174,13 @@
     #auth-gate .auth-account { font-size: 13px; color: #9aa4b2; margin: 0 0 16px; }
     #auth-gate .auth-account strong { color: #e8eaed; font-weight: 600; }
     #auth-gate .auth-terms-title {
-      font-size: 14px; font-weight: 600; color: #e8eaed; margin: 0 0 14px; letter-spacing: .2px;
+      font-size: 14px; font-weight: 700; color: #ff9a8f; margin: 0 0 14px;
+      letter-spacing: .4px; text-transform: uppercase;
     }
-    #auth-gate .auth-terms-body { font-size: 12px; line-height: 1.6; color: #9aa4b2; }
-    #auth-gate .auth-terms-body p { margin: 0 0 13px; }
+    #auth-gate .auth-terms-body { font-size: 12px; line-height: 1.6; color: #cbb9ba; }
+    #auth-gate .auth-terms-body p { margin: 0 0 13px; text-align: justify; hyphens: auto; }
     #auth-gate .auth-terms-body p:last-child { margin-bottom: 0; }
-    #auth-gate .auth-terms-body strong { color: #d4dbe4; font-weight: 600; }
+    #auth-gate .auth-terms-body strong { color: #ffe2da; font-weight: 600; }
     #auth-gate .auth-terms-check {
       display: flex; align-items: flex-start; gap: 9px; text-align: left;
       font-size: 12.5px; color: #c9d1d9; line-height: 1.4; margin: 4px 0 16px; cursor: pointer;
@@ -193,7 +196,7 @@
         width: min(96vw, 440px); flex-direction: column;
       }
       #auth-gate .auth-terms-col {
-        border-right: 0; border-bottom: 1px solid #262c35;
+        border-right: 0; border-bottom: 1px solid #4a2226;
         max-height: 36vh; overflow-y: auto;
       }
       #auth-gate .auth-main-col { justify-content: flex-start; }
@@ -647,6 +650,6 @@
   </div>
   <!-- Boot goes through the login wall; auth-gate.js dynamically imports
        js/main.js only after a user is authenticated. -->
-  <script type="module" src="js/auth/auth-gate.js?v=792"></script>
+  <script type="module" src="js/auth/auth-gate.js?v=793"></script>
 </body>
 </html>
