@@ -162,13 +162,59 @@ function humanize(code) {
 
 // ---- boot ------------------------------------------------------------------
 let booted = false;
+let gateRemoved = false;
+
+function removeGate() {
+  if (gateRemoved) return;
+  gateRemoved = true;
+  document.getElementById('auth-gate')?.remove();
+}
+
+// Swap the auth card for a loading animation but KEEP the gate in the DOM — it
+// sits above the app (z-index 100000), so it covers the screen from sign-in
+// until the first lab mounts. Without this cover the user sees a blank page
+// while main.js + Three.js download and the scene builds.
+function showGateLoading() {
+  if (!gate) return;
+  gate.classList.add('auth-booting-mode');
+  gate.innerHTML =
+    '<div class="auth-booting">' +
+      '<img class="auth-logo" src="assets/logo/AuraLAB-logo-1024.png" alt="" />' +
+      '<div class="auth-spinner" role="status" aria-label="Loading AuraLAB"></div>' +
+      '<p class="auth-booting-text">Loading AuraLAB…</p>' +
+    '</div>';
+}
+
+function showGateError() {
+  if (!gate || gateRemoved) return;
+  gate.classList.add('auth-booting-mode');
+  gate.innerHTML =
+    '<div class="auth-booting">' +
+      '<p class="auth-booting-text">AuraLAB couldn’t finish loading. Please reload.</p>' +
+      '<button type="button" id="auth-reload" class="auth-submit auth-reload-btn">Reload</button>' +
+    '</div>';
+  document.getElementById('auth-reload')?.addEventListener('click', () => window.location.reload());
+}
+
 async function bootApp() {
   if (booted) return;
   booted = true;
   document.documentElement.classList.remove('pre-auth');
-  gate?.remove();
+  showGateLoading();              // instant loading cover (gate is already painted)
   injectSignOut();
-  await import('../main.js');
+  // Lift the cover once the initial route has mounted and is visible.
+  const reveal = () => removeGate();
+  document.addEventListener('route:change', reveal, { once: true });
+  // Safety net so a failed/slow mount can't trap the user behind the spinner.
+  const safety = setTimeout(removeGate, 30000);
+  try {
+    await import('../main.js');
+  } catch (e) {
+    clearTimeout(safety);
+    document.removeEventListener('route:change', reveal);
+    console.error('[auth-gate] app failed to load:', e);
+    showGateError();
+  }
 }
 
 // Record the Terms acceptance against the signed-in account, then boot.

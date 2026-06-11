@@ -49,14 +49,15 @@ let termsObserver = null;      // MutationObserver watching for the terms scrim 
  * cleared and the observer self-cancels — no paint ever happens.
  */
 export function showLoadingOverlay(labLabel = 'lab') {
-  pendingLabel = labLabel;
-
-  if (document.getElementById('terms-modal-scrim')) {
-    // Terms modal is on screen. Don't paint, but remember the request
-    // and arm a one-shot watcher for the terms scrim's removal.
-    armTermsWatcher();
+  // During initial boot the auth gate (#auth-gate) is the hold-screen cover
+  // and is removed on the first route:change. Skip our overlay entirely while
+  // it's up — avoids a double cover and a flash the instant the gate lifts.
+  if (document.getElementById('auth-gate')) {
+    pendingLabel = null;
     return;
   }
+
+  pendingLabel = labLabel;
 
   ensureMounted();
   setLabel(labLabel);

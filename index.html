@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=796" />
-  <link rel="stylesheet" href="css/theme.css?v=796" />
-  <link rel="stylesheet" href="css/print.css?v=796" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=797" />
+  <link rel="stylesheet" href="css/theme.css?v=797" />
+  <link rel="stylesheet" href="css/print.css?v=797" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -200,6 +200,24 @@
         max-height: 36vh; overflow-y: auto;
       }
       #auth-gate .auth-main-col { justify-content: flex-start; }
+    }
+
+    /* --- boot loading cover (sign-in → app ready) --- */
+    #auth-gate .auth-booting {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 18px; text-align: center;
+    }
+    #auth-gate .auth-booting .auth-logo { width: 72px; height: 72px; margin: 0; }
+    #auth-gate .auth-spinner {
+      width: 34px; height: 34px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,.14); border-top-color: #4b8bf4;
+      animation: auth-spin .8s linear infinite;
+    }
+    @keyframes auth-spin { to { transform: rotate(360deg); } }
+    #auth-gate .auth-booting-text { margin: 0; font-size: 13px; color: #9aa4b2; letter-spacing: .3px; }
+    #auth-gate .auth-reload-btn { width: auto; padding: 9px 20px; margin-top: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      #auth-gate .auth-spinner { animation-duration: 1.8s; }
     }
   </style>
 </head>
@@ -650,6 +668,6 @@
   </div>
   <!-- Boot goes through the login wall; auth-gate.js dynamically imports
        js/main.js only after a user is authenticated. -->
-  <script type="module" src="js/auth/auth-gate.js?v=796"></script>
+  <script type="module" src="js/auth/auth-gate.js?v=797"></script>
 </body>
 </html>
