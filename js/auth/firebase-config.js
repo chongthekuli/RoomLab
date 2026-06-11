@@ -29,3 +29,10 @@ export const isConfigured = !firebaseConfig.apiKey.startsWith('YOUR_');
 // Currently OFF — Gmail and personal logins are allowed for this stage.
 // Flip to true (and bump ?v=) to enforce business-domain-only access.
 export const RESTRICT_TO_BUSINESS_EMAIL = false;
+
+// Require a verified email before the app will boot (email/password accounts
+// only — Google accounts are always verified). A verification link is ALWAYS
+// sent on sign-up regardless; this flag only controls whether it's enforced.
+// OFF for now so new accounts can use the app immediately. Flip to true to
+// require inbox confirmation before first use.
+export const REQUIRE_EMAIL_VERIFICATION = false;
