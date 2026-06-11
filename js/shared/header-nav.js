@@ -54,7 +54,6 @@ export function mountHeaderNav({ activeLab } = {}) {
       <button id="btn-reset-data" class="btn-reset" aria-label="Reset all AuraLAB data" title="Reset all AuraLAB data — saved scene, custom rooms, panel state, Lab preferences. Asks for confirmation; cannot be undone.">↻</button>
       <button id="btn-save-project" class="btn-save" title="Save the entire project (room, speakers, listeners, zones, EQ, ambient noise) to a .auralab.json file. On Chrome/Edge you choose the folder and filename; elsewhere you name it and it lands in Downloads.">💾 Save As</button>
       <button id="btn-load-project" class="btn-load" title="Load a previously saved .auralab.json project file (legacy .roomlab.json files still open)">📂 Load</button>
-      <button id="btn-share-link" class="btn-share" aria-label="share scene as link" title="Copy a URL that opens this exact scene — paste into Slack or email">🔗 Share</button>
       <button id="btn-print-report" class="btn-print" aria-label="print proposal" title="Print a multi-page proposal of the current scene. Use the print dialog's 'Save as PDF' destination on desktop. On mobile: choose 'Save as PDF' (Android) or pinch-and-share-to-Files (iOS).">🖨 Print</button>
       <input type="file" id="file-roomlab" accept=".json,.auralab.json,.roomlab.json,application/json" hidden />
     </div>

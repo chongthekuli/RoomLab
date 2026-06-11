@@ -4,7 +4,6 @@ import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { beginCapture } from '../capture/capture-picker.js';
 import { importDxfFile } from '../physics/dxf-import.js';
 import { saveProjectAs, loadProjectFromFile } from '../io/project-file.js';
-import { encodeShareLink, buildShareUrl } from '../io/share-link.js';
 import { triggerPrint } from './print-report.js';
 import { listCustomRooms, listProjects, latestRoomInProject, saveCustomRoom, getCustomRoomById, deleteCustomRoom, updateCustomRoom } from '../shared/custom-rooms.js';
 import { getPlacementBindings } from '../graphics/scene.js';
@@ -464,26 +463,8 @@ export function mountRoomPanel({ materials }) {
     }, 100);
   });
 
-  // Share — encode current state into a URL fragment, copy it. Oversize
-  // scenes (pavilion-class, ~70 KB encoded) get a "use Save instead"
-  // banner. Clipboard write may silently fail on Safari outside a user
-  // gesture chain — surface the URL inline as the fallback.
-  document.getElementById('btn-share-link')?.addEventListener('click', async () => {
-    const { hash, chars, tooLarge, bytes } = encodeShareLink();
-    if (tooLarge) {
-      showStatus(`scene too large for a link (${(bytes / 1024).toFixed(1)} KB) — use 💾 Save instead`, 'err');
-      return;
-    }
-    const url = buildShareUrl(hash);
-    try {
-      await navigator.clipboard.writeText(url);
-      showToast(`link copied — ${(bytes / 1024).toFixed(1)} KB`, 'ok');
-    } catch {
-      // Clipboard rejected (Safari without user gesture, or insecure
-      // context). Show the URL inline so the user can copy by hand.
-      showStatus(`couldn't auto-copy — copy this URL manually:\n${url}`, 'err');
-    }
-  });
+  // Share button removed from the header — the encode/build helpers and the
+  // inbound #R… hash loader remain so existing share URLs still open.
   const projectFileInput = document.getElementById('file-roomlab');
   document.getElementById('btn-load-project')?.addEventListener('click', () => projectFileInput?.click());
   projectFileInput?.addEventListener('change', async (e) => {
