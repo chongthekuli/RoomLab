@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=802" />
-  <link rel="stylesheet" href="css/theme.css?v=802" />
-  <link rel="stylesheet" href="css/print.css?v=802" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=803" />
+  <link rel="stylesheet" href="css/theme.css?v=803" />
+  <link rel="stylesheet" href="css/print.css?v=803" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -365,11 +365,19 @@
              keyboard shortcuts) tucks into the "•••" slide-down
              panel for low-frequency settings. -->
         <div class="vp-mode-segment" role="group" aria-label="Viewport mode">
-          <button class="vp-tab" data-view="2d" title="2D floor plan view — shortcut 1">2D</button>
+          <button class="vp-tab vp-tab-2d" data-view="2d" title="2D floor plan view — shortcut 1">2D<span class="vp-grid-arrow" id="vp-grid-arrow" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" aria-label="Grid size" title="Grid / snap size — pick 0.5 / 0.25 / 0.1 m">▾</span></button>
           <button class="vp-tab active" data-view="3d" title="3D perspective view — shortcut 2">3D</button>
           <button class="vp-tab" data-view="walk" title="First-person walkthrough — shortcut 3">Walk</button>
           <button class="vp-tab vp-fullscreen-btn" id="btn-fullscreen" title="Toggle fullscreen — useful for tablet walk mode" type="button">⛶</button>
           <button class="vp-tab vp-more-trigger" id="btn-more-menu" title="Layers, tools, keyboard shortcuts" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="vp-more-panel">⋯</button>
+          <!-- 2D grid/snap size selector — opened by the green ▾ on the 2D tab.
+               Sets state.display.gridSize_m; the 'G' key cycles the same. -->
+          <div id="vp-grid-menu" class="vp-grid-menu" hidden role="menu" aria-label="Grid size">
+            <div class="vp-grid-menu-title">Grid / snap</div>
+            <button class="vp-grid-opt" type="button" data-grid="0.5"  role="menuitemradio" aria-checked="true">0.5 m</button>
+            <button class="vp-grid-opt" type="button" data-grid="0.25" role="menuitemradio" aria-checked="false">0.25 m</button>
+            <button class="vp-grid-opt" type="button" data-grid="0.1"  role="menuitemradio" aria-checked="false">0.1 m</button>
+          </div>
         </div>
         <div class="vp-more-panel" id="vp-more-panel" hidden>
           <div class="vp-more-section">
@@ -668,6 +676,6 @@
   </div>
   <!-- Boot goes through the login wall; auth-gate.js dynamically imports
        js/main.js only after a user is authenticated. -->
-  <script type="module" src="js/auth/auth-gate.js?v=802"></script>
+  <script type="module" src="js/auth/auth-gate.js?v=803"></script>
 </body>
 </html>

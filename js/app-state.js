@@ -856,6 +856,11 @@ export const state = {
     // preset button. Session-only — like every other display.* toggle it
     // is excluded from project serialization (resets to true on load).
     reportCamLocked: true,
+    // 2D viewport grid / snap spacing in metres. Drives the draw-mode grid,
+    // the custom-room vertex snap, and the 2D drag snap. Adjustable to 0.5
+    // (default) / 0.25 / 0.1 via the green arrow on the 2D tab button or the
+    // 'G' key while drawing. Session-only (not serialized) like other display.*.
+    gridSize_m: 0.5,
   },
   // Physics model toggles (see spl-calculator.js). Reverberant field is OFF
   // by default — the Hopkins-Stryker statistical reverb is spatially uniform,

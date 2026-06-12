@@ -67,6 +67,58 @@ function setupTabs() {
     });
   });
 
+  // --- 2D grid/snap size selector (green ▾ on the 2D tab) --------------
+  // Drop-down to pick the 2D grid spacing: 0.5 (default) / 0.25 / 0.1 m.
+  // The 'G' key while drawing a custom room cycles the same setting. Single
+  // source of truth: state.display.gridSize_m; room-2d.js re-renders on the
+  // shared 'grid:changed' event.
+  const gridArrow = document.getElementById('vp-grid-arrow');
+  const gridMenu = document.getElementById('vp-grid-menu');
+  if (gridArrow && gridMenu) {
+    const closeGridMenu = () => { gridMenu.hidden = true; gridArrow.setAttribute('aria-expanded', 'false'); };
+    const openGridMenu  = () => { gridMenu.hidden = false; gridArrow.setAttribute('aria-expanded', 'true'); };
+    const syncGridUI = () => {
+      const cur = state.display?.gridSize_m ?? 0.5;
+      gridMenu.querySelectorAll('.vp-grid-opt').forEach(opt => {
+        opt.setAttribute('aria-checked', parseFloat(opt.dataset.grid) === cur ? 'true' : 'false');
+      });
+      gridArrow.title = `Grid / snap size — ${cur} m`;
+    };
+    const toggleGridMenu = (ev) => {
+      // Don't bubble to the 2D tab button (would switch the view).
+      ev.stopPropagation();
+      ev.preventDefault();
+      if (gridMenu.hidden) { syncGridUI(); openGridMenu(); } else { closeGridMenu(); }
+    };
+    gridArrow.addEventListener('click', toggleGridMenu);
+    gridArrow.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') toggleGridMenu(e);
+      else if (e.key === 'Escape') closeGridMenu();
+    });
+    gridMenu.querySelectorAll('.vp-grid-opt').forEach(opt => {
+      opt.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const m = parseFloat(opt.dataset.grid);
+        if (!Number.isFinite(m)) return;
+        if (!state.display) state.display = {};
+        state.display.gridSize_m = m;
+        emit('grid:changed');     // room-2d re-renders; syncGridUI runs via the listener below
+        closeGridMenu();
+      });
+    });
+    // Close on outside click / Escape.
+    document.addEventListener('click', (e) => {
+      if (gridMenu.hidden) return;
+      if (e.target === gridArrow || gridMenu.contains(e.target)) return;
+      closeGridMenu();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !gridMenu.hidden) closeGridMenu(); });
+    // Keep the dropdown's checkmark + tooltip in sync whenever the grid
+    // changes from anywhere (this dropdown OR the 'G' key in room-2d.js).
+    on('grid:changed', syncGridUI);
+    syncGridUI();
+  }
+
   // AutoCAD-style preset-view cluster. Visible only in 3D (orbit camera
   // exists). 2D has its own pan/zoom controller and Walk has the
   // first-person camera bound to the avatar — neither has a meaningful

@@ -139,7 +139,16 @@ let CUSTOM_VB_W = CUSTOM_VB_DEFAULT_W;
 let CUSTOM_VB_H = CUSTOM_VB_DEFAULT_H;
 const CUSTOM_SCALE = 40;             // 1 m = 40 px → 0.5 m = 20 px
 const CUSTOM_ORIGIN = { x: 60, y: 60 };
-const SNAP_M = 0.5;                  // Maya §3: pros work to 0.5 m, not 0.1 m
+const SNAP_M = 0.5;                  // Default grid/snap. Maya §3: pros work to 0.5 m.
+// Selectable 2D grid/snap spacings (coarse → fine). Coarsest is the default.
+export const GRID_SIZES_M = [0.5, 0.25, 0.1];
+// Live grid/snap size — reads the user's state.display.gridSize_m setting
+// (set via the 2D-tab green-arrow dropdown or the 'G' key while drawing),
+// falling back to the 0.5 m default for any unexpected value.
+function gridSize() {
+  const g = state.display?.gridSize_m;
+  return GRID_SIZES_M.includes(g) ? g : SNAP_M;
+}
 const CLOSE_RADIUS_M = 0.6;          // Maya §2: cursor-near-vertex-1 commits as close
 
 let drawActive = false;
@@ -797,6 +806,18 @@ function handleDrawKey(event) {
     render();
     event.preventDefault();
   }
+  else if (k === 'g' || k === 'G') {
+    // Cycle the grid/snap size (0.5 → 0.25 → 0.1 → 0.5 m). Updates the
+    // shared state setting + notifies the 2D viewport (re-render) and the
+    // grid-selector dropdown via grid:changed. No direct render() here —
+    // the on('grid:changed', render) subscription handles it.
+    if (!state.display) state.display = {};
+    const cur = gridSize();
+    const idx = GRID_SIZES_M.indexOf(cur);
+    state.display.gridSize_m = GRID_SIZES_M[(idx + 1) % GRID_SIZES_M.length];
+    emit('grid:changed');
+    event.preventDefault();
+  }
   else if ((k === 'z' || k === 'Z') && (event.ctrlKey || event.metaKey)) {
     undoDrawVertex();
     event.preventDefault();
@@ -849,7 +870,8 @@ function drawCoordsFromEvent(event) {
     // world-Y=0 lands. Cursor BELOW origin (larger sy) → ry negative.
     const ry = (CUSTOM_ORIGIN.y + drawPan.dy - sy) / CUSTOM_SCALE;
     if (!Number.isFinite(rx) || !Number.isFinite(ry)) return null;
-    const snap = (v) => Math.round(v / SNAP_M) * SNAP_M;
+    const g = gridSize();
+    const snap = (v) => Math.round(v / g) * g;
     return { sx, sy, rx: snap(rx), ry: snap(ry) };
   }
   // zone mode: use current room scale, with the same Y-flip as
@@ -982,6 +1004,7 @@ export function mount2DViewport({ materials }) {
   materialsRef = materials;
   render();
   on('room:changed', render);
+  on('grid:changed', render);   // 2D grid/snap size changed (G key or 2D-tab dropdown)
   on('source:changed', render);
   on('source:model_changed', render);
   on('source:selected', render);
@@ -1051,7 +1074,7 @@ function drawGuideText() {
     return `release here to close the loop — ${n} edge${n === 1 ? '' : 's'}.`;
   }
   if (n === 0) return 'click on the grid to place point 1. press esc to cancel.';
-  if (n === 1) return 'click to add point 2. snap is 0.5 m.';
+  if (n === 1) return `click to add point 2. snap is ${gridSize()} m (press G to change).`;
   if (n === 2) return 'click to add point 3. you\'ll need at least 3 to close a polygon.';
   return `click to add point ${n + 1}. double-click to finish, or click point 1 to close.`;
 }
@@ -1073,8 +1096,8 @@ function renderCustomDraw(vp) {
   // Maya §3: origin shifted by viewport pan offset
   const x0 = CUSTOM_ORIGIN.x + drawPan.dx;
   const y0 = CUSTOM_ORIGIN.y + drawPan.dy;
-  const minor = CUSTOM_SCALE * SNAP_M;            // 20 px = 0.5 m
-  const major = CUSTOM_SCALE * 5;                 // 200 px = 5 m
+  const minor = CUSTOM_SCALE * gridSize();        // minor lines at the chosen grid (0.5/0.25/0.1 m)
+  const major = CUSTOM_SCALE * 5;                 // 200 px = 5 m reference lines (fixed)
 
   let svg = `<svg viewBox="0 0 ${CUSTOM_VB_W} ${CUSTOM_VB_H}" preserveAspectRatio="xMidYMid meet" tabindex="0">`;
   // Two stacked grid layers, minor first, major on top.
@@ -2866,7 +2889,7 @@ function clientToWorldXY(svg, clientX, clientY) {
   return { x: rx, y: ry };
 }
 
-function snapToGrid(v) { return Math.round(v / SOURCE_SNAP_M) * SOURCE_SNAP_M; }
+function snapToGrid(v) { const g = gridSize(); return Math.round(v / g) * g; }
 
 // Return the current room's vertex list in WORLD coords without
 // converting to 'custom' (read-only inspection). Used by the vertex
