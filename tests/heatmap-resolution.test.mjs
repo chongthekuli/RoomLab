@@ -3,7 +3,8 @@
 // Pins the user-selectable heatmap resolution: state.display.heatmapRes
 // ('standard' | 'high' | 'ultra') maps (via heatmapResParams) to a finer cell
 // target + higher per-axis cap, threaded into computeSPLGrid by the 2D viewport
-// and the print report (3D keeps its smooth shader). Standard is byte-identical
+// the 3D heatmap, and the print report (all sample through computeSPLGrid; the
+// 3D GPU shader still smooths on top). Standard is byte-identical
 // to the historical 0.5 m / 120-cap default.
 //
 // Behavioural where possible: squareCellCounts + heatmapResParams are pure, so
@@ -69,6 +70,12 @@ ok(/on\('heatmap-res:changed', render\)/.test(room2d),
    "room-2d.js: re-renders on 'heatmap-res:changed'");
 ok(/\.\.\.resParams/.test(printRep) && /\(cached\.cellTarget_m \?\? 0\.5\) === resParams\.cellTarget_m/.test(printRep),
    'print-report.js: passes resolution AND makes the grid cache resolution-aware');
+// 3D heatmap now follows the Detail setting too (samples through computeSPLGrid).
+const scene = readFileSync('./js/graphics/scene.js', 'utf8');
+ok(/\.\.\.heatmapResParams\(state\.display\?\.heatmapRes\)/.test(scene),
+   'scene.js: 3D heatmap passes the resolution into computeSPLGrid');
+ok(/on\('heatmap-res:changed',\s*\(\)\s*=>\s*queueRebuild\(REBUILD_HEATMAP\)\)/.test(scene),
+   "scene.js: 3D heatmap rebuilds on 'heatmap-res:changed'");
 ok(/data-res="standard"/.test(indexHtml) && /data-res="high"/.test(indexHtml) && /data-res="ultra"/.test(indexHtml),
    'index.html: more-panel has Standard / High / Ultra detail pills');
 ok(/state\.display\.heatmapRes = level/.test(roomMain) && /emit\('heatmap-res:changed'\)/.test(roomMain),

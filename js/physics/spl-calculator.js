@@ -1133,7 +1133,9 @@ const HEATMAP_CELL_MAX = 120;
 // less blocky. NOTE per Dr. Chen: 0.5 m already Nyquist-samples the steepest
 // meaningful direct-field gradient, so finer cells add VISUAL smoothness, not
 // new physics — and cost ~(cells)² more compute. Cells stay square + equal-
-// area at every level, so the unweighted avgSPL mean stays unbiased.
+// area at every level, so the unweighted avgSPL mean stays unbiased. Applied
+// across the 2D viewport, the 3D heatmap, and the print report (all sample
+// through computeSPLGrid).
 export const HEATMAP_RES_LEVELS = {
   standard: { cellTarget_m: 0.5,   maxCells: 120, label: 'Standard' },
   high:     { cellTarget_m: 0.25,  maxCells: 240, label: 'High' },

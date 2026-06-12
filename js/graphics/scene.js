@@ -20,7 +20,7 @@ import { recordRayPaths, buildLineSegmentIndex } from './ray-viz.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { buildRackGroup } from './rack-render.js';
 import { computeCableTrayRows } from './cable-tray.js';
-import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext } from '../physics/spl-calculator.js';
+import { computeSPLGrid, computeZoneSPLGrid, computeMultiSourceSPL, computeRoomConstant, precomputeSPLContext, computeMultiSourceSPLFromContext, heatmapResParams } from '../physics/spl-calculator.js';
 import { computeSTIPA, precomputeSTIPAContext, computeSTIPAAt } from '../physics/stipa.js';
 import { roomPlanVertices, roomEffectiveBounds, domeGeometry, isInsideRoom3D, isInsideRoom, normalizeWallSlot, applySurauOpeningsToSlot, defaultInsidePosition } from '../physics/room-shape.js';
 import { wallInsetPolygon } from '../physics/wall-inset.js';
@@ -460,6 +460,7 @@ export async function mount3DViewport({ materials }) {
   });
   on('source:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
   on('source:model_changed', () => { invalidateRayViz(); queueRebuild(REBUILD_SOURCES | REBUILD_ZONES | REBUILD_HEATMAP); });
+  on('heatmap-res:changed', () => queueRebuild(REBUILD_HEATMAP));   // Detail setting changed — re-sample the 3D heatmap at the new resolution
   on('treatment:changed', () => { invalidateRayViz(); queueRebuild(REBUILD_TREATMENTS); });
   on('treatment:selected', () => queueRebuild(REBUILD_TREATMENTS));
   // FurnitureLAB placed objects — rebuild on placement, selection,
@@ -12785,6 +12786,10 @@ function rebuildHeatmap() {
     sources: flat,
     getSpeakerDef: url => getCachedLoudspeaker(url),
     room: state.room, gridSize: roomGrid, earHeight_m: ear,
+    // User-selectable heatmap resolution (state.display.heatmapRes) — the 3D
+    // heatmap now follows the same Detail setting as the 2D viewport + report.
+    // The GPU shader already smooths the field; finer cells add sampling detail.
+    ...heatmapResParams(state.display?.heatmapRes),
     ...currentPhysicsOpts(state.room),
     metric: useSTI ? 'sti' : 'spl',
     stipaCtx,
