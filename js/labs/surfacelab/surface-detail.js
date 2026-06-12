@@ -659,13 +659,16 @@ function layersFor(entry) {
   return [{ name: entry.name, role: 'Surface finish', color: c }];
 }
 
-// Surface applicability (floor / wall / ceiling) presentation. `arr` is the
-// material's materials.json `applicableTo` list, or null (legacy / not a
-// material). An empty array means "not a room-boundary finish" (rack panel,
-// seat zone-coverage) and renders as null so callers can show a note.
-const APPLY_ORDER = ['floor', 'wall', 'ceiling'];
-const APPLY_LABEL = { floor: 'Floor', wall: 'Wall', ceiling: 'Ceiling' };
-const APPLY_SHORT = { floor: 'F', wall: 'W', ceiling: 'C' };
+// Surface applicability (floor / wall / ceiling / door / window) presentation.
+// `arr` is the material's materials.json `applicableTo` list, or null (legacy /
+// not a material). An empty array means "not a room-boundary finish" (rack
+// panel, seat zone-coverage) and renders as null so callers can show a note.
+// door / window classify opening leaves (door = solid/glass/steel/acoustic
+// leaves; window = glazing) so the room-panel opening picker can offer only
+// physically-reasonable materials per kind.
+const APPLY_ORDER = ['floor', 'wall', 'ceiling', 'door', 'window'];
+const APPLY_LABEL = { floor: 'Floor', wall: 'Wall', ceiling: 'Ceiling', door: 'Door', window: 'Window' };
+const APPLY_SHORT = { floor: 'F', wall: 'W', ceiling: 'C', door: 'D', window: 'Gl' };
 
 function formatApplicability(arr) {
   if (!Array.isArray(arr) || arr.length === 0) return null;

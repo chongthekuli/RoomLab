@@ -2198,9 +2198,11 @@ function renderOpeningRow(surfaceId, op, idx, getSlot, setSlot) {
   });
   row.appendChild(stateSel);
 
-  // Material select — reuses the same list as walls but defaults differ
-  // by kind. Hidden when state === 'open' since it's irrelevant.
-  const matSel = buildMatSelect(`${surfaceId}-op-${idx}`, op.materialId);
+  // Material select — filtered by the OPENING'S kind (door vs window), not
+  // the host wall's kind, so a door offers only door leaves and a window only
+  // glazing. op.kind is 'door' | 'window'; anything else falls back to door.
+  const opKind = op.kind === 'window' ? 'window' : 'door';
+  const matSel = buildMatSelect(`${surfaceId}-op-${idx}`, op.materialId, opKind);
   matSel.className = 'opening-mat';
   matSel.addEventListener('change', e => {
     const next = readSlotAsObject(getSlot());
@@ -2329,10 +2331,15 @@ function materialAllowedOn(mat, kind) {
   return allow.includes(kind);
 }
 
-function buildMatSelect(dataKey, currentValue) {
+// kindOverride: when set ('door' | 'window'), the picker filters by that
+// opening kind instead of deriving 'wall' from the dataKey via surfaceKindFor.
+// A door slot then offers only door leaves (incl. glass/steel/acoustic doors),
+// a window slot only glazing — never a solid wall finish. Wall / floor /
+// ceiling selects pass no override and keep their surfaceKindFor behaviour.
+function buildMatSelect(dataKey, currentValue, kindOverride) {
   const sel = document.createElement('select');
   sel.dataset.key = dataKey;
-  const kind = surfaceKindFor(dataKey);
+  const kind = kindOverride || surfaceKindFor(dataKey);
   const curId = (currentValue && typeof currentValue === 'object')
     ? currentValue.materialId : currentValue;
   let opts = materialsRef.list.filter(m => m.id !== 'audience-seated' && materialAllowedOn(m, kind));

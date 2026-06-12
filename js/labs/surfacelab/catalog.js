@@ -73,7 +73,7 @@ export async function loadSurfaceCatalogue() {
   // bass.* / etc. inferred from the id pattern. Existing entries
   // with names like "bass-trap-broadband-corner" route correctly.
   const finishEntries = (materials.materials || []).map(m => {
-    const category = inferCategoryFromId(m.id);
+    const category = inferCategoryFromId(m.id, m.applicableTo);
     return {
       id: m.id,
       name: m.name,
@@ -211,8 +211,18 @@ export function railSegmentFor(category) {
 
 // Map free-form material id strings to dotted-path categories. Used
 // only for the legacy materials.json entries; treatment-products.json
-// supplies category fields directly.
-function inferCategoryFromId(id) {
+// supplies category fields directly. `applicableTo` (when present) is the
+// authoritative signal for opening leaves — a material tagged door/window
+// routes to the Openings rail even if its id doesn't contain "door"/"window".
+function inferCategoryFromId(id, applicableTo) {
+  // Authoritative: explicit door/window applicability beats id-pattern guessing.
+  if (Array.isArray(applicableTo)) {
+    const isDoor = applicableTo.includes('door');
+    const isWindow = applicableTo.includes('window');
+    if (isDoor && !isWindow)  return 'opening.door';
+    if (isWindow && !isDoor)  return 'opening.window';
+    if (isDoor && isWindow)   return 'opening.door';   // glazed leaf usable both ways → door rail
+  }
   if (/membrane|helmholtz/i.test(id))            return 'bass.membrane';
   if (/^bass.?trap|^broadband.?bass/i.test(id))  return 'bass.porous';
   if (/^broadband|panel.?absorb|rockwool|fibreglass/i.test(id)) return 'absorber.porous.panel';

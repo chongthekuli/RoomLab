@@ -388,7 +388,7 @@
       "id": "glass-window",
       "name": "Glass window 6mm",
       "model": "mass-law",
-      "applicableTo": ["wall"],
+      "applicableTo": ["window"],
       "absorption": [
         0.35,
         0.25,
@@ -756,7 +756,7 @@
       "id": "door-solid-wood",
       "name": "Solid wood door",
       "model": "mass-law",
-      "applicableTo": ["wall"],
+      "applicableTo": ["door"],
       "absorption": [
         0.14,
         0.1,
@@ -794,7 +794,7 @@
       "id": "door-hollow-core",
       "name": "Hollow core door",
       "model": "mass-law",
-      "applicableTo": ["wall"],
+      "applicableTo": ["door"],
       "absorption": [
         0.3,
         0.2,
@@ -827,6 +827,196 @@
       "assembly_type": "composite",
       "tl_estimated": false,
       "_tl_source": "Cavanaugh & Wilkes table 24-12 — 35 mm hollow-core door with paper honeycomb core (STC ≈ 19). Mass-law plateaus above 2 kHz because the thin face panels go through coincidence."
+    },
+    {
+      "id": "door-glass-toughened",
+      "name": "Glass door 10mm toughened (aluminium frame)",
+      "model": "mass-law",
+      "applicableTo": ["door"],
+      "absorption": [
+        0.18,
+        0.12,
+        0.08,
+        0.05,
+        0.04,
+        0.03,
+        0.03
+      ],
+      "scattering": [
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05
+      ],
+      "transmission_loss_db": [
+        24,
+        27,
+        31,
+        35,
+        31,
+        38,
+        42
+      ],
+      "surface_density_kg_m2": 25,
+      "reference_thickness_m": 0.01,
+      "assembly_type": "composite",
+      "tl_estimated": false,
+      "_tl_source": "Cavanaugh & Wilkes, Architectural Acoustics 2nd ed. table 24-9 — 10 mm monolithic float/toughened glass (STC ≈ 34). The 2 kHz dip is the plate-coincidence resonance, shifted DOWN from the 6 mm pane's ~3 kHz because the thicker plate is stiffer. Aluminium frame + bottom seal add the high-band plateau; a single swing-door leaf, NOT a glazed wall panel."
+    },
+    {
+      "id": "door-steel-insulated",
+      "name": "Steel door 44mm insulated (gasketed)",
+      "model": "mass-law",
+      "applicableTo": ["door"],
+      "absorption": [
+        0.1,
+        0.08,
+        0.06,
+        0.05,
+        0.05,
+        0.05,
+        0.05
+      ],
+      "scattering": [
+        0.05,
+        0.05,
+        0.05,
+        0.1,
+        0.1,
+        0.15,
+        0.15
+      ],
+      "transmission_loss_db": [
+        22,
+        27,
+        31,
+        33,
+        34,
+        35,
+        36
+      ],
+      "surface_density_kg_m2": 28,
+      "reference_thickness_m": 0.044,
+      "assembly_type": "composite",
+      "tl_estimated": false,
+      "_tl_source": "Cavanaugh & Wilkes table 24-12 — 44 mm hollow steel door, mineral-wool core, perimeter gaskets + drop seal (STC ≈ 33). The plateau above 1 kHz is the perimeter-leak / edge-diffraction floor that gasket quality, not mass, sets. Commercial / back-of-house / MEP-room leaf."
+    },
+    {
+      "id": "door-acoustic-stc45",
+      "name": "Acoustic-rated door STC 45 (sealed assembly)",
+      "model": "mass-law",
+      "applicableTo": ["door"],
+      "absorption": [
+        0.1,
+        0.08,
+        0.06,
+        0.05,
+        0.05,
+        0.05,
+        0.05
+      ],
+      "scattering": [
+        0.05,
+        0.05,
+        0.05,
+        0.1,
+        0.1,
+        0.15,
+        0.15
+      ],
+      "transmission_loss_db": [
+        32,
+        38,
+        43,
+        46,
+        47,
+        48,
+        49
+      ],
+      "surface_density_kg_m2": 45,
+      "reference_thickness_m": 0.054,
+      "assembly_type": "composite",
+      "tl_estimated": false,
+      "_tl_source": "NRC-CNRC door TL archive + Cavanaugh & Wilkes table 24-12 — proprietary STC-45 acoustic door: dense composite leaf (~45 kg/m²) with full perimeter compression seals, drop seal, and rebated stop (laboratory Rw ≈ 45). Field DnT,w is typically 5–10 dB lower due to frame/wall flanking (ISO 12354) — this row is the lab leaf only. Studio / plant-room / control-room spec."
+    },
+    {
+      "id": "window-double-glazed-igu",
+      "name": "Double glazing IGU 4-12-4 (thermal unit)",
+      "model": "mass-law",
+      "applicableTo": ["window"],
+      "absorption": [
+        0.3,
+        0.2,
+        0.15,
+        0.1,
+        0.06,
+        0.04,
+        0.04
+      ],
+      "scattering": [
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02
+      ],
+      "transmission_loss_db": [
+        25,
+        22,
+        29,
+        33,
+        29,
+        37,
+        41
+      ],
+      "surface_density_kg_m2": 20,
+      "reference_thickness_m": 0.02,
+      "assembly_type": "double_leaf",
+      "tl_estimated": false,
+      "_tl_source": "Tadeu & Mateus (2001) J. Sound Vib. 240(5) + Cavanaugh & Wilkes table 24-9 — sealed IGU, 4 mm / 12 mm air / 4 mm (STC ≈ 29). The 250 Hz DIP is the mass-air-mass resonance (f₀ ≈ 276 Hz for a 12 mm gap, Sharp 1973), so a thermal IGU is acoustically NO better — and at 250 Hz slightly worse — than a single 6 mm pane. A thermal product, not an acoustic one; cavity must be ≥ 50 mm to push f₀ below the speech band."
+    },
+    {
+      "id": "window-laminated-acoustic",
+      "name": "Laminated acoustic glazing 6.4mm (PVB)",
+      "model": "mass-law",
+      "applicableTo": ["window"],
+      "absorption": [
+        0.32,
+        0.22,
+        0.16,
+        0.11,
+        0.07,
+        0.04,
+        0.04
+      ],
+      "scattering": [
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02
+      ],
+      "transmission_loss_db": [
+        23,
+        26,
+        30,
+        34,
+        35,
+        38,
+        42
+      ],
+      "surface_density_kg_m2": 16,
+      "reference_thickness_m": 0.0064,
+      "assembly_type": "single_leaf",
+      "tl_estimated": false,
+      "_tl_source": "Tadeu & Mateus (2001) J. Sound Vib. 240(5) + manufacturer data (Pilkington Optiphon / Saint-Gobain SGG Stadip Silence) — 6.4 mm laminate, two 3 mm glass plies bonded by an acoustic PVB interlayer (STC ≈ 35). The PVB damps the coincidence resonance, so unlike a monolithic 6 mm pane there is NO 2 kHz dip — the gain over plain glass is concentrated at 2–4 kHz. The acoustician's standard single-pane upgrade."
     },
     {
       "id": "wall_2x4_sg_2x_each_air",
