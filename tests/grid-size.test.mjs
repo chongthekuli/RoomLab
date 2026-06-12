@@ -51,6 +51,22 @@ ok(/k === 'g' \|\| k === 'G'/.test(room2d) && /GRID_SIZES_M\[\(idx \+ 1\) % GRID
 ok(/on\('grid:changed', render\)/.test(room2d),
    "room-2d.js: subscribes on('grid:changed', render)");
 
+// 5b. The 'G' cycle is shared (handleDrawKey AND the float-coord input), so it
+//     works while focus is in the coord field during drawing.
+ok(/function cycleGridSize\(\)/.test(room2d),
+   'room-2d.js: cycleGridSize() helper exists');
+ok((room2d.match(/cycleGridSize\(\)/g) || []).length >= 3,
+   "room-2d.js: cycleGridSize() called from both the draw-key handler and the coord-input handler");
+
+// 5c. Main 2D view draws a floor grid at the snap spacing (so the visible grid
+//     changes — not just the snap).
+ok(/function renderFloorGrid\(/.test(room2d),
+   'room-2d.js: renderFloorGrid() helper exists');
+ok(/renderFloorGrid\(state\.room, x0, y0, pxW, pxD\)/.test(room2d),
+   'room-2d.js: renderNormal composes the floor grid into the SVG');
+ok(/const stepX = g \* \(pxW \/ room\.width_m\)/.test(room2d),
+   'room-2d.js: floor grid spacing scales with gridSize()');
+
 // 6. UI: green arrow + dropdown markup on the 2D tab.
 ok(/id="vp-grid-arrow"/.test(indexHtml),
    'index.html: green ▾ grid arrow exists');

@@ -149,6 +149,17 @@ function gridSize() {
   const g = state.display?.gridSize_m;
   return GRID_SIZES_M.includes(g) ? g : SNAP_M;
 }
+// Cycle the grid/snap size (0.5 → 0.25 → 0.1 → 0.5 m) and notify the 2D
+// viewport (re-render) + the 2D-tab dropdown via 'grid:changed'. Shared by the
+// 'G' key in handleDrawKey AND the float-coord input handler (onFieldKey) —
+// while drawing, focus sits in the coord input so the window-level draw-key
+// handler never sees the key.
+function cycleGridSize() {
+  if (!state.display) state.display = {};
+  const idx = GRID_SIZES_M.indexOf(gridSize());
+  state.display.gridSize_m = GRID_SIZES_M[(idx + 1) % GRID_SIZES_M.length];
+  emit('grid:changed');
+}
 const CLOSE_RADIUS_M = 0.6;          // Maya §2: cursor-near-vertex-1 commits as close
 
 let drawActive = false;
@@ -807,15 +818,7 @@ function handleDrawKey(event) {
     event.preventDefault();
   }
   else if (k === 'g' || k === 'G') {
-    // Cycle the grid/snap size (0.5 → 0.25 → 0.1 → 0.5 m). Updates the
-    // shared state setting + notifies the 2D viewport (re-render) and the
-    // grid-selector dropdown via grid:changed. No direct render() here —
-    // the on('grid:changed', render) subscription handles it.
-    if (!state.display) state.display = {};
-    const cur = gridSize();
-    const idx = GRID_SIZES_M.indexOf(cur);
-    state.display.gridSize_m = GRID_SIZES_M[(idx + 1) % GRID_SIZES_M.length];
-    emit('grid:changed');
+    cycleGridSize();          // on('grid:changed', render) handles the re-render
     event.preventDefault();
   }
   else if ((k === 'z' || k === 'Z') && (event.ctrlKey || event.metaKey)) {
@@ -1491,6 +1494,15 @@ function ensureFloatCoordEl(vp) {
       if (drawVertices.length >= 3) finishDraw();
       return;
     }
+    // 'G' — cycle grid/snap size. Handled here too because focus is in this
+    // coord input while drawing, so the window-level handleDrawKey never
+    // sees it (the field handler runs first and the numeric filter below
+    // would otherwise just swallow 'g').
+    if (e.key === 'g' || e.key === 'G') {
+      e.preventDefault();
+      cycleGridSize();
+      return;
+    }
     // Numeric-input filter — block any key that can't legally appear
     // in a metric coord string. Allow: digits, '-' (negative), '.'
     // (decimal), plus all navigation / editing keys (arrows, Home,
@@ -1849,6 +1861,7 @@ function renderNormal(vp) {
         ${outdoorOn
           ? `<g mask="url(#field-feather-mask)">${splSvg}</g>`
           : `<g clip-path="url(#room-clip)">${splSvg}</g>`}
+        ${outdoorOn ? '' : renderFloorGrid(state.room, x0, y0, pxW, pxD)}
         ${roomOutline.walls}
         ${roomOutline.labels}
         ${zonesSvg}
@@ -2100,6 +2113,24 @@ function renderClipPath(room, x0, y0, pxW, pxD) {
     return `${sx.toFixed(1)},${sy.toFixed(1)}`;
   }).join(' ');
   return `<clipPath id="room-clip"><polygon points="${points}" /></clipPath>`;
+}
+
+// Floor reference grid at the user's snap spacing (gridSize()), drawn over the
+// heatmap and clipped to the room polygon (#room-clip) so the visible grid
+// matches what the pointer snaps to. Indoor only — the outdoor field has its
+// own square + scale. Returns '' when the spacing would be < ~3 px (e.g. 0.1 m
+// on a large room), where a grid would just read as mush.
+function renderFloorGrid(room, x0, y0, pxW, pxD) {
+  if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
+  const g = gridSize();
+  const stepX = g * (pxW / room.width_m);
+  const stepY = g * (pxD / room.depth_m);
+  if (!(stepX >= 3) || !(stepY >= 3)) return '';
+  // x0 is the screen-px of world X=0 — offset the pattern so a grid line lands
+  // on the world origin (and therefore on every snapped coordinate).
+  const offX = ((x0 % stepX) + stepX) % stepX;
+  const offY = ((y0 % stepY) + stepY) % stepY;
+  return `<defs><pattern id="r2d-floor-grid" width="${stepX.toFixed(3)}" height="${stepY.toFixed(3)}" x="${offX.toFixed(3)}" y="${offY.toFixed(3)}" patternUnits="userSpaceOnUse"><path d="M ${stepX.toFixed(3)} 0 L 0 0 0 ${stepY.toFixed(3)}" fill="none" stroke="#e8edf5" stroke-width="0.6" stroke-opacity="0.2"/></pattern></defs><rect x="0" y="0" width="800" height="500" fill="url(#r2d-floor-grid)" clip-path="url(#room-clip)" />`;
 }
 
 // OUTDOOR radial edge feather — the 2D analogue of heatmap-shader.js's
