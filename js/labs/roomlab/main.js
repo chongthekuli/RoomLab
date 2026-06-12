@@ -77,12 +77,19 @@ function setupTabs() {
   if (gridArrow && gridMenu) {
     const closeGridMenu = () => { gridMenu.hidden = true; gridArrow.setAttribute('aria-expanded', 'false'); };
     const openGridMenu  = () => { gridMenu.hidden = false; gridArrow.setAttribute('aria-expanded', 'true'); };
+    const gridToggle = document.getElementById('vp-grid-toggle');
     const syncGridUI = () => {
       const cur = state.display?.gridSize_m ?? 0.5;
       gridMenu.querySelectorAll('.vp-grid-opt').forEach(opt => {
         opt.setAttribute('aria-checked', parseFloat(opt.dataset.grid) === cur ? 'true' : 'false');
       });
-      gridArrow.title = `Grid / snap size — ${cur} m`;
+      const visible = !!state.display?.gridVisible;
+      if (gridToggle) {
+        gridToggle.setAttribute('aria-checked', visible ? 'true' : 'false');
+        gridToggle.classList.toggle('is-on', visible);
+      }
+      gridArrow.classList.toggle('is-grid-on', visible);
+      gridArrow.title = visible ? `Grid shown · ${cur} m` : `Grid hidden · snap ${cur} m`;
     };
     const toggleGridMenu = (ev) => {
       // Don't bubble to the 2D tab button (would switch the view).
@@ -106,6 +113,17 @@ function setupTabs() {
         closeGridMenu();
       });
     });
+    // Show/hide the 2D reference grid (default off). Keep the menu open so the
+    // user can flip it and pick a size in one go.
+    if (gridToggle) {
+      gridToggle.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (!state.display) state.display = {};
+        state.display.gridVisible = !state.display.gridVisible;
+        emit('grid:changed');     // room-2d re-renders the floor grid
+        syncGridUI();
+      });
+    }
     // Close on outside click / Escape.
     document.addEventListener('click', (e) => {
       if (gridMenu.hidden) return;

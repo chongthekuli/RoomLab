@@ -28,6 +28,8 @@ ok(heatmapResParams(undefined).cellTarget_m === 0.5 && heatmapResParams('nonsens
    'heatmapResParams falls back to standard for unknown/undefined');
 ok(heatmapResParams('high').cellTarget_m < 0.5 && heatmapResParams('ultra').cellTarget_m < heatmapResParams('high').cellTarget_m,
    'high < standard and ultra < high in cell target size');
+ok(heatmapResParams('high').cellTarget_m === 0.25 && heatmapResParams('ultra').cellTarget_m === 0.125,
+   'high = 0.25 m, ultra = 0.125 m cells');
 
 // Same room, finer level → at least as many cells per axis, strictly more for a
 // room large enough to exceed the standard floor/cap.

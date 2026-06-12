@@ -1135,9 +1135,9 @@ const HEATMAP_CELL_MAX = 120;
 // new physics — and cost ~(cells)² more compute. Cells stay square + equal-
 // area at every level, so the unweighted avgSPL mean stays unbiased.
 export const HEATMAP_RES_LEVELS = {
-  standard: { cellTarget_m: 0.5,  maxCells: 120, label: 'Standard' },
-  high:     { cellTarget_m: 0.33, maxCells: 180, label: 'High' },
-  ultra:    { cellTarget_m: 0.25, maxCells: 240, label: 'Ultra' },
+  standard: { cellTarget_m: 0.5,   maxCells: 120, label: 'Standard' },
+  high:     { cellTarget_m: 0.25,  maxCells: 240, label: 'High' },
+  ultra:    { cellTarget_m: 0.125, maxCells: 400, label: 'Ultra' },
 };
 // Pure resolver: level name → { cellTarget_m, maxCells }. Unknown / undefined
 // falls back to Standard. Callers (room-2d.js, print-report.js) read the level

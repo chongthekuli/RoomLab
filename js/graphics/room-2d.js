@@ -2124,6 +2124,10 @@ function renderClipPath(room, x0, y0, pxW, pxD) {
 // own square + scale. Returns '' when the spacing would be < ~3 px (e.g. 0.1 m
 // on a large room), where a grid would just read as mush.
 function renderFloorGrid(room, x0, y0, pxW, pxD) {
+  // Off by default — only drawn over the 2D floor plan when the user enables
+  // it under the 2D-tab green-arrow dropdown. (Snap is independent of this;
+  // the draw-mode grid while drawing a custom room always shows.)
+  if (!state.display?.gridVisible) return '';
   if (!room || !(room.width_m > 0) || !(room.depth_m > 0)) return '';
   const g = gridSize();
   const stepX = g * (pxW / room.width_m);

@@ -861,6 +861,11 @@ export const state = {
     // (default) / 0.25 / 0.1 via the green arrow on the 2D tab button or the
     // 'G' key while drawing. Session-only (not serialized) like other display.*.
     gridSize_m: 0.5,
+    // Whether the reference grid is drawn over the 2D floor plan (renderNormal).
+    // OFF by default — toggled under the 2D-tab green-arrow dropdown. Snap still
+    // works regardless; the draw-mode grid (while drawing a custom room) always
+    // shows. Session-only.
+    gridVisible: false,
     // Heatmap resolution (2026-06-12). 'standard' (0.5 m cells, the historical
     // default) / 'high' / 'ultra' — finer cells = smoother 2D + report heatmap
     // for very small or very large rooms, at ~(cells)² more compute. Applied to

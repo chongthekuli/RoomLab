@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=808" />
-  <link rel="stylesheet" href="css/theme.css?v=808" />
-  <link rel="stylesheet" href="css/print.css?v=808" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=809" />
+  <link rel="stylesheet" href="css/theme.css?v=809" />
+  <link rel="stylesheet" href="css/print.css?v=809" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -373,7 +373,9 @@
           <!-- 2D grid/snap size selector — opened by the green ▾ on the 2D tab.
                Sets state.display.gridSize_m; the 'G' key cycles the same. -->
           <div id="vp-grid-menu" class="vp-grid-menu" hidden role="menu" aria-label="Grid size">
-            <div class="vp-grid-menu-title">Grid / snap</div>
+            <button class="vp-grid-toggle" type="button" id="vp-grid-toggle" role="menuitemcheckbox" aria-checked="false" title="Show the reference grid over the 2D floor plan. Snap still works whether or not the grid is shown.">Show grid in 2D view</button>
+            <div class="vp-grid-sep" role="separator"></div>
+            <div class="vp-grid-menu-title">Grid / snap size</div>
             <button class="vp-grid-opt" type="button" data-grid="0.5"  role="menuitemradio" aria-checked="true">0.5 m</button>
             <button class="vp-grid-opt" type="button" data-grid="0.25" role="menuitemradio" aria-checked="false">0.25 m</button>
             <button class="vp-grid-opt" type="button" data-grid="0.1"  role="menuitemradio" aria-checked="false">0.1 m</button>
@@ -409,8 +411,8 @@
             <div class="vp-res-row" role="radiogroup" aria-label="Heatmap resolution">
               <span class="vp-res-label">Detail</span>
               <button class="vp-res-pill active" data-res="standard" role="radio" aria-checked="true"  type="button" title="Standard — 0.5 m cells. Fastest; the historical default.">Standard</button>
-              <button class="vp-res-pill"        data-res="high"     role="radio" aria-checked="false" type="button" title="High — ~0.33 m cells. Smoother map; more compute.">High</button>
-              <button class="vp-res-pill"        data-res="ultra"    role="radio" aria-checked="false" type="button" title="Ultra — ~0.25 m cells. Smoothest; slowest, can lag on very large rooms.">Ultra</button>
+              <button class="vp-res-pill"        data-res="high"     role="radio" aria-checked="false" type="button" title="High — 0.25 m cells. Smoother map; more compute.">High</button>
+              <button class="vp-res-pill"        data-res="ultra"    role="radio" aria-checked="false" type="button" title="Ultra — 0.125 m cells. Smoothest; slowest, can lag on very large rooms.">Ultra</button>
             </div>
           </div>
           <div class="vp-more-section">
@@ -685,6 +687,6 @@
   </div>
   <!-- Boot goes through the login wall; auth-gate.js dynamically imports
        js/main.js only after a user is authenticated. -->
-  <script type="module" src="js/auth/auth-gate.js?v=808"></script>
+  <script type="module" src="js/auth/auth-gate.js?v=809"></script>
 </body>
 </html>

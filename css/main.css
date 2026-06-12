@@ -899,6 +899,40 @@ html[data-rail-right="method"]          #panel-method {
 .vp-grid-opt[aria-checked="true"] { color: #34c759; font-weight: 600; }
 .vp-grid-opt[aria-checked="true"]::before { content: "✓ "; }
 .vp-grid-opt[aria-checked="false"]::before { content: ""; padding-left: 0.9em; }
+/* Show-grid toggle (checkbox-style) at the top of the grid dropdown. */
+.vp-grid-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: var(--fg, #e8eaed);
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+}
+.vp-grid-toggle::before {
+  content: "";
+  display: inline-block;
+  width: 12px; height: 12px;
+  margin-right: 8px;
+  border: 1px solid #5b6573;
+  border-radius: 3px;
+  flex: none;
+}
+.vp-grid-toggle:hover { background: rgba(255, 255, 255, 0.06); }
+.vp-grid-toggle.is-on { color: #34c759; }
+.vp-grid-toggle.is-on::before {
+  background: #34c759;
+  border-color: #34c759;
+  box-shadow: inset 0 0 0 2px #161b22;
+}
+.vp-grid-sep { height: 1px; background: rgba(255, 255, 255, 0.08); margin: 4px 2px; }
+/* Green arrow reads "active" when the grid is shown. */
+.vp-grid-arrow.is-grid-on { opacity: 1; }
 
 /* Slide-down "more" panel anchored below the centred segmented
    control (2D/3D/Walk/⛶/⋯). Same animation grammar as the rail

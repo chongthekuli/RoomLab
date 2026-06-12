@@ -86,6 +86,17 @@ ok(/state\.display\.gridSize_m = m;[\s\S]{0,60}emit\('grid:changed'\)/.test(room
 ok(/ev\.stopPropagation\(\)/.test(roomMain) && /toggleGridMenu/.test(roomMain),
    'main.js: arrow toggle stops propagation (no 2D-tab view switch)');
 
+// 8. Grid VISIBILITY toggle (default off) under the green-arrow dropdown.
+ok(/gridVisible:\s*false/.test(appState),
+   'app-state.js: state.display.gridVisible defaults to false (grid hidden)');
+ok(/if \(!state\.display\?\.gridVisible\) return '';/.test(room2d),
+   'room-2d.js: renderFloorGrid is gated on gridVisible (hidden unless enabled)');
+ok(/id="vp-grid-toggle"/.test(indexHtml),
+   'index.html: grid menu has a Show-grid toggle');
+ok(/state\.display\.gridVisible = !state\.display\.gridVisible/.test(roomMain)
+   && /getElementById\('vp-grid-toggle'\)/.test(roomMain),
+   'main.js: the toggle flips gridVisible');
+
 if (failed) {
   console.log(`\n${failed} FAIL`);
   process.exit(1);
