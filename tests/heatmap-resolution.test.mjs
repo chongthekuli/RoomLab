@@ -3,8 +3,8 @@
 // Pins the user-selectable heatmap resolution: state.display.heatmapRes
 // ('standard' | 'high' | 'ultra') maps (via heatmapResParams) to a finer cell
 // target + higher per-axis cap, threaded into computeSPLGrid by the 2D viewport
-// and the print report (3D stays at Standard + relies on its GPU bilinear
-// shader). Standard is byte-identical
+// the 3D heatmap, and the print report (all sample through computeSPLGrid; the
+// 3D GPU shader still smooths on top). Standard is byte-identical
 // to the historical 0.5 m / 120-cap default.
 //
 // Behavioural where possible: squareCellCounts + heatmapResParams are pure, so
@@ -70,13 +70,13 @@ ok(/on\('heatmap-res:changed', render\)/.test(room2d),
    "room-2d.js: re-renders on 'heatmap-res:changed'");
 ok(/\.\.\.resParams/.test(printRep) && /\(cached\.cellTarget_m \?\? 0\.5\) === resParams\.cellTarget_m/.test(printRep),
    'print-report.js: passes resolution AND makes the grid cache resolution-aware');
-// 3D heatmap deliberately does NOT follow the Detail setting — it relies on its
-// GPU bilinear shader, so finer cells barely change the look while costing more.
+// 3D heatmap follows the Detail setting too (samples through computeSPLGrid;
+// the GPU bilinear shader still smooths on top).
 const scene = readFileSync('./js/graphics/scene.js', 'utf8');
-ok(!/heatmapResParams/.test(scene),
-   'scene.js: 3D heatmap does NOT pass a resolution (stays at Standard)');
-ok(!/on\('heatmap-res:changed'/.test(scene),
-   "scene.js: 3D heatmap does NOT rebuild on 'heatmap-res:changed'");
+ok(/\.\.\.heatmapResParams\(state\.display\?\.heatmapRes\)/.test(scene),
+   'scene.js: 3D heatmap passes the resolution into computeSPLGrid');
+ok(/on\('heatmap-res:changed',\s*\(\)\s*=>\s*queueRebuild\(REBUILD_HEATMAP\)\)/.test(scene),
+   "scene.js: 3D heatmap rebuilds on 'heatmap-res:changed'");
 ok(/data-res="standard"/.test(indexHtml) && /data-res="high"/.test(indexHtml) && /data-res="ultra"/.test(indexHtml),
    'index.html: more-panel has Standard / High / Ultra detail pills');
 ok(/state\.display\.heatmapRes = level/.test(roomMain) && /emit\('heatmap-res:changed'\)/.test(roomMain),
