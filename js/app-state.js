@@ -861,6 +861,11 @@ export const state = {
     // (default) / 0.25 / 0.1 via the green arrow on the 2D tab button or the
     // 'G' key while drawing. Session-only (not serialized) like other display.*.
     gridSize_m: 0.5,
+    // Heatmap resolution (2026-06-12). 'standard' (0.5 m cells, the historical
+    // default) / 'high' / 'ultra' — finer cells = smoother 2D + report heatmap
+    // for very small or very large rooms, at ~(cells)² more compute. Applied to
+    // the 2D viewport + print report (3D uses its smooth shader). Session-only.
+    heatmapRes: 'standard',
   },
   // Physics model toggles (see spl-calculator.js). Reverberant field is OFF
   // by default — the Hopkins-Stryker statistical reverb is spatially uniform,

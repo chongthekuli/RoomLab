@@ -13,7 +13,7 @@ import { computeRoomConstant } from '../physics/spl-calculator.js';
 import { on, emit } from '../ui/events.js';
 import { commitCapturedRoom } from '../capture/capture-flow.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
-import { computeSPLGrid } from '../physics/spl-calculator.js';
+import { computeSPLGrid, heatmapResParams } from '../physics/spl-calculator.js';
 import { roomPlanVertices, isInsideRoom3D, roomEffectiveBounds } from '../physics/room-shape.js';
 import { dilateGridForDisplay } from '../physics/grid-display.js';
 import { colorForMetric } from './colour-ramps.js';
@@ -1008,6 +1008,7 @@ export function mount2DViewport({ materials }) {
   render();
   on('room:changed', render);
   on('grid:changed', render);   // 2D grid/snap size changed (G key or 2D-tab dropdown)
+  on('heatmap-res:changed', render);   // heatmap resolution changed (more panel)
   on('source:changed', render);
   on('source:model_changed', render);
   on('source:selected', render);
@@ -1708,6 +1709,8 @@ function renderNormal(vp) {
       sources: flatSources,
       getSpeakerDef: url => getCachedLoudspeaker(url),
       room: state.room, gridSize: 25, freq_hz: freq, earHeight_m: ear,
+      // User-selectable heatmap resolution (state.display.heatmapRes).
+      ...heatmapResParams(state.display?.heatmapRes),
       airAbsorption: phys.airAbsorption !== false,
       coherent: !!phys.coherent,
       // Material-aware wall TL — must match the 3D path (scene.js

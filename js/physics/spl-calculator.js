@@ -1125,13 +1125,36 @@ function pointInPoly(x, y, verts) {
 const HEATMAP_CELL_TARGET_M = 0.5;
 const HEATMAP_CELL_MIN = 8;
 const HEATMAP_CELL_MAX = 120;
-export function squareCellCounts(totalW, totalD, targetM = HEATMAP_CELL_TARGET_M) {
+
+// User-selectable heatmap resolution (2026-06-12). Standard is the historical
+// 0.5 m / 120-cap default — unchanged. Higher levels shrink the target cell
+// SIZE and raise the per-axis cap so small rooms (which previously hit the
+// 8-cell floor) and large rooms (which hit the 120 cap) both render finer /
+// less blocky. NOTE per Dr. Chen: 0.5 m already Nyquist-samples the steepest
+// meaningful direct-field gradient, so finer cells add VISUAL smoothness, not
+// new physics — and cost ~(cells)² more compute. Cells stay square + equal-
+// area at every level, so the unweighted avgSPL mean stays unbiased.
+export const HEATMAP_RES_LEVELS = {
+  standard: { cellTarget_m: 0.5,  maxCells: 120, label: 'Standard' },
+  high:     { cellTarget_m: 0.33, maxCells: 180, label: 'High' },
+  ultra:    { cellTarget_m: 0.25, maxCells: 240, label: 'Ultra' },
+};
+// Pure resolver: level name → { cellTarget_m, maxCells }. Unknown / undefined
+// falls back to Standard. Callers (room-2d.js, print-report.js) read the level
+// off state and pass the params into computeSPLGrid — physics stays decoupled
+// from app-state.
+export function heatmapResParams(level) {
+  return HEATMAP_RES_LEVELS[level] || HEATMAP_RES_LEVELS.standard;
+}
+
+export function squareCellCounts(totalW, totalD, targetM = HEATMAP_CELL_TARGET_M, maxCells = HEATMAP_CELL_MAX) {
   const w = Math.max(1e-3, totalW), d = Math.max(1e-3, totalD);
+  const cap = Math.max(HEATMAP_CELL_MIN, Math.round(maxCells) || HEATMAP_CELL_MAX);
   const longest = Math.max(w, d);
   let cellSize = targetM;
-  if (longest / cellSize > HEATMAP_CELL_MAX) cellSize = longest / HEATMAP_CELL_MAX;
-  const cellsX = Math.max(HEATMAP_CELL_MIN, Math.min(HEATMAP_CELL_MAX, Math.round(w / cellSize)));
-  const cellsY = Math.max(HEATMAP_CELL_MIN, Math.min(HEATMAP_CELL_MAX, Math.round(d / cellSize)));
+  if (longest / cellSize > cap) cellSize = longest / cap;
+  const cellsX = Math.max(HEATMAP_CELL_MIN, Math.min(cap, Math.round(w / cellSize)));
+  const cellsY = Math.max(HEATMAP_CELL_MIN, Math.min(cap, Math.round(d / cellSize)));
   return { cellsX, cellsY };
 }
 
@@ -1230,6 +1253,11 @@ export function computeSPLGrid({
   // Default [] keeps legacy callers (and the bare-room modal estimate) valid.
   zones = [],
   treatments = [],
+  // Heatmap resolution (2026-06-12). cellTarget_m = target square cell size;
+  // maxCells = per-axis cap. Default to the historical 0.5 m / 120 so existing
+  // callers are byte-identical. UI callers pass heatmapResParams(level).
+  cellTarget_m = HEATMAP_CELL_TARGET_M,
+  maxCells = HEATMAP_CELL_MAX,
 }) {
   const useSTI = metric === 'sti' && stipaCtx && computeSTIPAAt;
 
@@ -1245,7 +1273,7 @@ export function computeSPLGrid({
   // an elongated room no longer gets stretched rectangular cells. All
   // surfaces (2D viewport / 3D room plane / print) call through here, so
   // they sample identically.
-  const { cellsX, cellsY } = squareCellCounts(totalW, totalD);
+  const { cellsX, cellsY } = squareCellCounts(totalW, totalD, cellTarget_m, maxCells);
   const cellW_m = totalW / cellsX;
   const cellD_m = totalD / cellsY;
   const originX_m = bounds.minX;
@@ -1504,6 +1532,9 @@ export function computeSPLGrid({
   const hasResults = count > 0;
   return {
     grid, cellsX, cellsY, cellW_m, cellD_m,
+    // Resolution this grid was computed at — lets the print report tell a
+    // standard-res cache (e.g. written by the 3D path) from a user-res one.
+    cellTarget_m, maxCells,
     // Origin of the (0,0) cell in state coords. Defaults to (0,0) for
     // legacy callers that were ignoring it; new callers that care about
     // post-merge geometry use these to position the heatmap cells.

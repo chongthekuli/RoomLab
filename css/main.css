@@ -1073,6 +1073,61 @@ html[data-more-menu] .vp-more-panel {
   .vp-freq-pill:active:not(:disabled) { transform: none; }
 }
 
+/* Heatmap resolution selector — a label + 3 pills sharing the octave-band
+   pill look so the more-panel reads as one control family. */
+.vp-res-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr 1fr;
+  align-items: center;
+  gap: 3px;
+  margin-top: 6px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+}
+.vp-res-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #7d8893;
+  padding: 0 8px 0 4px;
+}
+.vp-res-pill {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #89929d;
+  padding: 5px 0;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: center;
+  transition: color 180ms ease-out, background-color 200ms ease-out,
+              border-color 200ms ease-out, transform 120ms ease-out;
+}
+.vp-res-pill:hover:not(.active) {
+  color: #c5ccd4;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.vp-res-pill:active { transform: scale(0.96); }
+.vp-res-pill.active {
+  color: #fff;
+  background: #3a5a8a;
+  border-color: #5a7ab0;
+  box-shadow: 0 0 0 1px rgba(90, 122, 176, 0.35), 0 2px 6px rgba(58, 90, 138, 0.25);
+}
+.vp-res-pill:focus-visible {
+  outline: 2px solid var(--accent, #5a7ab0);
+  outline-offset: 2px;
+  z-index: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-res-pill { transition: none; }
+  .vp-res-pill:active { transform: none; }
+}
+
 .vp-help-btn { min-width: 28px; padding: 0.3rem 0.5rem; font-weight: 600; }
 .vp-help-btn::before { content: '' !important; }
 

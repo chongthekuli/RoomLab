@@ -30,7 +30,7 @@ import { computeAllBands } from '../physics/rt60.js';
 import { roomVolume, baseArea } from '../physics/room-shape.js';
 import { getCachedLoudspeaker } from '../physics/loudspeaker.js';
 import { speakerCategoryLabel } from '../shared/speaker-catalog.js';
-import { computeSPLGrid, computeRoomConstant } from '../physics/spl-calculator.js';
+import { computeSPLGrid, computeRoomConstant, heatmapResParams } from '../physics/spl-calculator.js';
 import { deriveMetrics } from '../physics/precision/derive-metrics.js';
 import { buildHeatmapPageSVG, buildHeatmapLegend, shiftSplGridByDb, buildHeatmapStripLegend, heatmapPageViewBox } from './print-heatmap.js';
 import { buildFloorPlanSVG } from './print-plan-svg.js';
@@ -295,11 +295,15 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
   // "SPL, room-only" caption. `outdoor !== true` is the load-bearing check.
   // Enforced by tests/outdoor-report-exclusion.test.mjs.
   const reportFreq = state.physics?.freq_hz ?? 1000;
+  const resParams = heatmapResParams(state.display?.heatmapRes);
   if (cached && cached.grid && cached.cellsX > 0 && cached.cellsY > 0
       && (cached.sourceCount ?? 0) > 0
       && cached.outdoor !== true
       && (cached.metric ?? 'spl') === 'spl'
-      && (cached.freq_hz ?? 1000) === reportFreq) {
+      && (cached.freq_hz ?? 1000) === reportFreq
+      // Resolution must match — a standard-res grid written by the 3D path
+      // would otherwise print coarser than the user's chosen heatmap detail.
+      && (cached.cellTarget_m ?? 0.5) === resParams.cellTarget_m) {
     return cached;
   }
   // Compute fresh. Match the same parameters the 2D viewport uses so
@@ -333,7 +337,9 @@ function ensurePrintSplGrid({ materials, t60_1k }) {
       getSpeakerDef: getCachedLoudspeaker,
       room: state.room,
       earHeight_m: earH,
-      gridSize: 60,             // Sofia spec: print-resolution raster
+      gridSize: 60,             // legacy (superseded by cellTarget_m/maxCells)
+      // User-selectable heatmap resolution (state.display.heatmapRes).
+      ...resParams,
       freq_hz: state.physics?.freq_hz ?? 1000,
       roomConstantR: R,
       coherent,

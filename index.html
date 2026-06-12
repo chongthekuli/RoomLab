@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=804" />
-  <link rel="stylesheet" href="css/theme.css?v=804" />
-  <link rel="stylesheet" href="css/print.css?v=804" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=805" />
+  <link rel="stylesheet" href="css/theme.css?v=805" />
+  <link rel="stylesheet" href="css/print.css?v=805" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -403,6 +403,15 @@
               <button class="vp-freq-pill" data-freq="4000" role="radio" aria-checked="false" type="button" title="4 kHz octave band — consonant clarity. Sharp shadows, strong air absorption beyond ~10 m.">4k</button>
               <button class="vp-freq-pill" data-freq="8000" role="radio" aria-checked="false" type="button" title="8 kHz octave band — high. Sharpest shadows, biggest air-absorption rolloff; A/B with 125 Hz to validate diffraction physics.">8k</button>
             </div>
+            <!-- Heatmap render resolution — finer cells = smoother 2D + report
+                 map for very small / very large rooms, at more compute. Applies
+                 to the 2D viewport + print report (3D uses its smooth shader). -->
+            <div class="vp-res-row" role="radiogroup" aria-label="Heatmap resolution">
+              <span class="vp-res-label">Detail</span>
+              <button class="vp-res-pill active" data-res="standard" role="radio" aria-checked="true"  type="button" title="Standard — 0.5 m cells. Fastest; the historical default.">Standard</button>
+              <button class="vp-res-pill"        data-res="high"     role="radio" aria-checked="false" type="button" title="High — ~0.33 m cells. Smoother map; more compute.">High</button>
+              <button class="vp-res-pill"        data-res="ultra"    role="radio" aria-checked="false" type="button" title="Ultra — ~0.25 m cells. Smoothest; slowest, can lag on very large rooms.">Ultra</button>
+            </div>
           </div>
           <div class="vp-more-section">
             <h4>Tools</h4>
@@ -676,6 +685,6 @@
   </div>
   <!-- Boot goes through the login wall; auth-gate.js dynamically imports
        js/main.js only after a user is authenticated. -->
-  <script type="module" src="js/auth/auth-gate.js?v=804"></script>
+  <script type="module" src="js/auth/auth-gate.js?v=805"></script>
 </body>
 </html>

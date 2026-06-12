@@ -255,6 +255,44 @@ function setupTabs() {
     });
   });
 
+  // Heatmap resolution selector (2026-06-12). Finer cells = smoother 2D +
+  // report heatmap for very small / very large rooms, at more compute. Writes
+  // state.display.heatmapRes and re-renders the 2D viewport via the shared
+  // 'heatmap-res:changed' event. The print report reads the setting at print
+  // time; 3D keeps its smooth shader (left at standard).
+  const resPills = Array.from(document.querySelectorAll('#vp-more-panel .vp-res-pill'));
+  const applyRes = (level, focusEl) => {
+    if (!level) return;
+    if (!state.display) state.display = {};
+    if ((state.display.heatmapRes ?? 'standard') !== level) {
+      state.display.heatmapRes = level;
+      try { emit('heatmap-res:changed'); } catch (_) {}
+    }
+    for (const p of resPills) {
+      const active = p.dataset.res === level;
+      p.classList.toggle('active', active);
+      p.setAttribute('aria-checked', active ? 'true' : 'false');
+      p.setAttribute('tabindex', active ? '0' : '-1');
+    }
+    if (focusEl) focusEl.focus();
+  };
+  resPills.forEach((pill, idx) => {
+    pill.setAttribute('tabindex', pill.classList.contains('active') ? '0' : '-1');
+    pill.addEventListener('click', () => applyRes(pill.dataset.res, pill));
+    pill.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Home' && e.key !== 'End') return;
+      e.preventDefault();
+      let next = idx;
+      if (e.key === 'ArrowLeft')  next = (idx - 1 + resPills.length) % resPills.length;
+      if (e.key === 'ArrowRight') next = (idx + 1) % resPills.length;
+      if (e.key === 'Home') next = 0;
+      if (e.key === 'End')  next = resPills.length - 1;
+      applyRes(resPills[next].dataset.res, resPills[next]);
+    });
+  });
+  // Reflect the initial state.display.heatmapRes on mount.
+  applyRes(state.display?.heatmapRes ?? 'standard');
+
   const aimBtn = document.getElementById('toggle-aim-lines');
   if (aimBtn) {
     aimBtn.addEventListener('click', () => {
