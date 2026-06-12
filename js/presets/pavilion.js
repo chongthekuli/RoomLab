@@ -1,7 +1,8 @@
-// Pavilion 2 Bukit Jalil — 4-level shopping mall preset.
+// Shopping Mall — 4-level super-regional shopping mall preset.
 //
-// Scaled model of the real Kuala Lumpur mall (which is ~340 × 90 m over
-// 5 retail levels) — 80 × 40 m footprint, 4 levels at 5.8 m floor-to-
+// Modelled on a typical Malaysian super-regional mall (the real ones run
+// ~340 × 90 m over 5 retail levels) — 80 × 40 m footprint, 4 levels at 5.8 m
+// floor-to-
 // floor, with a 20 × 14 m central atrium void punched through every
 // slab. Structural columns on a 10 × 10 m grid (Malaysian super-regional
 // mall norm). Ceiling speakers follow Malaysian BOMBA voice-alarm norms
@@ -110,16 +111,17 @@ for (const esc of escalators) {
 // ---- Shops along the perimeter of every level -----------------------
 // Each shop is a bay running 6 m deep from the exterior wall. Facade
 // faces the walkway with a storefront-glass pane and a 3 m shutter
-// opening centred on the bay. Brand names rotate through a list of
-// real Malaysian-mall tenants so the visual reads like an actual
-// concourse rather than abstract geometry.
+// opening centred on the bay. Storefront names rotate through a list of
+// invented, generic tenant names (NOT real trademarks) so the visual
+// reads like an actual concourse rather than abstract geometry.
 const BRANDS = [
-  'H&M', 'Uniqlo', 'Zara', 'Starbucks', 'Apple', 'Samsung', 'Nike', 'Adidas',
-  'Charles & Keith', 'Pomelo', 'Sephora', 'MAC', 'Chatime', 'Coach',
-  'Michael Kors', 'Timberland', 'Padini', 'Bata', 'MNG', 'Watsons',
-  'Guardian', 'Sushi King', 'KFC', 'Pizza Hut', 'Secret Recipe',
-  'OldTown', 'Mr. DIY', 'Popular', 'Kinokuniya', 'Toys R Us',
-  'Aldo', 'Lovisa', 'Pandora', 'Swatch',
+  'Fashion Hub', 'Urban Threads', 'Denim Republic', 'Coffee Co.', 'Tech World',
+  'GadgetZone', 'Active Gear', 'Run & Stride', 'Leather & Co.', 'Bloom Boutique',
+  'Beauty Bar', 'Glow Cosmetics', 'Bubble Tea', 'Handbag Lane', 'Modern Carry',
+  'Trailhead Outdoors', 'StylePoint', 'StepUp Footwear', 'Mode Lane', 'Healthwise Pharmacy',
+  'Wellness Pharmacy', 'Sushi Station', 'Burger Stop', 'Pizzeria', 'Sweet Crumbs',
+  'Brew House', 'HomeFix', 'Page & Co. Books', 'Story Corner', 'Playtown Toys',
+  'Sole Society', 'Charm & Gem', 'Glint Jewellery', 'Tick-Tock Watches',
 ];
 const SHOP_DEPTH = 6;
 const SHUTTER_WIDTH = 3.0;
@@ -287,22 +289,22 @@ const listeners = [
   // Ground floor (L0)
   { id: 'L1', label: 'GF — Main entrance',        position: { x: 5,  y: 20 }, elevation_m: 0,                    posture: 'standing',     custom_ear_height_m: null },
   { id: 'L2', label: 'GF — Atrium centre',        position: { x: 40, y: 20 }, elevation_m: 0,                    posture: 'standing',     custom_ear_height_m: null },
-  { id: 'L3', label: 'GF — Food Republic',        position: { x: 65, y: 10 }, elevation_m: 0,                    posture: 'sitting_chair', custom_ear_height_m: null },
-  { id: 'L4', label: 'GF — Parkson entrance',     position: { x: 72, y: 30 }, elevation_m: 0,                    posture: 'standing',     custom_ear_height_m: null },
+  { id: 'L3', label: 'GF — Food court',           position: { x: 65, y: 10 }, elevation_m: 0,                    posture: 'sitting_chair', custom_ear_height_m: null },
+  { id: 'L4', label: 'GF — Department store entrance', position: { x: 72, y: 30 }, elevation_m: 0,               posture: 'standing',     custom_ear_height_m: null },
   // Level 1
   { id: 'L5', label: 'L1 — Fashion concourse',    position: { x: 15, y: 32 }, elevation_m: levelHeight,          posture: 'standing',     custom_ear_height_m: null },
   { id: 'L6', label: 'L1 — Atrium balcony',       position: { x: 28, y: 20 }, elevation_m: levelHeight,          posture: 'standing',     custom_ear_height_m: null },
-  { id: 'L7', label: 'L1 — Tokyo Town precinct',  position: { x: 55, y: 8  }, elevation_m: levelHeight,          posture: 'standing',     custom_ear_height_m: null },
+  { id: 'L7', label: 'L1 — Themed dining precinct', position: { x: 55, y: 8  }, elevation_m: levelHeight,        posture: 'standing',     custom_ear_height_m: null },
   // Level 2
-  { id: 'L8', label: 'L2 — TGV cinema lobby',     position: { x: 25, y: 8  }, elevation_m: 2 * levelHeight,      posture: 'standing',     custom_ear_height_m: null },
+  { id: 'L8', label: 'L2 — Cinema lobby',         position: { x: 25, y: 8  }, elevation_m: 2 * levelHeight,      posture: 'standing',     custom_ear_height_m: null },
   { id: 'L9', label: 'L2 — Atrium balcony',       position: { x: 52, y: 20 }, elevation_m: 2 * levelHeight,      posture: 'standing',     custom_ear_height_m: null },
   // Level 3
-  { id: 'L10', label: 'L3 — Harvey Norman',       position: { x: 15, y: 20 }, elevation_m: 3 * levelHeight,      posture: 'standing',     custom_ear_height_m: null },
+  { id: 'L10', label: 'L3 — Electronics store',   position: { x: 15, y: 20 }, elevation_m: 3 * levelHeight,      posture: 'standing',     custom_ear_height_m: null },
   { id: 'L11', label: 'L3 — rooftop dining',      position: { x: 70, y: 25 }, elevation_m: 3 * levelHeight,      posture: 'sitting_chair', custom_ear_height_m: null },
 ];
 
 export default {
-  label: 'Pavilion 2 Bukit Jalil (4-level mall)',
+  label: 'Shopping Mall (4-level)',
   authorComments: 'Concourses on Amperes CS610B ceiling speakers at ~10 m spacing meet MS IEC 60849 voice-alarm intelligibility — STI ≥ 0.50 across every level. The central atrium void is the dominant reverb path; verify coverage at the void edges.',
   shape: 'custom',
   ceiling_type: 'flat',

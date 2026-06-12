@@ -1,6 +1,6 @@
 // Sports arena / auditorium preset (key: 'auditorium').
 //
-// Modelled after University of Wyoming Arena-Auditorium — a 60 m polygon
+// A generic ~11,600-seat geodesic-dome sports arena — a 60 m polygon
 // plan with a domed roof, tiered concrete bowl, 4 vomitory tunnels at the
 // cardinals, and a center-hung 4-sided LED cube. PA is 4 line-array hangs
 // on a 10 m ring at catwalk height aimed radially outward at each bowl

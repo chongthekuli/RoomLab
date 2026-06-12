@@ -608,11 +608,11 @@ export const state = {
     stadiumStructure: null,
     // Multi-level structure for shopping-mall / atrium-based buildings.
     // When present, scene.js renders floor slabs with an atrium cut-out,
-    // structural columns, and escalator ramps. Built for the Pavilion 2
-    // Bukit Jalil preset.
+    // structural columns, and escalator ramps. Built for the shopping-mall
+    // preset.
     multiLevelStructure: null,
     // Render overhead cable-tray runs above each rack row (visual-only;
-    // set true by the Google Data Center preset). Derived from rack
+    // set true by the data-center preset). Derived from rack
     // positions at render time — see rebuildCableTrays in scene.js. Keep
     // in sync with DEFAULT_ROOM_STATE below.
     cableTrays: false,
@@ -998,7 +998,7 @@ const DEFAULT_ROOM_STATE = {
   multiLevelStructure: null,
   surauStructure: null,
   // Render overhead cable-tray runs above each rack row (visual-only;
-  // set true by the Google Data Center preset). Derived from rack
+  // set true by the data-center preset). Derived from rack
   // positions at render time — see rebuildCableTrays in scene.js +
   // computeCableTrayRows in graphics/cable-tray.js. Round-trips via the
   // whole-room deepClone in serialize/deserializeProject. Keep in sync
@@ -1320,7 +1320,7 @@ export function deserializeProject(obj) {
     if (r.surauStructure && typeof r.surauStructure === 'object') {
       state.room.surauStructure = deepClone(r.surauStructure);
     }
-    // Overhead cable-tray render flag (Google Data Center preset). Round-
+    // Overhead cable-tray render flag (data-center preset). Round-
     // trips so a saved data-center scene reloads with its trays.
     if (typeof r.cableTrays === 'boolean')       state.room.cableTrays = r.cableTrays;
     // Sub-structures (Phase 1: visual only). Each entry is self-contained —

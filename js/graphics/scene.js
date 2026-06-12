@@ -6853,8 +6853,8 @@ function rebuildRacks() {
 }
 
 // Overhead ladder cable-trays — one continuous run above each rack row.
-// Visual-only set dressing, gated by state.room.cableTrays (the Google Data
-// Center preset sets it true). Rows are DERIVED from rack positions (see
+// Visual-only set dressing, gated by state.room.cableTrays (the data-center
+// preset sets it true). Rows are DERIVED from rack positions (see
 // computeCableTrayRows in cable-tray.js), so the tray always follows the
 // racks — no parallel state array to keep in sync. Each row is built as ONE
 // merged BufferGeometry (2 rails + N rungs) → ~1 draw call per row, sharing
@@ -8432,7 +8432,7 @@ let structuresGroup = null;
 // acoustics read the real material row, not this colour).
 function _structureColour(materialId) {
   const id = String(materialId || '').toLowerCase();
-  // Painted-white plant (chiller cabinets in the Google Data Center yard).
+  // Painted-white plant (chiller cabinets in the data-center yard).
   // Checked BEFORE metal so a 'chiller-cabinet-steel' id reads off-white,
   // not battleship grey. Not pure white — 0xffffff blows out under the
   // tone-mapped lighting and loses all form.
@@ -9764,7 +9764,7 @@ function rebuildStadiumHeatmap(room, sources) {
 // Multi-level shopping-mall architecture. Renders N floor slabs (with an
 // atrium cutout punched through every slab), a grid of structural columns
 // running the full building height, and escalator ramps between levels.
-// Driven by room.multiLevelStructure — built for the Pavilion 2 preset.
+// Driven by room.multiLevelStructure — built for the shopping-mall preset.
 function rebuildMultiLevelStructure(room) {
   const mls = room.multiLevelStructure;
   if (!mls) return;

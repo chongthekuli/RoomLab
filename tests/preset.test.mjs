@@ -159,7 +159,7 @@ assert(state.room.authorComments === TEMPLATES.hifi.authorComments,
 assert(state.room.authorComments !== surauNote,
   `Swap surau→hifi: authorComments actually CHANGED (sanity check)`);
 
-// --- Google Data Center preset (added 2026-06-06) --------------------------
+// --- Hyperscale data-center preset (added 2026-06-06) ----------------------
 // rackSystem + cableTrays plumbing (CLAUDE.md §3 preset-plumbing invariant):
 // a preset that ships racks / the cable-tray flag must propagate them in
 // applyPresetToState, AND assert it here, or the renderer sees undefined and
@@ -167,44 +167,44 @@ assert(state.room.authorComments !== surauNote,
 applyPresetToState('googleDataCenter');
 const dc = PRESETS.googleDataCenter;
 assert(Array.isArray(state.rackSystem?.racks) && state.rackSystem.racks.length === 200,
-  `Google DC: 200 racks propagated to state (got ${state.rackSystem?.racks?.length})`);
+  `Data-center: 200 racks propagated to state (got ${state.rackSystem?.racks?.length})`);
 assert(state.rackSystem.racks.every(r => r.rackModelKey === 'enclosed-42u'),
-  'Google DC: every rack is the enclosed-42u (70 kg) model');
+  'Data-center: every rack is the enclosed-42u (70 kg) model');
 assert(state.rackSystem.racks.every(r => r.slots.length === 21 && r.slots.every(s => s.amplifierId === 'qd2100')),
-  'Google DC: every rack stuffed with 21× QD2100 (2U each = 42U)');
+  'Data-center: every rack stuffed with 21× QD2100 (2U each = 42U)');
 assert(state.rackSystem.racks.every(r => r.slots.every(s => s.uHeight === 2) &&
     new Set(r.slots.map(s => s.uStart)).size === 21 &&
     Math.max(...r.slots.map(s => s.uStart)) === 41),
-  'Google DC: QD2100 slots fill U1..U42 with no overlap');
+  'Data-center: QD2100 slots fill U1..U42 with no overlap');
 assert(state.room.cableTrays === true,
-  'Google DC: room.cableTrays flag propagated true (overhead trays render)');
+  'Data-center: room.cableTrays flag propagated true (overhead trays render)');
 // Halls (5 demising walls → 10 split segments) + chiller yard (16 × 2).
 const partitions = state.structures.filter(s => s.type === 'partition');
 const chillerBodies = state.structures.filter(s => s.type === 'half_wall' && /chiller/i.test(s.materialId));
 const chillerPads = state.structures.filter(s => s.type === 'platform');
-assert(partitions.length === 10, `Google DC: 10 partition segments (got ${partitions.length})`);
+assert(partitions.length === 10, `Data-center: 10 partition segments (got ${partitions.length})`);
 assert(chillerBodies.length === 16 && chillerPads.length === 16,
-  `Google DC: 16 chiller bodies + 16 pads (got ${chillerBodies.length}/${chillerPads.length})`);
+  `Data-center: 16 chiller bodies + 16 pads (got ${chillerBodies.length}/${chillerPads.length})`);
 assert(state.sources.length === 12 && state.sources.every(s => s.groupId === 'VA'),
-  `Google DC: 12-speaker voice-alarm PA grid (got ${state.sources.length})`);
+  `Data-center: 12-speaker voice-alarm PA grid (got ${state.sources.length})`);
 assert(state.room.width_m === 60 && state.room.depth_m === 120 && state.room.height_m === 12,
-  'Google DC: representative 60×120×12 m shell');
+  'Data-center: representative 60×120×12 m shell');
 // Coordinate-frame guard (v=766 regression): RoomLab rectangular rooms use a
 // CORNER origin — interior content must fall within [0,W]×[0,D], NOT centred
 // on (0,0). The first cut placed everything about the room centre, so racks /
 // halls / speakers rendered a half-building down-and-left of the shell.
 const W_ = state.room.width_m, D_ = state.room.depth_m;
 assert(state.rackSystem.racks.every(r => r.position.x >= 0 && r.position.x <= W_ && r.position.y >= 0 && r.position.y <= D_),
-  'Google DC: all 200 racks sit INSIDE the building footprint [0,W]×[0,D]');
+  'Data-center: all 200 racks sit INSIDE the building footprint [0,W]×[0,D]');
 assert(state.sources.every(s => s.position.x >= 0 && s.position.x <= W_ && s.position.y >= 0 && s.position.y <= D_),
-  'Google DC: all VA speakers sit inside the building footprint');
+  'Data-center: all VA speakers sit inside the building footprint');
 assert(state.listeners.every(l => l.position.x >= 0 && l.position.x <= W_ && l.position.y >= 0 && l.position.y <= D_),
-  'Google DC: all listeners sit inside the building footprint');
+  'Data-center: all listeners sit inside the building footprint');
 assert(partitions.every(p => p.position.x >= 0 && p.position.x <= W_ && p.position.y >= 0 && p.position.y <= D_),
-  'Google DC: partition walls sit inside the building footprint');
+  'Data-center: partition walls sit inside the building footprint');
 // Chillers are EXTERIOR by design — west of the west wall (x < 0).
 assert(chillerBodies.every(c => c.position.x < 0) && chillerPads.every(c => c.position.x < 0),
-  'Google DC: chiller yard sits OUTSIDE the west wall (x < 0), as intended');
+  'Data-center: chiller yard sits OUTSIDE the west wall (x < 0), as intended');
 // Swap away must clear the cable-tray flag (no leak to the next scene).
 applyTemplateToState('hifi');
 assert(state.room.cableTrays === false,

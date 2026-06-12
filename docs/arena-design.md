@@ -1,6 +1,6 @@
 # Sports Arena — Design & Code Review
 
-This document assembles the code that renders RoomLAB's **Sports arena (dome)** preset — a simplified model of a tiered dome arena inspired by the University of Wyoming Arena-Auditorium (~11,600-seat geodesic dome, 360° seating). The goal of this file is to let an external acoustics or architecture consultant review our approach end-to-end in one read, and flag where our approximations diverge from real arena design.
+This document assembles the code that renders RoomLAB's **Sports arena (dome)** preset — a simplified model of a generic ~11,600-seat geodesic-dome sports arena (360° seating). The goal of this file is to let an external acoustics or architecture consultant review our approach end-to-end in one read, and flag where our approximations diverge from real arena design.
 
 ---
 
@@ -85,7 +85,7 @@ const SPKLA = 'data/loudspeakers/line-array-element.json';
 // ...
 
 auditorium: (() => {
-  // Sports arena modeled after University of Wyoming Arena-Auditorium.
+  // Sports arena modeled after a generic geodesic-dome arena.
   // 50 m polygon plan (24 sides approximates the geodesic dome).
   // Walls 12 m + 8 m dome rise → 20 m at apex.
   // NCAA basketball court (28.7 × 15.2 m) at center.
@@ -754,7 +754,7 @@ These are documented in [project_chen_audit.md](../memory placeholder) and track
 | A3 | **Vomitories / stair access** | Vertical breaks through the bowl at regular intervals | Not modeled — bowls wrap 360° uninterrupted |
 | A4 | **Seat acoustic effect** | Upholstered seats dominate absorption at audience freq bands | Zones use `carpet-heavy` material; no seat-density modeling |
 | A5 | **Geodesic dome truss** | Triangulated panels of different absorption | Smooth spherical-cap approximation with single `gypsum-board` material |
-| A6 | **Center-hung PA radius** | Wyoming catwalk ~15 m radius | Our cluster is 3 m ring radius; treated as a tight central cluster |
+| A6 | **Center-hung PA radius** | Typical arena catwalk ~15 m radius | Our cluster is 3 m ring radius; treated as a tight central cluster |
 | A7 | **Speaker directivity** | Real line arrays have very narrow vertical (~10°) dispersion | Our JSON has ±45° vertical coverage; mispredicts throw distance |
 
 ### Questions for an acoustic / architectural consultant
@@ -791,4 +791,4 @@ Total: ~100 assertions pass.
   - `js/graphics/scene.js` — Three.js renderer (room / zones / stadium furniture / sources / listeners)
   - `data/loudspeakers/line-array-element.json` — the speaker used in the arena preset
 
-Reference source for the arena model: [Arena-Auditorium (Wikipedia)](https://en.wikipedia.org/wiki/Arena-Auditorium).
+Reference model: a generic ~11,600-seat geodesic-dome sports arena (no specific real venue).

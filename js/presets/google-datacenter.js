@@ -1,4 +1,4 @@
-// Google Data Center — long-shed hyperscale "data-center barn" preset.
+// Hyperscale Data Center — long-shed "data-center barn" preset.
 //
 // Designed against the reference image (a ~150 m white shed with a row of
 // air-cooled chillers marching down one long side) by four specialists:
@@ -194,7 +194,7 @@ const toCorner = (item) => ({
 });
 
 const preset = {
-  label: 'Google Data Center',
+  label: 'Hyperscale Data Center',
   authorComments:
     'Long-shed hyperscale data centre. Partitions split it into a NOC, MMR, ' +
     'electrical room and three data halls, but the engine models ONE RT60 ' +

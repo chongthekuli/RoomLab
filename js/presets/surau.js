@@ -1,12 +1,11 @@
 // Surau (mosque prayer hall) preset (key: 'surau').
 //
-// Modelled after the Surau (Binaan Baru) at Rejimen 512 Askar Wataniah,
-// Kem Sri Tembila, Terengganu — Drawing PNZZ/Z2506/ELV/PA/018 (Sep 2025,
-// Perunding NZZ Sdn Bhd, tender drawing). RoomLAB simulates ONLY the
-// prayer hall (the 318 m² central space). The southern side rooms
-// (Imam, Bilal, AV, VIP, Staff, Utility, Toilets, Bilik Jenazah) and
-// the ablution area are acoustically separate spaces not served by the
-// indoor PA — they're excluded from the room polygon.
+// A generic single-storey community surau (small mosque) of typical
+// Malaysian build — an 18.0 × 17.7 m new-build prayer hall (the 318 m²
+// central space). RoomLAB simulates ONLY the prayer hall. The southern
+// side rooms (Imam, Bilal, AV, VIP, Staff, Utility, Toilets, Bilik
+// Jenazah) and the ablution area are acoustically separate spaces not
+// served by the indoor PA — they're excluded from the room polygon.
 //
 // Coordinate convention:
 //   +x = east (room is 18.0 m E–W)
@@ -15,7 +14,7 @@
 // Main entrance is on the south wall (y = 0); congregation faces north
 // toward the imam at the qibla wall (y = 17.7).
 //
-// PA system per the tender schematic PNZZ/Z2506/ELV/SCH/019:
+// PA system per a representative voice-alarm tender schematic:
 //   • 4× 20 W column speakers on the long walls (zones Z1–Z4)
 //   • Plus 1× zone (Z5) for the bilal/imam rooms — excluded here
 //   • Plus 4× 80 W horn speakers on the roof (Z6) for outdoor azan — excluded here
@@ -135,8 +134,8 @@ export default {
       materialId: 'wood-floor',
     },
     // Hip roof — replaces the flat ceiling with a 4-sided pyramid rising
-    // 1.5 m above the eaves. Matches the FALL 25° pitched roof in the
-    // tender drawing (4.5 m at eaves → 6.0 m at apex). Apex defaults to
+    // 1.5 m above the eaves. Approximates a typical 25° pitched roof
+    // (4.5 m at eaves → 6.0 m at apex). Apex defaults to
     // room centre. When atapTumpang is also defined (below), this block
     // becomes TIER 1 of a multi-tiered Malay roof — its plateau dims
     // are taken from atapTumpang.tier_plateau_size_m[0].
@@ -216,9 +215,8 @@ export default {
     // recommended 'mustaka' (lotus-derived bulb stack) as more vernacular
     // than 'crescent' (Turkish/Ottoman emblem). User preference 2026-05-15
     // reverted to 'crescent' — many post-1980s Malaysian mosques DO carry
-    // the crescent (Surau Al-Firdaus, Masjid Al-Wataniah Pasir Panjang,
-    // etc.) so it's not unheard-of. To switch back to mustaka, change
-    // cap_style to 'mustaka' below — both paths are implemented in
+    // the crescent, so it's not unheard-of. To switch back to mustaka,
+    // change cap_style to 'mustaka' below — both paths are implemented in
     // rebuildSurauStructure().
     minaret: {
       corner: 'NW',
