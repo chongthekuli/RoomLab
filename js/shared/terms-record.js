@@ -23,7 +23,8 @@ export function getAcceptanceTimestamp() {
 }
 
 // Read the full acceptance record (this session), or null. Shape:
-//   { acceptedAt, operatorName, publicIp, browser, timezone, screen }
+//   { acceptedAt, operatorName, publicIp, browser, timezone, screen,
+//     marketingConsent }
 export function getAcceptanceRecord() {
   try {
     const raw = sessionStorage.getItem(ACCEPT_RECORD_KEY);
@@ -38,10 +39,12 @@ export function hasAcceptedThisSession() {
 /**
  * Build and persist the acceptance record for this session. `operatorName` is
  * the author label printed on every report — now the signed-in account
- * identity. Resolves to the stored record (publicIp degrades to
+ * identity. `marketingConsent` records the OPTIONAL opt-in to promotional
+ * contact from AuraLAB and its manufacturer partners (default false; never
+ * gates sign-in). Resolves to the stored record (publicIp degrades to
  * "Not available" if the lookup is blocked/offline).
  */
-export async function recordAcceptance({ operatorName } = {}) {
+export async function recordAcceptance({ operatorName, marketingConsent } = {}) {
   const fp = captureFingerprint();
   const publicIp = await fetchPublicIp();
   const acceptedAt = formatUTC(new Date());
@@ -52,6 +55,7 @@ export async function recordAcceptance({ operatorName } = {}) {
     browser: fp.browser,
     timezone: fp.timezone,
     screen: fp.screen,
+    marketingConsent: marketingConsent === true,
   };
   try {
     sessionStorage.setItem(ACCEPT_TIMESTAMP_KEY, acceptedAt);

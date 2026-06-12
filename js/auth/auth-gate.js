@@ -222,8 +222,18 @@ function authorLabel(user) {
   const name = (user.displayName || '').trim();
   return name ? `${name} (${user.email})` : (user.email || 'Authenticated user');
 }
+// Optional marketing opt-in — read at acceptance time, default false if the
+// checkbox is absent (e.g. the already-signed-in terms step). Never gates auth.
+function marketingConsentChecked() {
+  return document.getElementById('marketing-consent-check')?.checked === true;
+}
 async function recordAndBoot(user) {
-  try { await recordAcceptance({ operatorName: authorLabel(user) }); }
+  try {
+    await recordAcceptance({
+      operatorName: authorLabel(user),
+      marketingConsent: marketingConsentChecked(),
+    });
+  }
   catch (e) { console.warn('[auth-gate] recordAcceptance failed:', e); }
   bootApp();
 }

@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=813" />
-  <link rel="stylesheet" href="css/theme.css?v=813" />
-  <link rel="stylesheet" href="css/print.css?v=813" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=814" />
+  <link rel="stylesheet" href="css/theme.css?v=814" />
+  <link rel="stylesheet" href="css/print.css?v=814" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -186,6 +186,12 @@
       font-size: 12.5px; color: #c9d1d9; line-height: 1.4; margin: 4px 0 16px; cursor: pointer;
     }
     #auth-gate .auth-terms-check input { width: auto; flex: none; margin: 2px 0 0; cursor: pointer; accent-color: #2f6fed; }
+    /* Optional marketing consent — lighter/secondary so it reads as not required. */
+    #auth-gate .auth-consent-check {
+      display: flex; align-items: flex-start; gap: 9px; text-align: left;
+      font-size: 11.5px; color: #8b95a3; line-height: 1.4; margin: -8px 0 16px; cursor: pointer;
+    }
+    #auth-gate .auth-consent-check input { width: auto; flex: none; margin: 2px 0 0; cursor: pointer; accent-color: #6b7280; }
     #auth-gate button:disabled { opacity: .5; cursor: not-allowed; }
 
     /* Two-column on desktop → stacked on narrow screens */
@@ -234,6 +240,8 @@
           <p><strong>Standards are referenced, not certified.</strong> The engine implements published methods (ISO&nbsp;3382-1, ISO&nbsp;9613-1, IEC&nbsp;60268-16:2020, ISO&nbsp;17497-2, Sabine, Eyring, Schroeder, Beranek) with documented simplifications. AuraLAB is not certified against any standard it cites; full methodology is printed in every report.</p>
           <p><strong>No warranty; engineering judgement remains yours.</strong> AuraLAB is provided as-is, without warranty of fitness for any purpose, and its operator accepts no liability for design decisions made from its output. By continuing you affirm that you are a competent acoustics, AV, architectural or engineering professional — or are supervised by one — and will not present these predictions as commissioning-grade measurements.</p>
           <p><strong>Your acceptance is recorded.</strong> It is timestamped in UTC together with your signed-in account, public IP address, browser and platform, and is referenced on the methodology page of every PDF report generated in this session.</p>
+          <p><strong>Privacy.</strong> The data held is your sign-in email and the acceptance record above (UTC timestamp, account identity, public IP, browser, platform and timezone). It is used to run the simulator and to evidence your acceptance on generated reports. Personal data is not sold. It is not shared with third parties except (a) where the law requires it or where a service we rely on needs it to operate — sign-in is handled by Google Firebase — and (b) with the manufacturer partners you opt into below, if any. Data is held with reasonable safeguards; you may ask the operator to show or delete your account data at any time.</p>
+          <p><strong>Whose terms these are.</strong> These are the operator's terms for using AuraLAB; they are not a certified legal opinion. If anything here is unclear, contact the operator before you continue.</p>
         </div>
       </section>
 
@@ -250,6 +258,13 @@
       <label class="auth-terms-check" data-views="signin signup">
         <input type="checkbox" id="terms-accept-check" />
         <span>I have read and accept the Terms of Use.</span>
+      </label>
+
+      <!-- Optional marketing-consent checkbox — DOES NOT gate sign-in.
+           Default unchecked; never pre-ticked (GDPR / Malaysia PDPA). -->
+      <label class="auth-consent-check" data-views="signin signup">
+        <input type="checkbox" id="marketing-consent-check" />
+        <span>I agree to receive product and promotional information from AuraLAB and its hardware manufacturer partners, and for my contact details to be shared with those partners for this purpose. Optional — you can withdraw at any time.</span>
       </label>
 
       <!-- Accept button — terms-acceptance step only -->
@@ -687,6 +702,6 @@
   </div>
   <!-- Boot goes through the login wall; auth-gate.js dynamically imports
        js/main.js only after a user is authenticated. -->
-  <script type="module" src="js/auth/auth-gate.js?v=813"></script>
+  <script type="module" src="js/auth/auth-gate.js?v=814"></script>
 </body>
 </html>
