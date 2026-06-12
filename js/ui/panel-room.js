@@ -1523,6 +1523,19 @@ function compactSlot(slot) {
 const DEFAULT_DOOR    = { kind: 'door',   width_m: 0.9, height_m: 2.1, x_m: 0.5, z_m: 0,   thickness_m: 0.05, materialId: 'door-solid-wood', state: 'closed' };
 const DEFAULT_WINDOW  = { kind: 'window', width_m: 1.5, height_m: 1.2, x_m: 0.5, z_m: 1.0, thickness_m: 0.05, materialId: 'glass-window',    state: 'closed' };
 
+// An opening's render depth follows its MATERIAL's real thickness
+// (reference_thickness_m) — so "Glass window 6mm" reads as 6 mm, not the old
+// flat 50 mm. Auto-filled when an opening is added and whenever its material
+// changes; the depth field stays editable afterward for special cases (a deep
+// frame / reveal). Falls back to 50 mm for any material without a reference
+// thickness. (Depth is render-only — the opening's acoustics come entirely
+// from the material's transmission-loss data, never its depth.)
+function refThicknessForMaterial(matId) {
+  const m = materialsRef?.list?.find(x => x.id === matId);
+  const t = Number(m?.reference_thickness_m);
+  return (Number.isFinite(t) && t > 0) ? t : 0.05;
+}
+
 let _opIdCounter = 1;
 function newOpeningId() { return 'op-' + (_opIdCounter++).toString(36) + Math.random().toString(36).slice(2, 5); }
 
@@ -2137,7 +2150,7 @@ function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
   addDoor.addEventListener('click', () => {
     const next = readSlotAsObject(getSlot());
     const x_m = placeOpeningX(next.openings, DEFAULT_DOOR.width_m, wallLengthFor(surfaceId));
-    next.openings.push({ ...DEFAULT_DOOR, x_m, id: newOpeningId() });
+    next.openings.push({ ...DEFAULT_DOOR, x_m, thickness_m: refThicknessForMaterial(DEFAULT_DOOR.materialId), id: newOpeningId() });
     setSlot(next);
     emit('room:changed');
     renderSurfaceMaterials();
@@ -2151,7 +2164,7 @@ function renderOpeningsBlock(surfaceId, getSlot, setSlot) {
   addWin.addEventListener('click', () => {
     const next = readSlotAsObject(getSlot());
     const x_m = placeOpeningX(next.openings, DEFAULT_WINDOW.width_m, wallLengthFor(surfaceId));
-    next.openings.push({ ...DEFAULT_WINDOW, x_m, id: newOpeningId() });
+    next.openings.push({ ...DEFAULT_WINDOW, x_m, thickness_m: refThicknessForMaterial(DEFAULT_WINDOW.materialId), id: newOpeningId() });
     setSlot(next);
     emit('room:changed');
     renderSurfaceMaterials();
@@ -2207,8 +2220,11 @@ function renderOpeningRow(surfaceId, op, idx, getSlot, setSlot) {
   matSel.addEventListener('change', e => {
     const next = readSlotAsObject(getSlot());
     next.openings[idx].materialId = e.target.value;
+    // Depth follows the material's real thickness (6 mm glass → 6 mm, etc.).
+    next.openings[idx].thickness_m = refThicknessForMaterial(e.target.value);
     setSlot(next);
     emit('room:changed');
+    renderSurfaceMaterials();   // refresh the depth field to the new thickness
   });
   row.appendChild(matSel);
 
@@ -2266,19 +2282,19 @@ function renderOpeningRow(surfaceId, op, idx, getSlot, setSlot) {
   // field fall back to 50 mm there.
   {
     const tLabel = document.createElement('label');
-    tLabel.title = 'Opening depth (door leaf / window frame thickness), shown in the 3D preview';
+    tLabel.title = 'Opening depth (leaf / pane thickness), shown in the 3D preview. Auto-set from the chosen material (e.g. Glass window 6mm → 6 mm); edit for a deep frame / reveal.';
     const tSpan = document.createElement('span');
     tSpan.textContent = 'depth (mm)';
     const tInput = document.createElement('input');
     tInput.type = 'number';
-    tInput.step = '5';
-    tInput.min = '10';
+    tInput.step = '1';
+    tInput.min = '3';
     tInput.max = '300';
     tInput.value = String(Math.round((Number(op.thickness_m) || 0.05) * 1000));
     tInput.addEventListener('input', e => {
       const mm = parseFloat(e.target.value);
       if (!Number.isFinite(mm)) return;
-      const clamped = Math.min(300, Math.max(10, mm));
+      const clamped = Math.min(300, Math.max(3, mm));
       const next = readSlotAsObject(getSlot());
       next.openings[idx].thickness_m = clamped / 1000;
       setSlot(next);
