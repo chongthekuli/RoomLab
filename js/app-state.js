@@ -867,9 +867,10 @@ export const state = {
     // shows. Session-only.
     gridVisible: false,
     // Heatmap resolution (2026-06-12). 'standard' (0.5 m cells, the historical
-    // default) / 'high' / 'ultra' — finer cells = more sampling detail, at
-    // ~(cells)² more compute. Applied to the 2D viewport, the 3D heatmap, and
-    // the print report (all three sample through computeSPLGrid). Session-only.
+    // default) / 'high' / 'ultra' — finer cells = smoother 2D + report heatmap
+    // for very small or very large rooms, at ~(cells)² more compute. Applied to
+    // the 2D viewport + print report only; the 3D heatmap stays at Standard and
+    // relies on its GPU shader's bilinear smoothing. Session-only.
     heatmapRes: 'standard',
   },
   // Physics model toggles (see spl-calculator.js). Reverberant field is OFF
