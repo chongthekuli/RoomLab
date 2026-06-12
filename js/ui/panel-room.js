@@ -168,16 +168,7 @@ export function mountRoomPanel({ materials }) {
       </label>
     </div>
     <div id="shape-params"></div>
-    <h3>Ceiling</h3>
-    <div class="field-group">
-      <label>Ceiling
-        <select data-f="ceiling_type">
-          ${Object.entries(CEILING_LABELS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
-        </select>
-      </label>
-    </div>
-    <div id="ceiling-params"></div>
-    <h3>Surface materials</h3>
+    <h3>Surfaces</h3>
     <div id="treatment-preset-row" class="treatment-preset-row"></div>
     <div id="surface-materials"></div>
   `;
@@ -518,11 +509,11 @@ export function mountRoomPanel({ materials }) {
     render();
     emit('room:changed');
   });
-  root.querySelector('[data-f="ceiling_type"]').addEventListener('change', e => {
-    state.room.ceiling_type = e.target.value;
-    render();
-    emit('room:changed');
-  });
+  // NOTE: the ceiling_type <select> is no longer in the static template —
+  // it now lives inside the Ceiling group rendered by renderSurfaceMaterials()
+  // (so ceiling SHAPE + ceiling MATERIAL read as one surface, not two
+  // disconnected "Ceiling" controls). Its change handler is wired per-render
+  // in renderCeilingTypeRow(); don't query it here at mount.
   root.querySelector('[data-f="enclosure"]').addEventListener('change', e => {
     state.room.enclosure = e.target.value;
     render();
@@ -701,21 +692,12 @@ function render() {
   // (Author's note sync moved to js/ui/panel-author-note.js at v=552 —
   // it subscribes to scene:reset and re-syncs its textarea + counter.)
   root.querySelector('[data-f="shape"]').value = state.room.shape;
-  root.querySelector('[data-f="ceiling_type"]').value = state.room.ceiling_type;
   root.querySelector('[data-f="enclosure"]').value = state.room.enclosure ?? 'indoor';
-  // Outdoor mode hides the entire Ceiling section since there's no roof
-  // — only Plan-shape, Type, Shape params (without height), and the floor
-  // material remain meaningful. The DOM nodes stay so flipping back to
-  // Indoor doesn't have to re-mount; we just toggle their hidden state.
-  const isOutdoor = state.room.enclosure === 'outdoor';
-  const ceilingHeader = Array.from(root.querySelectorAll('h3')).find(el => el.textContent === 'Ceiling');
-  if (ceilingHeader) ceilingHeader.hidden = isOutdoor;
-  const ceilGroup = root.querySelector('[data-f="ceiling_type"]')?.closest('.field-group');
-  if (ceilGroup) ceilGroup.hidden = isOutdoor;
-  const ceilParamsHost = root.querySelector('#ceiling-params');
-  if (ceilParamsHost) ceilParamsHost.hidden = isOutdoor;
+  // Outdoor (no roof) is handled inside renderSurfaceMaterials(): the whole
+  // Ceiling group (shape + material) is skipped, and Floor is relabelled
+  // "Ground". Ceiling shape/material no longer live in the static template,
+  // so there's no separate header/field-group to toggle here.
   renderShapeParams();
-  renderCeilingParams();
   renderSurfaceMaterials();
   renderSavedRoomDropdown();
   renderSavedCustomRooms();
@@ -1405,7 +1387,10 @@ function updateCustomBoundingBox() {
 }
 
 function renderCeilingParams() {
+  // Host only exists while the Ceiling group is mounted (indoor rooms).
+  // Outdoor rooms skip the group, so bail rather than throw.
   const root = document.getElementById('ceiling-params');
+  if (!root) return;
   const r = state.room;
   if (r.ceiling_type === 'dome') {
     root.innerHTML = `
@@ -1710,30 +1695,95 @@ function renderSurfaceMaterials() {
     parent.appendChild(wrap);
   };
 
+  // Render the unified Ceiling group: the ceiling SHAPE control (Flat /
+  // Domed + the dome-rise field when domed) and the ceiling MATERIAL row,
+  // together under one "Ceiling" heading. Before v=806 these lived in two
+  // disconnected places (a "Ceiling" shape dropdown at the top of the
+  // panel, and a "Ceiling" material row buried between Floor and Walls) —
+  // two controls both labelled "Ceiling" with the whole Surfaces section
+  // between them. Now both read as one surface. Skipped entirely for
+  // outdoor rooms (no roof). The shape select + dome host are rebuilt and
+  // re-wired on every render (they're no longer in the static template),
+  // so a re-render can't orphan their handlers.
+  const renderCeilingGroup = (parent) => {
+    const h4 = document.createElement('h4');
+    h4.textContent = 'Ceiling';
+    parent.appendChild(h4);
+
+    const group = document.createElement('div');
+    group.className = 'field-group';
+
+    // Ceiling SHAPE — Flat vs Domed. Labelled "Shape" (not "Ceiling") so it
+    // doesn't read as a second ceiling control; the group heading already
+    // says Ceiling.
+    const shapeLabel = document.createElement('label');
+    shapeLabel.title = 'Ceiling form. Flat is a level soffit; Domed is a spherical cap that focuses reflections toward the room centre.';
+    shapeLabel.append('Shape ');
+    const shapeSel = document.createElement('select');
+    shapeSel.dataset.f = 'ceiling_type';
+    for (const [k, v] of Object.entries(CEILING_LABELS)) {
+      const o = document.createElement('option');
+      o.value = k; o.textContent = v;
+      shapeSel.appendChild(o);
+    }
+    shapeSel.value = state.room.ceiling_type;
+    shapeSel.addEventListener('change', e => {
+      state.room.ceiling_type = e.target.value;
+      render();
+      emit('room:changed');
+    });
+    shapeLabel.appendChild(shapeSel);
+    group.appendChild(shapeLabel);
+    parent.appendChild(group);
+
+    // Dome-rise host — renderCeilingParams() fills this with the rise field
+    // only when ceiling_type === 'dome'. Same #ceiling-params id wireShapeInputs()
+    // queries, so the rise input wires through the existing shape-input path.
+    const ceilParams = document.createElement('div');
+    ceilParams.id = 'ceiling-params';
+    parent.appendChild(ceilParams);
+    renderCeilingParams();
+
+    // Ceiling MATERIAL — the absorptive surface itself.
+    const matGroup = document.createElement('div');
+    matGroup.className = 'field-group';
+    renderWallRow(
+      matGroup, 'ceiling', 'Material',
+      () => state.room.surfaces.ceiling,
+      v => { state.room.surfaces.ceiling = v; },
+      false,
+      'Acoustic finish of the ceiling soffit. Set to open-air to remove the roof.',
+    );
+    parent.appendChild(matGroup);
+  };
+
   // Outdoor mode keeps walls user-controlled — just rename the floor row to
-  // "Ground" and skip the ceiling row (no roof). Walls can be set to
+  // "Ground" and skip the ceiling group (no roof). Walls can be set to
   // 'open-air' individually if the user wants a fully open footprint.
   const isOutdoor = state.room.enclosure === 'outdoor';
 
+  // Surface order is the same everywhere: Floor → Walls → Ceiling. Each
+  // surface's controls sit together under one heading; surfaces are never
+  // interleaved. Guarded by tests/room-surface-grouping.test.mjs.
   if (state.room.shape === 'custom') {
-    const group1 = document.createElement('div');
-    group1.className = 'field-group';
-    const fcRows = isOutdoor
-      ? [['floor', 'Ground']]
-      : [['floor', 'Floor'], ['ceiling', 'Ceiling']];
-    for (const [id, lbl] of fcRows) {
-      renderWallRow(
-        group1, id, lbl,
-        () => state.room.surfaces[id],
-        v => { state.room.surfaces[id] = v; },
-        false,
-      );
-    }
-    root.appendChild(group1);
+    // Floor
+    const floorHead = document.createElement('h4');
+    floorHead.textContent = isOutdoor ? 'Ground' : 'Floor';
+    root.appendChild(floorHead);
+    const floorGroup = document.createElement('div');
+    floorGroup.className = 'field-group';
+    renderWallRow(
+      floorGroup, 'floor', isOutdoor ? 'Ground' : 'Floor',
+      () => state.room.surfaces.floor,
+      v => { state.room.surfaces.floor = v; },
+      false,
+    );
+    root.appendChild(floorGroup);
 
-    const h4 = document.createElement('h4');
-    h4.textContent = 'Wall materials';
-    root.appendChild(h4);
+    // Walls — per-edge for custom rooms.
+    const wallHead = document.createElement('h4');
+    wallHead.textContent = 'Walls';
+    root.appendChild(wallHead);
 
     const nEdges = (state.room.custom_vertices || []).length;
     if (!state.room.surfaces.edges || state.room.surfaces.edges.length !== nEdges) {
@@ -1751,6 +1801,10 @@ function renderSurfaceMaterials() {
       );
     }
     root.appendChild(edgeGroup);
+
+    // Ceiling (shape + material) — skipped outdoors.
+    if (!isOutdoor) renderCeilingGroup(root);
+
     // FALL THROUGH to renderEnclosureMaterialSections at the bottom so
     // a custom-shape parent ALSO gets per-enclosure rows. Without this,
     // clicking an enclosure face in 3D would emit surface:picked but
@@ -1760,24 +1814,43 @@ function renderSurfaceMaterials() {
     return;
   }
 
+  // Rectangular / non-rect (polygon, round): split the flat surface list
+  // into Floor → Walls → Ceiling groups so each surface reads as a unit.
   const labelsAll = state.room.shape === 'rectangular' ? RECT_SURFACE_LABELS : NONRECT_SURFACE_LABELS;
-  const labels = isOutdoor
-    ? labelsAll.filter(([id]) => id !== 'ceiling').map(
-        ([id, lbl]) => [id, id === 'floor' ? 'Ground' : lbl],
-      )
-    : labelsAll;
-  const group = document.createElement('div');
-  group.className = 'field-group';
-  for (const [id, label] of labels) {
-    const isWall = id !== 'floor' && id !== 'ceiling';
+  const wallLabels = labelsAll.filter(([id]) => id !== 'floor' && id !== 'ceiling');
+
+  // Floor
+  const floorHead = document.createElement('h4');
+  floorHead.textContent = isOutdoor ? 'Ground' : 'Floor';
+  root.appendChild(floorHead);
+  const floorGroup = document.createElement('div');
+  floorGroup.className = 'field-group';
+  renderWallRow(
+    floorGroup, 'floor', isOutdoor ? 'Ground' : 'Floor',
+    () => state.room.surfaces.floor,
+    v => { state.room.surfaces.floor = v; },
+    false,
+  );
+  root.appendChild(floorGroup);
+
+  // Walls
+  const wallHead = document.createElement('h4');
+  wallHead.textContent = 'Walls';
+  root.appendChild(wallHead);
+  const wallGroup = document.createElement('div');
+  wallGroup.className = 'field-group';
+  for (const [id, label] of wallLabels) {
     renderWallRow(
-      group, id, label,
+      wallGroup, id, label,
       () => state.room.surfaces[id],
       v => { state.room.surfaces[id] = v; },
-      isWall,
+      true,
     );
   }
-  root.appendChild(group);
+  root.appendChild(wallGroup);
+
+  // Ceiling (shape + material) — skipped outdoors.
+  if (!isOutdoor) renderCeilingGroup(root);
 
   // Per-enclosure sections — broken-out sub-rooms get their own Floor /
   // Ceiling / Wall N material rows + a × button to drop the whole
@@ -2352,14 +2425,20 @@ on('room:changed', () => {
     render();
   } else if (state.room.shape === 'custom') {
     // Don't rebuild the custom-shape panel while the user is typing in a
-    // vertex X/Y field. renderShapeParams() replaces #vertex-list via
+    // vertex X/Y field OR the dome-rise field. renderShapeParams() replaces
+    // #vertex-list and renderSurfaceMaterials() replaces #ceiling-params via
     // innerHTML, which would destroy the focused input and drop the caret
-    // after the first digit (the vertex manual-entry focus bug). The 2D/3D
-    // viewports still update live — they listen to room:changed separately.
-    // The list re-renders on the next room:changed once focus has left the
-    // field. Guarded by tests/vertex-edit-focus.test.mjs.
+    // after the first digit (the vertex manual-entry focus bug — the
+    // dome-rise field, now inside the Ceiling group, has the same shape).
+    // The 2D/3D viewports still update live — they listen to room:changed
+    // separately. The fields re-render on the next room:changed once focus
+    // has left. Guarded by tests/vertex-edit-focus.test.mjs.
     const ae = document.activeElement;
-    if (ae && typeof ae.closest === 'function' && ae.closest('#vertex-list')) return;
+    const hasClosest = ae && typeof ae.closest === 'function';
+    if (hasClosest && ae.closest('#vertex-list')) return;
+    // Same caret-drop guard for the dome-rise field — it now lives inside
+    // #ceiling-params, which renderSurfaceMaterials() replaces via innerHTML.
+    if (hasClosest && ae.closest('#ceiling-params')) return;
     renderShapeParams();
     renderSurfaceMaterials();
   }
