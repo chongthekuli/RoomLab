@@ -19,7 +19,7 @@ import { state } from '../../app-state.js';
 import { emit } from '../../shared/events.js';
 import { buildRackGroup } from '../../graphics/rack-render.js';
 import { bindLab } from '../../shared/lab-storage.js';
-import { listCustomRooms, updateCustomRoom } from '../../shared/custom-rooms.js';
+import { listCustomRooms, updateCustomRoom } from '../../state/cloud-rooms.js';
 
 // DeviceLAB-namespaced localStorage. Persists in-progress UI state
 // across browser-close → reopen: the half-built _currentRack and

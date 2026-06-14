@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/main.css?v=814" />
-  <link rel="stylesheet" href="css/theme.css?v=814" />
-  <link rel="stylesheet" href="css/print.css?v=814" media="all" />
+  <link rel="stylesheet" href="css/main.css?v=835" />
+  <link rel="stylesheet" href="css/theme.css?v=835" />
+  <link rel="stylesheet" href="css/print.css?v=835" media="all" />
   <script type="importmap">
   {
     "imports": {
@@ -125,6 +125,14 @@
       background: #2f6fed; color: #fff; border: 0;
     }
     #auth-gate .auth-submit:hover { background: #2a63d6; }
+    /* Secondary (ghost) button — used for "Resend email" on the verify gate. */
+    #auth-gate .auth-secondary {
+      padding: 11px; margin-top: 10px; cursor: pointer; font-weight: 500;
+      background: transparent; color: #9aa4b2; border: 1px solid #2a3038;
+    }
+    #auth-gate .auth-secondary:hover:not(:disabled) { background: rgba(255,255,255,.05); color: #e8eaed; }
+    #auth-gate .auth-verify-lead { font-size: 13px; color: #9aa4b2; line-height: 1.55; margin: 0 0 18px; text-align: left; }
+    #auth-gate .auth-verify-lead strong { color: #e8eaed; font-weight: 600; }
     #auth-gate .auth-error {
       margin-top: 16px; font-size: 13px; color: #ff8585;
       background: rgba(255,80,80,.08); border: 1px solid rgba(255,80,80,.25);
@@ -132,13 +140,9 @@
     }
     #auth-gate .auth-note { margin-top: 18px; font-size: 11px; color: #6b7280; }
     #auth-gate.auth-busy { opacity: .6; pointer-events: none; }
-    #auth-signout {
-      position: fixed; bottom: 12px; right: 12px; z-index: 90000;
-      font: 500 12px "Inter Tight", system-ui, sans-serif;
-      padding: 6px 12px; border-radius: 7px; cursor: pointer;
-      background: rgba(22,27,34,.9); color: #c9d1d9; border: 1px solid #2a3038;
-    }
-    #auth-signout:hover { background: #21262d; color: #fff; }
+    /* Sign-out moved into the header user menu (js/shared/header-nav.js +
+       js/ui/account-menu.js). The old fixed bottom-right #auth-signout button
+       was retired at v=815. */
 
     /* --- multi-view auth (sign in / create account / reset password) --- */
     #auth-gate .auth-sub { margin-bottom: 20px; line-height: 1.45; }
@@ -192,6 +196,17 @@
       font-size: 11.5px; color: #8b95a3; line-height: 1.4; margin: -8px 0 16px; cursor: pointer;
     }
     #auth-gate .auth-consent-check input { width: auto; flex: none; margin: 2px 0 0; cursor: pointer; accent-color: #6b7280; }
+    /* Required profile fields (company / position / contact) on the create form
+       + the completion gate. 16px inputs avoid iOS auto-zoom; the invalid state
+       uses border colour AND an inset bar (never colour alone). */
+    #auth-gate .auth-profile-group { margin-top: 4px; }
+    #auth-gate .auth-profile-group .auth-label { margin-bottom: 9px; }
+    #auth-gate .auth-profile-group input { font-size: 16px; }
+    #auth-gate .auth-req { color: #ff9a8f; margin-left: 2px; font-weight: 600; }
+    #auth-gate .auth-field-err { display: block; margin: 4px 0 0; font-size: 11.5px; line-height: 1.35; color: #ff8585; }
+    #auth-gate .auth-field-err[hidden] { display: none; }
+    #auth-gate input.is-invalid { border-color: #e0453a; box-shadow: inset 3px 0 0 #e0453a; }
+    #auth-gate input.is-invalid:focus { box-shadow: inset 3px 0 0 #e0453a, 0 0 0 3px rgba(224,69,58,.18); }
     #auth-gate button:disabled { opacity: .5; cursor: not-allowed; }
 
     /* Two-column on desktop → stacked on narrow screens */
@@ -240,7 +255,7 @@
           <p><strong>Standards are referenced, not certified.</strong> The engine implements published methods (ISO&nbsp;3382-1, ISO&nbsp;9613-1, IEC&nbsp;60268-16:2020, ISO&nbsp;17497-2, Sabine, Eyring, Schroeder, Beranek) with documented simplifications. AuraLAB is not certified against any standard it cites; full methodology is printed in every report.</p>
           <p><strong>No warranty; engineering judgement remains yours.</strong> AuraLAB is provided as-is, without warranty of fitness for any purpose, and its operator accepts no liability for design decisions made from its output. By continuing you affirm that you are a competent acoustics, AV, architectural or engineering professional — or are supervised by one — and will not present these predictions as commissioning-grade measurements.</p>
           <p><strong>Your acceptance is recorded.</strong> It is timestamped in UTC together with your signed-in account, public IP address, browser and platform, and is referenced on the methodology page of every PDF report generated in this session.</p>
-          <p><strong>Privacy.</strong> The data held is your sign-in email and the acceptance record above (UTC timestamp, account identity, public IP, browser, platform and timezone). It is used to run the simulator and to evidence your acceptance on generated reports. Personal data is not sold. It is not shared with third parties except (a) where the law requires it or where a service we rely on needs it to operate — sign-in is handled by Google Firebase — and (b) with the manufacturer partners you opt into below, if any. Data is held with reasonable safeguards; you may ask the operator to show or delete your account data at any time.</p>
+          <p><strong>Privacy.</strong> The data held is your sign-in email, the profile you provide — company name, position and contact number — and the acceptance record above (UTC timestamp, account identity, public IP, browser, platform and timezone). It is used to run the simulator, to manage your account, and to evidence your acceptance on generated reports. It is stored in our cloud provider's database — sign-in and storage are handled by Google Firebase&nbsp;/&nbsp;Firestore — and an administrator may view your profile and acceptance record. Personal data is not sold. It is not shared with third parties except (a) where the law requires it or where a service we rely on needs it to operate, and (b) with the manufacturer partners you opt into below, if any. Data is held with reasonable safeguards. You may correct your company name, position and contact number in your Profile, and you may ask the operator to show or delete your account data at any time. You may also delete your account yourself from your Profile; doing so ends your access and removes your login, but the operator retains a minimal record — that the account existed and the date it was deleted — for audit and compliance, not your profile or contact details.</p>
           <p><strong>Whose terms these are.</strong> These are the operator's terms for using AuraLAB; they are not a certified legal opinion. If anything here is unclear, contact the operator before you continue.</p>
         </div>
       </section>
@@ -260,11 +275,15 @@
         <span>I have read and accept the Terms of Use.</span>
       </label>
 
-      <!-- Optional marketing-consent checkbox — DOES NOT gate sign-in.
-           Default unchecked; never pre-ticked (GDPR / Malaysia PDPA). -->
-      <label class="auth-consent-check" data-views="signin signup">
-        <input type="checkbox" id="marketing-consent-check" />
-        <span>I agree to receive product and promotional information from AuraLAB and its hardware manufacturer partners, and for my contact details to be shared with those partners for this purpose. Optional — you can withdraw at any time.</span>
+      <!-- Marketing-consent checkbox — shown ONLY on the create-account view
+           (new registrations); never on the sign-in view. DOES NOT gate auth.
+           Default ON (pre-ticked) per operator decision (2026-06-13); the choice
+           latches to the per-user preference (js/shared/user-prefs.js) and is
+           editable later in Account → Preferences. Unticking shows a brief
+           message (wired in auth-gate.js). -->
+      <label class="auth-consent-check" data-views="signup">
+        <input type="checkbox" id="marketing-consent-check" checked />
+        <span>I agree to receive product and promotional information from AuraLAB and its hardware manufacturer partners, and for my contact details to be shared with those partners for this purpose.</span>
       </label>
 
       <!-- Accept button — terms-acceptance step only -->
@@ -309,6 +328,20 @@
             <button type="button" class="auth-toggle-pass" data-target="signup-pass2" aria-label="Show password">Show</button>
           </div>
         </label>
+        <div class="auth-profile-group" data-profile-group>
+          <label class="auth-label"><span>Company <span class="auth-req" aria-hidden="true">*</span></span>
+            <input type="text" id="signup-company" name="company" autocomplete="organization" placeholder="e.g. Arup, Müller-BBM" maxlength="120" required aria-describedby="signup-company-err" />
+            <span class="auth-field-err" id="signup-company-err" role="alert" hidden></span>
+          </label>
+          <label class="auth-label"><span>Position <span class="auth-req" aria-hidden="true">*</span></span>
+            <input type="text" id="signup-position" name="position" autocomplete="organization-title" placeholder="e.g. Acoustic consultant" maxlength="80" required aria-describedby="signup-position-err" />
+            <span class="auth-field-err" id="signup-position-err" role="alert" hidden></span>
+          </label>
+          <label class="auth-label"><span>Contact number <span class="auth-req" aria-hidden="true">*</span></span>
+            <input type="tel" id="signup-contactNumber" name="contactNumber" inputmode="tel" autocomplete="tel" placeholder="+60 12-345 6789" maxlength="32" required aria-describedby="signup-contactNumber-err" />
+            <span class="auth-field-err" id="signup-contactNumber-err" role="alert" hidden></span>
+          </label>
+        </div>
         <button type="submit" class="auth-submit">Create account</button>
       </form>
 
@@ -318,6 +351,37 @@
           <input type="email" id="reset-email" autocomplete="email" placeholder="you@company.com" required />
         </label>
         <button type="submit" class="auth-submit">Send reset link</button>
+      </form>
+
+      <!-- Complete your profile (post-auth gate, before app boot — shown when a
+           signed-in account is missing its required profile fields, e.g. Google
+           sign-ups that have no create-account form). -->
+      <form id="form-profile" class="auth-view" data-view="profile" hidden>
+        <p class="auth-account" data-views="profile" hidden>Signed in as <strong id="profile-account-email"></strong></p>
+        <div class="auth-profile-group" data-profile-group>
+          <label class="auth-label"><span>Company <span class="auth-req" aria-hidden="true">*</span></span>
+            <input type="text" id="profile-company" name="company" autocomplete="organization" placeholder="e.g. Arup, Müller-BBM" maxlength="120" required aria-describedby="profile-company-err" />
+            <span class="auth-field-err" id="profile-company-err" role="alert" hidden></span>
+          </label>
+          <label class="auth-label"><span>Position <span class="auth-req" aria-hidden="true">*</span></span>
+            <input type="text" id="profile-position" name="position" autocomplete="organization-title" placeholder="e.g. Acoustic consultant" maxlength="80" required aria-describedby="profile-position-err" />
+            <span class="auth-field-err" id="profile-position-err" role="alert" hidden></span>
+          </label>
+          <label class="auth-label"><span>Contact number <span class="auth-req" aria-hidden="true">*</span></span>
+            <input type="tel" id="profile-contactNumber" name="contactNumber" inputmode="tel" autocomplete="tel" placeholder="+60 12-345 6789" maxlength="32" required aria-describedby="profile-contactNumber-err" />
+            <span class="auth-field-err" id="profile-contactNumber-err" role="alert" hidden></span>
+          </label>
+        </div>
+        <button type="submit" id="profile-submit" class="auth-submit">Save &amp; continue</button>
+      </form>
+
+      <!-- Verify email (post-signup gate, password accounts) — Firebase sends a
+           verification LINK; the user clicks it, then "I've verified" re-checks. -->
+      <form id="form-verify" class="auth-view" data-view="verify" hidden>
+        <p class="auth-account" data-views="verify" hidden>Signed in as <strong id="verify-account-email"></strong></p>
+        <p class="auth-verify-lead">We've emailed a verification link to <strong id="verify-email-echo"></strong>. Open it to confirm your address, then come back and continue. <strong>Can't find it? Check your spam or junk folder</strong> — verification emails often land there.</p>
+        <button type="submit" id="verify-continue" class="auth-submit">I've verified — continue</button>
+        <button type="button" id="verify-resend" class="auth-secondary">Resend email</button>
       </form>
 
       <p id="auth-error" class="auth-msg auth-error" role="alert" hidden></p>
@@ -650,6 +714,13 @@
     </main>
   </div>
 
+  <!-- ACCOUNTLAB ROUTE — admin-only user-account console (Phase 3). Mounted
+       lazily by js/labs/accountlab/main.js; the router guards the route for
+       non-admins and the header tab is data-admin-only. -->
+  <div class="lab-route" id="route-account" data-route="account">
+    <main id="accountlab-root"></main>
+  </div>
+
   <div id="help-overlay" hidden>
     <div class="help-modal">
       <div class="help-head">
@@ -702,6 +773,6 @@
   </div>
   <!-- Boot goes through the login wall; auth-gate.js dynamically imports
        js/main.js only after a user is authenticated. -->
-  <script type="module" src="js/auth/auth-gate.js?v=814"></script>
+  <script type="module" src="js/auth/auth-gate.js?v=835"></script>
 </body>
 </html>

@@ -21,9 +21,14 @@
 // (route prefix).
 
 import { showLoadingOverlay, hideLoadingOverlay } from './lab-loading-overlay.js';
+import { isCurrentUserAdmin } from '../auth/admin.js';
 
-const ROUTES = ['room', 'speaker', 'device', 'surface', 'wall', 'furniture'];
+const ROUTES = ['room', 'speaker', 'device', 'surface', 'wall', 'furniture', 'account'];
 const DEFAULT_ROUTE = 'room';
+// Routes only admins may reach. The header tab is also hidden for non-admins
+// via `data-admin-only` CSS, but that's cosmetic — this guard is the real gate
+// against a non-admin typing the URL directly.
+const ADMIN_ROUTES = new Set(['account']);
 
 // Human-readable labels for the loading overlay. Match header-nav.js
 // so "Loading SpeakerLAB…" reads identically to the tab pill the user
@@ -35,6 +40,7 @@ const ROUTE_LABELS = {
   surface:   'SurfaceLAB',
   wall:      'WallLAB',
   furniture: 'FurnitureLAB',
+  account:   'AccountLAB',
 };
 
 /**
@@ -51,6 +57,16 @@ export function parseRoute(hash = window.location.hash) {
 /** True iff the hash is a Lab route (not a share-link blob). */
 export function isRouteHash(hash = window.location.hash) {
   return /^#\//.test(hash || '');
+}
+
+// Is the current user an admin? Checks the SAME signal that makes the AccountLAB
+// tab visible — the `is-admin` class on <html> (set by admin.js markAdmin) — so
+// the route guard and the tab can never disagree. Falls back to the sessionStorage
+// flag and the published auth tier in case the class isn't set yet.
+function isAdminNow() {
+  try { if (document.documentElement.classList.contains('is-admin')) return true; } catch (_) {}
+  try { if (globalThis.__auralabAuth?.user?.tier === 'admin') return true; } catch (_) {}
+  return isCurrentUserAdmin();
 }
 
 /**
@@ -77,7 +93,14 @@ export function startRouter({ mounts, onRouteChange } = {}) {
   let transitionSeq = 0;
 
   async function show(routeId) {
-    const target = ROUTES.includes(routeId) ? routeId : DEFAULT_ROUTE;
+    let target = ROUTES.includes(routeId) ? routeId : DEFAULT_ROUTE;
+    // Admin-only route guard: a non-admin who lands on (or types) an admin
+    // route is bounced to the default and the URL is corrected.
+    if (ADMIN_ROUTES.has(target) && !isAdminNow()) {
+      console.warn('[router] admin route blocked — not flagged admin:', target);
+      target = DEFAULT_ROUTE;
+      if (isRouteHash() && history.replaceState) history.replaceState(null, '', `#/${DEFAULT_ROUTE}`);
+    }
     if (target === current) return;
 
     const from = current;

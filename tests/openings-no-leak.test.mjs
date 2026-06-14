@@ -124,17 +124,19 @@ ok(/openings:\s*readSlotOpenings\(slot\)\.map\(o\s*=>\s*\(\{\s*\.\.\.o\s*\}\)\)/
 ok(/function\s+cloneSlotSeed\s*\(/.test(SRC),
    'source: cloneSlotSeed helper exists');
 
-// Both convert sites must seed via cloneSlotSeed, NOT the raw
-// `.map(() => state.room.surfaces.walls ...)` alias.
+// Every convert site that seeds per-edge slots must use cloneSlotSeed, NOT the
+// raw `.map(() => state.room.surfaces.walls ...)` alias. (The DXF-import convert
+// site was removed with the Import-DXF feature 2026-06-14, leaving the
+// draw-custom-room site as the sole seeder — so the count is now ≥ 1.)
 const seedAliasMatches = SRC.match(/\.map\(\(\)\s*=>\s*state\.room\.surfaces\.walls/g) || [];
 ok(seedAliasMatches.length === 0,
    'source: no convert site uses the raw `.map(() => surfaces.walls)` alias',
    `found ${seedAliasMatches.length} raw-alias seed site(s) — wrap in cloneSlotSeed`);
 
 const seedCloneMatches = SRC.match(/\.map\(\(\)\s*=>\s*cloneSlotSeed\(state\.room\.surfaces\.walls\)\)/g) || [];
-ok(seedCloneMatches.length >= 2,
-   'source: both convert sites seed edges via cloneSlotSeed(surfaces.walls)',
-   `found ${seedCloneMatches.length} cloned seed site(s), expected ≥ 2`);
+ok(seedCloneMatches.length >= 1,
+   'source: the convert site seeds edges via cloneSlotSeed(surfaces.walls)',
+   `found ${seedCloneMatches.length} cloned seed site(s), expected ≥ 1`);
 
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll opening-aliasing regression tests passed.');

@@ -13,12 +13,16 @@
 // keep firing afterwards regardless of which Lab is active.
 
 import { state, SPEAKER_CATALOG, DEFAULT_PRESET_KEY, applyPresetToState, serializeProject, deserializeProject, syncToiletListeners, syncAllToiletListeners } from '../../app-state.js';
-import { readAutosave, scheduleAutosave, flushAutosave } from '../../shared/autosave.js';
+import { listRoomsForUser, saveRoomForUser, deleteRoomForUser, loadLastRoomPointer, saveLastRoomPointer } from '../../auth/firebase-db.js';
+import { configureCloudRooms, hydrateRooms, roomsLoadFailed, getCustomRoomById, listCustomRooms, saveCustomRoom } from '../../state/cloud-rooms.js';
+import { markDirty, markClean, isDirty, loadSceneQuietly, setLoadFailed } from '../../state/scene-dirty.js';
 import { on, emit } from '../../shared/events.js';
 import { loadMaterials } from '../../physics/materials.js';
 import { loadLoudspeaker } from '../../physics/loudspeaker.js';
 import { applyHashStateOnLoad } from '../../io/share-link.js';
-import { mountRoomPanel, showToast } from '../../ui/panel-room.js';
+import { mountRoomPanel, showToast, setActiveCustomRoomId, getActiveCustomRoomId } from '../../ui/panel-room.js';
+import { configureAdminView, takePendingAdminView, isAdminViewing } from '../../state/admin-view.js';
+import { enterAdminView, exitAdminView } from '../../ui/admin-view-session.js';
 import { mountPrintReport } from '../../ui/print-report.js';
 import { mountSourcesPanel } from '../../ui/panel-sources.js';
 import { mountListenersPanel } from '../../ui/panel-listeners.js';
@@ -574,44 +578,66 @@ export async function mountRoomLab() {
   ]);
   setRackCatalogues({ rackCatalogue, ampCatalog });
 
-  // Boot order: previously-autosaved scene > URL-hash share-link >
-  // default preset. With the SPA shell the autosave is mostly a
-  // cold-start mechanism — once the page is loaded, RoomLAB and
-  // DeviceLAB share `state` directly, so cross-Lab edits propagate
-  // without going through localStorage. The autosave still earns
-  // its keep on browser-close → reopen.
-  const autosaved = readAutosave();
-  let bootedFromAutosave = false;
-  if (autosaved) {
-    try {
-      deserializeProject(autosaved);
-      bootedFromAutosave = true;
-    } catch (err) {
-      console.warn('autosave: restore failed, falling back to default preset', err);
+  // Boot: the user's CLOUD room library (Firestore). Rooms live in the account
+  // (multi-project, explicit Save) — NOT the browser. Wire the cache to
+  // Firestore, hydrate it, then restore the last-opened room (pointer → newest →
+  // default preset). hydrateRooms sets a load-failure flag (not throws) so an
+  // offline boot falls to a default + Save confirms before overwriting. All
+  // inside loadSceneQuietly so the deserialize/preset emits don't mark dirty.
+  const uid = (typeof window !== 'undefined' && window.__auralabAuth?.user?.uid) || null;
+  configureCloudRooms({ list: listRoomsForUser, save: saveRoomForUser, remove: deleteRoomForUser });
+  // Admin read-only viewer: let the (pure) admin-view core snapshot + restore the
+  // admin's active room id without importing panel-room (which pulls in Three.js).
+  configureAdminView({ getRoomId: getActiveCustomRoomId, setRoomId: setActiveCustomRoomId });
+  let ptr = { lastRoomId: null, legacyBlob: null };
+  if (uid) {
+    await hydrateRooms(uid);
+    try { ptr = await loadLastRoomPointer(uid); } catch (_) { /* offline — roomsLoadFailed already set */ }
+  }
+  // One-time migration: a Phase-1 single-scene `blob` with an empty library →
+  // seed it as the user's first room so their earlier save isn't lost.
+  let migrated = null;
+  if (uid && ptr.legacyBlob && listCustomRooms().length === 0) {
+    migrated = saveCustomRoom({ projectName: null, roomName: 'My room', scene: ptr.legacyBlob });
+    saveLastRoomPointer(uid, migrated.id);
+  }
+  const target = getCustomRoomById(ptr.lastRoomId) || migrated || listCustomRooms()[0] || null;
+  loadSceneQuietly(() => {
+    if (target?.scene) {
+      try { deserializeProject(target.scene); }
+      catch (err) { console.warn('[roomlab] saved room corrupt — default preset', err); applyPresetToState(DEFAULT_PRESET_KEY); }
+    } else if (state.sources.length === 0 && state.listeners.length === 0 && state.zones.length === 0) {
+      applyPresetToState(DEFAULT_PRESET_KEY);
     }
-  }
-  if (!bootedFromAutosave
-      && state.sources.length === 0 && state.listeners.length === 0 && state.zones.length === 0) {
-    applyPresetToState(DEFAULT_PRESET_KEY);
-  }
+  });
+  setActiveCustomRoomId(target?.id ?? null);   // boot INTO the restored room
+  setLoadFailed(roomsLoadFailed());
 
-  // Wire autosave: every state-mutating event triggers a debounced
-  // write. Captures DeviceLAB rack edits too because DeviceLAB now
-  // emits `rack:changed` against the same shared `state` (no more
-  // patchAutosave dance — see js/labs/devicelab/panel-rack.js).
-  const trigger = () => scheduleAutosave(() => serializeProject(state));
+  // Mark the scene dirty on any mutation, so the Save button + the unsaved-
+  // changes warning know there's work to persist. This list is the complete,
+  // audited set of scene-MUTATING events (selection/highlight/placement-arm
+  // events are deliberately excluded). A missing event here = silent data loss.
+  const trigger = () => markDirty();
   for (const ev of [
     'scene:reset',
-    'source:changed', 'source:model_changed',
-    'listener:changed',
+    'source:changed', 'source:model_changed', 'source:position',
+    'listener:changed', 'listener:position',
     'zone:changed',
     'room:changed',
     'rack:changed',
     'physics:eq_changed',
     'treatment:changed',
+    'structure:changed',
+    'furniture:changed',
+    'outdoor:changed',
+    'ambient:changed',
   ]) on(ev, trigger);
-  trigger();
-  window.addEventListener('pagehide', flushAutosave);
+  // Warn before a refresh / tab-close / leaving the app with unsaved work.
+  // (SPA route changes between Labs are NOT unloads — the scene lives in shared
+  // `state` and survives Lab nav; the risk is refresh/close, which this covers.)
+  window.addEventListener('beforeunload', (e) => {
+    if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   setupTabs();
   mountRoomPanel({ materials });
@@ -660,8 +686,21 @@ export async function mountRoomLab() {
   // happened while it was hidden (window resize while on
   // SpeakerLAB, container width change, etc).
   document.addEventListener('route:change', (e) => {
-    if (e.detail?.to !== 'room') return;
-    window.dispatchEvent(new Event('resize'));
+    const to = e.detail?.to;
+    const from = e.detail?.from;
+    if (to === 'room') {
+      window.dispatchEvent(new Event('resize'));
+      // Admin opened a user's room from AccountLAB → enter the read-only view.
+      // takePendingAdminView is atomic read-and-null, so the mount/route-change
+      // double-fire can't double-consume (Hannes SE-2).
+      const pending = takePendingAdminView();
+      if (pending) enterAdminView(pending);
+    } else if (from === 'room' && isAdminViewing()) {
+      // Left RoomLAB by ANY route (a header tab, not just the Exit button) while
+      // viewing a foreign room → auto-exit so read-only never leaks and the
+      // admin's own scene is restored (Hannes SE-3: tabs are also an exit).
+      exitAdminView();
+    }
   });
 
   // Share-link boot apply — runs once after every panel mounts AND

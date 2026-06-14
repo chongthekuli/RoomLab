@@ -2,10 +2,10 @@ import { state, PRESETS, TEMPLATES, SHAPE_LABELS, CEILING_LABELS, applyPresetToS
 import { emit, on } from './events.js';
 import { startDrawCustomShape } from '../graphics/room-2d.js';
 import { beginCapture } from '../capture/capture-picker.js';
-import { importDxfFile } from '../physics/dxf-import.js';
-import { saveProjectAs, loadProjectFromFile } from '../io/project-file.js';
+import { saveLastRoomPointer, saveRoomForUser } from '../auth/firebase-db.js';
+import { markClean, isDirty, didLoadFail, setLoadFailed, isReadOnly } from '../state/scene-dirty.js';
 import { triggerPrint } from './print-report.js';
-import { listCustomRooms, listProjects, latestRoomInProject, saveCustomRoom, getCustomRoomById, deleteCustomRoom, updateCustomRoom } from '../shared/custom-rooms.js';
+import { listCustomRooms, listProjects, latestRoomInProject, saveCustomRoom, getCustomRoomById, deleteCustomRoom, updateCustomRoom, upsertRoomCache, renameProject } from '../state/cloud-rooms.js';
 import { getPlacementBindings } from '../graphics/scene.js';
 import { PlaceRoomController } from '../graphics/place-room-controller.js';
 import { splitParentVsEnclosure } from '../physics/wall-overlap.js';
@@ -18,6 +18,12 @@ import { placeOpeningX } from './opening-placement.js';
 // room or clicks an existing chip; cleared when they switch to a
 // preset/template/load.
 let activeCustomRoomId = null;
+// Set by the boot loader (roomlab/main.js) to restore the last-opened room as
+// the active one, so edits + Save target the right library entry.
+export function setActiveCustomRoomId(id) { activeCustomRoomId = id ?? null; }
+// Read the active room id — used by the admin read-only viewer to snapshot the
+// admin's editing context before viewing a foreign room, and restore it on exit.
+export function getActiveCustomRoomId() { return activeCustomRoomId; }
 // Guard that blocks the debounced active-room auto-sync from firing while
 // the scene is being swapped wholesale (preset / template / draw-new /
 // load). Without it, widening the sync to source/listener/treatment
@@ -138,20 +144,13 @@ export function mountRoomPanel({ materials }) {
     <div class="picker-row">
       <span class="picker-label" title="Draw your own room outline on the 2D floor plan — click to place vertices, click point 1 to close the loop. Snap is 0.5 m.">Custom</span>
       <div class="picker-buttons">
-        <select class="picker-dropdown" id="saved-room-dropdown" title="Reopen a room you drew earlier, from any project. Loads its geometry and resets the scene — same as switching presets.">
-          <option value="">— Open a saved room —</option>
-        </select>
         <button id="btn-draw-custom-room" class="btn-custom-draw" title="Open the 2D floor plan in draw mode. Click to place vertices, click point 1 to close.">✎ Draw custom room</button>
         <button id="btn-place-saved-room" class="btn-custom-draw" title="Embed a saved room as a sub-structure inside THIS room — a hut in a park, a kiosk, a balcony. Does not switch which room you're editing.">⊕ Place</button>
-        <div id="custom-saved-row" class="custom-saved-row"></div>
       </div>
     </div>
+    <div id="saved-rooms-tree" class="saved-rooms-tree"></div>
     <div id="sub-structures-row" class="custom-saved-row"></div>
     <div id="sub-structure-detail" class="sub-structure-detail" hidden></div>
-    <div class="import-row">
-      <button id="btn-import-dxf" class="btn-import" title="Import room outline from a DXF file (DWG must be converted first)">⇪ Import DXF…</button>
-      <input type="file" id="file-dxf" accept=".dxf,.dwg" hidden />
-    </div>
     <div id="import-status" class="import-status" hidden></div>
     <h3>Shape</h3>
     <div class="field-group">
@@ -222,30 +221,13 @@ export function mountRoomPanel({ materials }) {
     if (pd) pd.value = '';
   });
 
-  // Saved-rooms dropdown — reopen a custom room you drew earlier, from ANY
-  // project (independent of state.projectName, unlike the chip row below
-  // which is a contextual "rooms in THIS project" recents list). This is
-  // the always-available library entry point: it fixes the bug where a
-  // saved room became unreachable once the user switched to a preset and
-  // lost the project context (2026-05-21). Options are (re)populated by
-  // renderSavedRoomDropdown() on every render(); the listener lives on the
-  // <select> so it survives option repopulation. Mirrors the preset/
-  // template confirm → load → reset-siblings → revert-on-cancel pattern.
-  const savedRoomDropdown = root.querySelector('#saved-room-dropdown');
-  savedRoomDropdown.addEventListener('change', (e) => {
-    const id = e.target.value;
-    if (!id) return;
-    const entry = getCustomRoomById(id);
-    const label = entry?.roomName || 'this saved room';
-    if (!confirmDestructiveSceneChange(label)) {
-      e.target.value = activeCustomRoomId || '';   // revert — never lie about state
-      return;
-    }
-    loadCustomRoomById(id);
-    // One active selection at a time across the three pickers.
-    const pd = root.querySelector('#preset-dropdown'); if (pd) pd.value = '';
-    const td = root.querySelector('#template-dropdown'); if (td) td.value = '';
-  });
+  // Saved-rooms library is now a TREE below the Custom row
+  // (#saved-rooms-tree), rendered + wired by renderSavedRoomsTree() on every
+  // render(). It reads listProjects() and NEVER filters by state.projectName,
+  // so a saved room is always reachable regardless of the active scene — the
+  // fix for the 2026-05-21 "unreachable after switching to a preset" bug.
+  // Its rows attach their own listeners on each render (the tree is rebuilt
+  // wholesale), so there's no persistent <select> listener to bind here.
 
   // Custom row — entry to the draw-custom-room flow.
   //
@@ -301,15 +283,10 @@ export function mountRoomPanel({ materials }) {
   // Lab route). Handlers are still bound here because RoomLAB owns
   // the scene state these actions operate on; the click bindings
   // attach when RoomLAB mounts.
-  document.getElementById('btn-save-project')?.addEventListener('click', async () => {
-    try {
-      const res = await saveProjectAs(state.projectName || undefined);
-      if (res.cancelled) { showStatus('Save cancelled.'); return; }
-      showStatus(`Saved as ${res.filename}`, 'ok');
-    } catch (err) {
-      showStatus(`Save failed: ${err.message || err}`, 'err');
-    }
-  });
+  document.getElementById('btn-save-project')?.addEventListener('click', saveActiveRoom);
+  // Reflect unsaved-changes state on the Save button, and set the initial label.
+  on('scene:dirty-changed', updateSaveButton);
+  updateSaveButton();
 
   document.getElementById('btn-print-report')?.addEventListener('click', async () => {
     // Gate: report generation requires a FRESH precision render. The
@@ -454,37 +431,11 @@ export function mountRoomPanel({ materials }) {
     }, 100);
   });
 
-  // Share button removed from the header — the encode/build helpers and the
-  // inbound #R… hash loader remain so existing share URLs still open.
-  const projectFileInput = document.getElementById('file-roomlab');
-  document.getElementById('btn-load-project')?.addEventListener('click', () => projectFileInput?.click());
-  projectFileInput?.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    projectFileInput.value = ''; // allow reloading the same file
-    if (!file) return;
-    try {
-      const { warnings } = await loadProjectFromFile(file);
-      const warnSuffix = warnings?.length ? ` (${warnings.length} warning${warnings.length === 1 ? '' : 's'})` : '';
-      showStatus(`Loaded ${file.name}${warnSuffix}`, 'ok');
-      // Re-render the room panel itself so the shape select etc. reflect
-      // the loaded state. scene:reset already woke every other panel.
-      render();
-    } catch (err) {
-      showStatus(err.message || String(err), 'err');
-    }
-  });
+  // File-based "Load" retired (v=830) — scenes live in the user's account now,
+  // loaded automatically on sign-in. The inbound #R… share-link hash loader
+  // still works (js/io/share-link.js) so existing share URLs open.
 
-  // DXF import — converts largest closed polyline in the file into the
-  // current room's custom_vertices. Height and surface materials are
-  // preserved; user edits them after.
-  const fileInput = root.querySelector('#file-dxf');
-  root.querySelector('#btn-import-dxf').addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await handleDxfImport(file);
-    fileInput.value = ''; // allow re-selecting the same file
-  });
+  // (DXF import removed 2026-06-14 — feature not ready for release.)
 
   root.querySelector('[data-f="shape"]').addEventListener('change', e => {
     state.room.shape = e.target.value;
@@ -526,8 +477,7 @@ export function mountRoomPanel({ materials }) {
 // Tracks which template (if any) is the live "source" of the current
 // room. While set, dimension edits in the Shape section regenerate the
 // template's sources/listeners so the layout stays consistent. Cleared
-// when the user applies a Preset, draws a custom shape, loads a project
-// file, or hits Import DXF.
+// when the user applies a Preset, draws a custom shape, or loads a saved room.
 let activeTemplateKey = null;
 
 function showStatus(text, kind) {
@@ -536,6 +486,85 @@ function showStatus(text, kind) {
   status.hidden = false;
   status.className = 'import-status' + (kind === 'ok' ? ' ok' : kind === 'err' ? ' err' : '');
   status.textContent = text;
+}
+
+// Cloud Save — persist the current scene to the user's account (Firestore).
+// Explicit only (no autosave). Confirms first if the boot scene-load failed
+// (offline), so we don't overwrite the user's real cloud scene with edits made
+// on top of a fallback default.
+// Explicit, DEFINITIVE Save — writes the active room to the user's cloud
+// library and awaits the result (no optimistic "maybe saved"). If there's no
+// active room yet (a preset/template the user hasn't named), it acts as
+// "Save As": prompts for a project + room name first.
+async function saveActiveRoom() {
+  // Read-only admin viewer: Save is structurally blocked. The scene loaded is
+  // another user's room (the Firestore rules also deny an admin write); editing
+  // + Save are disabled so the admin can't believe they changed the user's work.
+  if (isReadOnly()) { showStatus('Read-only view — you can’t save changes to another user’s room.', 'err'); return; }
+  const btn = document.getElementById('btn-save-project');
+  const uid = (typeof window !== 'undefined' && window.__auralabAuth?.user?.uid) || null;
+  if (!uid) { showStatus('Not signed in — can’t save.', 'err'); return; }
+
+  // Build the entry to write: update the active room, or create+name a new one.
+  let entry = activeCustomRoomId ? getCustomRoomById(activeCustomRoomId) : null;
+  if (entry) {
+    entry = {
+      ...entry,
+      scene: serializeProject(),
+      projectName: state.projectName ?? entry.projectName ?? null,
+      roomName: (state.room?.name && state.room.name.trim()) ? state.room.name.trim() : entry.roomName,
+      savedAt: new Date().toISOString(),
+    };
+  } else {
+    const dlg = await showCustomRoomDialog();   // { projectName, roomName } | null
+    if (!dlg || dlg.roomName == null) return;   // cancelled
+    entry = {
+      id: 'cr-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      projectName: (dlg.projectName && dlg.projectName.trim()) || null,
+      roomName: (dlg.roomName && dlg.roomName.trim()) || `Untitled · ${new Date().toLocaleString()}`,
+      scene: serializeProject(),
+      savedAt: new Date().toISOString(),
+    };
+    state.projectName = entry.projectName;
+    if (entry.roomName && !state.room.name) state.room.name = entry.roomName;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = '💾 Saving…'; }
+  let res;
+  try { res = await saveRoomForUser(uid, entry); }
+  catch (err) { res = { ok: false, code: 'write-failed' }; }
+  if (btn) btn.disabled = false;
+
+  if (res.ok) {
+    activeCustomRoomId = entry.id;
+    upsertRoomCache(entry);                 // reflect in the cache (already written) — emits projects:changed
+    saveLastRoomPointer(uid, entry.id);     // boot restores this room next time
+    setLoadFailed(false);
+    markClean();
+    _ensureProjectExpanded(entry.projectName);  // keep the just-saved room visible
+    renderSavedRoomsTree();                 // active marking + new row
+    showStatus('Saved to your account.', 'ok');
+  } else if (res.code === 'too-large') {
+    showStatus('Scene too large to save — reduce sub-structures, treatments or furniture.', 'err');
+  } else if (res.code === 'permission-denied') {
+    showStatus('Save was DENIED by the database. The Firestore rules are not published yet — paste firestore.rules into Firebase console → Firestore → Rules → Publish, then try again.', 'err');
+    console.error('[save] permission-denied — re-publish firestore.rules (the accounts/{uid}/rooms rule).');
+  } else if (res.code === 'no-db') {
+    showStatus('Database unavailable — is Firestore enabled in the Firebase console?', 'err');
+  } else {
+    showStatus(`Couldn’t save (${res.code || 'error'}) — check your connection and try again.`, 'err');
+    console.error('[save] failed:', res);
+  }
+  updateSaveButton();
+}
+
+// Reflect unsaved-changes state on the header Save button.
+function updateSaveButton() {
+  const btn = document.getElementById('btn-save-project');
+  if (!btn || btn.disabled) return;   // skip mid-save (label is "Saving…")
+  const dirty = isDirty();
+  btn.textContent = dirty ? '💾 Save •' : '💾 Save';
+  btn.classList.toggle('btn-save-dirty', dirty);
 }
 
 // Transient bottom-of-viewport toast — used for success acks where the
@@ -699,8 +728,7 @@ function render() {
   // so there's no separate header/field-group to toggle here.
   renderShapeParams();
   renderSurfaceMaterials();
-  renderSavedRoomDropdown();
-  renderSavedCustomRooms();
+  renderSavedRoomsTree();
   renderPlacedSubStructures();
 }
 
@@ -1139,85 +1167,260 @@ function showBreakConfirm(sourceRoomName) {
 // the header switcher. Crucially this reads listProjects() and NEVER
 // filters by state.projectName: that independence is the fix for the
 // 2026-05-21 bug where saved rooms were unreachable after switching to a
-// preset. The chip row (renderSavedCustomRooms) stays project-filtered as
-// a contextual recents list; this dropdown is the full library.
-function renderSavedRoomDropdown() {
-  const dd = document.getElementById('saved-room-dropdown');
-  if (!dd) return;
-  const projects = listProjects();   // [{ name, rooms, lastSavedAt }], newest-first
-  const total = projects.reduce((n, p) => n + p.rooms.length, 0);
-  if (total === 0) {
-    // Empty state: disabled + relabelled, NOT hidden — a vanishing control
-    // teaches the user it doesn't exist (discoverability is the whole bug).
-    dd.disabled = true;
-    dd.innerHTML = '<option value="">— No saved rooms yet —</option>';
-    return;
-  }
-  dd.disabled = false;
-  let html = '<option value="">— Open a saved room —</option>';
-  for (const proj of projects) {
-    html += `<optgroup label="${escapeAttr(proj.name)}">`;
-    for (const r of proj.rooms) {
-      const sel = r.id === activeCustomRoomId ? ' selected' : '';
-      html += `<option value="${escapeAttr(r.id)}"${sel}>${escapeHtml(r.roomName || 'Untitled')}</option>`;
-    }
-    html += '</optgroup>';
-  }
-  dd.innerHTML = html;
+// preset. (Maya spec 2026-06-14 — replaces the old dropdown + recents chip
+// row with one full-library tree.)
+//
+// Layout: project groups (collapsible) → room rows. The ACTIVE room (the one
+// 💾 Save overwrites) is marked four ways — filled cyan ● glyph, left-border,
+// bold name, tinted row — so it survives a dim display. (Unfiled) sorts last
+// and has no project ⋯ menu. Collapse state is per-session view-state (a Set),
+// NOT persisted to Firestore; the active room's project starts expanded.
+
+// Which project groups are collapsed this session (by project name). Pure
+// view-state — never persisted to Firestore. Seeded once (collapse all but the
+// active room's group) on the first tree render.
+const _collapsedProjects = new Set();
+let _treeSeeded = false;
+
+function _projKey(name) {
+  return (typeof name === 'string' && name.trim()) ? name.trim() : '(Unfiled)';
 }
 
-function renderSavedCustomRooms() {
-  const host = document.getElementById('custom-saved-row');
-  if (!host) return;
-  const all = listCustomRooms();
-  const activeProj = (typeof state.projectName === 'string' && state.projectName.trim())
-    ? state.projectName.trim()
-    : null;
-  // entry.projectName === null OR '' is the "(Unfiled)" bucket. Filter
-  // the chip list to entries whose project matches the active project,
-  // treating null === null as a match for unfiled rooms.
-  const entries = all.filter(e => {
-    const en = (typeof e.projectName === 'string' && e.projectName.trim())
-      ? e.projectName.trim()
-      : null;
-    return en === activeProj;
-  });
-  if (entries.length === 0) { host.innerHTML = ''; return; }
-  const projBanner = activeProj
-    ? `<span class="custom-saved-banner" title="Showing rooms in this project only">${escapeHtml(activeProj)}:</span>`
-    : `<span class="custom-saved-banner" title="Rooms saved without a project">Unfiled:</span>`;
-  host.innerHTML = projBanner + entries.map(e => {
-    const isActive = e.id === activeCustomRoomId;
-    const label = escapeHtml(e.roomName || 'Untitled');
-    const proj = e.projectName ? escapeHtml(e.projectName) : '';
-    const tooltip = proj ? `${proj} · ${label}` : label;
-    return `
-      <span class="custom-chip${isActive ? ' active' : ''}" data-cr-id="${e.id}" title="${escapeAttr(tooltip)}">
-        <button class="custom-chip-load" type="button">${label}</button>
-        <button class="custom-chip-delete" type="button" title="Delete this saved custom room" aria-label="Delete">×</button>
-      </span>
-    `;
-  }).join('');
+// Make sure a project group is expanded (used when a room in it becomes the
+// active room — load / Save As — so the just-opened room is never hidden).
+function _ensureProjectExpanded(name) {
+  _collapsedProjects.delete(_projKey(name));
+}
 
-  host.querySelectorAll('.custom-chip-load').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.parentElement?.dataset.crId;
-      if (id) loadCustomRoomById(id);
+function renderSavedRoomsTree() {
+  const host = document.getElementById('saved-rooms-tree');
+  if (!host) return;
+  let projects = listProjects();   // [{ name, rooms, lastSavedAt }], newest-first
+  // (Unfiled) always sorts LAST, overriding the API's newest-first order, so
+  // the system bucket never floats above the user's named projects.
+  projects = projects.slice().sort((a, b) => {
+    const au = a.name === '(Unfiled)', bu = b.name === '(Unfiled)';
+    if (au !== bu) return au ? 1 : -1;
+    return 0;   // otherwise keep listProjects' newest-first order
+  });
+  const total = projects.reduce((n, p) => n + p.rooms.length, 0);
+
+  // Header line: "SAVED ROOMS    4 rooms in 2 projects"
+  const projCount = projects.length;
+  let countText = '';
+  if (total > 0) {
+    countText = projCount > 1
+      ? `${total} room${total === 1 ? '' : 's'} in ${projCount} projects`
+      : `${total} room${total === 1 ? '' : 's'}`;
+  }
+  let html = `<div class="srt-head"><span class="srt-title">SAVED ROOMS</span>`
+           + `<span class="srt-count">${escapeHtml(countText)}</span></div>`;
+
+  if (total === 0) {
+    // Empty state — present, never hidden (discoverability). The 💾 glyph ties
+    // it to the header Save button without a tooltip.
+    html += `<div class="srt-empty">No rooms saved yet.<br>Draw a room, then 💾 Save to keep it here.</div>`;
+    host.innerHTML = html;
+    return;
+  }
+
+  // The project that holds the active room starts expanded; the rest follow
+  // the session collapse Set (default = expanded for the active project's
+  // group, collapsed for others on first paint).
+  const activeEntry = activeCustomRoomId ? getCustomRoomById(activeCustomRoomId) : null;
+  const activeProjKey = activeEntry ? _projKey(activeEntry.projectName) : null;
+  // Seed the collapse Set ONCE: collapse every project except the one to keep
+  // open — the active room's project, or (when nothing's active) the newest.
+  // A lone project is always left open (a single collapsed group is just a
+  // pointless extra click, no decluttering benefit).
+  if (!_treeSeeded) {
+    const expandKey = activeProjKey ?? (projects[0]?.name ?? null);
+    if (projects.length > 1) {
+      for (const p of projects) if (p.name !== expandKey) _collapsedProjects.add(p.name);
+    }
+    _treeSeeded = true;
+  }
+  const dirty = isDirty();
+
+  html += '<div class="srt-body">';
+  for (const proj of projects) {
+    const collapsed = _collapsedProjects.has(proj.name);
+    const unfiled = proj.name === '(Unfiled)';
+    const n = proj.rooms.length;
+    html += `<div class="srt-project${collapsed ? ' collapsed' : ''}" data-proj="${escapeAttr(proj.name)}">`;
+    html += `<div class="srt-proj-head" role="button" tabindex="0" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeAttr(proj.name)}">`
+          +   `<span class="srt-chevron">▾</span>`
+          +   `<span class="srt-proj-name${unfiled ? ' unfiled' : ''}" title="${escapeAttr(proj.name)}">${escapeHtml(proj.name)}</span>`
+          +   (collapsed ? `<span class="srt-proj-count">· ${n}</span>` : '')
+          +   (unfiled ? '' : `<button class="srt-proj-menu" type="button" aria-label="Project actions" title="Project actions">⋯</button>`)
+          + `</div>`;
+    html += `<div class="srt-rooms">`;
+    for (const r of proj.rooms) {
+      const isActive = r.id === activeCustomRoomId;
+      const isDirtyRow = isActive && dirty;
+      const label = escapeHtml(r.roomName || 'Untitled');
+      const glyph = isActive ? (isDirtyRow ? '◌' : '●') : '';
+      const glyphTip = isActive ? 'Save writes to this room' : '';
+      html += `<div class="srt-room${isActive ? ' active' : ''}${isDirtyRow ? ' dirty' : ''}" role="button" tabindex="0" data-cr-id="${escapeAttr(r.id)}" title="${escapeAttr(proj.name + ' · ' + (r.roomName || 'Untitled'))}">`
+            +   `<span class="srt-glyph"${glyphTip ? ` title="${escapeAttr(glyphTip)}"` : ''}>${glyph}</span>`
+            +   `<span class="srt-room-name">${label}</span>`
+            +   (isDirtyRow ? `<span class="srt-dirty" title="unsaved changes">*</span>` : '')
+            +   `<button class="srt-room-del" type="button" aria-label="Delete room" title="Delete room">×</button>`
+            + `</div>`;
+    }
+    html += `</div></div>`;
+  }
+  html += '</div>';
+  host.innerHTML = html;
+  _wireSavedRoomsTree(host);
+}
+
+// Bind the freshly-rendered tree's row/chevron/menu/delete handlers. Called
+// every render because the tree is rebuilt wholesale (no persistent listeners).
+function _wireSavedRoomsTree(host) {
+  // Toggle a project group (chevron / header body — but not the ⋯ menu).
+  host.querySelectorAll('.srt-proj-head').forEach(head => {
+    const toggle = () => {
+      const key = head.parentElement?.dataset.proj;
+      if (!key) return;
+      if (_collapsedProjects.has(key)) _collapsedProjects.delete(key);
+      else _collapsedProjects.add(key);
+      renderSavedRoomsTree();
+    };
+    head.addEventListener('click', (e) => {
+      if (e.target.closest('.srt-proj-menu')) return;   // menu handles itself
+      toggle();
+    });
+    head.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      else if (e.key === 'ArrowRight') { const k = head.parentElement?.dataset.proj; if (k && _collapsedProjects.delete(k)) renderSavedRoomsTree(); }
+      else if (e.key === 'ArrowLeft')  { const k = head.parentElement?.dataset.proj; if (k && !_collapsedProjects.has(k)) { _collapsedProjects.add(k); renderSavedRoomsTree(); } }
     });
   });
-  host.querySelectorAll('.custom-chip-delete').forEach(btn => {
+
+  // Project ⋯ menu — Rename project / Delete project.
+  host.querySelectorAll('.srt-proj-menu').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const id = btn.parentElement?.dataset.crId;
-      if (!id) return;
-      if (!window.confirm('Delete this saved custom room?')) return;
-      deleteCustomRoom(id);
-      if (activeCustomRoomId === id) activeCustomRoomId = null;
-      renderSavedRoomDropdown();
-      renderSavedCustomRooms();
-      emit('projects:changed');   // header dropdown may need to drop a project
+      const key = btn.closest('.srt-project')?.dataset.proj;
+      if (key) _openProjectMenu(btn, key);
     });
   });
+
+  // Open a room — confirm destructive swap, then load.
+  host.querySelectorAll('.srt-room').forEach(row => {
+    const open = () => {
+      const id = row.dataset.crId;
+      if (!id) return;
+      if (id === activeCustomRoomId && !isDirty()) return;   // already open + clean — no-op
+      const entry = getCustomRoomById(id);
+      if (!confirmDestructiveSceneChange(entry?.roomName || 'this saved room')) return;
+      loadCustomRoomById(id);
+      // Reset the preset/template pickers so one selection reads as active.
+      const pd = document.getElementById('preset-dropdown'); if (pd) pd.value = '';
+      const td = document.getElementById('template-dropdown'); if (td) td.value = '';
+    };
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.srt-room-del')) return;   // delete handles itself
+      open();
+    });
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      else if (e.key === 'Delete') { e.preventDefault(); row.querySelector('.srt-room-del')?.click(); }
+    });
+  });
+
+  // Delete a room.
+  host.querySelectorAll('.srt-room-del').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const row = btn.closest('.srt-room');
+      const id = row?.dataset.crId;
+      if (!id) return;
+      const entry = getCustomRoomById(id);
+      const name = entry?.roomName || 'this room';
+      if (!window.confirm(`Delete "${name}"? This can't be undone.`)) return;
+      deleteCustomRoom(id);
+      if (activeCustomRoomId === id) activeCustomRoomId = null;   // deleted the open room
+      renderSavedRoomsTree();
+    });
+  });
+}
+
+// Anchored 2-item popover for a project group's ⋯ menu. Closes on outside
+// click or Esc. Rename = inline header edit; Delete = confirm + remove all.
+function _openProjectMenu(anchor, projKey) {
+  document.querySelectorAll('.srt-menu').forEach(m => m.remove());   // one menu at a time
+  const proj = listProjects().find(p => _projKey(p.name) === projKey);
+  const n = proj ? proj.rooms.length : 0;
+  const menu = document.createElement('div');
+  menu.className = 'srt-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `
+    <button class="srt-menu-item" data-act="rename" role="menuitem">Rename project</button>
+    <button class="srt-menu-item srt-menu-danger" data-act="delete" role="menuitem">Delete project · ${n} room${n === 1 ? '' : 's'}</button>
+  `;
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = `${Math.min(r.left, window.innerWidth - 200)}px`;
+  menu.style.top  = `${r.bottom + 4}px`;
+
+  const close = () => { menu.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onOut, true); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const onOut = (e) => { if (!menu.contains(e.target)) close(); };
+  document.addEventListener('keydown', onKey);
+  document.addEventListener('mousedown', onOut, true);
+
+  menu.querySelector('[data-act="rename"]').addEventListener('click', () => {
+    close();
+    _renameProjectInline(projKey);
+  });
+  menu.querySelector('[data-act="delete"]').addEventListener('click', () => {
+    close();
+    if (projKey === '(Unfiled)') return;   // bucket isn't deletable as a unit
+    if (!window.confirm(`Delete project "${projKey}" and its ${n} room${n === 1 ? '' : 's'}? This can't be undone.`)) return;
+    const group = listProjects().find(p => _projKey(p.name) === projKey);
+    (group?.rooms ?? []).forEach(r => {
+      deleteCustomRoom(r.id);
+      if (activeCustomRoomId === r.id) activeCustomRoomId = null;   // deleted the open room
+    });
+    renderSavedRoomsTree();
+  });
+}
+
+// Inline-edit a project name in its header row. Enter / blur commits via
+// renameProject (fan-out across the group); Esc reverts.
+function _renameProjectInline(projKey) {
+  if (projKey === '(Unfiled)') return;
+  const head = document.querySelector(`.srt-project[data-proj="${CSS.escape(projKey)}"] .srt-proj-head`);
+  const nameEl = head?.querySelector('.srt-proj-name');
+  if (!nameEl) return;
+  const input = document.createElement('input');
+  input.className = 'srt-rename-input';
+  input.type = 'text';
+  input.value = projKey;
+  input.placeholder = 'Project name';
+  input.maxLength = 80;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const commit = () => {
+    if (done) return; done = true;
+    const next = input.value.trim();
+    if (next && next !== projKey) {
+      // Carry the collapse state across the rename so the group doesn't jump.
+      if (_collapsedProjects.delete(projKey)) _collapsedProjects.add(next);
+      renameProject(projKey, next);
+    }
+    renderSavedRoomsTree();
+  };
+  const revert = () => { if (done) return; done = true; renderSavedRoomsTree(); };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); revert(); }
+  });
+  input.addEventListener('blur', commit);
 }
 
 // Restore a legacy library entry (geometry + rackSystem only — saved
@@ -1278,6 +1481,15 @@ function loadCustomRoomById(id) {
     emit('room:changed');
     emit('rack:changed');   // 3D scene rebuilds racksGroup with the loaded set
   });
+  // A freshly-loaded room is CLEAN (matches its saved blob); and remember it as
+  // the last-opened so boot restores it. (markClean after the emits settle.)
+  markClean();
+  // Make the just-opened room visible in the tree (expand its group) + refresh
+  // so its row gets the active marking.
+  _ensureProjectExpanded(entry.projectName);
+  renderSavedRoomsTree();
+  const uid = (typeof window !== 'undefined' && window.__auralabAuth?.user?.uid) || null;
+  if (uid) saveLastRoomPointer(uid, id);
 }
 
 function escapeHtml(s) {
@@ -2399,42 +2611,6 @@ function applyTemplate(key) {
   });
 }
 
-async function handleDxfImport(file) {
-  const status = document.getElementById('import-status');
-  status.hidden = false;
-  status.className = 'import-status';
-  status.textContent = `Reading ${file.name}…`;
-  try {
-    const { polygons, bestIndex, source_units } = await importDxfFile(file);
-    const best = polygons[bestIndex];
-    // Translate so the polygon's bbox starts at the origin (consistent with
-    // the draw-custom convention — the 2D viewport expects x/y >= 0).
-    const minX = Math.min(...best.vertices.map(v => v.x));
-    const minY = Math.min(...best.vertices.map(v => v.y));
-    const verts = best.vertices.map(v => ({ x: v.x - minX, y: v.y - minY }));
-    const w = Math.max(...verts.map(v => v.x));
-    const d = Math.max(...verts.map(v => v.y));
-
-    state.room.shape = 'custom';
-    state.room.custom_vertices = verts;
-    state.room.width_m = w;
-    state.room.depth_m = d;
-    // Deep-clone per edge so the shared `surfaces.walls` object isn't
-    // aliased across every edge (the door-leaks-to-all-walls bug).
-    state.room.surfaces.edges = verts.map(() => cloneSlotSeed(state.room.surfaces.walls));
-    activeTemplateKey = null;
-
-    render();
-    emit('room:changed');
-
-    const more = polygons.length > 1 ? ` (${polygons.length - 1} other closed polylines in file, largest used)` : '';
-    status.textContent = `Imported ${verts.length}-vertex room · ${best.area_m2.toFixed(1)} m² · bbox ${w.toFixed(1)} × ${d.toFixed(1)} m · units ${source_units}${more}`;
-    status.classList.add('ok');
-  } catch (err) {
-    status.textContent = err.message;
-    status.classList.add('err');
-  }
-}
 
 // Listen for room:changed to re-render panel when draw mode finishes
 // (`on` is imported at the top of the file alongside `emit`).
@@ -2472,11 +2648,24 @@ on('room:changed', () => {
 // template generator on top of it.
 on('scene:reset', () => {
   // Note: don't reset activeTemplateKey if WE just set it via applyTemplate
-  // — scene:reset is emitted both from us and from project-file load.
+  // — scene:reset is emitted both from us and from a cloud-scene/share-link load.
   // Distinguishing requires a payload; for v1 we accept that loading a
-  // project file dropped from a template still loses the regen behaviour,
+  // scene dropped from a template still loses the regen behaviour,
   // which is the conservative default.
 });
+
+// Keep the saved-rooms tree current without a full panel render: structural
+// library changes (save / delete / rename emit projects:changed) and the dirty
+// marker on the active row (scene:dirty-changed is edge-triggered, so this
+// fires only on clean↔dirty transitions, not per drag-frame). A re-render
+// rebuilds the tree wholesale, so skip it while an inline project rename is in
+// progress — it would destroy the focused <input> and drop the user's typing.
+function _refreshSavedRoomsTree() {
+  if (document.querySelector('.srt-rename-input')) return;
+  renderSavedRoomsTree();
+}
+on('projects:changed', _refreshSavedRoomsTree);
+on('scene:dirty-changed', _refreshSavedRoomsTree);
 
 // Auto-sync the active saved-custom-room entry when the user mutates the
 // live scene. Captures a FULL scene snapshot (serializeProject) so
@@ -2487,46 +2676,11 @@ on('scene:reset', () => {
 // activeCustomRoomId re-check stop a wholesale scene swap (preset /
 // template / load) from clobbering the saved room with transient state.
 let _autoSyncTimer = null;
-function scheduleActiveRoomSync() {
-  if (_suppressSync) return;
-  if (!activeCustomRoomId) return;
-  if (_autoSyncTimer) clearTimeout(_autoSyncTimer);
-  _autoSyncTimer = setTimeout(() => {
-    _autoSyncTimer = null;
-    if (_suppressSync) return;
-    if (!activeCustomRoomId) return;
-    try {
-      const patch = {
-        scene: serializeProject(),
-        projectName: state.projectName ?? null,
-      };
-      // Only override the library label when the live room actually has a
-      // name — passing undefined would blow away the stored roomName.
-      if (state.room?.name && state.room.name.trim()) patch.roomName = state.room.name.trim();
-      updateCustomRoom(activeCustomRoomId, patch);
-    } catch (err) {
-      console.warn('failed to sync active custom room', err);
-    }
-  }, 300);
-}
-// Every scene-content mutation must keep the active saved room current.
-// zones emit room:changed (already covered); sources / listeners /
-// treatments have their own granular events that were NOT wired before —
-// which is exactly why they vanished on reopen.
-on('rack:changed', scheduleActiveRoomSync);
-on('source:changed', scheduleActiveRoomSync);
-on('listener:changed', scheduleActiveRoomSync);
-on('treatment:changed', scheduleActiveRoomSync);
-
-// Header project dropdown → load that project's most recent saved room.
-// header-nav.js emits with the saved-room id already resolved, so we just
-// hand off to the existing loader.
-on('project:switch', ({ customRoomId } = {}) => {
-  if (typeof customRoomId === 'string' && customRoomId) {
-    loadCustomRoomById(customRoomId);
-  }
-});
-on('room:changed', scheduleActiveRoomSync);
+// Cloud auto-sync is intentionally DISABLED (v=834) — saving is EXPLICIT now:
+// the 💾 Save button (saveActiveRoom) writes the active room to the account, and
+// the dirty flag (markDirty, wired in roomlab/main.js) tracks unsaved changes +
+// warns before a refresh. No silent background writes to the server.
+function scheduleActiveRoomSync() { /* no-op — explicit Save only */ }
 
 // Click on a wall / floor / ceiling in the 3D viewport pulses the matching
 // material <select> in this panel — Maya's spec: the picker already exists

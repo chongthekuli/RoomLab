@@ -29,24 +29,23 @@ const pass = (l) => console.log(`PASS  ${l}`);
 const fail = (l, e = '') => { console.log(`FAIL  ${l}${e ? '  — ' + e : ''}`); failed++; };
 const ok = (c, l, e = '') => (c ? pass(l) : fail(l, e));
 
-// --- localStorage shim (custom-rooms.js reads it at call time) ----------
-const _store = new Map();
-globalThis.localStorage = {
-  getItem: (k) => (_store.has(k) ? _store.get(k) : null),
-  setItem: (k, v) => { _store.set(k, String(v)); },
-  removeItem: (k) => { _store.delete(k); },
-};
-
-const { saveCustomRoom, listProjects, listCustomRooms, getCustomRoomById } =
-  await import('../js/shared/custom-rooms.js');
+// The library now lives in the cloud-rooms cache (Firestore-backed). Inject
+// no-op DB stubs so the optimistic mutators run without a real Firestore, and
+// hydrate an empty cache before seeding.
+const { configureCloudRooms, hydrateRooms, resetRoomsCache,
+        saveCustomRoom, listProjects, listCustomRooms, getCustomRoomById } =
+  await import('../js/state/cloud-rooms.js');
+configureCloudRooms({ list: async () => [], save: async () => ({ ok: true }), remove: async () => ({ ok: true }) });
+resetRoomsCache();
+await hydrateRooms('u-test');
 
 // --- (1) data layer surfaces all rooms grouped, project-independent -----
 
 // Seed two rooms in project "sdff" plus one unfiled room — mirrors the
 // "sdff · 2 rooms" the user saw in the New-custom-room dialog.
-saveCustomRoom({ projectName: 'sdff', roomName: 'Hall A', room: { width_m: 10, depth_m: 8 } });
-saveCustomRoom({ projectName: 'sdff', roomName: 'Hall B', room: { width_m: 12, depth_m: 9 } });
-saveCustomRoom({ projectName: '', roomName: 'Scratch', room: { width_m: 5, depth_m: 5 } });
+saveCustomRoom({ projectName: 'sdff', roomName: 'Hall A', scene: { formatVersion: 1, room: { width_m: 10, depth_m: 8 } } });
+saveCustomRoom({ projectName: 'sdff', roomName: 'Hall B', scene: { formatVersion: 1, room: { width_m: 12, depth_m: 9 } } });
+saveCustomRoom({ projectName: '', roomName: 'Scratch', scene: { formatVersion: 1, room: { width_m: 5, depth_m: 5 } } });
 
 const projects = listProjects();
 const sdff = projects.find(p => p.name === 'sdff');
@@ -70,29 +69,33 @@ ok(!!getCustomRoomById(pickId),
 
 const src = readFileSync('js/ui/panel-room.js', 'utf8');
 
-ok(/id="saved-room-dropdown"/.test(src),
-   'panel-room: the "Open a saved room" dropdown exists in the Custom row markup');
+// The dropdown + project-filtered recents chips were replaced (2026-06-14) by
+// ONE full-library projects→rooms tree below the Custom row (Maya spec). The
+// regression guard is unchanged: the tree must surface the WHOLE library,
+// never filtered by the active project.
+ok(/id="saved-rooms-tree"/.test(src),
+   'panel-room: the saved-rooms TREE block exists below the Custom row');
 
-ok(/function renderSavedRoomDropdown\s*\(\)/.test(src),
-   'panel-room: renderSavedRoomDropdown() is defined');
+ok(/function renderSavedRoomsTree\s*\(\)/.test(src),
+   'panel-room: renderSavedRoomsTree() is defined');
 
-// Extract the renderSavedRoomDropdown body to assert it uses listProjects()
-// and — the load-bearing guard — does NOT filter by state.projectName.
-const bodyMatch = src.match(/function renderSavedRoomDropdown\s*\(\)\s*\{([\s\S]*?)\n\}/);
+// Extract the renderSavedRoomsTree body to assert it reads listProjects() and
+// — the load-bearing guard — does NOT filter by state.projectName.
+const bodyMatch = src.match(/function renderSavedRoomsTree\s*\(\)\s*\{([\s\S]*?)\n\}/);
 const body = bodyMatch ? bodyMatch[1] : '';
 ok(/listProjects\s*\(\)/.test(body),
-   'panel-room: renderSavedRoomDropdown reads listProjects() (the unfiltered, all-projects source)');
+   'panel-room: renderSavedRoomsTree reads listProjects() (the unfiltered, all-projects source)');
 ok(body.length > 0 && !/state\.projectName/.test(body),
-   'panel-room: renderSavedRoomDropdown does NOT filter by state.projectName (the exact bug — rooms must show regardless of active project)');
+   'panel-room: renderSavedRoomsTree does NOT filter by state.projectName (the exact bug — rooms must show regardless of active project)');
 
-// The dropdown's change handler must route a pick to loadCustomRoomById.
-ok(/#saved-room-dropdown[\s\S]{0,600}loadCustomRoomById\(id\)/.test(src),
-   'panel-room: the saved-room dropdown change handler calls loadCustomRoomById(id)');
+// A tree room row's open handler must route a pick to loadCustomRoomById.
+ok(/loadCustomRoomById\(id\)/.test(src),
+   'panel-room: opening a tree room calls loadCustomRoomById(id)');
 
-// And it must be repopulated on every render() (so saves/deletes/loads
-// keep it current), alongside the project-filtered chip row.
-ok(/renderSavedRoomDropdown\(\);\s*\n\s*renderSavedCustomRooms\(\);/.test(src),
-   'panel-room: renderSavedRoomDropdown() runs in render() next to renderSavedCustomRooms()');
+// And the tree must be repopulated on every render() (so saves/deletes/loads
+// keep it current).
+ok(/renderSavedRoomsTree\(\);/.test(src),
+   'panel-room: renderSavedRoomsTree() runs in render()');
 
 console.log(failed === 0
   ? '\nAll saved-room-reopen tests passed.'

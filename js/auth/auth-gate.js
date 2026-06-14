@@ -26,6 +26,7 @@ import {
   GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
   signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendPasswordResetEmail, sendEmailVerification, signOut,
+  deleteUser, reauthenticateWithCredential, reauthenticateWithPopup, EmailAuthProvider,
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import {
   firebaseConfig, isConfigured,
@@ -33,7 +34,14 @@ import {
 } from './firebase-config.js';
 import { isBusinessEmail } from './free-email-domains.js';
 import { isAdminEmail, markAdmin } from './admin.js';
+import { resolveTier, markTier, getCurrentTier } from './account-tier.js';
 import { recordAcceptance, hasAcceptedThisSession } from '../shared/terms-record.js';
+import {
+  getMarketingConsent, setMarketingConsent, hasSetMarketingConsent,
+  MARKETING_OPT_OUT_MSG, MARKETING_OPT_IN_MSG,
+} from '../shared/user-prefs.js';
+import { initDb, upsertAccountOnSignIn, saveProfileFields, isProfileComplete, deleteOwnAccount } from './firebase-db.js';
+import { validateProfileGroup, validateProfileField, PROFILE_FIELDS } from './profile-fields.js';
 
 // ---- element refs ----------------------------------------------------------
 const gate      = document.getElementById('auth-gate');
@@ -45,6 +53,7 @@ const infoEl    = document.getElementById('auth-info');
 const googleBtn = document.getElementById('auth-google');
 const googleLbl = document.getElementById('auth-google-label');
 const termsCheck = document.getElementById('terms-accept-check');
+const marketingCheck = document.getElementById('marketing-consent-check');
 const acceptBtn  = document.getElementById('terms-accept-btn');
 const accountEl  = document.getElementById('auth-account-email');
 
@@ -56,6 +65,9 @@ const passVal  = (id) => $(id)?.value || '';
 let currentView = 'signin';
 let termsChecked = false;     // in-memory; the persisted record is the legal trail
 let pendingUser = null;       // a signed-in user awaiting terms acceptance
+let pendingSignupProfile = null;  // profile values typed on the create-account view, latched to a NEW account doc
+let verifyEmailSent = false;      // email a fresh verification link only once per verify-gate entry
+let resendTimer = null;           // resend-cooldown interval handle
 
 // ---- messaging -------------------------------------------------------------
 function showError(msg) { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } if (infoEl) infoEl.hidden = true; }
@@ -66,18 +78,39 @@ function clearMessages() {
 }
 function setBusy(busy) {
   gate?.classList.toggle('auth-busy', busy);
-  gate?.querySelectorAll('button').forEach((b) => { b.disabled = busy; });
+  // Exclude the verify Resend button — it owns its own cooldown disabled-state;
+  // letting setBusy(false) re-enable it opens a window to bypass the cooldown.
+  gate?.querySelectorAll('button:not(#verify-resend)').forEach((b) => { b.disabled = busy; });
   if (!busy) refreshTermsGate();
 }
 
 // Auth actions are disabled until the terms checkbox is ticked (sign-in /
 // create-account views only). Reset + terms views are never terms-gated here.
 function refreshTermsGate() {
-  const need = currentView === 'signin' || currentView === 'signup';
-  const blocked = need && !termsChecked;
-  if (googleBtn) googleBtn.disabled = blocked;
+  const needTerms = currentView === 'signin' || currentView === 'signup';
+  const termsBlock = needTerms && !termsChecked;
+  // Google button: gated by terms only (profile is collected via the sign-up
+  // submit or the completion gate). It's hidden on the profile view anyway.
+  if (googleBtn) googleBtn.disabled = termsBlock;
+  // The current view's submit ALSO needs the profile group valid on the
+  // create-account view and the completion gate.
+  let blocked = termsBlock;
+  if (currentView === 'signup' || currentView === 'profile') {
+    const { ok } = validateProfileGroup((n) => $(`${currentView}-${n}`)?.value);
+    if (!ok) blocked = true;
+  }
   const submit = gate?.querySelector(`.auth-view[data-view="${currentView}"] .auth-submit`);
   if (submit) submit.disabled = blocked;
+}
+
+// Per-field inline validation for the profile group (company / position /
+// contact number). Shown on blur + submit attempt — never per keystroke.
+function showFieldError(el) {
+  if (!el) return;
+  const err = validateProfileField(el.name, el.value);
+  const errEl = document.getElementById(`${el.id}-err`);
+  el.classList.toggle('is-invalid', !!err);
+  if (errEl) { errEl.textContent = err || ''; errEl.hidden = !err; }
 }
 
 // ---- view switching --------------------------------------------------------
@@ -102,6 +135,16 @@ const VIEWS = {
     sub:   'Please accept the Terms of Use to continue.',
     sw:    'Not you? <a data-action="signout" role="button" tabindex="0">Sign out</a>',
   },
+  profile: {
+    title: 'Complete your profile',
+    sub:   'Three details before you start — required to set up your account.',
+    sw:    'Not you? <a data-action="signout" role="button" tabindex="0">Sign out</a>',
+  },
+  verify: {
+    title: 'Verify your email',
+    sub:   'One more step — confirm your email address to finish setting up.',
+    sw:    'Wrong account? <a data-action="signout" role="button" tabindex="0">Sign out</a>',
+  },
 };
 
 function setView(view) {
@@ -123,7 +166,9 @@ function setView(view) {
   // Focus the most relevant control once the unhide has applied.
   const focusTarget = view === 'terms'
     ? acceptBtn
-    : gate?.querySelector(`.auth-view[data-view="${view}"] input`);
+    : view === 'verify'
+      ? document.getElementById('verify-continue')
+      : gate?.querySelector(`.auth-view[data-view="${view}"] input`);
   setTimeout(() => focusTarget?.focus(), 30);
 }
 
@@ -135,6 +180,7 @@ if (!isConfigured) {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+initDb(app);   // Firestore on the SAME app instance (accounts database, Phase 0)
 
 // Keep the user signed in across reloads/tabs on this device. (Terms are still
 // re-accepted each session — acceptance lives in sessionStorage.)
@@ -196,12 +242,48 @@ function showGateError() {
   document.getElementById('auth-reload')?.addEventListener('click', () => window.location.reload());
 }
 
+// Re-authenticate the signed-in user. Password accounts need their password
+// re-entered; Google accounts re-confirm via popup. Throws on failure (wrong
+// password → auth/wrong-password|invalid-credential; popup closed, etc.) so the
+// account modal can show the right inline error.
+async function reauthenticateCurrentUser({ password } = {}) {
+  const user = auth.currentUser;
+  if (!user) { const e = new Error('not signed in'); e.code = 'auth/no-current-user'; throw e; }
+  const providerId = user.providerData?.[0]?.providerId || 'password';
+  if (providerId === 'google.com') {
+    await reauthenticateWithPopup(user, new GoogleAuthProvider());
+  } else {
+    if (!password) { const e = new Error('password required'); e.code = 'auth/missing-password'; throw e; }
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+  }
+}
+
+// Self-service deletion. Re-auth must already have succeeded (the modal calls
+// reauthenticate() first). Order: soft-delete the record (mandatory; admin keeps
+// it) → best-effort remove the Auth credential → flag the notice → sign out. A
+// failed credential removal is swallowed: the account is already closed and the
+// boot gate (afterTerms) locks out the lingering login. Throws only if the
+// MANDATORY soft-delete write fails.
+async function deleteCurrentAccount() {
+  const user = auth.currentUser;
+  if (!user) { const e = new Error('not signed in'); e.code = 'auth/no-current-user'; throw e; }
+  const ok = await deleteOwnAccount(user.uid);
+  if (!ok) { const e = new Error('soft-delete failed'); e.code = 'firestore/write-failed'; throw e; }
+  // Flag the notice BEFORE any credential teardown — deleteUser/signOut trigger
+  // onAuthStateChanged(null) → reload, and the flag must already be set so the
+  // reloaded login screen can surface the one-time "account closed" notice.
+  try { sessionStorage.setItem('auralab.justDeleted', '1'); } catch (_) {}
+  try { await deleteUser(user); } catch (e) { console.warn('[auth-gate] deleteUser (best-effort):', e?.code || e); }
+  try { await signOut(auth); } catch (_) {}
+}
+
 async function bootApp() {
   if (booted) return;
   booted = true;
   document.documentElement.classList.remove('pre-auth');
   showGateLoading();              // instant loading cover (gate is already painted)
-  injectSignOut();
+  publishAuthContext();           // expose user + signOut to the app BEFORE main.js mounts the header
+  // (The account doc is seeded/refreshed in afterTerms() before bootApp runs.)
   // Lift the cover once the initial route has mounted and is visible.
   const reveal = () => removeGate();
   document.addEventListener('route:change', reveal, { once: true });
@@ -228,32 +310,148 @@ function marketingConsentChecked() {
   return document.getElementById('marketing-consent-check')?.checked === true;
 }
 async function recordAndBoot(user) {
+  // Latch the sign-up marketing choice to the per-user preference the FIRST time
+  // this account is seen on this device. The consent checkbox is shown only on
+  // the create-account view and defaults ON; for returning sign-ins it is
+  // hidden, so its (pre-ticked) state must NOT overwrite a stored preference —
+  // hence the hasSetMarketingConsent guard. The attestation then records the
+  // ACTUAL preference, so a returning user's report reflects their real choice.
+  try {
+    if (!hasSetMarketingConsent(user.uid)) {
+      setMarketingConsent(marketingConsentChecked(), user.uid);
+    }
+  } catch (_) { /* storage blocked — pref read falls back to default ON */ }
   try {
     await recordAcceptance({
       operatorName: authorLabel(user),
-      marketingConsent: marketingConsentChecked(),
+      marketingConsent: getMarketingConsent(user.uid),
     });
   }
   catch (e) { console.warn('[auth-gate] recordAcceptance failed:', e); }
+  await afterTerms(user);
+}
+
+// Single boot funnel for every signed-in + terms-accepted path: seed/refresh the
+// Firestore account doc, then gate on profile completeness before booting. If
+// the profile is incomplete (e.g. a Google sign-up with no create-account form),
+// show the completion gate; otherwise boot. NEVER traps the user if Firestore is
+// unreachable — a DB error boots anyway.
+async function afterTerms(user) {
+  let acc;
+  try {
+    acc = await upsertAccountOnSignIn(user, pendingSignupProfile);
+  } catch (e) {
+    console.warn('[auth-gate] account upsert failed — booting without profile gate:', e);
+    pendingSignupProfile = null;
+    bootApp();
+    return;
+  }
+  pendingSignupProfile = null;
+  // A deleted account can still re-authenticate (the credential may linger if
+  // deleteUser didn't run) — it must NEVER re-enter the app.
+  if (acc && acc.status === 'deleted') { showDeletedGate(); return; }
+  // acc === null means Firestore isn't enabled → don't gate. acc with an
+  // incomplete profile → collect it first.
+  if (acc && !isProfileComplete(acc)) { showProfileGate(user); return; }
   bootApp();
 }
 
-function injectSignOut() {
-  // Minimal, unobtrusive sign-out affordance. TODO(Maya): fold into the header
-  // nav for a polished placement — this is the functional v1.
-  const btn = document.createElement('button');
-  btn.id = 'auth-signout';
-  btn.type = 'button';
-  btn.textContent = 'Sign out';
-  btn.title = 'Sign out of AuraLAB';
-  btn.addEventListener('click', () => signOut(auth).catch((e) => console.warn('[auth-gate] signOut:', e)));
-  document.body.appendChild(btn);
+// A deleted account is bounced to the login view with a one-time notice, and
+// signed out so its lingering credential (if any) can't be used.
+function showDeletedGate() {
+  setView('signin');
+  showDeletedNotice();
+  signOut(auth).catch(() => {});
+}
+
+// Show (and clear) the one-time "account deleted" notice, set just before a
+// self-delete sign-out (survives the reload) or by showDeletedGate directly.
+function showDeletedNotice() {
+  showInfo('Your account has been closed. You’ve been signed out — contact the operator if this was a mistake.');
+}
+function maybeShowDeletedNotice() {
+  try {
+    if (sessionStorage.getItem('auralab.justDeleted') === '1') {
+      sessionStorage.removeItem('auralab.justDeleted');
+      showDeletedNotice();
+    }
+  } catch (_) { /* storage blocked */ }
+}
+
+function showProfileGate(user) {
+  pendingUser = user;
+  const chip = document.getElementById('profile-account-email');
+  if (chip) chip.textContent = user.email || 'your account';
+  setView('profile');
+}
+
+// Expose a minimal, plain-object auth context to the booted app so the header
+// user menu, Account modal and per-user prefs can read the signed-in identity
+// and sign out — WITHOUT importing firebase-auth a second time (a second
+// initializeApp/getAuth would be a separate instance). The Firebase SDK stays
+// encapsulated in this module; the app sees only a snapshot + a signOut thunk.
+//
+// Published BEFORE the dynamic import of ../main.js (see bootApp) so it's in
+// place by the time header-nav.js's mountHeaderNav() runs synchronously.
+function publishAuthContext() {
+  const u = auth.currentUser;
+  const user = u ? {
+    uid:           u.uid,
+    email:         u.email || '',
+    displayName:   (u.displayName || '').trim(),
+    photoURL:      u.photoURL || '',
+    providerId:    u.providerData?.[0]?.providerId || 'password',
+    emailVerified: !!u.emailVerified,
+    createdAt:     u.metadata?.creationTime || '',
+    lastLoginAt:   u.metadata?.lastSignInTime || '',
+    tier:          getCurrentTier(),   // 'free' | 'pro' | 'max' | 'admin'
+  } : null;
+  window.__auralabAuth = {
+    user,
+    signOut: () => signOut(auth).catch((e) => console.warn('[auth-gate] signOut:', e)),
+    // Re-authenticate the current user (security checkpoint before deletion).
+    // Throws on wrong password / cancelled popup so the caller can show an error.
+    reauthenticate: (opts) => reauthenticateCurrentUser(opts),
+    // Self-service account deletion: soft-delete the record (admin retains it),
+    // best-effort remove the credential, then sign out. Re-auth must precede this.
+    deleteAccount: () => deleteCurrentAccount(),
+  };
+  try {
+    window.dispatchEvent(new CustomEvent('auralab:auth', { detail: { user } }));
+  } catch (_) { /* CustomEvent unsupported — the snapshot is still on window */ }
 }
 
 // ---- terms checkbox --------------------------------------------------------
 termsCheck?.addEventListener('change', (e) => {
   termsChecked = !!e.target.checked;
   refreshTermsGate();
+});
+
+// Marketing-consent toggle (create-account view only) — show a brief (~5s)
+// message on change: graceful opt-out copy / simple opt-in ack (Carmen,
+// market-strategist). Never gates auth. The choice is latched to the per-user
+// preference in recordAndBoot().
+let consentMsgTimer = null;
+function showTimedInfo(msg) {
+  showInfo(msg);
+  clearTimeout(consentMsgTimer);
+  consentMsgTimer = setTimeout(() => {
+    if (infoEl && !infoEl.hidden && infoEl.textContent === msg) infoEl.hidden = true;
+  }, 5000);
+}
+marketingCheck?.addEventListener('change', (e) => {
+  showTimedInfo(e.target.checked ? MARKETING_OPT_IN_MSG : MARKETING_OPT_OUT_MSG);
+});
+
+// Profile-group fields (sign-up form + completion gate): live-revalidate the
+// submit button on input, clear a shown error as the user fixes it, and surface
+// the inline error on blur.
+gate?.querySelectorAll('[data-profile-group] input').forEach((el) => {
+  el.addEventListener('input', () => {
+    if (el.classList.contains('is-invalid')) showFieldError(el);
+    refreshTermsGate();
+  });
+  el.addEventListener('blur', () => showFieldError(el));
 });
 
 // ---- delegated UI events (view links, sign-out link, password toggles) -----
@@ -296,6 +494,13 @@ function termsBlocked() {
 const provider = new GoogleAuthProvider();
 googleBtn?.addEventListener('click', async () => {
   if (termsBlocked()) return;
+  // On the create-account view, capture any typed profile so a NEW Google
+  // account is seeded with it (ignored for existing accounts; an incomplete
+  // Google account still hits the completion gate). Best-effort, never blocks.
+  if (currentView === 'signup') {
+    const prof = validateProfileGroup((n) => $(`signup-${n}`)?.value);
+    pendingSignupProfile = prof.ok ? prof.values : null;
+  }
   clearMessages(); setBusy(true);
   try {
     await signInWithPopup(auth, provider);
@@ -341,13 +546,28 @@ $('form-signup')?.addEventListener('submit', async (ev) => {
     showError('Please register with your company email address. Public providers (Gmail, Outlook, etc.) are not permitted.');
     return;
   }
+  // Required profile fields — block creation until valid, and capture them so
+  // afterTerms() seeds the new account doc with them (profileComplete:true).
+  const prof = validateProfileGroup((n) => $(`signup-${n}`)?.value);
+  if (!prof.ok) {
+    PROFILE_FIELDS.forEach((n) => showFieldError($(`signup-${n}`)));
+    showError('Please complete your company, position and contact number.');
+    return;
+  }
 
   setBusy(true);
+  // Capture BEFORE creating the account: createUserWithEmailAndPassword signs the
+  // user in, which fires onAuthStateChanged → afterTerms() — and that can run
+  // before the line after the await. If the seed isn't already set, afterTerms
+  // creates an empty-profile doc and shows the completion gate, asking for the
+  // same fields twice. Setting it first closes that race.
+  pendingSignupProfile = prof.values;
   try {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    try { await sendEmailVerification(cred.user); } catch (e) { console.warn('[auth-gate] verification email:', e); }
-    // onAuthStateChanged decides whether to boot now or require verification.
+    await createUserWithEmailAndPassword(auth, email, pass);
+    // onAuthStateChanged routes to the verify gate (which sends the link) or,
+    // if verification is off, to the terms gate / boot.
   } catch (e) {
+    pendingSignupProfile = null;   // creation failed — don't leak the seed into a later sign-in
     showError(humanize(e?.code || 'unknown'));
   } finally {
     setBusy(false);
@@ -359,6 +579,27 @@ acceptBtn?.addEventListener('click', async () => {
   if (!pendingUser) return;
   setBusy(true);
   await recordAndBoot(pendingUser);   // boot removes the gate
+});
+
+// ---- complete-profile gate (post-auth) -------------------------------------
+// Terms are already recorded by the time this gate shows, so on success we save
+// the profile and boot directly (no re-record).
+$('form-profile')?.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const { ok, values } = validateProfileGroup((n) => $(`profile-${n}`)?.value);
+  if (!ok) { PROFILE_FIELDS.forEach((n) => showFieldError($(`profile-${n}`))); return; }
+  // Re-derive from the LIVE user, not the latched pendingUser — guards against a
+  // fast account switch between gate-entry and submit writing the wrong uid.
+  const u = auth.currentUser;
+  if (!u || (pendingUser && u.uid !== pendingUser.uid)) return;
+  setBusy(true);
+  const saved = await saveProfileFields(u.uid, values);
+  if (!saved) {
+    setBusy(false);
+    showError('Couldn’t save your profile. Check your connection and try again.');
+    return;
+  }
+  bootApp();
 });
 
 // ---- forgot password -------------------------------------------------------
@@ -389,37 +630,121 @@ function showAccountTermsGate(user) {
   setView('terms');
 }
 
+// ---- email-verification gate -----------------------------------------------
+// Park an unverified password account on the verify view and send ONE fresh
+// verification link per gate entry. The user clicks the link (in this or
+// another tab), then "I've verified" reloads + re-checks.
+async function showVerifyGate(user) {
+  pendingUser = user;
+  const email = user.email || 'your account';
+  const chip = document.getElementById('verify-account-email');
+  const echo = document.getElementById('verify-email-echo');
+  if (chip) chip.textContent = email;
+  if (echo) echo.textContent = email;
+  setView('verify');
+  if (!verifyEmailSent) {
+    verifyEmailSent = true;
+    startResendCooldown();                 // optimistic — disable resend immediately
+    try { await sendEmailVerification(user); }
+    catch (e) { showInfo('Check your inbox — and your spam or junk folder — for the verification link. You can resend in a moment.'); }
+  }
+}
+
+// Cooldown the Resend button. The per-second tick re-asserts `disabled` from the
+// remaining count, so a transient setBusy(false) elsewhere self-heals within 1s.
+function startResendCooldown(seconds = 45) {
+  const btn = document.getElementById('verify-resend');
+  if (!btn) return;
+  clearInterval(resendTimer);
+  let left = seconds;
+  const tick = () => {
+    btn.disabled = left > 0;
+    btn.textContent = left > 0 ? `Resend email (${left})` : 'Resend email';
+    if (left <= 0) { clearInterval(resendTimer); return; }
+    left -= 1;
+  };
+  tick();
+  resendTimer = setInterval(tick, 1000);
+}
+
+// "I've verified — continue": reload the user and re-check emailVerified. Manage
+// only the continue button's disabled state (NOT setBusy) so the resend cooldown
+// is untouched.
+$('form-verify')?.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const u = auth.currentUser;
+  if (!u) return;
+  const btn = $('verify-continue');
+  if (btn) btn.disabled = true;
+  clearMessages();
+  try {
+    await u.reload();
+    if (auth.currentUser?.emailVerified) {
+      await proceedAfterAuth(auth.currentUser);
+      return;   // booting / advancing to the next gate
+    }
+    showInfo('Not verified yet — open the link in the email we sent, then tap “I’ve verified”. Be sure to check your spam and junk folders too.');
+  } catch (e) {
+    showError('Couldn’t check verification just now. Please try again.');
+  }
+  if (btn) btn.disabled = false;
+});
+
+// Resend the verification link.
+document.getElementById('verify-resend')?.addEventListener('click', async () => {
+  const u = auth.currentUser;
+  if (!u) return;
+  clearMessages();
+  try {
+    await sendEmailVerification(u);
+    showInfo('Verification link re-sent. Check your inbox, then your spam and junk folders.');
+    startResendCooldown();
+  } catch (e) {
+    showError(humanize(e?.code || 'unknown'));
+  }
+});
+
+// onAuthStateChanged fires on sign-in AND on token refresh (~hourly) and on
+// reload(). Guard against re-entry so a refresh can't (a) re-run the gates over
+// the already-running app, or (b) double-process a user parked on a gate
+// (double recordAcceptance, re-stamped timestamp). The flow after the first
+// fire is driven by the gate's own handlers (accept / verify-continue /
+// profile-submit), which call proceedAfterAuth directly — never via this
+// listener — so bailing subsequent same-uid fires is safe. Reset on sign-out.
+let lastHandledUid = null;
 onAuthStateChanged(auth, async (user) => {
   if (user) {
+    if (booted) return;                        // app already running — ignore refreshes
+    if (lastHandledUid === user.uid) return;   // already processing / parked this user
+    lastHandledUid = user.uid;
     // Corporate-only gate (flag-controlled). Admins are always exempt.
     if (RESTRICT_TO_BUSINESS_EMAIL && !isBusinessEmail(user.email) && !isAdminEmail(user.email)) {
       showError('Please use your company email address. Public providers (Gmail, Outlook, Yahoo, QQ, etc.) are not permitted.');
       signOut(auth);
       return;
     }
-    // Email-verification gate (flag-controlled, password accounts only).
+    // Email-verification gate (flag-controlled, password accounts only; admins
+    // exempt — they're provisioned and the admin test address has no inbox).
+    // Park the user on the verify gate (do NOT sign them out) so they can click
+    // the emailed link and continue without re-entering credentials.
     const usesPassword = user.providerData.some((p) => p.providerId === 'password');
-    if (REQUIRE_EMAIL_VERIFICATION && usesPassword && !user.emailVerified) {
-      showInfo('Almost there — verify your email. We sent a link to ' + user.email + '. Click it, then sign in.');
-      signOut(auth);
+    if (REQUIRE_EMAIL_VERIFICATION && usesPassword && !user.emailVerified && !isAdminEmail(user.email)) {
+      await showVerifyGate(user);
       return;
     }
-    // Super-admin flag (lightweight email check) — tags <html> so admin-only
-    // UI shows for this account.
-    markAdmin(isAdminEmail(user.email));
-    // Terms gate: already accepted this session → boot; just ticked + signed
-    // in → record then boot; otherwise (persisted login) → ask on this page.
-    if (hasAcceptedThisSession()) { clearMessages(); bootApp(); return; }
-    if (termsChecked)             { clearMessages(); await recordAndBoot(user); return; }
-    showAccountTermsGate(user);
+    await proceedAfterAuth(user);
   } else {
     pendingUser = null;
+    lastHandledUid = null;
+    verifyEmailSent = false;
+    clearInterval(resendTimer);
     markAdmin(false);
+    markTier('free');
     if (booted) {
       // Signed out after using the app — reload to a clean locked state.
       window.location.reload();
-    } else if (currentView === 'terms') {
-      // Signed out from the terms step — return to the login view.
+    } else if (currentView === 'terms' || currentView === 'verify' || currentView === 'profile') {
+      // Signed out from a post-auth gate — return to the login view.
       if (termsCheck) termsCheck.checked = false;
       termsChecked = false;
       setView('signin');
@@ -427,5 +752,18 @@ onAuthStateChanged(auth, async (user) => {
   }
 });
 
+// Post-verification continuation (also the verified / Google / admin path): tag
+// role + tier, then run the terms gate. Extracted so the "I've verified" handler
+// can re-enter it once the email is confirmed.
+async function proceedAfterAuth(user) {
+  markAdmin(isAdminEmail(user.email));
+  markTier(resolveTier(user));
+  if (hasAcceptedThisSession()) { clearMessages(); await afterTerms(user); return; }
+  if (termsChecked)             { clearMessages(); await recordAndBoot(user); return; }
+  showAccountTermsGate(user);
+}
+
 // Initial view.
 setView('signin');
+// After a self-delete + reload, surface the one-time "account closed" notice.
+maybeShowDeletedNotice();

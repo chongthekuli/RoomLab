@@ -8,7 +8,6 @@ import {
   state, applyPresetToState, applyTemplateToState, PRESETS, TEMPLATES,
   serializeProject, deserializeProject, PROJECT_FORMAT_VERSION,
 } from '../js/app-state.js';
-import { defaultSaveFilename, normalizeSaveFilename } from '../js/io/project-file.js';
 
 let failed = 0;
 function assert(cond, label) {
@@ -228,47 +227,9 @@ applyTemplateToState('hifi');
 assert(state.outdoor.enabled === false && state.outdoor.field_size_m === 400,
   `applyTemplateToState resets outdoor to default (got enabled=${state.outdoor.enabled}, size=${state.outdoor.field_size_m})`);
 
-// 8. Save-As filename helpers (v=721) — the pure pieces behind the
-//    "Save As" button. Browser-API paths (showSaveFilePicker, prompt,
-//    anchor download) aren't unit-testable in Node, but these are.
-{
-  const fixedDate = new Date('2026-05-29T14:30:05.123Z');
-  // 8a. Auto-suggested name: <base>_<stamp>.auralab.json, ':'/'.' → '-'.
-  // (RoomLAB→AuraLAB rebrand 2026-06-04: new saves use .auralab.json; the
-  // loader still opens legacy .roomlab.json — see 8d.)
-  assert(defaultSaveFilename('surau', fixedDate) === 'surau_2026-05-29_14-30-05.auralab.json',
-    'defaultSaveFilename: hint + stamp, colons/dots stripped');
-  // 8b. Blank / missing hint falls back to 'auralab'.
-  assert(defaultSaveFilename('', fixedDate) === 'auralab_2026-05-29_14-30-05.auralab.json',
-    'defaultSaveFilename: blank hint → auralab');
-  assert(defaultSaveFilename(undefined, fixedDate).startsWith('auralab_'),
-    'defaultSaveFilename: undefined hint → auralab');
-  assert(defaultSaveFilename('  ', fixedDate).startsWith('auralab_'),
-    'defaultSaveFilename: whitespace-only hint → auralab');
-
-  // 8c. normalizeSaveFilename: appends extension when the user omits it.
-  assert(normalizeSaveFilename('Hospital Serdang', 'fallback.auralab.json') === 'Hospital Serdang.auralab.json',
-    'normalizeSaveFilename: appends .auralab.json when missing');
-  // 8d. A typed .json (new .auralab.json OR legacy .roomlab.json) is left
-  // intact — back-compat: re-saving an opened legacy file keeps its name.
-  assert(normalizeSaveFilename('mine.json', 'fallback.auralab.json') === 'mine.json',
-    'normalizeSaveFilename: keeps a .json the user typed');
-  assert(normalizeSaveFilename('mine.auralab.json', 'fallback.auralab.json') === 'mine.auralab.json',
-    'normalizeSaveFilename: keeps a full .auralab.json');
-  assert(normalizeSaveFilename('mine.roomlab.json', 'fallback.auralab.json') === 'mine.roomlab.json',
-    'normalizeSaveFilename: keeps a legacy .roomlab.json intact (back-compat)');
-  // 8e. Blank / null typed value → fallback (used when prompt returns '').
-  assert(normalizeSaveFilename('', 'fallback.auralab.json') === 'fallback.auralab.json',
-    'normalizeSaveFilename: blank → fallback');
-  assert(normalizeSaveFilename('   ', 'fallback.auralab.json') === 'fallback.auralab.json',
-    'normalizeSaveFilename: whitespace → fallback');
-  // 8f. Surrounding whitespace is trimmed.
-  assert(normalizeSaveFilename('  trimmed  ', 'fallback.auralab.json') === 'trimmed.auralab.json',
-    'normalizeSaveFilename: trims surrounding whitespace');
-  // 8g. Extension match is case-insensitive (don't double-append).
-  assert(normalizeSaveFilename('LOUD.JSON', 'fallback.auralab.json') === 'LOUD.JSON',
-    'normalizeSaveFilename: case-insensitive extension check');
-}
+// (The "Save As" filename helpers were retired with file-based save/load at
+// v=830 — scenes now persist to the user's Firebase account. The serialize ↔
+// JSON ↔ deserialize round-trip above IS the cloud-blob integrity guarantee.)
 
 if (failed > 0) { console.log(`\n${failed} test(s) FAILED`); process.exit(1); }
 console.log('\nAll project round-trip tests passed.');

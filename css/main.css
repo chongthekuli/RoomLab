@@ -4,6 +4,14 @@
    <html> when the signed-in email is on ADMIN_EMAILS. Any element marked
    data-admin-only is then hidden from non-admins. */
 html:not(.is-admin) [data-admin-only] { display: none !important; }
+/* Account-tier gating (see js/auth/account-tier.js). markTier() adds
+   `tier-allows-<t>` to <html> for every tier at or below the active rank
+   (free < pro < max < admin). Mark a feature element data-needs-pro /
+   data-needs-max / data-needs-admin and it is hidden for users below that
+   tier. Nothing is gated yet — feature locks are TBD. */
+html:not(.tier-allows-pro)   [data-needs-pro],
+html:not(.tier-allows-max)   [data-needs-max],
+html:not(.tier-allows-admin) [data-needs-admin] { display: none !important; }
 /* P5 — typography pass. Specialist tools use a NAMED display sans, not
    the OS default (system-ui resolves to Segoe UI on Windows / SF on
    Mac, both of which read as "AI-generated landing page" against a
@@ -135,6 +143,15 @@ html, body {
   border-color: var(--border);
   color: var(--fg-strong, #fff);
   background: rgba(255, 255, 255, 0.04);
+}
+/* Unsaved-changes state on the cloud Save button — accent colour + the "•" in
+   the label signal that work isn't yet in the user's account. */
+#app-header .header-actions button.btn-save-dirty {
+  color: var(--accent);
+}
+#app-header .header-actions button.btn-save-dirty:hover {
+  color: var(--accent-hover, #6ab4ff);
+  border-color: var(--accent);
 }
 /* Print button gated state — no fresh precision render → muted look so
    the user sees Print is blocked BEFORE clicking. Clicking still
@@ -2782,6 +2799,223 @@ section h3 {
 .custom-chip-delete:hover {
   background: rgba(229, 68, 68, 0.18);
   color: #fca5a5;
+}
+
+/* ── Saved Rooms library tree (below the Custom row) ──────────────────────
+   Maya spec 2026-06-14. Replaces the saved-room dropdown + project-filtered
+   recents chips with ONE full-library projects→rooms tree. Reads the whole
+   library (never filtered by the active project). The ACTIVE room (the one
+   💾 Save overwrites) is marked four ways — ● glyph, cyan left-border, bold
+   name, tinted row — so it survives a dim display. Extends the .custom-chip
+   accent language + the --data-cyan / --border / --bg-elev tokens. */
+.saved-rooms-tree {
+  width: 100%;
+  margin-top: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.srt-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+}
+.srt-title {
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.5px;
+  text-transform: uppercase; color: var(--muted);
+}
+.srt-count { font-size: 0.62rem; color: var(--muted); white-space: nowrap; }
+.srt-empty {
+  padding: 0.55rem; font-size: 0.72rem; color: var(--muted); line-height: 1.55;
+}
+.srt-body { max-height: 40vh; overflow-y: auto; }
+.srt-body::-webkit-scrollbar { width: 8px; }
+.srt-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Project group header (collapsible) */
+.srt-proj-head {
+  display: flex; align-items: center; gap: 0.3rem;
+  height: 32px; padding: 0 0.45rem; cursor: pointer; user-select: none;
+}
+.srt-proj-head:hover { background: rgba(255, 255, 255, 0.03); }
+.srt-proj-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.srt-chevron {
+  flex: none; width: 12px; font-size: 0.7rem; color: var(--muted);
+  transition: transform 150ms ease-out;
+}
+.srt-project.collapsed .srt-chevron { transform: rotate(-90deg); }
+.srt-proj-name {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 0.74rem; font-weight: 600; color: var(--fg-strong, #e5e7eb);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.srt-proj-name.unfiled { color: var(--muted); font-style: italic; font-weight: 500; }
+.srt-proj-count { flex: none; font-size: 0.66rem; color: var(--muted); }
+.srt-proj-menu {
+  flex: none; background: transparent; border: 0; color: var(--muted);
+  font-size: 0.9rem; line-height: 1; padding: 0 0.25rem; cursor: pointer;
+  opacity: 0; transition: opacity 120ms;
+}
+.srt-proj-head:hover .srt-proj-menu,
+.srt-proj-head:focus-within .srt-proj-menu { opacity: 1; }
+.srt-proj-menu:hover { color: var(--fg-strong, #fff); }
+
+/* Rooms list (collapse) */
+.srt-project.collapsed .srt-rooms { display: none; }
+
+/* Room row */
+.srt-room {
+  display: flex; align-items: center; gap: 0.2rem;
+  height: 28px; padding: 0 0.4rem 0 0.5rem;
+  margin-left: 22px;                 /* indent under the project name, not the chevron */
+  border-left: 2px solid transparent;
+  cursor: pointer; user-select: none;
+}
+.srt-room:hover { background: rgba(255, 255, 255, 0.03); }
+.srt-room:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.srt-room.active {
+  border-left-color: var(--data-cyan, #74d0ff);
+  background: rgba(116, 208, 255, 0.08);
+}
+.srt-glyph {
+  flex: none; width: 16px; text-align: center;
+  font-size: 0.7rem; color: var(--data-cyan, #74d0ff);
+}
+.srt-room.dirty .srt-glyph { color: var(--data-amber, #ffb454); }
+.srt-room-name {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 0.72rem; color: var(--fg, #e6edf3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.srt-room.active .srt-room-name { color: var(--fg-strong, #fff); }
+.srt-dirty { flex: none; color: var(--data-amber, #ffb454); font-weight: 700; }
+.srt-room-del {
+  flex: none; background: transparent; border: 0; color: var(--muted);
+  font-size: 0.95rem; line-height: 1; padding: 0 0.3rem; cursor: pointer;
+  opacity: 0; transition: opacity 120ms;
+}
+.srt-room:hover .srt-room-del,
+.srt-room:focus-within .srt-room-del { opacity: 1; }
+.srt-room-del:hover { color: #fca5a5; }
+
+/* Inline project rename */
+.srt-rename-input {
+  flex: 1 1 auto; min-width: 0;
+  font: inherit; font-size: 0.74rem; font-weight: 600;
+  color: var(--fg-strong, #fff);
+  background: var(--bg, #11151b);
+  border: 1px solid var(--accent);
+  border-radius: 3px; padding: 1px 4px;
+}
+
+/* Project ⋯ popover menu (anchored, body-level) */
+.srt-menu {
+  position: fixed; z-index: 1000;
+  min-width: 170px;
+  background: var(--bg-elev, #1a1f26);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.42);
+  padding: 4px;
+}
+.srt-menu-item {
+  display: block; width: 100%; text-align: left;
+  background: transparent; border: 0; color: var(--fg, #e6edf3);
+  font: inherit; font-size: 0.74rem; padding: 0.4rem 0.5rem;
+  border-radius: 4px; cursor: pointer;
+}
+.srt-menu-item:hover { background: rgba(255, 255, 255, 0.06); }
+.srt-menu-danger { color: #f0a0a0; }
+.srt-menu-danger:hover { background: rgba(229, 68, 68, 0.16); color: #fca5a5; }
+
+/* Touch: never hide an affordance behind hover on a finger */
+@media (hover: none) {
+  .srt-proj-menu, .srt-room-del { opacity: 0.6; }
+}
+
+/* ── Admin read-only scene viewer (R3) — Maya spec 2026-06-14 ─────────────
+   AccountLAB "Saved work" list + the read-only MODE banner + the editing-rail
+   lock. Amber (--data-amber) = "borrowed context, careful" — deliberately NOT
+   error-red (the admin is doing a legitimate thing). */
+
+/* Surface 1 — AccountLAB saved-work list (inside the expanded detail cell) */
+.al-saved {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+.al-saved-proj-head {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--muted); text-transform: uppercase;
+  margin: var(--space-3) 0 var(--space-1);
+}
+.al-saved-proj-head.unfiled { font-style: italic; text-transform: none; letter-spacing: 0; }
+.al-saved-room {
+  display: grid;
+  grid-template-columns: 18px minmax(120px, 1.6fr) minmax(150px, 1.4fr) 92px 64px;
+  align-items: center; gap: var(--space-3);
+  height: 34px; padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.al-saved-name {
+  color: var(--fg-strong, #e5e7eb); font-size: 0.82rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.al-saved-meta {
+  color: var(--muted); font-size: 0.74rem;
+  font-family: var(--mono, ui-monospace, monospace);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.al-saved-date { color: var(--muted); font-size: 0.74rem; }
+.al-saved-view {
+  font: 600 0.72rem/1 inherit; padding: 5px 12px;
+  border: 1px solid var(--accent); color: var(--accent);
+  background: transparent; border-radius: var(--radius); cursor: pointer;
+}
+.al-saved-view:hover { background: rgba(74, 163, 255, 0.1); }
+.al-saved-view:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.srt-error { color: var(--data-amber, #ffb454); }
+
+/* Surface 2 — read-only mode banner. Absolute strip across the very top of the
+   viewport (0–40px). The floating tab + camera-cube clusters start at top:56px,
+   so this clears them with a 16px gap; the 3D canvas underneath keeps its full
+   size (no reflow → no Three.js resize jank). */
+.ro-banner {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 6;
+  display: flex; align-items: center; gap: var(--space-3);
+  height: 40px; padding: 0 var(--space-3);
+  background: rgba(38, 30, 16, 0.92);
+  border-bottom: 1px solid var(--data-amber, #ffb454);
+  color: var(--fg-strong, #fff); font-size: 0.8rem;
+}
+.ro-tag {
+  flex: none; font-weight: 700; font-size: 0.7rem; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--data-amber, #ffb454);
+  border-left: 3px solid var(--data-amber, #ffb454); padding-left: 0.5rem;
+}
+.ro-who { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.ro-email { color: var(--fg-strong, #fff); }
+.ro-note { flex: none; color: var(--muted); font-size: 0.74rem; }
+.ro-exit {
+  margin-left: auto; flex: none;
+  background: var(--data-amber, #ffb454); color: #1a1206;
+  font-weight: 600; font-size: 0.76rem;
+  border: 0; border-radius: var(--radius); padding: 5px 14px; cursor: pointer;
+}
+.ro-exit:hover { background: #ffc06e; }
+.ro-exit:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@media (max-width: 640px) { .ro-note { display: none; } }
+
+/* Surface 3 — editing-rail lock. `inert` (set in JS) does the enforcement;
+   this is the VISUAL "intentionally locked" cue. No position change — the rail
+   panel is position:fixed and must stay that way. */
+.ro-locked {
+  filter: saturate(0.55) brightness(0.9);
+  opacity: 0.7;
+  border-left: 2px solid var(--data-amber, #ffb454);
+  cursor: not-allowed;
 }
 
 /* Picker row: small left-aligned label ("Presets" / "Templates") + a
@@ -8671,4 +8905,479 @@ section h3 {
   .draw-height-prompt-unit { font-size: 0.92rem; }
   .draw-height-prompt-hint { font-size: 0.8rem; }
 }
+
+/* ===========================================================================
+   Header user chip + account dropdown (js/ui/account-menu.js)
+   Chip inherits the demoted .header-actions button grammar; the menu uses an
+   elevated, accent-tinted surface like .project-dd-menu. Replaces the old
+   fixed bottom-right #auth-signout button (retired v=815).
+   =========================================================================== */
+#app-header .user-chip-dd { position: relative; margin-left: 2px; }
+
+#app-header .user-chip {
+  list-style: none; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 7px 3px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--muted);
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+#app-header .user-chip::-webkit-details-marker { display: none; }
+#app-header .user-chip:hover { color: var(--fg-strong); background: rgba(255,255,255,.04); border-color: var(--border); }
+#app-header .user-chip-dd[open] > .user-chip { background: rgba(255,255,255,.06); border-color: var(--border-strong); color: var(--fg-strong); }
+#app-header .user-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The avatar disc — the ONE intentionally-round element in the chrome. Shared
+   look (the inset ring) across the 24px chip and 52px modal sizes. */
+.avatar-disc {
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid; place-items: center;
+  color: #fff;
+  font-family: "Inter Tight", system-ui, sans-serif; font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+  user-select: none;
+}
+.avatar-disc img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.user-chip-avatar { width: 24px; height: 24px; flex: 0 0 24px; font-size: 12px; line-height: 1; }
+
+#app-header .user-chip-name {
+  font-size: 0.8rem; font-weight: 500; letter-spacing: 0.01em;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#app-header .user-chip-caret { color: var(--muted-dim); transition: transform 140ms ease-out; }
+#app-header .user-chip-dd[open] .user-chip-caret { transform: rotate(180deg); }
+
+#app-header .user-chip-menu {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  min-width: 200px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  padding: 4px; z-index: 200;
+}
+#app-header .user-chip-menu .user-chip-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: transparent; border: none; border-radius: var(--radius);
+  color: var(--fg); padding: 8px 10px;
+  font: inherit; font-size: 0.82rem; text-align: left; cursor: pointer;
+  transition: background-color 110ms ease-out, color 110ms ease-out;
+}
+#app-header .user-chip-menu .user-chip-item .uc-ic { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); }
+#app-header .user-chip-menu .user-chip-item:hover,
+#app-header .user-chip-menu .user-chip-item:focus-visible {
+  background: rgba(74,163,255,.12); color: var(--fg-strong); outline: none;
+}
+#app-header .user-chip-menu .user-chip-item:hover .uc-ic,
+#app-header .user-chip-menu .user-chip-item:focus-visible .uc-ic { color: var(--accent); }
+#app-header .user-chip-divider { height: 1px; background: var(--border); margin: 4px 6px; }
+
+/* Sign out — warm-tinted on hover (session-ending, deliberate) but NOT red;
+   red is reserved for the destructive Reset. Sign-out is reversible. */
+#app-header .user-chip-menu .user-chip-item-signout:hover,
+#app-header .user-chip-menu .user-chip-item-signout:focus-visible {
+  background: rgba(255,180,84,.14); color: var(--data-amber);
+}
+#app-header .user-chip-menu .user-chip-item-signout:hover .uc-ic,
+#app-header .user-chip-menu .user-chip-item-signout:focus-visible .uc-ic { color: var(--data-amber); }
+
+/* Below ~720px the header is tight — collapse the chip to avatar-only. */
+@media (max-width: 720px) {
+  #app-header .user-chip-name,
+  #app-header .user-chip-caret { display: none; }
+  #app-header .user-chip { padding: 3px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app-header .user-chip-caret { transition: none; }
+}
+
+/* ===========================================================================
+   App modals (Account / About) — shared closeable glass chrome
+   (js/ui/modal-shell.js). NOT the Terms modal (welcome-card.js), which is
+   intentionally non-closeable.
+   =========================================================================== */
+.app-modal-scrim {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-4);
+  background: rgba(10, 12, 16, 0.62);
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+.app-modal-scrim.app-modal-visible { opacity: 1; }
+.app-modal-scrim.app-modal-exit { opacity: 0; }
+
+.app-modal-card {
+  position: relative;
+  width: 100%; max-width: 440px;
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow-y: auto;
+  background: rgba(20, 24, 32, 0.78);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg);
+  padding: var(--space-5);
+  transform: translateY(6px);
+  transition: transform 160ms cubic-bezier(.2,.7,.3,1);
+}
+.app-modal-scrim.app-modal-visible .app-modal-card { transform: translateY(0); }
+@supports not ((backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px))) {
+  .app-modal-card { background: rgba(20, 24, 32, 0.96); }
+}
+
+.app-modal-close {
+  position: absolute; top: var(--space-3); right: var(--space-3);
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--muted); cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+}
+.app-modal-close:hover { color: var(--fg-strong); background: rgba(255,255,255,.05); border-color: var(--border); }
+.app-modal-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-modal-scrim, .app-modal-card { transition: none; }
+  .app-modal-card { transform: none; }
+}
+
+.app-modal-title {
+  font: 600 1rem/1.2 "Inter Tight", sans-serif;
+  color: var(--fg-strong); margin: 0 0 var(--space-4); letter-spacing: -.005em;
+}
+
+/* --- Account modal ------------------------------------------------------- */
+.acct-head { padding-right: 36px; }   /* clear the X button */
+
+/* Segmented tabs — square, instrument-style, inset-active (mirrors .lab-tab.active) */
+.seg-tabs {
+  display: inline-flex; padding: 2px; gap: 2px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: var(--space-4);
+}
+.seg-tab {
+  appearance: none; background: transparent; border: 1px solid transparent;
+  border-radius: var(--radius); color: var(--muted);
+  font: 600 0.78rem/1 "Inter Tight", sans-serif; letter-spacing: .02em;
+  padding: 6px 14px; cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+}
+.seg-tab:hover { color: var(--fg); }
+.seg-tab[aria-selected="true"] {
+  background: rgba(255,255,255,.06); color: var(--fg-strong); border-color: var(--border);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 0 -1px 0 rgba(0,0,0,.3);
+}
+.seg-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.acct-view[hidden] { display: none; }
+
+.acct-identity { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.acct-avatar { width: 52px; height: 52px; flex: 0 0 52px; font-size: 20px; line-height: 1; }
+.acct-name  { font-size: 0.95rem; font-weight: 600; color: var(--fg-strong); }
+
+/* Account-level strip — all tiers in one compact row; the current level is
+   highlighted (tinted + bordered in its tier hue, bold name). Dots carry the
+   tier hue at all times (cheapest → premium: Free grey, Pro blue, Max gold;
+   Admin violet = operator) so colour alone signals level. Status display, not a
+   selector — no hover/cursor affordance. */
+.tier-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.tier-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 0.8rem; font-weight: 500; color: var(--muted); letter-spacing: .01em;
+}
+.tier-pill-dot {
+  width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%;
+  background: var(--muted-dim); box-shadow: inset 0 0 0 1px rgba(255,255,255,.10);
+}
+/* per-tier dot hue (always on, even when not the current level) */
+.tier-pill-free  .tier-pill-dot { background: var(--muted); }
+.tier-pill-pro   .tier-pill-dot { background: var(--accent); }
+.tier-pill-max   .tier-pill-dot { background: var(--data-amber); }
+.tier-pill-admin .tier-pill-dot { background: #a78bfa; }
+/* current — tinted bg + coloured border + brightened bold name, per tier */
+.tier-pill.is-current { color: var(--fg-strong); font-weight: 600; }
+.tier-pill-free.is-current  { border-color: rgba(138,146,157,.60); background: rgba(138,146,157,.14); }
+.tier-pill-pro.is-current   { border-color: rgba(74,163,255,.60);  background: rgba(74,163,255,.14); }
+.tier-pill-max.is-current   { border-color: rgba(255,180,84,.60);  background: rgba(255,180,84,.14); }
+.tier-pill-admin.is-current { border-color: rgba(167,139,250,.60); background: rgba(167,139,250,.16); }
+.acct-email { font-size: 0.8rem; color: var(--muted); margin-top: 2px;
+              font-family: "JetBrains Mono", monospace; word-break: break-all; }
+
+.acct-subhead {
+  font: 600 0.72rem/1 "Inter Tight", sans-serif; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); margin: var(--space-4) 0 var(--space-2);
+  padding-top: var(--space-3); border-top: 1px solid var(--border);
+}
+.acct-rows { margin: 0; }
+.acct-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4);
+  padding: 6px 0; border-bottom: 1px solid var(--border);
+}
+.acct-row:last-child { border-bottom: none; }
+.acct-row dt { color: var(--muted); font-size: 0.8rem; }
+.acct-row dd { margin: 0; color: var(--fg); font-size: 0.82rem; text-align: right; }
+.acct-rows-mono dd { font-family: "JetBrains Mono", monospace; font-size: 0.78rem;
+                     font-variant-numeric: tabular-nums; }
+.acct-provider { display: inline-flex; align-items: center; gap: 7px; }
+.acct-provider-glyph { width: 15px; height: 15px; flex: 0 0 15px; color: var(--muted); }
+.acct-empty { color: var(--muted-dim); font-style: italic; text-align: left !important; }
+.acct-note { color: var(--muted-dim); font-size: 0.74rem; line-height: 1.45; margin: var(--space-3) 0 0; }
+
+/* Preferences toggle (switch) */
+.pref-row { display: flex; gap: var(--space-3); align-items: flex-start; }
+.switch { position: relative; flex: 0 0 auto; display: inline-block; margin-top: 1px; }
+.switch-input {
+  position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer;
+  width: 100%; height: 100%;
+}
+.switch-track {
+  display: block; width: 38px; height: 22px; border-radius: 11px;
+  background: var(--border-strong); border: 1px solid var(--border-strong);
+  transition: background-color 140ms ease-out, border-color 140ms ease-out;
+}
+.switch-thumb {
+  display: block; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--muted); margin: 2px;
+  transition: transform 140ms cubic-bezier(.2,.7,.3,1), background-color 140ms ease-out;
+}
+.switch-input:checked + .switch-track { background: var(--accent-dim); border-color: var(--accent); }
+.switch-input:checked + .switch-track .switch-thumb { transform: translateX(16px); background: var(--accent); }
+.switch-input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch-input:disabled + .switch-track { opacity: .5; cursor: not-allowed; }
+
+.pref-copy { flex: 1 1 auto; }
+.pref-label {
+  display: block; color: var(--fg); line-height: 1.5; cursor: pointer;
+  font-size: 16px;                 /* ≥16px: prevents iOS auto-zoom on focus */
+}
+.pref-help { color: var(--muted-dim); font-size: 0.78rem; margin: var(--space-2) 0 0; line-height: 1.45; }
+/* Transient (~5s) confirmation under the marketing toggle on opt-out / opt-in. */
+.pref-toast {
+  margin: var(--space-3) 0 0;
+  font-size: 0.78rem; line-height: 1.45; color: var(--fg);
+  background: rgba(74,163,255,.08); border: 1px solid rgba(74,163,255,.22);
+  border-radius: var(--radius); padding: 8px 11px;
+}
+.pref-toast[hidden] { display: none; }
+
+/* Account-modal Profile editor — read rows + Edit→Save/Cancel toggle. */
+.acct-subhead-row { display: flex; align-items: flex-end; justify-content: space-between; }
+.acct-subhead-row .acct-subhead { flex: 1 1 auto; }
+.acct-edit-btn {
+  flex: 0 0 auto; align-self: center; margin-top: var(--space-3);
+  background: transparent; border: 1px solid var(--border);
+  color: var(--accent); font-size: 0.78rem; font-weight: 500;
+  padding: 3px 12px; border-radius: var(--radius); cursor: pointer;
+}
+.acct-edit-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+.acct-edit-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acct-edit-btn[hidden] { display: none; }
+.acct-loading { color: var(--muted-dim); font-style: italic; }
+
+.acct-profile-form { margin: var(--space-2) 0 0; }
+.acct-edit-label { display: block; margin: 0 0 var(--space-3); }
+.acct-edit-label > span { display: block; color: var(--muted); font-size: 0.8rem; margin: 0 0 4px; }
+.acct-edit-label input {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg); border: 1px solid var(--border); color: var(--fg);
+  border-radius: var(--radius); padding: 9px 11px;
+  font-size: 16px;                 /* ≥16px: no iOS zoom */
+  font-family: "Inter Tight", system-ui, sans-serif;
+}
+.acct-edit-label input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.acct-edit-label input.is-invalid { border-color: #e0453a; box-shadow: inset 3px 0 0 #e0453a; }
+.acct-field-err { display: block; margin-top: 4px; font-size: 0.74rem; color: #ff8585; }
+.acct-field-err[hidden] { display: none; }
+
+.acct-edit-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
+.acct-btn-ghost, .acct-btn-primary {
+  font-size: 0.82rem; font-weight: 500; padding: 7px 16px;
+  border-radius: var(--radius); cursor: pointer; border: 1px solid var(--border);
+}
+.acct-btn-ghost { background: transparent; color: var(--muted); }
+.acct-btn-ghost:hover { color: var(--fg); border-color: var(--border-strong); }
+.acct-btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.acct-btn-primary:hover { background: var(--accent-hover); }
+.acct-btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.acct-btn-ghost:focus-visible, .acct-btn-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* --- Account modal: danger zone (delete account) ------------------------- */
+.acct-danger {
+  margin-top: var(--space-5);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(255,107,107,.28);   /* red-tinted divider, not a box */
+}
+.acct-subhead-danger { color: var(--data-red); border-top: none; padding-top: 0; }
+.acct-danger-note { color: var(--muted); font-size: 0.78rem; line-height: 1.5; margin: 0 0 var(--space-3); }
+.acct-danger-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+/* Calm starter button — outlined red, low-key (escalation tracks commitment). */
+.acct-btn-danger-ghost {
+  font-size: 0.82rem; font-weight: 500; padding: 7px 16px;
+  border-radius: var(--radius); cursor: pointer;
+  background: transparent; color: var(--data-red); border: 1px solid rgba(255,107,107,.45);
+}
+.acct-btn-danger-ghost:hover { border-color: var(--data-red); background: rgba(255,107,107,.10); }
+.acct-btn-danger-ghost:focus-visible { outline: 2px solid var(--data-red); outline-offset: 1px; }
+/* Expanded confirm block — escalated: stronger red edge + wash */
+.acct-danger-confirm {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid rgba(255,107,107,.40);
+  border-left: 3px solid var(--data-red);
+  border-radius: var(--radius);
+  background: rgba(255,107,107,.06);
+  overflow: hidden;
+  animation: acct-danger-expand 140ms ease-out;
+}
+.acct-danger-confirm[hidden] { display: none; }
+@keyframes acct-danger-expand { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+.acct-danger-warn { color: var(--fg); font-size: 0.8rem; line-height: 1.5; margin: 0 0 var(--space-3); }
+.acct-reauth { margin: 0 0 var(--space-3); }
+.acct-reauth[hidden] { display: none; }
+.acct-reauth-head { display: flex; align-items: center; gap: 7px; margin: 0 0 var(--space-2); }
+.acct-reauth-lock { width: 14px; height: 14px; flex: 0 0 14px; color: var(--muted); }
+.acct-reauth-title { font: 600 0.72rem/1 "Inter Tight", sans-serif; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.acct-reauth-pw[hidden], .acct-reauth-google[hidden] { display: none; }
+.acct-reauth-pw { margin-bottom: 0; }
+.acct-reauth-help { color: var(--muted); font-size: 0.8rem; margin: 0 0 var(--space-2); }
+.acct-danger-error {
+  margin: 0 0 var(--space-3); font-size: 0.78rem; line-height: 1.45; color: var(--data-red);
+  background: rgba(255,107,107,.08); border: 1px solid rgba(255,107,107,.30);
+  border-radius: var(--radius); padding: 8px 11px;
+}
+.acct-danger-error[hidden] { display: none; }
+/* Final destructive action — filled red, dark ink for AA contrast (#1a1d23 on
+   #ff6b6b ≈ 7.3:1), unmistakably distinct from the blue .acct-btn-primary. */
+.acct-btn-danger {
+  font-size: 0.82rem; font-weight: 600; padding: 7px 16px;
+  border-radius: var(--radius); cursor: pointer;
+  background: var(--data-red); color: #1a1d23; border: 1px solid var(--data-red);
+}
+.acct-btn-danger:hover { background: #ff8585; border-color: #ff8585; }
+.acct-btn-danger:disabled { opacity: .45; cursor: not-allowed; }
+.acct-btn-danger:focus-visible { outline: 2px solid var(--data-red); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .acct-danger-confirm { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .switch-track, .switch-thumb { transition: none; } }
+
+/* --- About modal --------------------------------------------------------- */
+.about-modal .about-hero { display: flex; gap: var(--space-3); align-items: flex-start; padding-right: 36px; }
+.about-logo { border-radius: var(--radius); flex: 0 0 56px; }
+.about-name { font: 700 1.4rem/1 "Inter Tight", sans-serif; color: var(--fg-strong); margin: 0; letter-spacing: -.01em; }
+.about-tagline { color: var(--fg); font-size: 0.84rem; margin: 6px 0 0; line-height: 1.4; }
+.about-version {
+  color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 0.72rem;
+  margin: 8px 0 0; letter-spacing: .02em;
+}
+.about-body { color: var(--fg); font-size: 0.86rem; line-height: 1.6; margin: var(--space-4) 0 0; }
+.about-subhead {
+  font: 600 0.72rem/1 "Inter Tight", sans-serif; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); margin: var(--space-4) 0 var(--space-2);
+}
+.about-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; list-style: none; }
+.about-chip {
+  font-family: "JetBrains Mono", monospace; font-size: 0.7rem; letter-spacing: .01em;
+  color: var(--data-cyan);
+  background: rgba(92,207,230,.08);
+  border: 1px solid rgba(92,207,230,.22);
+  border-radius: var(--radius); padding: 3px 8px;
+}
+.about-disclaimer {
+  color: var(--muted); font-size: 0.76rem; line-height: 1.55;
+  margin: var(--space-4) 0 0; padding: var(--space-3);
+  background: rgba(255,255,255,.02); border-left: 2px solid var(--border-strong);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.about-footer {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border);
+  color: var(--muted-dim); font-size: 0.74rem;
+}
+
+/* ===========================================================================
+   AccountLAB — admin-only account monitor (js/labs/accountlab/main.js)
+   =========================================================================== */
+#accountlab-root {
+  height: 100%; overflow-y: auto; box-sizing: border-box;
+  padding: var(--space-5);
+  background: var(--bg);
+}
+.al-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-4); flex-wrap: wrap;
+  margin-bottom: var(--space-4); padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.al-title { font: 700 1.3rem/1.1 "Inter Tight", sans-serif; color: var(--fg-strong); margin: 0; letter-spacing: -.01em; }
+.al-tagline { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
+.al-head-actions { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.al-stats { display: flex; gap: var(--space-4); }
+.al-stat { color: var(--muted); font-size: 0.8rem; }
+.al-stat strong { color: var(--fg-strong); font-family: "JetBrains Mono", monospace; font-size: 0.95rem; }
+.al-stat-warn strong { color: var(--data-amber); }
+.al-refresh {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  font: inherit; font-size: 0.78rem; padding: 5px 12px; border-radius: var(--radius); cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+}
+.al-refresh:hover { color: var(--fg-strong); border-color: var(--border-strong); background: rgba(255,255,255,.04); }
+
+.al-loading, .al-empty { color: var(--muted); font-size: 0.86rem; padding: var(--space-5) 0; }
+.al-error {
+  color: var(--data-red); font-size: 0.84rem; line-height: 1.5;
+  background: rgba(255,107,107,.08); border: 1px solid rgba(255,107,107,.25);
+  border-radius: var(--radius); padding: var(--space-3); max-width: 640px;
+}
+
+.al-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.al-table thead th {
+  text-align: left; color: var(--muted); font-weight: 600; font-size: 0.72rem;
+  letter-spacing: .05em; text-transform: uppercase;
+  padding: 0 var(--space-3) var(--space-2); border-bottom: 1px solid var(--border);
+}
+.al-table th.al-num, .al-table td.al-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.al-row { cursor: pointer; }
+.al-row > td { padding: 9px var(--space-3); border-bottom: 1px solid var(--border); vertical-align: middle; }
+.al-row:hover > td { background: rgba(255,255,255,.03); }
+.al-row.is-open > td { background: rgba(74,163,255,.06); }
+.al-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.al-acct { display: flex; align-items: center; gap: 10px; }
+.al-avatar { width: 28px; height: 28px; flex: 0 0 28px; font-size: 12px; line-height: 1; }
+.al-acct-text { display: flex; flex-direction: column; min-width: 0; }
+.al-name { color: var(--fg-strong); font-weight: 500; }
+.al-email { color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 0.72rem; }
+.al-dash { color: var(--muted-dim); }
+
+.al-pill {
+  display: inline-block; font: 600 0.66rem/1 "Inter Tight", sans-serif;
+  letter-spacing: .06em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: var(--radius); border: 1px solid transparent;
+}
+.al-tier-free   { color: var(--muted);      background: rgba(138,146,157,.12); border-color: rgba(138,146,157,.30); }
+.al-tier-pro    { color: var(--accent);     background: rgba(74,163,255,.12);  border-color: rgba(74,163,255,.35); }
+.al-tier-max    { color: var(--data-amber); background: rgba(255,180,84,.12);   border-color: rgba(255,180,84,.38); }
+.al-tier-admin  { color: #c4a7ff;           background: rgba(167,139,250,.14);  border-color: rgba(167,139,250,.40); }
+.al-status-active    { color: var(--data-green); background: rgba(163,217,119,.12); border-color: rgba(163,217,119,.35); }
+.al-status-suspended { color: var(--data-amber); background: rgba(255,180,84,.12);  border-color: rgba(255,180,84,.38); }
+.al-status-deleted   { color: var(--muted);      background: rgba(138,146,157,.12); border-color: rgba(138,146,157,.32); }
+/* Deleted accounts recede but stay legible (admin still audits them). */
+.al-row-deleted > td { opacity: 0.55; }
+.al-row-deleted:hover > td { opacity: 0.8; }
+
+.al-detail-row > td { padding: 0 var(--space-3) var(--space-3); border-bottom: 1px solid var(--border); background: rgba(74,163,255,.04); }
+.al-detail { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
+.al-detail dt { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; }
+.al-detail dd { color: var(--fg); font-size: 0.82rem; margin: 2px 0 0; }
+.al-detail .al-uid { font-family: "JetBrains Mono", monospace; font-size: 0.72rem; color: var(--muted); word-break: break-all; }
+.al-foot-note { color: var(--muted-dim); font-size: 0.74rem; line-height: 1.45; margin: var(--space-4) 0 0; }
 

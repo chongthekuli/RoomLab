@@ -31,11 +31,11 @@ export const isConfigured = !firebaseConfig.apiKey.startsWith('YOUR_');
 export const RESTRICT_TO_BUSINESS_EMAIL = false;
 
 // Require a verified email before the app will boot (email/password accounts
-// only — Google accounts are always verified). A verification link is ALWAYS
-// sent on sign-up regardless; this flag only controls whether it's enforced.
-// OFF for now so new accounts can use the app immediately. Flip to true to
-// require inbox confirmation before first use.
-export const REQUIRE_EMAIL_VERIFICATION = false;
+// only — Google accounts are always verified; admins are exempt since the admin
+// test address has no real inbox). New password sign-ups are parked on a
+// "Verify your email" gate (js/auth/auth-gate.js) that sends a Firebase
+// verification link, offers Resend, and re-checks on "I've verified".
+export const REQUIRE_EMAIL_VERIFICATION = true;
 
 // Super-admin accounts (lightweight client-side role check — see js/auth/admin.js).
 // A signed-in user whose email is listed here gets the `is-admin` page flag, so
@@ -44,3 +44,13 @@ export const REQUIRE_EMAIL_VERIFICATION = false;
 export const ADMIN_EMAILS = [
   'admin@admin.com',
 ];
+
+// Account-tier assignment (client-side, operator-controlled — SAME trust model
+// as ADMIN_EMAILS; see js/auth/account-tier.js). Until tiers are issued as
+// Firebase custom claims by a backend, grant a paid plan to specific accounts
+// here by email → 'pro' | 'max'. Admins (above) always resolve to 'admin'
+// regardless of this map; everyone not listed defaults to 'free'.
+export const TIER_OVERRIDES = {
+  // 'poweruser@company.com': 'pro',
+  // 'studio@company.com':    'max',
+};

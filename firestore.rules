@@ -1,0 +1,124 @@
+rules_version = '2';
+
+// AuraLAB — Firestore security rules (accounts database).
+// =============================================================================
+// Trust model: RULES-ONLY (operator decision 2026-06-14, free Spark plan).
+// These rules tamper-proof the DATABASE: a non-admin can never read another
+// user's PII, and can never grant themselves a tier or un-suspend themselves
+// by writing the document. They do NOT make the static client honour its own
+// `status`/`tier` un-bypassably — that needs custom claims (Cloud Functions),
+// the documented upgrade path. "Suspend" here = a lock honest users respect.
+//
+// ADMIN LIST: the email(s) below MUST stay in sync with ADMIN_EMAILS in
+// js/auth/firebase-config.js. When you move to custom claims later, replace
+// isAdmin() with `request.auth.token.admin == true` and drop the email list.
+//
+// HOW TO DEPLOY: Firebase console → Firestore Database → Rules → paste → Publish
+// (or `firebase deploy --only firestore:rules` if you adopt the Firebase CLI).
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+
+    // Keep this list identical to ADMIN_EMAILS in firebase-config.js.
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email in [
+        'admin@admin.com'
+      ];
+    }
+
+    // Fields a user is allowed to change on their OWN account doc. Crucially
+    // EXCLUDES tier, status, statusReason, adminLog, uid, createdAt — so a user
+    // cannot PATCH themselves to a higher tier or un-suspend their account. The
+    // email field is in the writable set (the client mirrors it from the token
+    // on every sign-in) but is PINNED to the token so a user can't forge the
+    // email that the admin sees on a retained record (case-insensitive — the
+    // client lowercases, the token may not).
+    function ownerWritableOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'email', 'displayName', 'photoURL',
+            'company', 'position', 'contactNumber', 'profileComplete',
+            'updatedAt', 'lastActiveAt'
+          ])
+          && request.resource.data.email.lower() == request.auth.token.email.lower();
+    }
+
+    // A freshly-created own-doc must carry the safe defaults (no self-upgrade
+    // at creation time), a token-pinned email, and ONLY the known fields — so a
+    // user can't inject adminLog / statusReason / a forged createdAt|deletedAt
+    // at birth, nor pre-seed a field a future rule might trust.
+    function createHasSafeDefaults() {
+      return request.resource.data.tier == 'free'
+          && request.resource.data.status == 'active'
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.email.lower() == request.auth.token.email.lower()
+          && request.resource.data.keys().hasOnly([
+               'uid', 'email', 'displayName', 'photoURL',
+               'company', 'position', 'contactNumber', 'profileComplete',
+               'tier', 'status', 'createdAt', 'updatedAt', 'lastActiveAt'
+             ]);
+    }
+
+    // Owner may CLOSE their own account: flip status → 'deleted' and stamp
+    // deletedAt, touching ONLY those two fields (+ updatedAt). They CANNOT set
+    // status to anything else, change tier, or touch statusReason / adminLog,
+    // and — crucially — can only do this FROM a non-deleted state, so a deleted
+    // account can never write itself back to life (terminal). deletedAt must be
+    // the server time, so the admin's displayed deletion date can't be forged.
+    function onlySelfDelete() {
+      return resource.data.status != 'deleted'
+          && request.resource.data.status == 'deleted'
+          && request.resource.data.deletedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'deletedAt', 'updatedAt'])
+          && request.resource.data.tier == resource.data.tier;
+    }
+
+    match /accounts/{uid} {
+      allow read:   if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) && createHasSafeDefaults();
+      // Owner profile edits are frozen once the account is deleted (terminal).
+      allow update: if isAdmin()
+                 || (isOwner(uid) && resource.data.status != 'deleted' && ownerWritableOnly())
+                 || (isOwner(uid) && onlySelfDelete());
+      allow delete: if isAdmin();
+
+      // Append-only activity log (Phase 2). A user writes only under their own
+      // uid; nobody edits or deletes history; admins (and the owner) may read.
+      match /activity/{eventId} {
+        allow create: if isOwner(uid);
+        allow read:   if isOwner(uid) || isAdmin();
+        allow update, delete: if false;
+      }
+
+      // The "last-opened room" pointer ({ lastRoomId }). Only one id, 'current'.
+      // Owner reads + writes their own; admin may read (the viewer). Tiny doc.
+      match /scene/{sceneId} {
+        allow read:  if (isOwner(uid) || isAdmin()) && sceneId == 'current';
+        allow write: if isOwner(uid) && sceneId == 'current'
+                  && get(/databases/$(database)/documents/accounts/$(uid)).data.status == 'active';
+      }
+
+      // The user's ROOM LIBRARY (multi-project). Each room is one doc holding a
+      // full scene blob. Owner reads + writes + deletes their OWN; an ADMIN may
+      // READ any user's rooms (the read-only viewer) but NEVER write/delete —
+      // read-only is structural. Write/delete require the account be 'active'
+      // (suspended/deleted can't mutate their library), same posture as scene.
+      match /rooms/{roomId} {
+        allow read:   if isOwner(uid) || isAdmin();
+        allow write:  if isOwner(uid)
+                   && get(/databases/$(database)/documents/accounts/$(uid)).data.status == 'active';
+        allow delete: if isOwner(uid)
+                   && get(/databases/$(database)/documents/accounts/$(uid)).data.status == 'active';
+      }
+    }
+
+    // Deny everything not explicitly matched above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

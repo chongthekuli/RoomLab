@@ -9,24 +9,23 @@
 // sources / listeners / zones / treatments / physics / author notes were
 // dropped on reopen. Fix: each entry now stores a full serializeProject()
 // scene snapshot, and loadCustomRoomById restores it via
-// deserializeProject() — the same lossless round-trip as 💾 Save →
-// .roomlab.json. This is the round-trip assertion Martina flagged would
-// have caught every bug in this feature.
+// deserializeProject() — the same lossless round-trip as 💾 Save.
+//
+// The library moved from localStorage (custom-rooms.js) to the cloud-rooms
+// cache (Firestore-backed) on 2026-06-14; this test now drives that cache
+// with injected stubs. The round-trip + scene-blob-only invariant are
+// unchanged — the explicit Save (no autosave) is the only wiring difference.
 //
 // Run: node tests/custom-room-fullscene.test.mjs
 
 import { readFileSync } from 'node:fs';
 
-// localStorage shim BEFORE importing custom-rooms (read at call time).
-const _store = new Map();
-globalThis.localStorage = {
-  getItem: (k) => (_store.has(k) ? _store.get(k) : null),
-  setItem: (k, v) => { _store.set(k, String(v)); },
-  removeItem: (k) => { _store.delete(k); },
-};
-
 const { state, serializeProject, deserializeProject } = await import('../js/app-state.js');
-const { saveCustomRoom, updateCustomRoom, getCustomRoomById } = await import('../js/shared/custom-rooms.js');
+const { configureCloudRooms, hydrateRooms, resetRoomsCache,
+        saveCustomRoom, getCustomRoomById } = await import('../js/state/cloud-rooms.js');
+configureCloudRooms({ list: async () => [], save: async () => ({ ok: true }), remove: async () => ({ ok: true }) });
+resetRoomsCache();
+await hydrateRooms('u-test');
 
 let failed = 0;
 const pass = (l) => console.log(`PASS  ${l}`);
@@ -79,10 +78,10 @@ ok(state.projectName === 'sdff', 'round-trip: project name survives');
 ok(state.physics.reverberantField === true, 'round-trip: physics tweak survives');
 ok(state.rackSystem.racks.length === 1, 'round-trip: rack survives');
 
-// --- (2) custom-rooms library persists + reopens the scene blob --------
+// --- (2) cloud-rooms library persists + reopens the scene blob ---------
 const entry = saveCustomRoom({ projectName: 'sdff', roomName: 'Hall A', scene: serializeProject(seeded) });
 ok(!!entry.scene && entry.room === undefined,
-   'library: new entry stores a scene blob, no legacy room field');
+   'library: new entry stores a scene blob, no legacy geometry field (scene-blob-only invariant)');
 
 // Simulate switching to a blank scene, then reopening the saved room.
 deserializeProject(serializeProject({
@@ -101,23 +100,15 @@ ok(state.sources.length === 2 && state.listeners.length === 2 && state.zones.len
 ok(state.room.authorComments === seeded.room.authorComments,
    'library: reopening restores author notes');
 
-// --- (3) updateCustomRoom EITHER/OR invariant --------------------------
-const legacy = saveCustomRoom({ projectName: 'old', roomName: 'Legacy', room: { name: 'Legacy', shape: 'custom' }, rackSystem: { racks: [] } });
-ok(!!legacy.room && legacy.scene === undefined,
-   'library: legacy save (no scene) keeps the geometry-only shape');
-updateCustomRoom(legacy.id, { scene: serializeProject(seeded) });
-const migrated = getCustomRoomById(legacy.id);
-ok(!!migrated.scene && migrated.room === undefined && migrated.rackSystem === undefined,
-   'library: migrating a legacy entry to a scene blob strips stale room/rackSystem (EITHER/OR invariant)');
-
-// --- (4) wiring guards in panel-room.js --------------------------------
+// --- (3) explicit-Save wiring guards in panel-room.js ------------------
+// The library is EXPLICIT-save only now (no debounced autosync). Save
+// captures a full serializeProject() blob; load restores via deserialize;
+// the _suppressSync guard still stops preset/load swaps clobbering state.
 const panel = readFileSync('js/ui/panel-room.js', 'utf8');
-ok(/on\('source:changed',\s*scheduleActiveRoomSync\)/.test(panel)
-   && /on\('listener:changed',\s*scheduleActiveRoomSync\)/.test(panel)
-   && /on\('treatment:changed',\s*scheduleActiveRoomSync\)/.test(panel),
-   'panel-room: auto-sync now also fires on source/listener/treatment changes (was the gap)');
+ok(/async function saveActiveRoom\s*\(\)/.test(panel),
+   'panel-room: Save is the definitive, awaitable saveActiveRoom()');
 ok(/scene:\s*serializeProject\(\)/.test(panel),
-   'panel-room: auto-sync captures a full serializeProject() snapshot');
+   'panel-room: Save captures a full serializeProject() snapshot');
 ok(/deserializeProject\(entry\.scene\)/.test(panel),
    'panel-room: loadCustomRoomById restores the scene blob via deserializeProject');
 ok(/_suppressSync/.test(panel),

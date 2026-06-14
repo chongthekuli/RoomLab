@@ -52,6 +52,7 @@ startRouter({
     surface:   () => import(`./labs/surfacelab/main.js${_vQ}`).then(m => m.mountSurfaceLab()),
     wall:      () => import(`./labs/walllab/main.js${_vQ}`).then(m => m.mountWallLab()),
     furniture: () => import(`./labs/furniturelab/main.js${_vQ}`).then(m => m.mountFurnitureLab()),
+    account:   () => import(`./labs/accountlab/main.js${_vQ}`).then(m => m.mountAccountLab()),
   },
 });
 
